@@ -13,6 +13,8 @@ def test_oms_legacy_routes_removed_from_openapi() -> None:
     removed_legacy_paths = {
         "/api/v1/branch/{db_name}/list",
         "/api/v1/version/{db_name}/head",
+        "/api/v1/version/{db_name}/history",
+        "/api/v1/version/{db_name}/diff",
         "/api/v1/database/{db_name}/ontology/branches",
     }
 

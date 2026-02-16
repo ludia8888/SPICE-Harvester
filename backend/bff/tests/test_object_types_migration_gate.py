@@ -100,7 +100,7 @@ class _FakeObjectifyRegistry:
         return None
 
 
-def _build_context(status_value="ACTIVE"):
+def _build_context(status_value="ACTIVE", *, existing_spec_override=None):
     dataset = SimpleNamespace(
         dataset_id="ds-new",
         db_name="test_db",
@@ -123,7 +123,7 @@ def _build_context(status_value="ACTIVE"):
         dataset_version_id="ver-new",
         schema_hash="hash-new",
     )
-    existing_spec = {
+    existing_spec = existing_spec_override or {
         "backing_source": {"ref": "backing-old", "schema_hash": "hash-old", "version_id": "backing-ver-old"},
         "pk_spec": {"primary_key": ["account_id"], "title_key": ["account_id"]},
         "mapping_spec": {"mapping_spec_id": "map-1", "mapping_spec_version": 1},
@@ -196,3 +196,39 @@ async def test_object_type_migration_plan_is_recorded():
     assert dataset_registry.last_plan["status"] == "APPROVED"
     assert dataset_registry.last_plan["plan"]["backing_changed"] is True
     assert dataset_registry.last_plan["plan"]["pk_changed"] is False
+
+
+@pytest.mark.asyncio
+async def test_object_type_bootstrap_seed_update_skips_migration_gate():
+    placeholder_spec = {
+        "id": "Account",
+        "label": "Account",
+        "properties": [{"name": "account_id", "type": "xsd:string"}],
+        "relationships": [],
+    }
+    dataset_registry, oms_client = _build_context(existing_spec_override=placeholder_spec)
+    objectify_registry = _FakeObjectifyRegistry()
+    request = Request({"type": "http", "headers": []})
+    body = object_types_router.ObjectTypeContractUpdate(
+        backing_dataset_id="ds-new",
+        pk_spec={"primary_key": ["account_id"], "title_key": ["account_id"]},
+        status="ACTIVE",
+    )
+
+    response = await object_types_router.update_object_type_contract(
+        db_name="test_db",
+        class_id="Account",
+        body=body,
+        request=request,
+        branch="main",
+        expected_head_commit="head",
+        oms_client=oms_client,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+    )
+
+    spec = response.data["object_type"]["spec"]
+    assert spec["backing_source"]["ref"] == "backing-new"
+    assert spec["pk_spec"]["primary_key"] == ["account_id"]
+    assert spec["pk_spec"]["title_key"] == ["account_id"]
+    assert dataset_registry.last_gate is None

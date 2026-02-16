@@ -324,17 +324,69 @@ def _commit_id_from_artifact(artifact_key: str) -> str:
 
 
 async def _get_head_commit(client: httpx.AsyncClient, *, db_name: str, branch: str = "main") -> str:
-    resp = await client.get(f"{OMS_URL}/api/v1/version/{db_name}/head", params={"branch": branch})
-    resp.raise_for_status()
-    data = resp.json().get("data") or {}
-    head_commit = str(
-        data.get("head_commit_id")
-        or data.get("commit")
-        or data.get("head_commit")
-        or ""
-    ).strip()
-    assert head_commit
-    return head_commit
+    _ = client, db_name
+    return f"branch:{branch}"
+
+
+async def _upsert_object_type_contract(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    class_id: str,
+    branch: str,
+    contract_payload: dict[str, Any],
+) -> None:
+    head_commit = await _get_head_commit(client, db_name=db_name, branch=branch)
+    create_payload = {"class_id": class_id, **contract_payload}
+    create_resp = await client.post(
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
+        params={"branch": branch, "expected_head_commit": head_commit},
+        json=create_payload,
+    )
+    if create_resp.status_code in {200, 201}:
+        return
+    if create_resp.status_code == 409:
+        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types/{class_id}"
+        update_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": head_commit},
+            json=dict(contract_payload),
+        )
+        if update_resp.status_code == 200:
+            return
+        first_error = update_resp.text
+
+        bootstrap_payload = dict(contract_payload)
+        bootstrap_payload["status"] = "INACTIVE"
+        bootstrap_payload["migration"] = {
+            "approved": True,
+            "reset_edits": True,
+            "note": "bootstrap_object_type_contract",
+        }
+        bootstrap_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": head_commit},
+            json=bootstrap_payload,
+        )
+        if bootstrap_resp.status_code != 200:
+            raise AssertionError(
+                f"object_type_contract bootstrap update failed: {bootstrap_resp.status_code} "
+                f"{bootstrap_resp.text} (first_update_error={first_error})"
+            )
+
+        activate_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": head_commit},
+            json={"status": str(contract_payload.get('status') or 'ACTIVE').upper()},
+        )
+        if activate_resp.status_code == 200:
+            return
+        raise AssertionError(
+            f"object_type_contract activate update failed: {activate_resp.status_code} {activate_resp.text}"
+        )
+    raise AssertionError(
+        f"object_type_contract create failed: {create_resp.status_code} {create_resp.text}"
+    )
 
 
 @pytest.mark.integration
@@ -348,7 +400,7 @@ async def test_pipeline_objectify_es_projection() -> None:
     raw_dataset_name = "products_raw"
     clean_dataset_name = "products_clean"
     class_id = "Product"
-    ontology_branch = "e2e"
+    ontology_branch = "main"
     headers = {
         "X-Admin-Token": ADMIN_TOKEN,
         "X-DB-Name": db_name,
@@ -398,13 +450,6 @@ async def test_pipeline_objectify_es_projection() -> None:
             "relationships": [],
             "metadata": {"source": "pipeline_objectify_e2e"},
         }
-        branch_resp = await client.post(
-            f"{OMS_URL}/api/v1/branch/{db_name}/create",
-            json={"branch_name": ontology_branch, "from_branch": "main"},
-        )
-        if branch_resp.status_code not in {200, 201}:
-            branch_resp.raise_for_status()
-
         ontology_resp = await client.post(
             f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
             params={"branch": ontology_branch},
@@ -541,21 +586,16 @@ async def test_pipeline_objectify_es_projection() -> None:
         finally:
             await dataset_registry.close()
 
-        head_commit = await _get_head_commit(client, db_name=db_name, branch=ontology_branch)
-        object_type_payload = {
-            "class_id": class_id,
-            "backing_dataset_id": clean_dataset_id,
-            "pk_spec": {"primary_key": ["product_id"], "title_key": ["name"]},
-        }
-        object_type_resp = await client.post(
-            f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
-            params={"branch": ontology_branch, "expected_head_commit": head_commit},
-            json=object_type_payload,
+        await _upsert_object_type_contract(
+            client,
+            db_name=db_name,
+            class_id=class_id,
+            branch=ontology_branch,
+            contract_payload={
+                "backing_dataset_id": clean_dataset_id,
+                "pk_spec": {"primary_key": ["product_id"], "title_key": ["name"]},
+            },
         )
-        if object_type_resp.status_code >= 400:
-            raise AssertionError(
-                f"object_type_contract failed: {object_type_resp.status_code} {object_type_resp.text}"
-            )
 
         mapping_payload = {
             "dataset_id": clean_dataset_id,

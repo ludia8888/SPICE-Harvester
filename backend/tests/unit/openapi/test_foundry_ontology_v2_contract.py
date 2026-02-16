@@ -167,6 +167,10 @@ def test_foundry_v2_list_linked_objects_includes_foundry_query_params():
 
 @pytest.mark.unit
 def test_foundry_v2_strict_compat_env_gate(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", raising=False)
+    monkeypatch.delenv("FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST", raising=False)
+    assert foundry_ontology_v2._is_foundry_v2_strict_compat_enabled(db_name="any_db") is True
+
     monkeypatch.setenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", "false")
     monkeypatch.setenv("FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST", "sales_db, core")
     assert foundry_ontology_v2._is_foundry_v2_strict_compat_enabled(db_name="sales_db") is True
@@ -365,6 +369,88 @@ async def test_foundry_v2_route_full_metadata_strict_on_applies_branch_and_requi
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
     assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
     assert body["objectTypes"]["Order"]["linkTypes"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_v2_route_full_metadata_strict_on_does_not_require_preview_flag(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", "true")
+    monkeypatch.setenv("FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST", "")
+
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    async def _fake_list_resources_best_effort(*, db_name: str, branch: str, resource_type: str, oms_client):  # noqa: ANN001
+        _ = db_name, branch, resource_type, oms_client
+        return []
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+    monkeypatch.setattr(foundry_ontology_v2, "_list_resources_best_effort", _fake_list_resources_best_effort)
+
+    oms_client = AsyncMock()
+    oms_client.get_database = AsyncMock(return_value={"data": {"name": "sales_db"}})
+    app = _build_router_test_app(oms_client=oms_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["branch"] == {"rid": "main"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v2/ontologies/sales_db/interfaceTypes?branch=main",
+        "/api/v2/ontologies/sales_db/interfaceTypes/BaseInterface?branch=main",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes?branch=main",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes/sharedName?branch=main",
+        "/api/v2/ontologies/sales_db/valueTypes",
+        "/api/v2/ontologies/sales_db/valueTypes/string",
+        "/api/v2/ontologies/sales_db/objectTypes/Order/fullMetadata?branch=main",
+    ],
+)
+async def test_foundry_v2_preview_routes_strict_on_require_preview_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+):
+    monkeypatch.setenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", "true")
+    monkeypatch.setenv("FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST", "")
+
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+
+    oms_client = AsyncMock()
+    app = _build_router_test_app(oms_client=oms_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(path)
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["errorCode"] == "INVALID_ARGUMENT"
+    assert body["errorName"] == "ApiFeaturePreviewUsageOnly"
 
 
 @pytest.mark.unit

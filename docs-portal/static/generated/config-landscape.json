@@ -1037,7 +1037,7 @@
         {
           "name": "enable_foundry_v2_strict_compat",
           "type": "bool",
-          "default": "False",
+          "default": "True",
           "description": "Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT)",
           "env_vars": [
             "ENABLE_FOUNDRY_V2_STRICT_COMPAT"

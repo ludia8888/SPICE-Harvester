@@ -59,6 +59,7 @@ def main() -> int:
         ["scripts/generate_error_taxonomy.py", "--check"],
         ["scripts/generate_pipeline_tooling_reference.py", "--check"],
         ["scripts/generate_repo_file_inventory.py", "--check"],
+        ["scripts/generate_portal_content.py", "--check"],
     ]
     for gen in generators:
         _run([sys.executable, *gen])

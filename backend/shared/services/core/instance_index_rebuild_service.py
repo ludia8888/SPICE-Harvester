@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from objectify_worker.write_paths import DatasetPrimaryIndexWritePath
+from shared.config.instances_index_mapping import INSTANCE_INDEX_MAPPING
 from shared.config.search_config import get_default_index_settings, get_instances_index_name
 from shared.services.storage.elasticsearch_service import (
     ElasticsearchService,
@@ -85,7 +85,7 @@ async def rebuild_instance_index(
         # 1. Create new index with up-to-date mappings
         await elasticsearch_service.create_index(
             index=new_index,
-            mappings=DatasetPrimaryIndexWritePath._INSTANCE_MAPPING,
+            mappings=INSTANCE_INDEX_MAPPING,
             settings=get_default_index_settings(),
         )
         logger.info("Created rebuild target index: %s", new_index)

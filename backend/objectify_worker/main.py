@@ -644,6 +644,38 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 return result.message
         return None
 
+    def _extract_ontology_pk_targets(self, payload: Any) -> List[str]:
+        """Extract ontology-declared primaryKey fields in order (best-effort)."""
+        data = self._normalize_ontology_payload(payload)
+        meta = data.get("metadata") if isinstance(data, dict) else None
+        if isinstance(meta, dict):
+            key_spec = meta.get("key_spec") or meta.get("keySpec") or meta.get("key_specification")
+            if isinstance(key_spec, dict):
+                raw_pk = (
+                    key_spec.get("primary_key")
+                    or key_spec.get("primaryKey")
+                    or key_spec.get("primaryKeys")
+                    or []
+                )
+                if isinstance(raw_pk, list):
+                    ordered = [str(v).strip() for v in raw_pk if str(v).strip()]
+                    if ordered:
+                        return ordered
+        props = data.get("properties") if isinstance(data, dict) else None
+        out: List[str] = []
+        seen: set[str] = set()
+        if isinstance(props, list):
+            for prop in props:
+                if not isinstance(prop, dict):
+                    continue
+                if not bool(prop.get("primary_key") or prop.get("primaryKey")):
+                    continue
+                name = str(prop.get("name") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append(name)
+        return out
+
     @staticmethod
     def _map_mappings_by_target(mappings: List[FieldMapping]) -> Dict[str, List[str]]:
         mapping: Dict[str, List[str]] = {}
@@ -661,6 +693,244 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if not code or code in self.P0_ERROR_CODES:
                 return True
         return False
+
+    async def _load_value_type_defs_with_validation(
+        self,
+        *,
+        job: ObjectifyJob,
+        prop_map: Dict[str, Dict[str, Any]],
+        fail_job: Any,
+    ) -> Dict[str, Dict[str, Any]]:
+        value_type_refs = {
+            str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip()
+            for meta in prop_map.values()
+            if isinstance(meta, dict)
+        }
+        value_type_refs = {ref for ref in value_type_refs if ref}
+        value_type_defs, missing_value_types = await self._fetch_value_type_defs(job, value_type_refs)
+        if missing_value_types:
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.VALUE_TYPE_NOT_FOUND.value,
+                            "value_type_refs": sorted(missing_value_types),
+                            "message": "Referenced value types are missing",
+                        }
+                    ]
+                },
+            )
+        return value_type_defs
+
+    def _build_property_type_context(
+        self,
+        *,
+        prop_map: Dict[str, Dict[str, Any]],
+        value_type_defs: Dict[str, Dict[str, Any]],
+        target_class_id: str,
+    ) -> Tuple[
+        Dict[str, str],
+        Dict[str, Any],
+        Dict[str, Optional[Any]],
+        set[str],
+        set[str],
+        List[str],
+    ]:
+        resolved_field_types: Dict[str, str] = {}
+        field_constraints: Dict[str, Any] = {}
+        field_raw_types: Dict[str, Optional[Any]] = {}
+        required_targets: set[str] = set()
+        explicit_pk_targets: set[str] = set()
+        unsupported_targets: List[str] = []
+        for name, meta in prop_map.items():
+            raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
+            raw_type_norm = normalize_ontology_base_type(raw_type) or raw_type
+            value_type_ref = str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip() or None
+            value_type_spec = value_type_defs.get(value_type_ref) if value_type_ref else None
+            value_type_base = None
+            value_type_constraints = None
+            if value_type_spec:
+                value_type_base = value_type_spec.get("base_type") or value_type_spec.get("baseType")
+                value_type_constraints = value_type_spec.get("constraints") or value_type_spec.get("constraint") or {}
+
+            if value_type_base and normalize_ontology_base_type(raw_type_norm) in {None, "string"}:
+                raw_type_norm = value_type_base
+
+            field_raw_types[name] = raw_type_norm
+
+            is_relationship = bool(
+                raw_type_norm == "link"
+                or meta.get("isRelationship")
+                or meta.get("target")
+                or meta.get("linkTarget")
+            )
+            items = meta.get("items") if isinstance(meta, dict) else None
+            if isinstance(items, dict):
+                item_type = items.get("type")
+                if item_type == "link" and (items.get("target") or items.get("linkTarget")):
+                    is_relationship = True
+
+            if is_relationship:
+                unsupported_targets.append(name)
+                continue
+            import_type = self._resolve_import_type(raw_type_norm)
+            if not import_type:
+                unsupported_targets.append(name)
+                continue
+            resolved_field_types[name] = import_type
+            prop_constraints = self._normalize_constraints(meta.get("constraints"), raw_type=raw_type_norm)
+            base_constraints: Dict[str, Any] = {}
+            if normalize_ontology_base_type(raw_type_norm) == "array":
+                base_constraints = {"noNullItems": True, "noNestedArrays": True}
+            elif normalize_ontology_base_type(raw_type_norm) == "struct":
+                base_constraints = {"noNestedStructs": True, "noArrayFields": True}
+
+            constraint_sets: List[Dict[str, Any]] = []
+            if base_constraints:
+                constraint_sets.append(base_constraints)
+            if value_type_constraints:
+                constraint_sets.append(self._normalize_constraints(value_type_constraints, raw_type=value_type_base))
+            if prop_constraints:
+                constraint_sets.append(prop_constraints)
+            field_constraints[name] = constraint_sets if constraint_sets else {}
+            if bool(meta.get("required")):
+                required_targets.add(name)
+            if bool(meta.get("primary_key") or meta.get("primaryKey")):
+                explicit_pk_targets.add(name)
+
+        if not explicit_pk_targets:
+            expected_pk = f"{target_class_id.lower()}_id"
+            if expected_pk in prop_map:
+                explicit_pk_targets.add(expected_pk)
+
+        return (
+            resolved_field_types,
+            field_constraints,
+            field_raw_types,
+            required_targets,
+            explicit_pk_targets,
+            unsupported_targets,
+        )
+
+    async def _resolve_object_type_key_contract(
+        self,
+        *,
+        job: ObjectifyJob,
+        ontology_payload: Any,
+        prop_map: Dict[str, Dict[str, Any]],
+        fail_job: Any,
+        warnings: List[Dict[str, Any]],
+    ) -> Tuple[List[str], List[str], List[List[str]], List[str], set[str]]:
+        object_type_resource = await self._fetch_object_type_contract(job)
+        object_type_data = object_type_resource.get("data") if isinstance(object_type_resource, dict) else None
+        if not isinstance(object_type_data, dict):
+            object_type_data = object_type_resource if isinstance(object_type_resource, dict) else {}
+        object_type_spec = object_type_data.get("spec") if isinstance(object_type_data.get("spec"), dict) else {}
+        if not object_type_spec:
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.OBJECT_TYPE_CONTRACT_MISSING.value,
+                            "message": "Object type contract is required for objectify",
+                        }
+                    ]
+                },
+            )
+        status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
+        if status_value != "ACTIVE":
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.OBJECT_TYPE_INACTIVE.value,
+                            "status": status_value,
+                            "message": "Object type contract is not active",
+                        }
+                    ]
+                },
+            )
+        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        object_type_pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
+        object_type_title_targets = [str(v).strip() for v in object_type_key_spec.get("title_key") or [] if str(v).strip()]
+        object_type_unique_keys = [
+            [str(v).strip() for v in key if str(v).strip()]
+            for key in object_type_key_spec.get("unique_keys") or []
+            if isinstance(key, list)
+        ]
+        object_type_required_fields = [str(v).strip() for v in object_type_key_spec.get("required_fields") or [] if str(v).strip()]
+        object_type_nullable_fields = {str(v).strip() for v in object_type_key_spec.get("nullable_fields") or [] if str(v).strip()}
+
+        if not object_type_pk_targets:
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.OBJECT_TYPE_PRIMARY_KEY_MISSING.value,
+                            "message": "Object type pk_spec.primary_key is required",
+                        }
+                    ]
+                },
+            )
+        if not object_type_title_targets:
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.OBJECT_TYPE_TITLE_KEY_MISSING.value,
+                            "message": "Object type pk_spec.title_key is required",
+                        }
+                    ]
+                },
+            )
+
+        missing_contract_fields = sorted(
+            {
+                *object_type_pk_targets,
+                *object_type_title_targets,
+                *object_type_required_fields,
+            }
+            - set(prop_map.keys())
+        )
+        if missing_contract_fields:
+            await fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": VC.OBJECT_TYPE_KEY_FIELDS_MISSING.value,
+                            "fields": missing_contract_fields,
+                            "message": "Object type key spec fields missing from ontology schema",
+                        }
+                    ]
+                },
+            )
+
+        ontology_pk_targets = self._extract_ontology_pk_targets(ontology_payload)
+        if ontology_pk_targets and ontology_pk_targets != object_type_pk_targets:
+            issue = {
+                "code": VC.ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH.value,
+                "expected": object_type_pk_targets,
+                "observed": ontology_pk_targets,
+                "message": "Ontology primaryKey does not match object_type pk_spec (fields+order)",
+            }
+            if self.ontology_pk_validation_mode == "fail":
+                await fail_job("validation_failed", report={"errors": [issue]})
+            if self.ontology_pk_validation_mode == "warn":
+                warnings.append(issue)
+
+        return (
+            object_type_pk_targets,
+            object_type_title_targets,
+            object_type_unique_keys,
+            object_type_required_fields,
+            object_type_nullable_fields,
+        )
 
     async def initialize(self) -> None:
         self.dataset_registry = DatasetRegistry()
@@ -954,6 +1224,119 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             attempt_count,
         )
 
+    async def _resolve_job_input_context(
+        self,
+        *,
+        job: ObjectifyJob,
+        fail_job: Any,
+    ) -> Tuple[str, Optional[str], Optional[str]]:
+        dataset = await self.dataset_registry.get_dataset(dataset_id=job.dataset_id)
+        if not dataset:
+            await fail_job(f"dataset_not_found:{job.dataset_id}")
+        if dataset.db_name != job.db_name:
+            await fail_job("dataset_db_name_mismatch")
+
+        input_type = "dataset_version" if job.dataset_version_id else "artifact"
+        resolved_output_name: Optional[str] = None
+        stable_seed: Optional[str] = None
+
+        if job.dataset_version_id and job.artifact_id:
+            await fail_job("objectify_input_conflict")
+        if not job.dataset_version_id and not job.artifact_id:
+            await fail_job("objectify_input_missing")
+
+        if job.dataset_version_id:
+            version = await self.dataset_registry.get_version(version_id=job.dataset_version_id)
+            if not version or version.dataset_id != job.dataset_id:
+                await fail_job("dataset_version_mismatch")
+            resolved_artifact_key = job.artifact_key or version.artifact_key
+            if not resolved_artifact_key:
+                await fail_job("artifact_key_missing")
+            if version.artifact_key and job.artifact_key and version.artifact_key != job.artifact_key:
+                await fail_job("artifact_key_mismatch")
+            stable_seed = job.dataset_version_id
+        else:
+            resolved_artifact_key, resolved_output_name = await self._resolve_artifact_output(job)
+            if job.artifact_key and job.artifact_key != resolved_artifact_key:
+                await fail_job("artifact_key_mismatch")
+            stable_seed = f"artifact:{job.artifact_id}:{resolved_output_name}"
+
+        job.artifact_key = resolved_artifact_key
+        if resolved_output_name and not job.artifact_output_name:
+            job.artifact_output_name = resolved_output_name
+
+        return input_type, resolved_output_name, stable_seed
+
+    async def _resolve_mapping_spec_for_job(
+        self,
+        *,
+        job: ObjectifyJob,
+        fail_job: Any,
+    ) -> Any:
+        if not job.mapping_spec_id:
+            # OMS mode: resolve from object_type backing_source
+            try:
+                ot_contract = await self._fetch_object_type_contract(job)
+            except Exception as oms_fetch_exc:
+                logger.error(
+                    "OMS object_type fetch failed (job_id=%s class_id=%s): %s",
+                    job.job_id,
+                    job.target_class_id,
+                    oms_fetch_exc,
+                )
+                raise
+            if not ot_contract:
+                await fail_job(f"oms_object_type_not_found:{job.target_class_id}")
+            # OMS wraps response in {"data": {...}} — unwrap if needed
+            ot_resource = ot_contract.get("data") if isinstance(ot_contract.get("data"), dict) else ot_contract
+            ot_spec = (ot_resource.get("spec") if isinstance(ot_resource, dict) else {}) or {}
+            backing = ot_spec.get("backing_source") or {}
+            prop_mappings = backing.get("property_mappings")
+            if not prop_mappings or not isinstance(prop_mappings, list):
+                await fail_job(f"oms_backing_source_no_property_mappings:{job.target_class_id}")
+            from shared.services.registries.backing_source_adapter import BackingSourceMappingSpec
+
+            return BackingSourceMappingSpec(
+                mapping_spec_id=f"oms:{job.target_class_id}",
+                dataset_id=job.dataset_id,
+                dataset_branch=job.dataset_branch,
+                artifact_output_name=job.artifact_output_name,
+                schema_hash=backing.get("schema_hash"),
+                target_class_id=job.target_class_id,
+                mappings=[
+                    {"source_field": str(m.get("source_field", "")), "target_field": str(m.get("target_field", ""))}
+                    for m in prop_mappings
+                    if isinstance(m, dict)
+                ],
+                target_field_types=backing.get("target_field_types") or {},
+                auto_sync=backing.get("auto_sync", True),
+                version=int(backing.get("mapping_version") or 1),
+                status=str(ot_spec.get("status") or "ACTIVE"),
+            )
+
+        mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)
+        if not mapping_spec:
+            await fail_job(f"mapping_spec_not_found:{job.mapping_spec_id}")
+        if mapping_spec.dataset_id != job.dataset_id:
+            await fail_job("mapping_spec_dataset_mismatch")
+        if job.mapping_spec_version is not None and int(mapping_spec.version) != int(job.mapping_spec_version):
+            await fail_job(
+                f"mapping_spec_version_mismatch(job={job.mapping_spec_version} spec={mapping_spec.version})"
+            )
+        if mapping_spec.backing_datasource_version_id:
+            if job.artifact_id:
+                await fail_job("backing_datasource_version_conflict")
+            backing_version = await self.dataset_registry.get_backing_datasource_version(
+                version_id=mapping_spec.backing_datasource_version_id
+            )
+            if not backing_version:
+                await fail_job("backing_datasource_version_missing")
+            if not job.dataset_version_id:
+                await fail_job("backing_datasource_version_required")
+            if backing_version.dataset_version_id != job.dataset_version_id:
+                await fail_job("backing_datasource_version_mismatch")
+        return mapping_spec
+
     async def _process_job(self, job: ObjectifyJob) -> None:
         if not self.objectify_registry or not self.dataset_registry:
             raise RuntimeError("ObjectifyRegistry not initialized")
@@ -993,101 +1376,14 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             logger.info("Objectify job already submitted (job_id=%s); skipping", job.job_id)
             return
 
-        dataset = await self.dataset_registry.get_dataset(dataset_id=job.dataset_id)
-        if not dataset:
-            await _fail_job(f"dataset_not_found:{job.dataset_id}")
-        if dataset.db_name != job.db_name:
-            await _fail_job("dataset_db_name_mismatch")
-
-        input_type = "dataset_version" if job.dataset_version_id else "artifact"
-        resolved_output_name: Optional[str] = None
-        stable_seed: Optional[str] = None
-
-        if job.dataset_version_id and job.artifact_id:
-            await _fail_job("objectify_input_conflict")
-        if not job.dataset_version_id and not job.artifact_id:
-            await _fail_job("objectify_input_missing")
-
-        if job.dataset_version_id:
-            version = await self.dataset_registry.get_version(version_id=job.dataset_version_id)
-            if not version or version.dataset_id != job.dataset_id:
-                await _fail_job("dataset_version_mismatch")
-            resolved_artifact_key = job.artifact_key or version.artifact_key
-            if not resolved_artifact_key:
-                await _fail_job("artifact_key_missing")
-            if version.artifact_key and job.artifact_key and version.artifact_key != job.artifact_key:
-                await _fail_job("artifact_key_mismatch")
-            stable_seed = job.dataset_version_id
-        else:
-            resolved_artifact_key, resolved_output_name = await self._resolve_artifact_output(job)
-            if job.artifact_key and job.artifact_key != resolved_artifact_key:
-                await _fail_job("artifact_key_mismatch")
-            stable_seed = f"artifact:{job.artifact_id}:{resolved_output_name}"
-
-        job.artifact_key = resolved_artifact_key
-        if resolved_output_name and not job.artifact_output_name:
-            job.artifact_output_name = resolved_output_name
-
-        # ── Mapping spec resolution: OMS backing_source (if no PG mapping_spec_id) or PostgreSQL ──
-        mapping_spec = None
-        if not job.mapping_spec_id:
-            # OMS mode: resolve from object_type backing_source
-            try:
-                ot_contract = await self._fetch_object_type_contract(job)
-            except Exception as oms_fetch_exc:
-                logger.error(
-                    "OMS object_type fetch failed (job_id=%s class_id=%s): %s",
-                    job.job_id, job.target_class_id, oms_fetch_exc,
-                )
-                raise  # Let retry logic handle (retryable for network/5xx)
-            if not ot_contract:
-                await _fail_job(f"oms_object_type_not_found:{job.target_class_id}")
-            # OMS wraps response in {"data": {...}} — unwrap if needed
-            ot_resource = ot_contract.get("data") if isinstance(ot_contract.get("data"), dict) else ot_contract
-            ot_spec = (ot_resource.get("spec") if isinstance(ot_resource, dict) else {}) or {}
-            backing = ot_spec.get("backing_source") or {}
-            prop_mappings = backing.get("property_mappings")
-            if not prop_mappings or not isinstance(prop_mappings, list):
-                await _fail_job(f"oms_backing_source_no_property_mappings:{job.target_class_id}")
-            from shared.services.registries.backing_source_adapter import BackingSourceMappingSpec
-            mapping_spec = BackingSourceMappingSpec(
-                mapping_spec_id=f"oms:{job.target_class_id}",
-                dataset_id=job.dataset_id,
-                dataset_branch=job.dataset_branch,
-                artifact_output_name=job.artifact_output_name,
-                schema_hash=backing.get("schema_hash"),
-                target_class_id=job.target_class_id,
-                mappings=[
-                    {"source_field": str(m.get("source_field", "")), "target_field": str(m.get("target_field", ""))}
-                    for m in prop_mappings if isinstance(m, dict)
-                ],
-                target_field_types=backing.get("target_field_types") or {},
-                auto_sync=backing.get("auto_sync", True),
-                version=int(backing.get("mapping_version") or 1),
-                status=str(ot_spec.get("status") or "ACTIVE"),
-            )
-        else:
-            mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)
-            if not mapping_spec:
-                await _fail_job(f"mapping_spec_not_found:{job.mapping_spec_id}")
-            if mapping_spec.dataset_id != job.dataset_id:
-                await _fail_job("mapping_spec_dataset_mismatch")
-            if job.mapping_spec_version is not None and int(mapping_spec.version) != int(job.mapping_spec_version):
-                await _fail_job(
-                    f"mapping_spec_version_mismatch(job={job.mapping_spec_version} spec={mapping_spec.version})"
-                )
-            if mapping_spec.backing_datasource_version_id:
-                if job.artifact_id:
-                    await _fail_job("backing_datasource_version_conflict")
-                backing_version = await self.dataset_registry.get_backing_datasource_version(
-                    version_id=mapping_spec.backing_datasource_version_id
-                )
-                if not backing_version:
-                    await _fail_job("backing_datasource_version_missing")
-                if not job.dataset_version_id:
-                    await _fail_job("backing_datasource_version_required")
-                if backing_version.dataset_version_id != job.dataset_version_id:
-                    await _fail_job("backing_datasource_version_mismatch")
+        input_type, resolved_output_name, stable_seed = await self._resolve_job_input_context(
+            job=job,
+            fail_job=_fail_job,
+        )
+        mapping_spec = await self._resolve_mapping_spec_for_job(
+            job=job,
+            fail_job=_fail_job,
+        )
 
         await self.objectify_registry.update_objectify_job_status(
             job_id=job.job_id,
@@ -1225,183 +1521,38 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             )
             return
 
-        value_type_refs = {
-            str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip()
-            for meta in prop_map.values()
-            if isinstance(meta, dict)
-        }
-        value_type_refs = {ref for ref in value_type_refs if ref}
-        value_type_defs, missing_value_types = await self._fetch_value_type_defs(job, value_type_refs)
-        if missing_value_types:
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.VALUE_TYPE_NOT_FOUND.value,
-                            "value_type_refs": sorted(missing_value_types),
-                            "message": "Referenced value types are missing",
-                        }
-                    ]
-                },
-            )
-
-        resolved_field_types: Dict[str, str] = {}
-        field_constraints: Dict[str, Any] = {}
-        field_raw_types: Dict[str, Optional[Any]] = {}
-        required_targets: set[str] = set()
-        explicit_pk_targets: set[str] = set()
-        unsupported_targets: List[str] = []
-        for name, meta in prop_map.items():
-            raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
-            raw_type_norm = normalize_ontology_base_type(raw_type) or raw_type
-            value_type_ref = str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip() or None
-            value_type_spec = value_type_defs.get(value_type_ref) if value_type_ref else None
-            value_type_base = None
-            value_type_constraints = None
-            if value_type_spec:
-                value_type_base = value_type_spec.get("base_type") or value_type_spec.get("baseType")
-                value_type_constraints = value_type_spec.get("constraints") or value_type_spec.get("constraint") or {}
-
-            if value_type_base and normalize_ontology_base_type(raw_type_norm) in {None, "string"}:
-                raw_type_norm = value_type_base
-
-            field_raw_types[name] = raw_type_norm
-
-            is_relationship = bool(
-                raw_type_norm == "link"
-                or meta.get("isRelationship")
-                or meta.get("target")
-                or meta.get("linkTarget")
-            )
-            items = meta.get("items") if isinstance(meta, dict) else None
-            if isinstance(items, dict):
-                item_type = items.get("type")
-                if item_type == "link" and (items.get("target") or items.get("linkTarget")):
-                    is_relationship = True
-
-            if is_relationship:
-                unsupported_targets.append(name)
-                continue
-            import_type = self._resolve_import_type(raw_type_norm)
-            if not import_type:
-                unsupported_targets.append(name)
-                continue
-            resolved_field_types[name] = import_type
-            prop_constraints = self._normalize_constraints(meta.get("constraints"), raw_type=raw_type_norm)
-            base_constraints: Dict[str, Any] = {}
-            if normalize_ontology_base_type(raw_type_norm) == "array":
-                base_constraints = {"noNullItems": True, "noNestedArrays": True}
-            elif normalize_ontology_base_type(raw_type_norm) == "struct":
-                base_constraints = {"noNestedStructs": True, "noArrayFields": True}
-
-            constraint_sets: List[Dict[str, Any]] = []
-            if base_constraints:
-                constraint_sets.append(base_constraints)
-            if value_type_constraints:
-                constraint_sets.append(self._normalize_constraints(value_type_constraints, raw_type=value_type_base))
-            if prop_constraints:
-                constraint_sets.append(prop_constraints)
-            field_constraints[name] = constraint_sets if constraint_sets else {}
-            if bool(meta.get("required")):
-                required_targets.add(name)
-            if bool(meta.get("primary_key") or meta.get("primaryKey")):
-                explicit_pk_targets.add(name)
-
-        if not explicit_pk_targets:
-            expected_pk = f"{job.target_class_id.lower()}_id"
-            if expected_pk in prop_map:
-                explicit_pk_targets.add(expected_pk)
-
-        object_type_resource = await self._fetch_object_type_contract(job)
-        object_type_data = object_type_resource.get("data") if isinstance(object_type_resource, dict) else None
-        if not isinstance(object_type_data, dict):
-            object_type_data = object_type_resource if isinstance(object_type_resource, dict) else {}
-        object_type_spec = object_type_data.get("spec") if isinstance(object_type_data.get("spec"), dict) else {}
-        if not object_type_spec:
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.OBJECT_TYPE_CONTRACT_MISSING.value,
-                            "message": "Object type contract is required for objectify",
-                        }
-                    ]
-                },
-            )
-        status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
-        if status_value != "ACTIVE":
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.OBJECT_TYPE_INACTIVE.value,
-                            "status": status_value,
-                            "message": "Object type contract is not active",
-                        }
-                    ]
-                },
-            )
-        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
-        object_type_pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
-        object_type_title_targets = [str(v).strip() for v in object_type_key_spec.get("title_key") or [] if str(v).strip()]
-        object_type_unique_keys = [
-            [str(v).strip() for v in key if str(v).strip()]
-            for key in object_type_key_spec.get("unique_keys") or []
-            if isinstance(key, list)
-        ]
-        object_type_required_fields = [str(v).strip() for v in object_type_key_spec.get("required_fields") or [] if str(v).strip()]
-        object_type_nullable_fields = {str(v).strip() for v in object_type_key_spec.get("nullable_fields") or [] if str(v).strip()}
-
-        if not object_type_pk_targets:
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.OBJECT_TYPE_PRIMARY_KEY_MISSING.value,
-                            "message": "Object type pk_spec.primary_key is required",
-                        }
-                    ]
-                },
-            )
-        if not object_type_title_targets:
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.OBJECT_TYPE_TITLE_KEY_MISSING.value,
-                            "message": "Object type pk_spec.title_key is required",
-                        }
-                    ]
-                },
-            )
-
-        missing_contract_fields = sorted(
-            {
-                *object_type_pk_targets,
-                *object_type_title_targets,
-                *object_type_required_fields,
-            }
-            - set(prop_map.keys())
+        value_type_defs = await self._load_value_type_defs_with_validation(
+            job=job,
+            prop_map=prop_map,
+            fail_job=_fail_job,
         )
-        if missing_contract_fields:
-            await _fail_job(
-                "validation_failed",
-                report={
-                    "errors": [
-                        {
-                            "code": VC.OBJECT_TYPE_KEY_FIELDS_MISSING.value,
-                            "fields": missing_contract_fields,
-                            "message": "Object type key spec fields missing from ontology schema",
-                        }
-                    ]
-                },
-            )
+        (
+            resolved_field_types,
+            field_constraints,
+            field_raw_types,
+            required_targets,
+            explicit_pk_targets,
+            unsupported_targets,
+        ) = self._build_property_type_context(
+            prop_map=prop_map,
+            value_type_defs=value_type_defs,
+            target_class_id=job.target_class_id,
+        )
 
+        warnings: List[Dict[str, Any]] = []
+        (
+            object_type_pk_targets,
+            object_type_title_targets,
+            object_type_unique_keys,
+            object_type_required_fields,
+            object_type_nullable_fields,
+        ) = await self._resolve_object_type_key_contract(
+            job=job,
+            ontology_payload=ontology_payload,
+            prop_map=prop_map,
+            fail_job=_fail_job,
+            warnings=warnings,
+        )
         property_targets = [t for t in mapping_targets if t in prop_map]
         unsupported_mapped = [t for t in property_targets if t in unsupported_targets or t not in resolved_field_types]
         if unsupported_mapped:
@@ -1417,56 +1568,6 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     ]
                 },
             )
-
-        warnings: List[Dict[str, Any]] = []
-
-        def _extract_ontology_pk_targets(payload: Any) -> List[str]:
-            """Extract ontology-declared primaryKey fields in order (best-effort)."""
-            data = self._normalize_ontology_payload(payload)
-            meta = data.get("metadata") if isinstance(data, dict) else None
-            if isinstance(meta, dict):
-                key_spec = meta.get("key_spec") or meta.get("keySpec") or meta.get("key_specification")
-                if isinstance(key_spec, dict):
-                    raw_pk = (
-                        key_spec.get("primary_key")
-                        or key_spec.get("primaryKey")
-                        or key_spec.get("primaryKeys")
-                        or []
-                    )
-                    if isinstance(raw_pk, list):
-                        ordered = [str(v).strip() for v in raw_pk if str(v).strip()]
-                        if ordered:
-                            return ordered
-            props = data.get("properties") if isinstance(data, dict) else None
-            out: List[str] = []
-            seen: set[str] = set()
-            if isinstance(props, list):
-                for prop in props:
-                    if not isinstance(prop, dict):
-                        continue
-                    if not bool(prop.get("primary_key") or prop.get("primaryKey")):
-                        continue
-                    name = str(prop.get("name") or "").strip()
-                    if name and name not in seen:
-                        seen.add(name)
-                        out.append(name)
-            return out
-
-        # P0 (enterprise-safe): object_type.pk_spec is the operational source of truth.
-        # If ontology still carries primaryKey metadata (e.g. round-trip preserved), we validate it
-        # against pk_spec as an additional contract check (warn/fail configurable).
-        ontology_pk_targets = _extract_ontology_pk_targets(ontology_payload)
-        if ontology_pk_targets and ontology_pk_targets != object_type_pk_targets:
-            issue = {
-                "code": VC.ONTOLOGY_OBJECT_TYPE_PRIMARY_KEY_MISMATCH.value,
-                "expected": object_type_pk_targets,
-                "observed": ontology_pk_targets,
-                "message": "Ontology primaryKey does not match object_type pk_spec (fields+order)",
-            }
-            if self.ontology_pk_validation_mode == "fail":
-                await _fail_job("validation_failed", report={"errors": [issue]})
-            if self.ontology_pk_validation_mode == "warn":
-                warnings.append(issue)
 
         pk_fields = self._normalize_pk_fields(
             options.get("primary_key_fields")

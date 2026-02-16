@@ -2408,13 +2408,12 @@ async def _run_agent_core(
 
     # ── MCP client ──
     try:
-        try:
-            from mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2393", exc_info=True)
-            from backend.mcp_servers.mcp_client import get_mcp_manager  # type: ignore[import-not-found]
+        from shared.services.mcp_client import get_mcp_manager
     except Exception as exc:
-        logging.getLogger(__name__).warning("Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2395", exc_info=True)
+        logging.getLogger(__name__).warning(
+            "Exception fallback at bff/services/pipeline_agent_autonomous_loop.py:2411",
+            exc_info=True,
+        )
         yield StreamEvent(
             event_type="error" if streaming else "complete",
             data={

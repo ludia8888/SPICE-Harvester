@@ -22,7 +22,7 @@ from bff.services.oms_client import OMSClient
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 if TYPE_CHECKING:  # pragma: no cover
-    from mcp_servers.mcp_client import Context7Client as Context7Client  # noqa: F401
+    from shared.services.mcp_client import Context7Client as Context7Client  # noqa: F401
 else:
     Context7Client = Any  # type: ignore[misc,assignment]
 
@@ -48,7 +48,7 @@ def _context7_unavailable_exc() -> HTTPException:
 
 async def get_context7_client() -> Any:
     try:
-        from mcp_servers.mcp_client import get_context7_client as _get_context7_client
+        from shared.services.mcp_client import get_context7_client as _get_context7_client
     except Exception:
         raise _context7_unavailable_exc()
     try:

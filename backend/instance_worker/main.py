@@ -27,6 +27,7 @@ import httpx
 from botocore.exceptions import ClientError
 
 from shared.config.app_config import AppConfig
+from shared.config.instances_index_mapping import INSTANCE_INDEX_MAPPING
 from shared.services.storage.redis_service import create_redis_service
 from shared.services.core.command_status_service import (
     CommandStatusService as CommandStatusTracker,
@@ -75,7 +76,6 @@ from oms.services.event_store import EventStore
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.config.search_config import get_instances_index_name, get_default_index_settings
 from shared.services.core.relationship_extractor import extract_relationships as shared_extract_relationships
-from objectify_worker.write_paths import DatasetPrimaryIndexWritePath
 
 _LOG_LEVEL = get_settings().observability.log_level
 configure_logging(_LOG_LEVEL)
@@ -352,14 +352,14 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         if not await self.elasticsearch_service.index_exists(index_name):
             await self.elasticsearch_service.create_index(
                 index=index_name,
-                mappings=DatasetPrimaryIndexWritePath._INSTANCE_MAPPING,
+                mappings=INSTANCE_INDEX_MAPPING,
                 settings=get_default_index_settings(),
             )
             logger.info("Created instances index: %s", index_name)
         else:
             await self.elasticsearch_service.update_mapping(
                 index=index_name,
-                properties=DatasetPrimaryIndexWritePath._INSTANCE_MAPPING["properties"],
+                properties=INSTANCE_INDEX_MAPPING["properties"],
             )
 
         self._created_es_indices.add(index_name)

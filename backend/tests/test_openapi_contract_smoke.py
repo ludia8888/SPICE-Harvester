@@ -201,22 +201,8 @@ async def _get_ontology_head_commit(
     db_name: str,
     branch: str = "main",
 ) -> str:
-    async with session.get(
-        f"{OMS_URL}/api/v1/version/{db_name}/head",
-        params={"branch": branch},
-        headers=BFF_HEADERS,
-    ) as resp:
-        if resp.status in {404, 410}:
-            return f"branch:{branch}"
-        if resp.status != 200:
-            raise AssertionError(f"Failed to get ontology head commit (http={resp.status}): {await resp.text()}")
-        payload = await resp.json()
-
-    data = payload.get("data") if isinstance(payload, dict) else None
-    head_commit_id = (data or {}).get("head_commit_id") if isinstance(data, dict) else None
-    if isinstance(head_commit_id, str) and head_commit_id.strip():
-        return head_commit_id.strip()
-    raise AssertionError(f"Unexpected ontology head payload shape: {payload}")
+    _ = session, db_name
+    return f"branch:{branch}"
 
 
 async def _record_deployed_commit(
@@ -252,6 +238,39 @@ async def _record_deployed_commit(
         await postgres_db.disconnect()
 
 
+_COMMAND_TERMINAL_STATES = {"COMPLETED", "SUCCEEDED", "FAILED", "CANCELLED", "CANCELED"}
+_COMMAND_STATUS_KEYS = ("status", "state", "command_status", "commandState")
+_ENVELOPE_GENERIC_STATUS = {"SUCCESS", "ERROR"}
+
+
+def _extract_command_lifecycle_status(payload: Dict[str, Any]) -> str:
+    """
+    Resolve command lifecycle status from either direct or envelope-style responses.
+
+    Supported shapes:
+    - {"status": "COMPLETED"}
+    - {"status": "success", "data": {"status": "COMPLETED"}}
+    - {"status": "success", "data": {"state": "FAILED"}}
+    """
+    if not isinstance(payload, dict):
+        return ""
+
+    nested = payload.get("data") if isinstance(payload.get("data"), dict) else None
+    for source in (nested, payload):
+        if not isinstance(source, dict):
+            continue
+        for key in _COMMAND_STATUS_KEYS:
+            value = source.get(key)
+            token = str(value or "").strip().upper()
+            if not token:
+                continue
+            # Ignore generic envelope status when command lifecycle status is not present.
+            if source is payload and token in _ENVELOPE_GENERIC_STATUS and nested is not None:
+                continue
+            return token
+    return ""
+
+
 async def _wait_for_command_completed(
     session: aiohttp.ClientSession,
     *,
@@ -270,10 +289,10 @@ async def _wait_for_command_completed(
                 continue
             last = await resp.json()
 
-        status_value = str(last.get("status") or "").upper()
-        if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
-            if status_value != "COMPLETED":
-                raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+        lifecycle_status = _extract_command_lifecycle_status(last)
+        if lifecycle_status in _COMMAND_TERMINAL_STATES:
+            if lifecycle_status not in {"COMPLETED", "SUCCEEDED"}:
+                raise AssertionError(f"Command {command_id} ended in {lifecycle_status}: {last}")
             await asyncio.sleep(0.5)
             return last
 
@@ -405,7 +424,42 @@ REMOVED_V1_COMPAT_OPERATIONS: set[tuple[str, str]] = {
         "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
     ),
     ("POST", "/api/v1/databases/{db_name}/query"),
+    ("GET", "/api/v1/databases/{db_name}/branches"),
+    ("POST", "/api/v1/databases/{db_name}/branches"),
+    ("GET", "/api/v1/databases/{db_name}/branches/{branch_name}"),
+    ("DELETE", "/api/v1/databases/{db_name}/branches/{branch_name}"),
 }
+
+
+REMOVED_V1_STRICT_ABSENT_PATHS: set[str] = {
+    "/api/v1/databases/{db_name}/branches",
+    "/api/v1/databases/{db_name}/branches/{branch_name}",
+    "/api/v1/databases/{db_name}/versions",
+    "/api/v1/databases/{db_name}/ontology/branches",
+    "/api/v1/databases/{db_name}/merge/simulate",
+    "/api/v1/databases/{db_name}/merge/resolve",
+}
+
+
+def _collect_reintroduced_removed_ops(spec_paths_map: Dict[str, Any]) -> list[tuple[str, str]]:
+    reintroduced_removed_ops: list[tuple[str, str]] = []
+    for method, path in sorted(REMOVED_V1_COMPAT_OPERATIONS):
+        methods = spec_paths_map.get(path) or {}
+        if isinstance(methods, dict) and method.lower() in methods:
+            reintroduced_removed_ops.append((method, path))
+    return reintroduced_removed_ops
+
+
+def _local_source_reintroduced_removed_ops() -> list[tuple[str, str]] | None:
+    try:
+        from bff.main import app as local_bff_app
+    except Exception:
+        return None
+
+    local_spec_paths_map = (local_bff_app.openapi() or {}).get("paths") or {}
+    if not isinstance(local_spec_paths_map, dict):
+        return None
+    return _collect_reintroduced_removed_ops(local_spec_paths_map)
 
 
 def _is_wip(op: Operation) -> bool:
@@ -558,6 +612,14 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "primaryKey": ctx.instance_id,
         "linkType": ctx.link_type_id or "missing_link_type",
         "linkedObjectPrimaryKey": ctx.instance_id,
+        "actionTypeRid": (
+            f"ri.spice.main.action-type.{ctx.db_name}.{ctx.action_type_id or 'missing_action_type'}"
+        ),
+        "actionType": ctx.action_type_id or "missing_action_type",
+        "queryApiName": "missing_query_type",
+        "interfaceType": "BaseInterface",
+        "sharedPropertyType": "sharedName",
+        "valueType": "string",
         "mapping_spec_id": "00000000-0000-0000-0000-000000000000",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
@@ -1145,20 +1207,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"db_name": ctx.db_name}
         return RequestPlan(op.method, op.path, url, (200, 400, 422), params=params, form=form)
 
-    if key == ("GET", "/api/v1/databases/{db_name}/branches"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200,))
-    if key == ("POST", "/api/v1/databases/{db_name}/branches"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"name": ctx.branch_name, "from_branch": "main"}
-        return RequestPlan(op.method, op.path, url, (200, 201, 404, 409), json_body=body)
-    if key == ("GET", "/api/v1/databases/{db_name}/branches/{branch_name}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200,))
-    if key == ("DELETE", "/api/v1/databases/{db_name}/branches/{branch_name}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 202, 404))
-
     if key == ("GET", "/api/v1/databases/{db_name}/classes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
@@ -1235,6 +1283,16 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"branch": "main"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
+    if key == ("GET", "/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"branch": "main"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/actionTypes/{actionType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"branch": "main"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         params = {"pageSize": 10}
@@ -1251,6 +1309,45 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'linkType': ctx.link_type_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+        params = {"branch": "main", "preview": "true"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/interfaceTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"branch": "main", "preview": "true", "pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'interfaceType': 'BaseInterface'})}"
+        params = {"branch": "main", "preview": "true"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/sharedPropertyTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"branch": "main", "preview": "true", "pageSize": 10}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'sharedPropertyType': 'sharedName'})}"
+        params = {"branch": "main", "preview": "true"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/valueTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        params = {"preview": "true"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/valueTypes/{valueType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'valueType': 'string'})}"
+        params = {"preview": "true"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
+
+    if key == ("GET", "/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'queryApiName': 'missing_query_type'})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
 
     if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/search"):
@@ -1489,6 +1586,22 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
                 "db_name": ctx.db_name,
                 "from_as_of": from_as_of,
                 "to_as_of": now.isoformat(),
+            },
+        )
+
+    if key == ("GET", "/api/v1/lineage/column-lineage"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400, 404),
+            params={
+                "db_name": ctx.db_name,
+                "branch": "main",
+                "source_field": "name",
+                "target_field": "name",
+                "pair_limit": 100,
             },
         )
 
@@ -1776,6 +1889,27 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body)
 
+    if key == ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "base_branch": "main",
+            "items": [
+                {
+                    "request_id": "openapi-smoke-batch-1",
+                    "input": {
+                        "product": {"class_id": ctx.class_id, "instance_id": ctx.instance_id},
+                        "new_name": "OpenAPI Smoke Product (batch)",
+                    },
+                }
+            ],
+        }
+        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), json_body=body)
+
+    if key == ("POST", "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"reason": "openapi smoke undo coverage", "base_branch": "main"}
+        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), json_body=body)
+
     # ---------- AI (LLM) ----------
     if key == ("POST", "/api/v1/ai/intent"):
         url = f"{BFF_URL}{op.path}"
@@ -1847,6 +1981,33 @@ async def test_openapi_stable_contract_smoke():
             spec = await resp.json()
 
     spec_paths = set((spec.get("paths") or {}).keys())
+    spec_paths_map = spec.get("paths") or {}
+
+    # Legacy routes removed in Foundry/Postgres runtime must never reappear.
+    reintroduced_strict_absent = sorted(path for path in REMOVED_V1_STRICT_ABSENT_PATHS if path in spec_paths)
+    assert not reintroduced_strict_absent, f"Reintroduced legacy paths in OpenAPI: {reintroduced_strict_absent}"
+
+    reintroduced_removed_ops = _collect_reintroduced_removed_ops(spec_paths_map)
+    if reintroduced_removed_ops:
+        print(f"[openapi] legacy compat operations still exposed: {reintroduced_removed_ops}")
+        strict_removed_ops = str(os.getenv("OPENAPI_STRICT_REMOVED_V1_OPS", "false")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if strict_removed_ops:
+            local_reintroduced = _local_source_reintroduced_removed_ops()
+            stale_runtime_hint = ""
+            if local_reintroduced == []:
+                stale_runtime_hint = (
+                    " (local source OpenAPI is clean; running BFF instance likely stale. "
+                    "Restart/redeploy local stack and retry.)"
+                )
+            raise AssertionError(
+                f"Reintroduced legacy operations in OpenAPI: {reintroduced_removed_ops}{stale_runtime_hint}"
+            )
+
     db_create_path = _pick_spec_path(spec_paths, "/api/v1/databases", "/api/v1/database")
     db_ontology_path = _pick_spec_path(
         spec_paths,
@@ -1858,12 +2019,6 @@ async def test_openapi_stable_contract_smoke():
         "/api/v1/databases/{db_name}/ontology/{class_id}/schema",
         "/api/v1/database/{db_name}/ontology/{class_id}/schema",
     )
-    db_branches_path = _pick_spec_path(
-        spec_paths,
-        "/api/v1/databases/{db_name}/branches",
-        "/api/v1/database/{db_name}/branches",
-    )
-    db_branches_available = db_branches_path in spec_paths
     db_instance_create_path = _pick_spec_path(
         spec_paths,
         "/api/v1/databases/{db_name}/instances/{class_label}/create",
@@ -1949,17 +2104,6 @@ async def test_openapi_stable_contract_smoke():
                 ctx.command_ids["create_database"] = str(command_id)
                 await _wait_for_command_completed(session, command_id=str(command_id))
 
-            # Create branch (for merge simulate, etc) when branch API is exposed.
-            if db_branches_available:
-                plan = await _build_plan(
-                    Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
-                    ctx,
-                )
-                status, text, _ = await _request(session, plan)
-                executed.add((plan.method, plan.path_template))
-                if status not in plan.expected_statuses:
-                    raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
-
             # Create ontology classes (Product + Order) on main. If the stack is running with
             # protected branches (e.g., ONTOLOGY_REQUIRE_PROPOSALS=true), writes to main will 409.
             # In that case, write to ctx.branch_name and merge/deploy into main via proposals.
@@ -2002,52 +2146,10 @@ async def test_openapi_stable_contract_smoke():
                         await _wait_for_command_completed(session, command_id=str(command_id))
 
             if needs_proposal:
-                # Ensure ontology branch exists on stacks where database-branch APIs and
-                # ontology-branch APIs are backed by different controls.
-                ontology_branches_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/branches"
-                branches_check_plan = RequestPlan(
-                    "GET",
-                    "/api/v1/databases/{db_name}/ontology/branches",
-                    ontology_branches_url,
-                    (200, 404),
-                    note="smoke: ensure ontology branch exists before proposal fallback writes",
-                )
-                status, text, payload = await _request(session, branches_check_plan)
-                executed.add((branches_check_plan.method, branches_check_plan.path_template))
-                ontology_branch_exists = False
-                ontology_branch_api_available = status == 200
-                if status == 200 and isinstance(payload, dict):
-                    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-                    branches = data.get("branches") if isinstance(data, dict) else None
-                    if isinstance(branches, list):
-                        ontology_branch_exists = ctx.branch_name in {str(item).strip() for item in branches}
-
-                if not ontology_branch_exists and ontology_branch_api_available:
-                    create_branch_plan = RequestPlan(
-                        "POST",
-                        "/api/v1/databases/{db_name}/ontology/branches",
-                        ontology_branches_url,
-                        (201, 409, 404),
-                        json_body={
-                            "branch_name": ctx.branch_name,
-                            "from_branch": "main",
-                            "author": "openapi_smoke",
-                        },
-                        note="smoke: create ontology branch for proposal fallback",
-                    )
-                    status, text, _ = await _request(session, create_branch_plan)
-                    executed.add((create_branch_plan.method, create_branch_plan.path_template))
-                    if status == 404:
-                        raise AssertionError(
-                            "Ontology branch API is unavailable, but proposal fallback path is required "
-                            "(protected main branch)."
-                        )
-                    if status not in create_branch_plan.expected_statuses:
-                        raise AssertionError(
-                            f"Failed to create ontology branch {ctx.branch_name} (http={status}): {text[:800]}"
-                        )
-
                 # Write missing ontology resources to the feature branch.
+                # In Foundry/Postgres profiles the legacy branch-management APIs may be removed.
+                # Proposal/write APIs still accept branch refs, so fallback should not require
+                # explicit branch-create endpoints to be present.
                 for path_template, body in needs_proposal:
                     url = f"{BFF_URL}{_format_path(path_template, ctx)}"
                     write_class_id = str(body.get("id") if isinstance(body, dict) else "").strip() or "unknown"
@@ -2456,26 +2558,7 @@ async def test_openapi_stable_contract_smoke():
                     # Some stacks protect ontology resources (including action-types) on main, even if
                     # class creation is allowed (or already happened). In that case, create the action
                     # type on a fresh branch from the current main head and merge+deploy it.
-                    if not db_branches_available:
-                        raise AssertionError(
-                            "Action-type protected-branch fallback requires branch API, "
-                            "but '/databases/{db_name}/branches' is not exposed in this profile."
-                        )
-                    action_branch = f"{ctx.branch_name}-action-type"
-                    create_branch_plan = RequestPlan(
-                        "POST",
-                        db_branches_path,
-                        f"{BFF_URL}{_format_path(db_branches_path, ctx)}",
-                        (200, 201, 404, 409),
-                        json_body={"name": action_branch, "from_branch": "main"},
-                        note="smoke: action-type protected-branch fallback",
-                    )
-                    status, text, _ = await _request(session, create_branch_plan)
-                    executed.add((create_branch_plan.method, create_branch_plan.path_template))
-                    if status not in create_branch_plan.expected_statuses:
-                        raise AssertionError(
-                            f"{create_branch_plan.method} {create_branch_plan.path_template} unexpected status {status}: {text[:500]}"
-                        )
+                    action_branch = ctx.branch_name
 
                     branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=action_branch)
                     action_type_branch_plan = RequestPlan(

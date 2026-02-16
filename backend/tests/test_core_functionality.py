@@ -293,7 +293,7 @@ class TestCoreOntologyManagement:
         """Test ontology creation with complex types"""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_db_{uuid.uuid4().hex[:12]}"
-            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
+            ontology_branch = "main"
             
             # Create database first
             async with session.post(
@@ -303,12 +303,6 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
-
-            async with session.post(
-                f"{OMS_URL}/api/v1/branch/{db_name}/create",
-                json={"branch_name": ontology_branch, "from_branch": "main"},
-            ) as resp:
-                assert resp.status in {200, 201}
 
             # Relationship targets must exist in schema (create Customer first)
             customer_ontology = {
@@ -378,7 +372,7 @@ class TestCoreOntologyManagement:
         """Ensure i18n labels are normalized for ES and preserved in label_i18n."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:12]}"
-            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
+            ontology_branch = "main"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",
@@ -387,12 +381,6 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
-
-            async with session.post(
-                f"{OMS_URL}/api/v1/branch/{db_name}/create",
-                json={"branch_name": ontology_branch, "from_branch": "main"},
-            ) as resp:
-                assert resp.status in {200, 201}
 
             customer = {
                 "id": "Customer",
@@ -510,7 +498,7 @@ class TestCoreOntologyManagement:
         """Test ontology creation with relationships is event-sourced and functional."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:12]}"
-            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
+            ontology_branch = "main"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",
@@ -519,12 +507,6 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
-
-            async with session.post(
-                f"{OMS_URL}/api/v1/branch/{db_name}/create",
-                json={"branch_name": ontology_branch, "from_branch": "main"},
-            ) as resp:
-                assert resp.status in {200, 201}
 
             # Create target class first so relationship validation can succeed.
             customer = {

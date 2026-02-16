@@ -69,12 +69,27 @@ def reset_type_inference_service() -> None:
 
 
 if __name__ == "__main__":
-    # Test dependency injection
-    from ..interfaces.type_inference import get_mock_type_inference_service
+    class _DummyTypeInferenceService(TypeInferenceInterface):
+        async def infer_column_type(self, column_data, column_name=None, include_complex_types=False, context_columns=None, metadata=None):
+            from shared.models.type_inference import ColumnAnalysisResult, TypeInferenceResult
+
+            return ColumnAnalysisResult(
+                column_name=column_name or "col",
+                inferred_type=TypeInferenceResult(type="xsd:string", confidence=1.0, reason="dummy"),
+                total_count=len(column_data),
+                non_empty_count=len(column_data),
+                sample_values=list(column_data)[:10],
+                null_count=0,
+                unique_count=len(set(str(v) for v in column_data)),
+                null_ratio=0.0,
+                unique_ratio=1.0,
+            )
+
+        async def analyze_dataset(self, data, columns, sample_size=1000, include_complex_types=False, metadata=None):
+            return [await self.infer_column_type([row[idx] if idx < len(row) else None for row in data], column_name=col) for idx, col in enumerate(columns)]
 
     # Test configuration
-    mock_service = get_mock_type_inference_service()
-    configure_type_inference_service(mock_service)
+    configure_type_inference_service(_DummyTypeInferenceService())
 
     # Test retrieval
     retrieved_service = get_type_inference_service()

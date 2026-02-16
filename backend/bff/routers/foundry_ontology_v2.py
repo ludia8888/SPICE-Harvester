@@ -54,6 +54,10 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class ApiFeaturePreviewUsageOnlyError(ValueError):
+    pass
+
+
 def _foundry_error(
     status_code: int,
     *,
@@ -169,6 +173,13 @@ def _preflight_error_response(
         return _not_found_error("OntologyNotFound", ontology=ontology, parameters=scoped or None)
     if isinstance(exc, PermissionDeniedError):
         return _permission_denied(ontology=ontology, message=str(exc), parameters=scoped or None)
+    if isinstance(exc, ApiFeaturePreviewUsageOnlyError):
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="ApiFeaturePreviewUsageOnly",
+            parameters={"ontology": ontology, **scoped, "message": str(exc)},
+        )
     if isinstance(exc, (ValueError, SecurityViolationError)):
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
@@ -516,6 +527,16 @@ def _log_strict_compat_summary(
 
 def _full_metadata_branch_contract(*, branch: str, strict_compat: bool) -> Dict[str, str]:
     return {"rid": branch} if strict_compat else {"name": branch}
+
+
+def _require_preview_true_for_strict_compat(
+    *,
+    preview: bool,
+    strict_compat: bool,
+    endpoint: str,
+) -> None:
+    if strict_compat and not preview:
+        raise ApiFeaturePreviewUsageOnlyError(f"preview=true is required for {endpoint} in strict compat mode")
 
 
 def _linked_object_parameters(
@@ -1446,7 +1467,6 @@ async def get_ontology_v2(
 async def get_full_metadata_v2(
     ontology: str,
     request: Request,
-    preview: bool = Query(False),
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
@@ -1460,7 +1480,6 @@ async def get_full_metadata_v2(
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
-            parameters={"preview": preview},
         )
 
     try:
@@ -1941,9 +1960,16 @@ async def list_interface_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/interfaceTypes",
+        )
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
@@ -1998,9 +2024,16 @@ async def get_interface_type_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/interfaceTypes/{interfaceType}",
+        )
         _ = sdk_package_rid, sdk_version
         interface_type = str(interfaceType or "").strip()
         if not interface_type:
@@ -2071,9 +2104,16 @@ async def list_shared_property_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/sharedPropertyTypes",
+        )
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
@@ -2126,9 +2166,16 @@ async def get_shared_property_type_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}",
+        )
         shared_property_type = str(sharedPropertyType or "").strip()
         if not shared_property_type:
             raise ValueError("sharedPropertyType is required")
@@ -2195,8 +2242,15 @@ async def list_value_types_v2(
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/valueTypes",
+        )
         await _require_domain_role(request, db_name=db_name)
     except Exception as exc:
         return _preflight_error_response(
@@ -2243,8 +2297,15 @@ async def get_value_type_v2(
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
+    strict_compat = False
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/valueTypes/{valueType}",
+        )
         value_type = str(valueType or "").strip()
         if not value_type:
             raise ValueError("valueType is required")
@@ -2478,7 +2539,12 @@ async def get_object_type_full_metadata_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _ = preview, sdk_package_rid, sdk_version
+        _require_preview_true_for_strict_compat(
+            preview=preview,
+            strict_compat=strict_compat,
+            endpoint="ontologies/{ontology}/objectTypes/{objectType}/fullMetadata",
+        )
+        _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")

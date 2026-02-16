@@ -6,6 +6,7 @@ from shared.config.settings import (
     AgentRuntimeSettings,
     ClientSettings,
     DatabaseSettings,
+    FeatureFlagsSettings,
     ObjectifySettings,
     PipelineSettings,
     StorageSettings,
@@ -113,3 +114,14 @@ def test_objectify_dataset_primary_chunk_size_clamps_lower_bound(monkeypatch: py
     monkeypatch.setenv("OBJECTIFY_DATASET_PRIMARY_INDEX_CHUNK_SIZE", "0")
     settings = ObjectifySettings()
     assert settings.dataset_primary_index_chunk_size == 1
+
+
+def test_feature_flags_strict_compat_defaults_on_and_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", raising=False)
+    defaults = FeatureFlagsSettings()
+    assert defaults.enable_foundry_v2_strict_compat is True
+
+    monkeypatch.setenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", "false")
+    explicit_off = FeatureFlagsSettings()
+    assert explicit_off.enable_foundry_v2_strict_compat is False

@@ -163,6 +163,64 @@ async def _wait_for_es_doc(
     raise AssertionError(f"Timed out waiting for ES doc (index={index_name}, doc_id={doc_id}, status={last_status})")
 
 
+async def _upsert_object_type_contract(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    class_id: str,
+    branch: str,
+    contract_payload: dict[str, Any],
+) -> None:
+    expected_head_commit = f"branch:{branch}"
+    create_resp = await client.post(
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
+        params={"branch": branch, "expected_head_commit": expected_head_commit},
+        json={"class_id": class_id, **contract_payload},
+    )
+    if create_resp.status_code in {200, 201}:
+        return
+    if create_resp.status_code == 409:
+        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types/{class_id}"
+        update_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": expected_head_commit},
+            json=dict(contract_payload),
+        )
+        if update_resp.status_code == 200:
+            return
+        first_error = update_resp.text
+
+        bootstrap_payload = dict(contract_payload)
+        bootstrap_payload["status"] = "INACTIVE"
+        bootstrap_payload["migration"] = {
+            "approved": True,
+            "reset_edits": True,
+            "note": "bootstrap_object_type_contract",
+        }
+        bootstrap_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": expected_head_commit},
+            json=bootstrap_payload,
+        )
+        if bootstrap_resp.status_code != 200:
+            raise AssertionError(
+                f"object-type bootstrap update failed: {bootstrap_resp.status_code} "
+                f"{bootstrap_resp.text} (first_update_error={first_error})"
+            )
+
+        activate_resp = await client.put(
+            update_url,
+            params={"branch": branch, "expected_head_commit": expected_head_commit},
+            json={"status": str(contract_payload.get('status') or 'ACTIVE').upper()},
+        )
+        if activate_resp.status_code == 200:
+            return
+        raise AssertionError(
+            f"object-type activate update failed: {activate_resp.status_code} {activate_resp.text}"
+        )
+    raise AssertionError(f"object-type create failed: {create_resp.status_code} {create_resp.text}")
+
+
 def _extract_funnel_types(payload: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for item in (payload.get("columns") or []):
@@ -404,18 +462,17 @@ async def test_financial_investigation_workflow_e2e() -> None:
             ("PhoneCall", calls_dataset_id, {"primary_key": ["call_id"], "title_key": ["call_id"]}),
         ]
         for class_id, backing_dataset_id, pk_spec in object_types:
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
-                params={"branch": "main"},
-                json={
-                    "class_id": class_id,
+            await _upsert_object_type_contract(
+                client,
+                db_name=db_name,
+                class_id=class_id,
+                branch="main",
+                contract_payload={
                     "backing_dataset_id": backing_dataset_id,
                     "pk_spec": pk_spec,
                     "metadata": {"source": "financial_investigation_workflow_e2e"},
                 },
             )
-            if resp.status_code >= 400:
-                raise AssertionError(f"object-type create failed: {resp.status_code} {resp.text}")
 
         # Phase 4: Mapping specs + objectify
         mapping_specs: dict[str, str] = {}

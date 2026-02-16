@@ -52,6 +52,9 @@ echo "🧾 API reference check..."
 echo "🧾 Architecture reference check..."
 "$PYTHON_BIN" scripts/generate_architecture_reference.py --check
 
+echo "🧱 Architecture guard..."
+"$PYTHON_BIN" scripts/architecture_guard.py
+
 echo "🎨 Frontend lint + build..."
 cd frontend
 "$NPM_BIN" ci
@@ -69,6 +72,6 @@ cleanup_stack() {
 }
 trap cleanup_stack EXIT
 
-AUTO_DOCKER_GC=false PYTHON_BIN="$PYTHON_BIN" ./backend/run_production_tests.sh --full
+AUTO_DOCKER_GC=false OPENAPI_STRICT_REMOVED_V1_OPS=true PYTHON_BIN="$PYTHON_BIN" ./backend/run_production_tests.sh --full
 
 echo "✅ Local CI gates completed successfully."

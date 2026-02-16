@@ -9,14 +9,27 @@ Official references:
 - Search Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/search-objects
 - List Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/list-objects
 - Get Object (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/get-object
-- List Linked Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/list-linked-objects
-- Get Linked Object (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/get-linked-object
-- SearchJsonQuery (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-queries/search-json-query
+- List Linked Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/linked-objects/list-linked-objects
+- Get Linked Object (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/linked-objects/get-linked-object
+- Search JSON Query body (v2 Search Objects): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/search-objects
+- Get Ontology Full Metadata (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontologies/get-ontology-full-metadata
+- List Interface Types (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontology-interfaces/list-interface-types
+- Get Interface Type (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontology-interfaces/get-interface-type
+- List Action Types (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/action-types/list-action-types
+- Get Action Type (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/action-types/get-action-type
+- Get Action Type by RID (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/action-types/get-action-type-by-rid
+- List Query Types (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/list-query-types
+- Get Query Type (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/get-query-type
+- List Value Types (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/list-ontology-value-types
+- Get Value Type (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/get-ontology-value-type
 - List Ontologies (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontologies/list-ontologies
 - API Errors (v2): https://www.palantir.com/docs/foundry/api/general/overview/errors
 - Object Edits Overview: https://www.palantir.com/docs/foundry/object-edits/overview
 - How Edits Are Applied: https://www.palantir.com/docs/foundry/object-edits/how-edits-applied/
-- Ontology Branches (Legacy): https://www.palantir.com/docs/foundry/ontologies/ontology-branches-legacy/
+
+Supplementary references (non-authoritative, validation aid only):
+- Foundry platform Python SDK (`develop`): https://github.com/palantir/foundry-platform-python
+- Palantir Developer Community: https://community.palantir.com/
 
 Current status:
 - [x] OMS Search Objects read surface is Foundry-style (`/objects/{db_name}/{object_type}/search`).
@@ -31,6 +44,8 @@ Current status:
 - [x] Migration guide and alignment checklist are cross-synced for P0 strict compat semantics (preview optionality, fullMetadata branch shape, strict rollout flags).
 - [x] v2-successor가 존재하는 주요 v1 read/query compat endpoints are code-deleted (operation removed from runtime handlers and OpenAPI).
 - [x] v1 query compatibility endpoint (`POST /api/v1/databases/{db}/query`) is removed from runtime handlers/OpenAPI; callers must use v2 object search.
+- [x] OpenAPI smoke recipe guard covers Foundry v2 preview/action/query endpoints and prevents bool `preview` query regressions in request plans.
+- [x] Foundry v2 OpenAPI parameter-surface guard explicitly verifies official actionTypes/queryTypes/fullMetadata contracts (branch/pagination/preview/sdk parameter rules).
 - [x] ES-native graph traversal path exists without TerminusDB dependency.
 - [x] Ontology persistence in Postgres profile no longer depends on TerminusDB runtime in OMS (legacy/hybrid adapter retained by feature mode).
 - [x] OMS boot path supports Postgres-first startup without eager Terminus initialization (`resource_storage_backend=postgres`).
@@ -73,11 +88,9 @@ Phase 2: Remove ontology runtime dependency on TerminusDB (high impact)
 - [x] OMS ontology write paths removed no-op legacy relationship-validation gate (`_validate_relationships_gate`); write validation now relies on registry/lint/interface checks only.
 - [x] OMS app no longer mounts legacy `/branch` and `/version` routers in any profile (legacy surfaces removed from runtime OpenAPI).
 - [x] OMS database routes (`/database/list|create|exists`) are always exposed with Foundry-style Postgres behavior; legacy branch/version routes remain removed from OpenAPI.
-- [x] BFF legacy branch/version wrappers (`/databases/{db}/branches*`, `/databases/{db}/versions`) are marked deprecated and return explicit `410 Gone` in postgres profile.
-- [x] BFF legacy branch/version wrappers are no longer exposed in OpenAPI contract when `resource_storage_backend=postgres` (`include_in_schema=false`), while runtime 410 compatibility remains for migration-safe calls.
-- [x] BFF ontology legacy branch endpoints (`/databases/{db}/ontology/branches`) are marked deprecated and return explicit `410 Gone` in postgres profile.
-- [x] BFF merge conflict legacy endpoints (`/databases/{db}/merge/simulate`, `/databases/{db}/merge/resolve`) are marked deprecated and return explicit `410 Gone` in postgres profile.
-- [x] BFF ontology/merge legacy routes are no longer exposed in OpenAPI in `postgres` profile (`include_in_schema=false`); runtime `410` compatibility behavior is preserved.
+- [x] BFF legacy branch/version wrappers (`/databases/{db}/branches*`, `/databases/{db}/versions`) are code-deleted from runtime handlers and OpenAPI.
+- [x] BFF ontology legacy branch endpoints (`/databases/{db}/ontology/branches`) are code-deleted from runtime handlers and OpenAPI.
+- [x] BFF merge conflict legacy endpoints (`/databases/{db}/merge/simulate`, `/databases/{db}/merge/resolve`) are code-deleted from runtime handlers and OpenAPI.
 - [x] BFF summary endpoint no longer calls legacy OMS branch-info API in any profile (`branch_info` is intentionally null).
 - [x] BFF summary ontology backend is now fixed to Foundry-style `postgres` (no profile-driven hybrid/terminus branching surface).
 - [x] BFF `FoundryQueryService` legacy branch/version/merge helpers are removed.
@@ -153,7 +166,7 @@ Phase 4: Topology cleanup
 Definition of done:
 - [x] No production-critical path requires TerminusDB at runtime in Postgres profile (legacy DB/branch/version paths remain profile-gated compatibility surfaces).
 - [x] Ontology and object read APIs match Foundry v2 contracts where implemented.
-- [x] All deprecated endpoints either removed or returning explicit 410 with migration path.
+- [x] Foundry-surface deprecated compatibility endpoints are code-deleted from runtime and OpenAPI.
 - [x] Replay and projection consistency checks are automated in CI.
 
 P0 strict-compat hardening (2026-02-16):
@@ -161,27 +174,36 @@ P0 strict-compat hardening (2026-02-16):
   - `ENABLE_FOUNDRY_V2_STRICT_COMPAT` (global)
   - `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST` (comma-separated DB list)
 - [x] Strict gate rule fixed as `global=true OR db_name in allowlist` (case-insensitive, trim-aware).
+- [x] Strict compat default is now enabled (`ENABLE_FOUNDRY_V2_STRICT_COMPAT=true`); legacy-compatible behavior is opt-out only.
 - [x] Objectify execution mode precedence is fixed end-to-end:
   - enqueue default `full`
   - worker resolution `options.execution_mode -> job.execution_mode -> "full"`
-- [x] v2 strict response normalization is active behind flag:
-  - `GET /api/v2/ontologies/{ontology}/fullMetadata` branch shape: strict=`{"rid": ...}`, legacy=`{"name": ...}`
+- [x] v2 strict response normalization is active by default:
+  - `GET /api/v2/ontologies/{ontology}/fullMetadata` branch shape default=`{"rid": ...}` (legacy `{"name": ...}` is compatibility override only)
   - object/link required fields are synthesized only in strict mode
   - unresolved outgoing link type entries are dropped in strict list and mapped to `404 LinkTypeNotFound` in strict get
+  - preview endpoints (`interfaceTypes*`, `sharedPropertyTypes*`, `valueTypes*`, `objectTypes/*/fullMetadata`) require `preview=true` in strict mode and return `400 INVALID_ARGUMENT` + `ApiFeaturePreviewUsageOnly` when omitted
 - [x] OCC expected-head validation now uses deployed commit + branch tokens:
   - strict mode: blank token -> `400 INVALID_ARGUMENT`, mismatch -> `409 CONFLICT`
   - legacy mode: blank token remains tolerated
+- [x] E2E/contract test helpers no longer depend on legacy OMS `/api/v1/version/{db_name}/head` calls for OCC tokens; `branch:<name>` tokens are used.
+- [x] OMS smoke no longer calls legacy `/api/v1/version/{db_name}/history|diff`; legacy version routes are asserted absent via OpenAPI.
+- [x] Core Foundry migration E2E suites no longer call legacy OMS `/api/v1/branch/*` APIs; branch-specific tests were normalized to `main` in Foundry/Postgres runtime.
+- [x] OpenAPI contract smoke protected-branch fallback no longer uses legacy branch-management routes (`/api/v1/databases/{db_name}/ontology/branches`, `/api/v1/databases/{db_name}/branches*`).
 - [x] Observability added:
   - v2 strict normalization summary logs (`route`, `db`, `branch`, `fixes`, `dropped`)
   - OCC mismatch logs (`db`, `branch`, `expected`, `allowed_count`)
 
 Validation commands (latest run: 2026-02-16):
 - `cd backend && pytest -q tests/unit/workers/test_objectify_incremental_default.py tests/unit/openapi/test_foundry_ontology_v2_contract.py tests/unit/oms/test_ontology_extensions_occ.py`
+- `cd backend && pytest -q tests/unit/openapi/test_removed_v1_compat_guard.py` (full BFF OpenAPI 기준 제거된 v1 op 재노출 + Foundry v2 파라미터 계약 가드)
+- `cd backend && pytest -q tests/unit/openapi/test_openapi_smoke_recipe_guard.py` (OpenAPI smoke recipe 누락/preview 파라미터 타입 회귀 방지)
+- `cd backend && pytest -q tests/unit/openapi/test_openapi_command_status_parser.py` (command status envelope 파싱 회귀 방지)
 - `cd backend && pytest -q tests/test_openapi_contract_smoke.py`
+- `cd backend && OPENAPI_STRICT_REMOVED_V1_OPS=true pytest -q tests/test_openapi_contract_smoke.py` (legacy removed-operation 재노출을 실패로 강제)
 
 Recommended rollout:
-1. Deploy with strict compat off by default.
-2. Enable strict compat in staging (`ENABLE_FOUNDRY_V2_STRICT_COMPAT=true`) and verify v2 consumers.
-3. In production, keep global off and enable per DB using `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST`.
-4. Observe logs for at least 48 hours before expanding allowlist.
-5. Rollback policy: set global off and clear allowlist to instantly restore legacy behavior.
+1. Keep strict compat on by default (`ENABLE_FOUNDRY_V2_STRICT_COMPAT=true`) across environments.
+2. Verify v2 consumers in staging/prod with strict defaults and monitor strict normalization/OCC mismatch logs.
+3. Use DB allowlist only for targeted early adoption when global strict is intentionally disabled.
+4. Rollback policy: set global off and clear allowlist to temporarily restore legacy-compatible behavior.

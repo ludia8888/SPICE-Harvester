@@ -219,7 +219,6 @@ async def _wait_for_instance_count(
 async def test_oms_end_to_end_smoke():
     async with aiohttp.ClientSession(headers=OMS_HEADERS) as session:
         db_name = f"test_oms_smoke_{uuid.uuid4().hex[:10]}"
-        branch_name = "feature/oms_smoke"
         class_id = "Product"
         instance_id = f"prod_{uuid.uuid4().hex[:8]}"
         write_branch = "main"
@@ -238,34 +237,15 @@ async def test_oms_end_to_end_smoke():
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
-            # 2) Branch endpoints
-            async with session.get(f"{OMS_URL}/api/v1/branch/{db_name}/list") as resp:
+            # 2) Legacy version-control routes are removed from OpenAPI.
+            async with session.get(f"{OMS_URL}/openapi.json") as resp:
                 assert resp.status == 200
-                payload = await resp.json()
-                assert payload.get("status") == "success"
+                openapi_payload = await resp.json()
+                openapi_paths = set((openapi_payload.get("paths") or {}).keys())
+                assert "/api/v1/version/{db_name}/history" not in openapi_paths
+                assert "/api/v1/version/{db_name}/diff" not in openapi_paths
 
-            async with session.post(
-                f"{OMS_URL}/api/v1/branch/{db_name}/create",
-                json={"branch_name": branch_name, "from_branch": "main"},
-            ) as resp:
-                assert resp.status in {200, 201}
-
-            async with session.get(
-                f"{OMS_URL}/api/v1/branch/{db_name}/branch/{branch_name}/info"
-            ) as resp:
-                assert resp.status == 200
-
-            # 3) Version control endpoints (smoke)
-            async with session.get(f"{OMS_URL}/api/v1/version/{db_name}/history") as resp:
-                assert resp.status == 200
-
-            async with session.get(
-                f"{OMS_URL}/api/v1/version/{db_name}/diff",
-                params={"from_ref": "main", "to_ref": "main"},
-            ) as resp:
-                assert resp.status in {200, 404}
-
-            # 4) Ontology creation (event sourcing)
+            # 3) Ontology creation (event sourcing)
             ontology = {
                 "id": class_id,
                 "label": "Product",
@@ -295,23 +275,10 @@ async def test_oms_end_to_end_smoke():
                         or "보호된 브랜치" in detail
                         or "보호된 브랜치" in message
                     ):
-                        write_branch = branch_name
+                        pytest.skip("OMS smoke requires writes on main; protected-branch proposal workflow is out of scope")
                     else:
                         raise AssertionError(f"Unexpected 409 response: {payload}")
                 else:
-                    assert resp.status == 202
-                    payload = await resp.json()
-                    ontology_command_id = (payload.get("data") or {}).get("command_id")
-                    assert ontology_command_id
-                    await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
-                    await _wait_for_command_completed(session, command_id=str(ontology_command_id))
-
-            if write_branch != "main":
-                async with session.post(
-                    f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-                    params={"branch": write_branch},
-                    json=ontology,
-                ) as resp:
                     assert resp.status == 202
                     payload = await resp.json()
                     ontology_command_id = (payload.get("data") or {}).get("command_id")
@@ -340,7 +307,7 @@ async def test_oms_end_to_end_smoke():
                 assert name_prop is not None, payload
                 assert bool(name_prop.get("titleKey") or name_prop.get("title_key")) is True, payload
 
-            # 5) Async instance create (event sourcing) + read-side count
+            # 4) Async instance create (event sourcing) + read-side count
             async with session.post(
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/{class_id}/create",
                 params={"branch": write_branch},

@@ -124,7 +124,7 @@ async def get_ontology_suggestions(*, db_name: str, class_id: str, client: Any) 
 async def check_context7_health(*, client: Any) -> Dict[str, Any]:
     _ = client
     try:
-        from mcp_servers.mcp_client import get_mcp_manager
+        from shared.services.mcp_client import get_mcp_manager
 
         mcp_manager = get_mcp_manager()
         tools = await mcp_manager.list_tools("context7")

@@ -23,6 +23,7 @@ GENERATORS = [
     "scripts/generate_error_taxonomy.py",
     "scripts/generate_pipeline_tooling_reference.py",
     "scripts/generate_repo_file_inventory.py",
+    "scripts/generate_portal_content.py",
 ]
 
 

@@ -950,7 +950,7 @@ class FeatureFlagsSettings(BaseSettings):
         description="Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
     )
     enable_foundry_v2_strict_compat: bool = Field(
-        default=False,
+        default=True,
         description="Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT)",
     )
     foundry_v2_strict_compat_db_allowlist: str = Field(

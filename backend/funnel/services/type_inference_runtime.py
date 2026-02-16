@@ -1,29 +1,22 @@
 """
-🔥 THINK ULTRA! Type Inference Service Adapter
-Adapts FunnelTypeInferenceService to conform to TypeInferenceInterface
+Funnel-local type inference runtime implementation.
+
+Kept outside `shared` to avoid cross-layer reverse imports from shared -> funnel.
 """
 
+from __future__ import annotations
+
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from shared.interfaces.type_inference import TypeInferenceInterface
 from shared.models.type_inference import ColumnAnalysisResult
 
-from funnel.services.type_inference_runtime import get_funnel_type_inference_service
+from funnel.services.type_inference import PatternBasedTypeDetector
 
-class FunnelTypeInferenceAdapter(TypeInferenceInterface):
-    """
-    Adapter that wraps FunnelTypeInferenceService to implement TypeInferenceInterface.
 
-    This adapter handles the conversion between the interface types and the
-    FunnelTypeInferenceService implementation types.
-    """
-
-    def __init__(self):
-        import logging
-
-        self.logger = logging.getLogger(__name__)
-        self._delegate = get_funnel_type_inference_service()
-        self.logger.info("🔥 FunnelTypeInferenceAdapter initialized with funnel production delegate")
+class FunnelProductionTypeInferenceService(TypeInferenceInterface):
+    """Production type inference backed by Funnel pattern detectors."""
 
     async def infer_column_type(
         self,
@@ -33,15 +26,15 @@ class FunnelTypeInferenceAdapter(TypeInferenceInterface):
         context_columns: Optional[Dict[str, List[Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ColumnAnalysisResult:
-        """
-        Analyze a column of data and infer its type.
-        """
-        return await self._delegate.infer_column_type(
+        if metadata:
+            include_complex_types = metadata.get("include_complex_types", include_complex_types)
+
+        return await asyncio.to_thread(
+            PatternBasedTypeDetector.infer_column_type,
             column_data=column_data,
             column_name=column_name,
             include_complex_types=include_complex_types,
             context_columns=context_columns,
-            metadata=metadata,
         )
 
     async def analyze_dataset(
@@ -52,13 +45,20 @@ class FunnelTypeInferenceAdapter(TypeInferenceInterface):
         include_complex_types: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[ColumnAnalysisResult]:
-        """
-        Analyze an entire dataset and infer types for all columns.
-        """
-        return await self._delegate.analyze_dataset(
+        if metadata:
+            include_complex_types = metadata.get("include_complex_types", include_complex_types)
+            sample_size = metadata.get("sample_size", sample_size)
+
+        return await asyncio.to_thread(
+            PatternBasedTypeDetector.analyze_dataset,
             data=data,
             columns=columns,
             sample_size=sample_size,
             include_complex_types=include_complex_types,
-            metadata=metadata,
         )
+
+
+def get_funnel_type_inference_service() -> TypeInferenceInterface:
+    """Factory for Funnel production type inference service."""
+    return FunnelProductionTypeInferenceService()
+

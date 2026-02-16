@@ -26,6 +26,7 @@ jobs:
       ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || 'ci_admin_token' }}
       SMOKE_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || 'ci_admin_token' }}
       TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      OPENAPI_STRICT_REMOVED_V1_OPS: "true"
 
     steps:
       - name: Checkout

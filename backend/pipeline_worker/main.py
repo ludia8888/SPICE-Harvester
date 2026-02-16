@@ -15,10 +15,11 @@ import shutil
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from functools import reduce
 import operator
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 from uuid import UUID, uuid4
 
 import httpx
@@ -191,6 +192,37 @@ class _PipelinePayloadParseError(ValueError):
         self.payload_text = payload_text
         self.payload_obj = payload_obj
         self.cause = cause
+
+
+class _OutputNodeValidationError(ValueError):
+    def __init__(
+        self,
+        *,
+        stage: str,
+        node_id: str,
+        errors: List[str],
+        row_count: int,
+        payload: Dict[str, Any],
+    ) -> None:
+        super().__init__(f"{stage}:{node_id}")
+        self.stage = str(stage)
+        self.node_id = str(node_id)
+        self.errors = list(errors)
+        self.row_count = int(row_count)
+        self.payload = payload
+
+
+@dataclass(frozen=True)
+class _DatasetInputLoadContext:
+    dataset: Any
+    version: Any
+    requested_branch: Optional[str]
+    resolved_branch: Optional[str]
+    used_fallback: bool
+    bucket: str
+    key: str
+    current_commit_id: str
+    artifact_prefix: str
 
 
 def _resolve_declared_output_kind(
@@ -1070,39 +1102,18 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             return pipeline.pipeline_id
         return None
 
-    async def _execute_job(self, job: PipelineJob) -> None:
-        if not self.pipeline_registry or not self.dataset_registry:
-            raise RuntimeError("Registry services not available")
-        if not self.spark:
-            raise RuntimeError("Spark session not initialized")
-        if not self.storage:
-            raise RuntimeError("Storage service not available")
-
-        definition = job.definition_json or {}
-        # Apply per-pipeline Spark/cast configuration overrides before we record spark_conf in the run output.
-        prev_spark_conf, prev_cast_mode = self._apply_job_overrides(definition)
-        preview_meta = definition.get("__preview_meta__") or {}
-        tables: Dict[str, DataFrame] = {}
-        nodes = normalize_nodes(definition.get("nodes"))
-        for _node in nodes.values():
-            _node["metadata"] = normalize_transform_metadata(_node.get("metadata"))
-        edges = normalize_edges(definition.get("edges"))
-        order = topological_sort(nodes, edges, include_unordered=False)
-        incoming = build_incoming(edges)
-        parameters = normalize_parameters(definition.get("parameters"))
-        input_snapshots: list[dict[str, Any]] = []
-        input_sampling: dict[str, Any] = {}
-        input_commit_payload: Optional[list[dict[str, Any]]] = None
-        temp_dirs: list[str] = []
-        persisted_dfs: list[DataFrame] = []
-        output_nodes = {
-            node_id: node for node_id, node in nodes.items() if str(node.get("type") or "") == "output"
-        }
-
-        execution_semantics = _resolve_execution_semantics(job=job, definition=definition)
-
+    def _plan_execution_scope(
+        self,
+        *,
+        job: PipelineJob,
+        nodes: Dict[str, Dict[str, Any]],
+        order: List[str],
+        incoming: Dict[str, List[str]],
+        output_nodes: Dict[str, Dict[str, Any]],
+        execution_semantics: str,
+    ) -> Tuple[List[str], set[str], List[str], Optional[str]]:
         requested_node_error: Optional[str] = None
-        target_node_ids: list[str]
+        target_node_ids: List[str]
         if execution_semantics == "streaming" and job.node_id:
             requested_node_error = "Streaming pipelines do not support node_id targeting; run the whole pipeline"
             target_node_ids = []
@@ -1130,7 +1141,2069 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 if parent not in required_node_ids:
                     stack.append(parent)
         order_run = [node_id for node_id in order if node_id in required_node_ids]
+        return target_node_ids, required_node_ids, order_run, requested_node_error
 
+    async def _load_previous_watermark_state(
+        self,
+        *,
+        job: PipelineJob,
+        resolved_pipeline_id: Optional[str],
+        execution_semantics: str,
+        watermark_column: Optional[str],
+    ) -> Tuple[Optional[Any], List[str], Dict[str, str]]:
+        previous_watermark: Optional[Any] = None
+        previous_watermark_keys: List[str] = []
+        previous_input_commits: Dict[str, str] = {}
+        if execution_semantics not in {"incremental", "streaming"} or not resolved_pipeline_id:
+            return previous_watermark, previous_watermark_keys, previous_input_commits
+
+        try:
+            state = await self.pipeline_registry.get_watermarks(
+                pipeline_id=resolved_pipeline_id,
+                branch=job.branch or "main",
+            )
+            stored_column = str(
+                state.get("watermark_column")
+                or state.get("watermarkColumn")
+                or state.get("column")
+                or ""
+            ).strip()
+            stored_value = (
+                state.get("watermark_value")
+                if "watermark_value" in state
+                else state.get("watermarkValue")
+                if "watermarkValue" in state
+                else state.get("value")
+            )
+            if watermark_column:
+                if stored_column and stored_column != watermark_column:
+                    previous_watermark = None
+                    previous_watermark_keys = []
+                else:
+                    previous_watermark = stored_value
+                    stored_keys = None
+                    if isinstance(state, dict):
+                        stored_keys = state.get("watermark_keys") or state.get("watermarkKeys")
+                    if isinstance(stored_keys, list):
+                        for item in stored_keys:
+                            item_str = str(item or "").strip()
+                            if item_str:
+                                previous_watermark_keys.append(item_str)
+            commits_payload = (
+                state.get("input_commits")
+                if isinstance(state, dict)
+                else None
+            )
+            if commits_payload is None and isinstance(state, dict):
+                commits_payload = state.get("inputCommits")
+            if isinstance(commits_payload, dict):
+                for key, value in commits_payload.items():
+                    node_key = str(key or "").strip()
+                    commit_value = str(value or "").strip()
+                    if node_key and commit_value:
+                        previous_input_commits[node_key] = commit_value
+        except Exception as exc:
+            logger.warning("Failed to load pipeline watermarks (pipeline_id=%s): %s", resolved_pipeline_id, exc)
+
+        return previous_watermark, previous_watermark_keys, previous_input_commits
+
+    async def _run_preview_mode(
+        self,
+        *,
+        job: PipelineJob,
+        definition: Dict[str, Any],
+        nodes: Dict[str, Dict[str, Any]],
+        target_node_ids: List[str],
+        tables: Dict[str, DataFrame],
+        input_snapshots: List[Dict[str, Any]],
+        input_sampling: Dict[str, Any],
+        temp_dirs: List[str],
+        preview_limit: int,
+        execution_semantics: str,
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        code_version: Optional[str],
+        spark_conf: Dict[str, Any],
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        record_preview: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+    ) -> None:
+        primary_id = target_node_ids[0] if target_node_ids else None
+        output_df = tables.get(primary_id) if primary_id else self._empty_dataframe()
+        schema_columns = _schema_from_dataframe(output_df)
+        row_count = int(await self._run_spark(lambda: output_df.count(), label=f"count:preview:{primary_id}"))
+        schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
+        output_ops = self._build_table_ops(output_df)
+        contract_errors = await self._run_spark(
+            lambda: validate_schema_contract(output_ops, schema_contract),
+            label=f"schema_contract:preview:{primary_id}",
+        )
+        if contract_errors:
+            contract_payload = self._build_error_payload(
+                message="Pipeline schema contract failed",
+                errors=contract_errors,
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=422,
+                external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
+                stage="schema_contract",
+                job=job,
+                node_id=primary_id,
+                context={"execution_semantics": execution_semantics},
+            )
+            await record_preview(
+                status="FAILED",
+                row_count=row_count,
+                sample_json=contract_payload,
+                job_id=job.job_id,
+                node_id=job.node_id,
+            )
+            await record_run(
+                job_id=job.job_id,
+                mode="preview",
+                status="FAILED",
+                node_id=job.node_id,
+                row_count=row_count,
+                sample_json=contract_payload,
+                input_lakefs_commits=input_commit_payload,
+                finished_at=utcnow(),
+            )
+            await record_artifact(
+                status="FAILED",
+                errors=contract_errors,
+                inputs=inputs_payload,
+            )
+            logger.error("Pipeline schema contract failed: %s", contract_errors)
+            return
+
+        output_meta = nodes.get(primary_id, {}) if primary_id else {}
+        output_metadata = output_meta.get("metadata") or {}
+        output_name = (
+            output_metadata.get("outputName")
+            or output_metadata.get("datasetName")
+            or output_meta.get("title")
+            or (primary_id or "preview_output")
+        )
+        output_kind = _resolve_declared_output_kind(
+            declared_outputs=declared_outputs,
+            output_node_id=primary_id,
+            output_name=str(output_name or ""),
+        )
+        _validate_output_kind_metadata(
+            output_kind=output_kind,
+            output_metadata=output_metadata,
+            node_id=str(primary_id or "preview_output"),
+        )
+        pk_semantics = resolve_pk_semantics(
+            execution_semantics=execution_semantics,
+            definition=definition,
+            output_metadata=output_metadata,
+        )
+        delete_column = resolve_delete_column(
+            definition=definition,
+            output_metadata=output_metadata,
+        )
+        pk_columns = resolve_pk_columns(
+            definition=definition,
+            output_metadata=output_metadata,
+            output_name=output_name,
+            output_node_id=primary_id,
+            declared_outputs=declared_outputs,
+        )
+        available_columns = output_ops.columns
+        pk_semantic_errors = validate_pk_semantics(
+            available_columns=available_columns,
+            pk_semantics=pk_semantics,
+            pk_columns=pk_columns,
+            delete_column=delete_column,
+        )
+        expectations = build_expectations_with_pk(
+            definition=definition,
+            output_metadata=output_metadata,
+            output_name=output_name,
+            output_node_id=primary_id,
+            declared_outputs=declared_outputs,
+            pk_semantics=pk_semantics,
+            delete_column=delete_column,
+            pk_columns=pk_columns,
+            available_columns=available_columns,
+        )
+        expectation_errors = pk_semantic_errors + await self._run_spark(
+            lambda: validate_expectations(output_ops, expectations),
+            label=f"expectations:preview:{primary_id}",
+        )
+        fk_errors = await self._evaluate_fk_expectations(
+            expectations=expectations,
+            output_df=output_df,
+            db_name=job.db_name,
+            branch=job.branch or "main",
+            temp_dirs=temp_dirs,
+        )
+        expectation_errors = expectation_errors + fk_errors
+        sample_rows = await self._run_spark(
+            lambda: output_df.limit(preview_limit).collect(),
+            label=f"collect:preview:{primary_id}",
+        )
+        output_sample = [row.asDict(recursive=True) for row in sample_rows]
+        column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
+        sample_payload: Dict[str, Any] = {
+            "columns": schema_columns,
+            "rows": output_sample,
+            "job_id": job.job_id,
+            "row_count": row_count,
+            "sample_row_count": len(output_sample),
+            "sampling_strategy": {
+                "output": {"type": "limit", "limit": preview_limit},
+                **({"input": input_sampling} if input_sampling else {}),
+            },
+            "column_stats": column_stats,
+            "definition_hash": job.definition_hash,
+            "branch": job.branch or "main",
+            "input_snapshots": input_snapshots,
+            "execution_semantics": execution_semantics,
+            "pipeline_spec_hash": pipeline_spec_hash,
+            "pipeline_spec_commit_id": pipeline_spec_commit_id,
+            "code_version": code_version,
+            "spark_conf": spark_conf,
+        }
+        if primary_id:
+            sample_payload["node_id"] = primary_id
+        if expectation_errors:
+            sample_payload["expectations"] = expectation_errors
+        preview_outputs = [
+            {
+                "node_id": primary_id,
+                "output_name": output_name,
+                "output_kind": output_kind,
+                "dataset_name": output_name,
+                "row_count": row_count,
+                "columns": schema_columns,
+                "schema_hash": _hash_schema_columns(schema_columns),
+                "schema_json": {"columns": schema_columns},
+                "rows": output_sample,
+                "sample_row_count": len(output_sample),
+                "column_stats": column_stats,
+            }
+        ]
+        artifact_status = "FAILED" if expectation_errors else "SUCCESS"
+        artifact_id = await record_artifact(
+            status=artifact_status,
+            outputs=preview_outputs,
+            inputs=inputs_payload,
+            sampling_strategy={
+                "output": {"type": "limit", "limit": preview_limit},
+                **({"input": input_sampling} if input_sampling else {}),
+            },
+            errors=expectation_errors if expectation_errors else None,
+        )
+        if artifact_id:
+            sample_payload["artifact_id"] = artifact_id
+
+        await record_preview(
+            status="FAILED" if expectation_errors else "SUCCESS",
+            row_count=row_count,
+            sample_json=sample_payload,
+            job_id=job.job_id,
+            node_id=job.node_id,
+        )
+        await record_run(
+            job_id=job.job_id,
+            mode="preview",
+            status="FAILED" if expectation_errors else "SUCCESS",
+            node_id=job.node_id,
+            row_count=row_count,
+            sample_json=sample_payload,
+            input_lakefs_commits=input_commit_payload,
+            finished_at=utcnow(),
+        )
+        if expectation_errors:
+            logger.error("Pipeline expectations failed: %s", expectation_errors)
+
+    def _build_output_validation_payload(
+        self,
+        *,
+        stage: str,
+        errors: List[str],
+        job: PipelineJob,
+        node_id: str,
+        execution_semantics: str,
+        output_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        stage_config = {
+            "schema_contract": (
+                "Pipeline schema contract failed",
+                "PIPELINE_SCHEMA_CONTRACT_FAILED",
+            ),
+            "expectations": (
+                "Pipeline expectations failed",
+                "PIPELINE_EXPECTATIONS_FAILED",
+            ),
+            "output_metadata": (
+                "Dataset output metadata invalid",
+                "PIPELINE_DATASET_OUTPUT_METADATA_INVALID",
+            ),
+        }
+        message, external_code = stage_config.get(
+            stage,
+            ("Pipeline output validation failed", "PIPELINE_OUTPUT_VALIDATION_FAILED"),
+        )
+        context: Dict[str, Any] = {"execution_semantics": execution_semantics}
+        if output_name:
+            context["output_name"] = output_name
+        return self._build_error_payload(
+            message=message,
+            errors=errors,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            external_code=external_code,
+            stage=stage,
+            job=job,
+            node_id=node_id,
+            context=context,
+        )
+
+    async def _prepare_output_work_item(
+        self,
+        *,
+        mode_label: str,
+        job: PipelineJob,
+        definition: Dict[str, Any],
+        declared_outputs: List[Dict[str, Any]],
+        output_nodes: Dict[str, Dict[str, Any]],
+        node_id: str,
+        output_df: DataFrame,
+        pipeline_ref: str,
+        output_write_mode: str,
+        execution_semantics: str,
+        has_incremental_input: bool,
+        incremental_inputs_have_additive_updates: Optional[bool],
+        preview_limit: int,
+        temp_dirs: List[str],
+        persist_output: bool,
+        persisted_dfs: List[DataFrame],
+    ) -> Dict[str, Any]:
+        if persist_output and _PYSPARK_AVAILABLE:
+            # Build mode touches the same DataFrame multiple times (count/sample/write). Persist the
+            # final output to avoid recomputation spikes that can OOM-kill the worker in Docker.
+            try:
+                output_df = output_df.persist(StorageLevel.DISK_ONLY)
+                persisted_dfs.append(output_df)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to persist output dataframe for node %s: %s",
+                    node_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        schema_columns = _schema_from_dataframe(output_df)
+        delta_row_count = int(
+            await self._run_spark(lambda: output_df.count(), label=f"count:{mode_label}:{node_id}")
+        )
+        schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
+        output_ops = self._build_table_ops(output_df)
+        contract_errors = await self._run_spark(
+            lambda: validate_schema_contract(output_ops, schema_contract),
+            label=f"schema_contract:{mode_label}:{node_id}",
+        )
+        if contract_errors:
+            raise _OutputNodeValidationError(
+                stage="schema_contract",
+                node_id=node_id,
+                errors=contract_errors,
+                row_count=delta_row_count,
+                payload=self._build_output_validation_payload(
+                    stage="schema_contract",
+                    errors=contract_errors,
+                    job=job,
+                    node_id=node_id,
+                    execution_semantics=execution_semantics,
+                ),
+            )
+
+        output_meta = output_nodes.get(node_id) or {}
+        metadata = output_meta.get("metadata") or {}
+        output_name = (
+            metadata.get("outputName")
+            or metadata.get("datasetName")
+            or output_meta.get("title")
+            or job.output_dataset_name
+        )
+        output_kind = _resolve_declared_output_kind(
+            declared_outputs=declared_outputs,
+            output_node_id=node_id,
+            output_name=str(output_name or ""),
+        )
+        _validate_output_kind_metadata(
+            output_kind=output_kind,
+            output_metadata=metadata,
+            node_id=str(node_id),
+        )
+        pk_semantics = resolve_pk_semantics(
+            execution_semantics=execution_semantics,
+            definition=definition,
+            output_metadata=metadata,
+        )
+        delete_column = resolve_delete_column(
+            definition=definition,
+            output_metadata=metadata,
+        )
+        pk_columns = resolve_pk_columns(
+            definition=definition,
+            output_metadata=metadata,
+            output_name=output_name,
+            output_node_id=node_id,
+            declared_outputs=declared_outputs,
+        )
+        available_columns = output_ops.columns
+        pk_semantic_errors = validate_pk_semantics(
+            available_columns=available_columns,
+            pk_semantics=pk_semantics,
+            pk_columns=pk_columns,
+            delete_column=delete_column,
+        )
+        expectations = build_expectations_with_pk(
+            definition=definition,
+            output_metadata=metadata,
+            output_name=output_name,
+            output_node_id=node_id,
+            declared_outputs=declared_outputs,
+            pk_semantics=pk_semantics,
+            delete_column=delete_column,
+            pk_columns=pk_columns,
+            available_columns=available_columns,
+        )
+        expectation_errors = pk_semantic_errors + await self._run_spark(
+            lambda: validate_expectations(output_ops, expectations),
+            label=f"expectations:{mode_label}:{node_id}",
+        )
+        fk_errors = await self._evaluate_fk_expectations(
+            expectations=expectations,
+            output_df=output_df,
+            db_name=job.db_name,
+            branch=job.branch or "main",
+            temp_dirs=temp_dirs,
+        )
+        expectation_errors = expectation_errors + fk_errors
+        if expectation_errors:
+            raise _OutputNodeValidationError(
+                stage="expectations",
+                node_id=node_id,
+                errors=expectation_errors,
+                row_count=delta_row_count,
+                payload=self._build_output_validation_payload(
+                    stage="expectations",
+                    errors=expectation_errors,
+                    job=job,
+                    node_id=node_id,
+                    execution_semantics=execution_semantics,
+                ),
+            )
+
+        dataset_name = str(output_name or job.output_dataset_name)
+        write_mode_requested = output_write_mode
+        write_mode_resolved = output_write_mode
+        runtime_write_mode = output_write_mode
+        write_policy_hash: Optional[str] = None
+        pk_columns_policy: List[str] = []
+        post_filtering_column: Optional[str] = None
+        if output_kind == OUTPUT_KIND_DATASET:
+            dataset_policy = resolve_dataset_write_policy(
+                definition=definition,
+                output_metadata=metadata,
+                execution_semantics=execution_semantics,
+                has_incremental_input=has_incremental_input,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+            )
+            metadata = dict(dataset_policy.normalized_metadata)
+            write_mode_requested = dataset_policy.requested_write_mode
+            write_mode_resolved = dataset_policy.resolved_write_mode.value
+            runtime_write_mode = dataset_policy.runtime_write_mode
+            write_policy_hash = dataset_policy.policy_hash
+            pk_columns_policy = list(dataset_policy.primary_key_columns)
+            post_filtering_column = dataset_policy.post_filtering_column
+            dataset_output_errors = validate_dataset_output_metadata(
+                definition=definition,
+                output_metadata=metadata,
+                execution_semantics=execution_semantics,
+                has_incremental_input=has_incremental_input,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                available_columns=_schema_column_names(schema_columns),
+            )
+            if dataset_output_errors:
+                raise _OutputNodeValidationError(
+                    stage="output_metadata",
+                    node_id=node_id,
+                    errors=dataset_output_errors,
+                    row_count=delta_row_count,
+                    payload=self._build_output_validation_payload(
+                        stage="output_metadata",
+                        errors=dataset_output_errors,
+                        job=job,
+                        node_id=node_id,
+                        execution_semantics=execution_semantics,
+                        output_name=dataset_name,
+                    ),
+                )
+            output_format = dataset_policy.output_format
+            partition_cols = list(dataset_policy.partition_by)
+        else:
+            output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
+            partition_cols = _resolve_partition_columns(
+                definition=definition,
+                output_metadata=metadata,
+            )
+
+        schema_hash = _hash_schema_columns(schema_columns)
+        sample_rows = await self._run_spark(
+            lambda: output_df.limit(preview_limit).collect(),
+            label=f"collect:{mode_label}:{node_id}",
+        )
+        output_sample = [row.asDict(recursive=True) for row in sample_rows]
+        sample_row_count = len(output_sample)
+        column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
+        safe_name = dataset_name.replace(" ", "_")
+        artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
+        return {
+            "node_id": node_id,
+            "output_name": output_name,
+            "output_kind": output_kind,
+            "output_metadata": dict(metadata),
+            "dataset_name": dataset_name,
+            "output_df": output_df,
+            "artifact_prefix": artifact_prefix,
+            "output_format": output_format,
+            "partition_columns": partition_cols,
+            "write_mode_requested": write_mode_requested,
+            "write_mode_resolved": write_mode_resolved,
+            "runtime_write_mode": runtime_write_mode,
+            "write_policy_hash": write_policy_hash,
+            "pk_columns": pk_columns_policy,
+            "post_filtering_column": post_filtering_column,
+            "has_incremental_input": has_incremental_input,
+            "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
+            "delta_row_count": delta_row_count,
+            "row_count": delta_row_count,
+            "schema_columns": schema_columns,
+            "columns": schema_columns,
+            "schema_hash": schema_hash,
+            "schema_json": {"columns": schema_columns},
+            "output_sample": output_sample,
+            "rows": output_sample,
+            "sample_row_count": sample_row_count,
+            "column_stats": column_stats,
+        }
+
+    def _log_output_validation_failure(
+        self,
+        *,
+        mode_label: str,
+        failure: _OutputNodeValidationError,
+    ) -> None:
+        stage_messages = {
+            "schema_contract": "Pipeline schema contract failed",
+            "expectations": "Pipeline expectations failed",
+            "output_metadata": "Pipeline dataset output metadata invalid",
+        }
+        suffix = " (build)" if mode_label == "build" else ""
+        logger.error(
+            "%s%s: %s",
+            stage_messages.get(failure.stage, "Pipeline output validation failed"),
+            suffix,
+            failure.errors,
+        )
+
+    async def _record_build_output_failure(
+        self,
+        *,
+        job: PipelineJob,
+        failure: _OutputNodeValidationError,
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        await record_run(
+            job_id=job.job_id,
+            mode="build",
+            status="FAILED",
+            node_id=failure.node_id,
+            row_count=failure.row_count,
+            output_json=failure.payload,
+            input_lakefs_commits=input_commit_payload,
+            finished_at=utcnow(),
+        )
+        await record_artifact(
+            status="FAILED",
+            errors=failure.errors,
+            inputs=inputs_payload,
+        )
+        await emit_job_event(status="FAILED", errors=failure.errors)
+        self._log_output_validation_failure(mode_label="build", failure=failure)
+
+    async def _record_deploy_output_failure(
+        self,
+        *,
+        job: PipelineJob,
+        failure: _OutputNodeValidationError,
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        await record_build(
+            status="FAILED",
+            output_json=failure.payload,
+        )
+        await record_run(
+            job_id=job.job_id,
+            mode="deploy",
+            status="FAILED",
+            node_id=failure.node_id,
+            row_count=failure.row_count,
+            output_json=failure.payload,
+            input_lakefs_commits=input_commit_payload,
+            finished_at=utcnow(),
+        )
+        await record_artifact(
+            status="FAILED",
+            errors=failure.errors,
+            inputs=inputs_payload,
+        )
+        await emit_job_event(status="FAILED", errors=failure.errors)
+        self._log_output_validation_failure(mode_label="deploy", failure=failure)
+
+    async def _prepare_build_output_work(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        tables: Dict[str, DataFrame],
+        target_node_ids: List[str],
+        output_nodes: Dict[str, Dict[str, Any]],
+        definition: Dict[str, Any],
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_ref: str,
+        output_write_mode: str,
+        execution_semantics: str,
+        has_incremental_input: bool,
+        incremental_inputs_have_additive_updates: Optional[bool],
+        preview_limit: int,
+        temp_dirs: List[str],
+        persisted_dfs: List[DataFrame],
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> Optional[Tuple[List[Dict[str, Any]], bool]]:
+        output_work: List[Dict[str, Any]] = []
+        has_output_rows = False
+        for node_id in target_node_ids:
+            if lock:
+                lock.raise_if_lost()
+            output_df = tables.get(node_id, self._empty_dataframe())
+            try:
+                output_item = await self._prepare_output_work_item(
+                    mode_label="build",
+                    job=job,
+                    definition=definition,
+                    declared_outputs=declared_outputs,
+                    output_nodes=output_nodes,
+                    node_id=node_id,
+                    output_df=output_df,
+                    pipeline_ref=pipeline_ref,
+                    output_write_mode=output_write_mode,
+                    execution_semantics=execution_semantics,
+                    has_incremental_input=has_incremental_input,
+                    incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                    preview_limit=preview_limit,
+                    temp_dirs=temp_dirs,
+                    persist_output=True,
+                    persisted_dfs=persisted_dfs,
+                )
+            except _OutputNodeValidationError as failure:
+                await self._record_build_output_failure(
+                    job=job,
+                    failure=failure,
+                    input_commit_payload=input_commit_payload,
+                    inputs_payload=inputs_payload,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
+                    emit_job_event=emit_job_event,
+                )
+                return None
+            if int(output_item.get("delta_row_count") or 0) > 0:
+                has_output_rows = True
+            output_work.append(output_item)
+        return output_work, has_output_rows
+
+    async def _create_build_branch(
+        self,
+        *,
+        artifact_repo: str,
+        pipeline_ref: str,
+        run_ref: str,
+        base_branch: str,
+    ) -> str:
+        build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}")
+        try:
+            await self.lakefs_client.create_branch(  # type: ignore[union-attr]
+                repository=artifact_repo,
+                name=build_branch,
+                source=base_branch,
+            )
+        except LakeFSConflictError:
+            build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
+            await self.lakefs_client.create_branch(  # type: ignore[union-attr]
+                repository=artifact_repo,
+                name=build_branch,
+                source=base_branch,
+            )
+        return build_branch
+
+    async def _materialize_build_outputs(
+        self,
+        *,
+        job: PipelineJob,
+        artifact_repo: str,
+        build_branch: str,
+        base_branch: str,
+        output_work: List[Dict[str, Any]],
+        output_write_mode: str,
+        execution_semantics: str,
+        incremental_inputs_have_additive_updates: Optional[bool],
+    ) -> List[Dict[str, Any]]:
+        build_outputs: List[Dict[str, Any]] = []
+        for item in output_work:
+            output_df = item["output_df"]
+            materialized = await self._materialize_output_by_kind(
+                output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
+                output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                df=output_df,
+                artifact_bucket=artifact_repo,
+                prefix=f"{build_branch}/{item['artifact_prefix']}",
+                db_name=job.db_name,
+                branch=base_branch,
+                dataset_name=str(item.get("dataset_name") or ""),
+                execution_semantics=execution_semantics,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                write_mode=str(item.get("runtime_write_mode") or output_write_mode),
+                file_prefix=job.job_id,
+                file_format=item["output_format"],
+                partition_cols=item["partition_columns"],
+                base_row_count=int(item.get("delta_row_count") or 0),
+            )
+            if _PYSPARK_AVAILABLE:
+                try:
+                    output_df.unpersist(blocking=False)
+                except Exception as exc:
+                    logger.warning("Failed to unpersist output dataframe: %s", exc, exc_info=True)
+            resolved_runtime_write_mode = str(
+                materialized.get("runtime_write_mode")
+                or item.get("runtime_write_mode")
+                or output_write_mode
+            )
+            delta_row_count = int(
+                materialized.get("delta_row_count")
+                if materialized.get("delta_row_count") is not None
+                else int(item.get("delta_row_count") or 0)
+            )
+            row_count = delta_row_count
+            if resolved_runtime_write_mode == "append":
+                try:
+                    existing_dataset = await self.dataset_registry.get_dataset_by_name(
+                        db_name=job.db_name,
+                        name=item["dataset_name"],
+                        branch=base_branch,
+                    )
+                    if existing_dataset:
+                        existing_version = await self.dataset_registry.get_latest_version(
+                            dataset_id=existing_dataset.dataset_id
+                        )
+                        if existing_version and existing_version.row_count is not None:
+                            row_count = int(existing_version.row_count) + delta_row_count
+                except Exception as exc:
+                    logger.debug("Failed to resolve previous row_count for incremental build: %s", exc)
+            build_outputs.append(
+                {
+                    "node_id": item["node_id"],
+                    "output_name": item["output_name"],
+                    "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+                    "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                    "dataset_name": item["dataset_name"],
+                    "artifact_key": materialized["artifact_key"],
+                    "artifact_prefix": item["artifact_prefix"],
+                    "output_format": materialized.get("output_format") or item["output_format"],
+                    "partition_columns": materialized.get("partition_by") or item["partition_columns"],
+                    "row_count": row_count,
+                    "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
+                    "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
+                    "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
+                    "runtime_write_mode": resolved_runtime_write_mode,
+                    "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
+                    "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
+                    "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
+                    "has_incremental_input": (
+                        materialized.get("has_incremental_input")
+                        if materialized.get("has_incremental_input") is not None
+                        else item.get("has_incremental_input")
+                    ),
+                    "incremental_inputs_have_additive_updates": (
+                        materialized.get("incremental_inputs_have_additive_updates")
+                        if materialized.get("incremental_inputs_have_additive_updates") is not None
+                        else item.get("incremental_inputs_have_additive_updates")
+                    ),
+                    "columns": item["schema_columns"],
+                    "schema_hash": item["schema_hash"],
+                    "schema_json": {"columns": item["schema_columns"]},
+                    "rows": item["output_sample"],
+                    "sample_row_count": len(item["output_sample"]),
+                    "column_stats": item["column_stats"],
+                }
+            )
+        return build_outputs
+
+    async def _run_build_mode(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        tables: Dict[str, DataFrame],
+        target_node_ids: List[str],
+        output_nodes: Dict[str, Dict[str, Any]],
+        definition: Dict[str, Any],
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_ref: str,
+        run_ref: str,
+        execution_semantics: str,
+        diff_empty_inputs: bool,
+        has_incremental_input: bool,
+        incremental_inputs_have_additive_updates: Optional[bool],
+        preview_limit: int,
+        temp_dirs: List[str],
+        persisted_dfs: List[DataFrame],
+        input_snapshots: List[Dict[str, Any]],
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        code_version: Optional[str],
+        spark_conf: Dict[str, Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        if not self.storage or not self.lakefs_client:
+            raise RuntimeError("lakeFS services are not configured")
+        if lock:
+            lock.raise_if_lost()
+
+        artifact_repo = _resolve_lakefs_repository()
+        await self.storage.create_bucket(artifact_repo)
+        output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
+        base_branch = safe_lakefs_ref(job.branch or "main")
+        prepared = await self._prepare_build_output_work(
+            job=job,
+            lock=lock,
+            tables=tables,
+            target_node_ids=target_node_ids,
+            output_nodes=output_nodes,
+            definition=definition,
+            declared_outputs=declared_outputs,
+            pipeline_ref=pipeline_ref,
+            output_write_mode=output_write_mode,
+            execution_semantics=execution_semantics,
+            has_incremental_input=has_incremental_input,
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+            preview_limit=preview_limit,
+            temp_dirs=temp_dirs,
+            persisted_dfs=persisted_dfs,
+            input_commit_payload=input_commit_payload,
+            inputs_payload=inputs_payload,
+            record_run=record_run,
+            record_artifact=record_artifact,
+            emit_job_event=emit_job_event,
+        )
+        if not prepared:
+            return
+        output_work, has_output_rows = prepared
+
+        no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
+        if no_op_candidate and not has_output_rows:
+            no_op_payload = {
+                "outputs": [],
+                "definition_hash": job.definition_hash,
+                "branch": job.branch or "main",
+                "execution_semantics": execution_semantics,
+                "pipeline_spec_hash": pipeline_spec_hash,
+                "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                "code_version": code_version,
+                "spark_conf": spark_conf,
+                "no_op": True,
+                "input_snapshots": input_snapshots,
+            }
+            await record_build(status="SUCCESS", output_json=no_op_payload)
+            await record_run(
+                job_id=job.job_id,
+                mode="build",
+                status="SUCCESS",
+                node_id=job.node_id,
+                input_lakefs_commits=input_commit_payload,
+                output_json=no_op_payload,
+                finished_at=utcnow(),
+            )
+            await record_artifact(
+                status="SUCCESS",
+                outputs=[],
+                inputs=inputs_payload,
+            )
+            await emit_job_event(status="SUCCESS", output={"no_op": True, "outputs": []})
+            return
+
+        build_branch = await self._create_build_branch(
+            artifact_repo=artifact_repo,
+            pipeline_ref=pipeline_ref,
+            run_ref=run_ref,
+            base_branch=base_branch,
+        )
+        build_outputs = await self._materialize_build_outputs(
+            job=job,
+            artifact_repo=artifact_repo,
+            build_branch=build_branch,
+            base_branch=base_branch,
+            output_work=output_work,
+            output_write_mode=output_write_mode,
+            execution_semantics=execution_semantics,
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+        )
+
+        if lock:
+            lock.raise_if_lost()
+        commit_id = await self.lakefs_client.commit(
+            repository=artifact_repo,
+            branch=build_branch,
+            message=f"Build pipeline {job.db_name}/{pipeline_ref} ({job.job_id})",
+            metadata={
+                "pipeline_id": pipeline_ref,
+                "pipeline_job_id": job.job_id,
+                "db_name": job.db_name,
+                "mode": "build",
+            },
+        )
+        for item in build_outputs:
+            artifact_prefix = str(item.get("artifact_prefix") or "").lstrip("/")
+            if artifact_prefix:
+                item["artifact_commit_key"] = build_s3_uri(artifact_repo, f"{commit_id}/{artifact_prefix}")
+
+        artifact_id = await record_artifact(
+            status="SUCCESS",
+            outputs=build_outputs,
+            inputs=inputs_payload,
+            lakefs={
+                "repository": artifact_repo,
+                "branch": build_branch,
+                "commit_id": commit_id,
+            },
+        )
+
+        output_json = {
+            "outputs": build_outputs,
+            "definition_hash": job.definition_hash,
+            "branch": job.branch or "main",
+            "execution_semantics": execution_semantics,
+            "pipeline_spec_hash": pipeline_spec_hash,
+            "pipeline_spec_commit_id": pipeline_spec_commit_id,
+            "code_version": code_version,
+            "spark_conf": spark_conf,
+            "lakefs": {
+                "repository": artifact_repo,
+                "base_branch": base_branch,
+                "build_branch": build_branch,
+                "commit_id": commit_id,
+            },
+            "ontology": (
+                (definition.get("__build_meta__") or {}).get("ontology")
+                if isinstance(definition.get("__build_meta__"), dict)
+                else None
+            ),
+            "input_snapshots": input_snapshots,
+        }
+        if artifact_id:
+            output_json["artifact_id"] = artifact_id
+
+        await record_run(
+            job_id=job.job_id,
+            mode="build",
+            status="SUCCESS",
+            node_id=job.node_id,
+            input_lakefs_commits=input_commit_payload,
+            output_lakefs_commit_id=commit_id,
+            output_json=output_json,
+            finished_at=utcnow(),
+        )
+        output_payload = {"outputs": build_outputs}
+        if artifact_id:
+            output_payload["artifact_id"] = artifact_id
+        await emit_job_event(
+            status="SUCCESS",
+            lakefs={
+                "repository": artifact_repo,
+                "base_branch": base_branch,
+                "build_branch": build_branch,
+                "commit_id": commit_id,
+            },
+            output=output_payload,
+        )
+
+    async def _prepare_deploy_output_work(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        tables: Dict[str, DataFrame],
+        target_node_ids: List[str],
+        output_nodes: Dict[str, Dict[str, Any]],
+        definition: Dict[str, Any],
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_ref: str,
+        output_write_mode: str,
+        execution_semantics: str,
+        has_incremental_input: bool,
+        incremental_inputs_have_additive_updates: Optional[bool],
+        preview_limit: int,
+        temp_dirs: List[str],
+        persisted_dfs: List[DataFrame],
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> Optional[Tuple[List[Dict[str, Any]], bool]]:
+        output_work: List[Dict[str, Any]] = []
+        has_output_rows = False
+        for node_id in target_node_ids:
+            if lock:
+                lock.raise_if_lost()
+            output_df = tables.get(node_id, self._empty_dataframe())
+            try:
+                output_item = await self._prepare_output_work_item(
+                    mode_label="deploy",
+                    job=job,
+                    definition=definition,
+                    declared_outputs=declared_outputs,
+                    output_nodes=output_nodes,
+                    node_id=node_id,
+                    output_df=output_df,
+                    pipeline_ref=pipeline_ref,
+                    output_write_mode=output_write_mode,
+                    execution_semantics=execution_semantics,
+                    has_incremental_input=has_incremental_input,
+                    incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                    preview_limit=preview_limit,
+                    temp_dirs=temp_dirs,
+                    persist_output=False,
+                    persisted_dfs=persisted_dfs,
+                )
+            except _OutputNodeValidationError as failure:
+                await self._record_deploy_output_failure(
+                    job=job,
+                    failure=failure,
+                    input_commit_payload=input_commit_payload,
+                    inputs_payload=inputs_payload,
+                    record_build=record_build,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
+                    emit_job_event=emit_job_event,
+                )
+                return None
+            if int(output_item.get("delta_row_count") or 0) > 0:
+                has_output_rows = True
+            output_work.append(output_item)
+        return output_work, has_output_rows
+
+    async def _create_deploy_run_branch(
+        self,
+        *,
+        artifact_repo: str,
+        base_branch: str,
+        pipeline_ref: str,
+        run_ref: str,
+    ) -> str:
+        run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}")
+        try:
+            await self.lakefs_client.create_branch(  # type: ignore[union-attr]
+                repository=artifact_repo,
+                name=run_branch,
+                source=base_branch,
+            )
+        except LakeFSConflictError:
+            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
+            await self.lakefs_client.create_branch(  # type: ignore[union-attr]
+                repository=artifact_repo,
+                name=run_branch,
+                source=base_branch,
+            )
+        return run_branch
+
+    async def _materialize_deploy_staged_outputs(
+        self,
+        *,
+        job: PipelineJob,
+        run_branch: str,
+        artifact_repo: str,
+        base_branch: str,
+        output_work: List[Dict[str, Any]],
+        output_write_mode: str,
+        execution_semantics: str,
+        incremental_inputs_have_additive_updates: Optional[bool],
+    ) -> List[Dict[str, Any]]:
+        staged_outputs: List[Dict[str, Any]] = []
+        for item in output_work:
+            branch_prefix = f"{run_branch}/{item['artifact_prefix']}"
+            materialized = await self._materialize_output_by_kind(
+                output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
+                output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                df=item["output_df"],
+                artifact_bucket=artifact_repo,
+                prefix=branch_prefix,
+                db_name=job.db_name,
+                branch=base_branch,
+                dataset_name=str(item.get("dataset_name") or ""),
+                execution_semantics=execution_semantics,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                write_mode=str(item.get("runtime_write_mode") or output_write_mode),
+                file_prefix=job.job_id,
+                file_format=item["output_format"],
+                partition_cols=item["partition_columns"],
+                base_row_count=int(item.get("row_count") or 0),
+            )
+            resolved_runtime_write_mode = str(
+                materialized.get("runtime_write_mode")
+                or item.get("runtime_write_mode")
+                or output_write_mode
+            )
+            delta_row_count = int(
+                materialized.get("delta_row_count")
+                if materialized.get("delta_row_count") is not None
+                else int(item.get("row_count") or 0)
+            )
+            staged_outputs.append(
+                {
+                    "node_id": item["node_id"],
+                    "output_name": item.get("output_name"),
+                    "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+                    "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+                    "dataset_name": item["dataset_name"],
+                    "artifact_prefix": item["artifact_prefix"],
+                    "output_format": materialized.get("output_format") or item["output_format"],
+                    "partition_columns": materialized.get("partition_by") or item["partition_columns"],
+                    "row_count": delta_row_count,
+                    "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
+                    "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
+                    "runtime_write_mode": resolved_runtime_write_mode,
+                    "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
+                    "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
+                    "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
+                    "has_incremental_input": (
+                        materialized.get("has_incremental_input")
+                        if materialized.get("has_incremental_input") is not None
+                        else item.get("has_incremental_input")
+                    ),
+                    "incremental_inputs_have_additive_updates": (
+                        materialized.get("incremental_inputs_have_additive_updates")
+                        if materialized.get("incremental_inputs_have_additive_updates") is not None
+                        else item.get("incremental_inputs_have_additive_updates")
+                    ),
+                    "columns": item["columns"],
+                    "rows": item["rows"],
+                    "sample_row_count": item["sample_row_count"],
+                    "column_stats": item["column_stats"],
+                }
+            )
+        return staged_outputs
+
+    async def _commit_and_merge_deploy_branch(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        pipeline_ref: str,
+        artifact_repo: str,
+        run_branch: str,
+        base_branch: str,
+    ) -> Tuple[str, str]:
+        if lock:
+            lock.raise_if_lost()
+        commit_id = await self.lakefs_client.commit(  # type: ignore[union-attr]
+            repository=artifact_repo,
+            branch=run_branch,
+            message=f"Build pipeline outputs {job.db_name}/{pipeline_ref} ({job.job_id})",
+            metadata={
+                "pipeline_id": pipeline_ref,
+                "pipeline_job_id": job.job_id,
+                "db_name": job.db_name,
+                "mode": "deploy",
+            },
+        )
+        if lock:
+            lock.raise_if_lost()
+        merge_commit_id = await self.lakefs_client.merge(  # type: ignore[union-attr]
+            repository=artifact_repo,
+            source_ref=run_branch,
+            destination_branch=base_branch,
+            message=f"Publish pipeline outputs {job.db_name}/{pipeline_ref} ({job.job_id})",
+            metadata={
+                "pipeline_id": pipeline_ref,
+                "pipeline_job_id": job.job_id,
+                "db_name": job.db_name,
+                "mode": "deploy",
+                "run_branch": run_branch,
+                "run_commit_id": commit_id,
+            },
+            allow_empty=False,
+        )
+        try:
+            await self.lakefs_client.delete_branch(repository=artifact_repo, name=run_branch)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.info("Failed to delete run branch %s after merge: %s", run_branch, exc)
+        return commit_id, merge_commit_id
+
+    async def _stage_deploy_outputs(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        pipeline_ref: str,
+        run_ref: str,
+        artifact_repo: str,
+        base_branch: str,
+        output_work: List[Dict[str, Any]],
+        output_write_mode: str,
+        execution_semantics: str,
+        incremental_inputs_have_additive_updates: Optional[bool],
+    ) -> Tuple[str, str, str, List[Dict[str, Any]]]:
+        run_branch = await self._create_deploy_run_branch(
+            artifact_repo=artifact_repo,
+            base_branch=base_branch,
+            pipeline_ref=pipeline_ref,
+            run_ref=run_ref,
+        )
+        staged_outputs = await self._materialize_deploy_staged_outputs(
+            job=job,
+            run_branch=run_branch,
+            artifact_repo=artifact_repo,
+            base_branch=base_branch,
+            output_work=output_work,
+            output_write_mode=output_write_mode,
+            execution_semantics=execution_semantics,
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+        )
+        commit_id, merge_commit_id = await self._commit_and_merge_deploy_branch(
+            job=job,
+            lock=lock,
+            pipeline_ref=pipeline_ref,
+            artifact_repo=artifact_repo,
+            run_branch=run_branch,
+            base_branch=base_branch,
+        )
+        return run_branch, commit_id, merge_commit_id, staged_outputs
+
+    def _build_deploy_version_sample_payload(
+        self,
+        *,
+        item: Dict[str, Any],
+        schema_columns: List[Dict[str, Any]],
+        output_sample: List[Dict[str, Any]],
+        total_row_count: int,
+        delta_row_count: int,
+        resolved_runtime_write_mode: str,
+    ) -> Dict[str, Any]:
+        return {
+            "columns": schema_columns,
+            "rows": output_sample,
+            "row_count": total_row_count,
+            "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
+            "write_mode_requested": item.get("write_mode_requested"),
+            "write_mode_resolved": item.get("write_mode_resolved"),
+            "runtime_write_mode": resolved_runtime_write_mode,
+            "pk_columns": item.get("pk_columns") or [],
+            "write_policy_hash": item.get("write_policy_hash"),
+            "has_incremental_input": item.get("has_incremental_input"),
+            "incremental_inputs_have_additive_updates": item.get("incremental_inputs_have_additive_updates"),
+            "sample_row_count": len(output_sample),
+            "column_stats": item.get("column_stats") or {},
+        }
+
+    async def _resolve_deploy_output_publication(
+        self,
+        *,
+        job: PipelineJob,
+        pipeline_ref: str,
+        artifact_repo: str,
+        base_branch: str,
+        merge_commit_id: str,
+        output_write_mode: str,
+        item: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        artifact_prefix = str(item.get("artifact_prefix") or "").lstrip("/")
+        artifact_key = build_s3_uri(artifact_repo, f"{merge_commit_id}/{artifact_prefix}")
+        dataset_name = str(item.get("dataset_name") or "")
+        schema_columns = item.get("columns") if isinstance(item.get("columns"), list) else []
+        output_sample = item.get("rows") if isinstance(item.get("rows"), list) else []
+        delta_row_count = int(item.get("row_count") or 0)
+
+        dataset = await self.dataset_registry.get_dataset_by_name(
+            db_name=job.db_name,
+            name=dataset_name,
+            branch=base_branch,
+        )
+        resolved_runtime_write_mode = str(item.get("runtime_write_mode") or output_write_mode)
+        total_row_count = delta_row_count
+        if resolved_runtime_write_mode == "append" and dataset:
+            previous = await self.dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
+            if previous and previous.row_count is not None:
+                total_row_count = int(previous.row_count) + delta_row_count
+        if not dataset:
+            dataset = await self.dataset_registry.create_dataset(
+                db_name=job.db_name,
+                name=dataset_name,
+                description=None,
+                source_type="pipeline",
+                source_ref=pipeline_ref,
+                schema_json={"columns": schema_columns},
+                branch=base_branch,
+            )
+        version = await self.dataset_registry.add_version(
+            dataset_id=dataset.dataset_id,
+            lakefs_commit_id=merge_commit_id,
+            artifact_key=artifact_key,
+            row_count=total_row_count,
+            sample_json=self._build_deploy_version_sample_payload(
+                item=item,
+                schema_columns=schema_columns,
+                output_sample=output_sample,
+                total_row_count=total_row_count,
+                delta_row_count=delta_row_count,
+                resolved_runtime_write_mode=resolved_runtime_write_mode,
+            ),
+            schema_json={"columns": schema_columns},
+        )
+        objectify_job_id = await self._maybe_enqueue_objectify_job(dataset=dataset, version=version)
+        relationship_job_ids = await self._maybe_enqueue_relationship_jobs(dataset=dataset, version=version)
+        return {
+            "dataset_name": dataset_name,
+            "artifact_key": artifact_key,
+            "total_row_count": total_row_count,
+            "delta_row_count": delta_row_count,
+            "resolved_runtime_write_mode": resolved_runtime_write_mode,
+            "objectify_job_id": objectify_job_id,
+            "relationship_job_ids": relationship_job_ids,
+        }
+
+    def _build_deploy_output_record(
+        self,
+        *,
+        item: Dict[str, Any],
+        publication: Dict[str, Any],
+        merge_commit_id: str,
+        base_branch: str,
+    ) -> Dict[str, Any]:
+        return {
+            "node_id": item.get("node_id"),
+            "output_name": item.get("output_name"),
+            "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
+            "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
+            "dataset_name": publication["dataset_name"],
+            "artifact_key": publication["artifact_key"],
+            "row_count": publication["total_row_count"],
+            "delta_row_count": (
+                publication["delta_row_count"]
+                if publication["resolved_runtime_write_mode"] == "append"
+                else None
+            ),
+            "write_mode_requested": item.get("write_mode_requested"),
+            "write_mode_resolved": item.get("write_mode_resolved"),
+            "runtime_write_mode": publication["resolved_runtime_write_mode"],
+            "pk_columns": item.get("pk_columns") or [],
+            "post_filtering_column": item.get("post_filtering_column"),
+            "write_policy_hash": item.get("write_policy_hash"),
+            "has_incremental_input": item.get("has_incremental_input"),
+            "incremental_inputs_have_additive_updates": item.get("incremental_inputs_have_additive_updates"),
+            "lakefs_commit_id": merge_commit_id,
+            "lakefs_branch": base_branch,
+            "objectify_job_id": publication["objectify_job_id"],
+            "relationship_job_ids": publication["relationship_job_ids"],
+        }
+
+    async def _record_deploy_output_lineage(
+        self,
+        *,
+        job: PipelineJob,
+        pipeline_ref: str,
+        artifact_key: str,
+        dataset_name: str,
+        node_id: Optional[str],
+        merge_commit_id: str,
+        base_branch: str,
+    ) -> None:
+        parsed = parse_s3_uri(artifact_key)
+        if not parsed:
+            return
+        bucket, key = parsed
+
+        async def _record_pipeline_output_lineage() -> None:
+            await self.lineage.record_link(  # type: ignore[union-attr]
+                from_node_id=LineageStore.node_aggregate("Pipeline", pipeline_ref),
+                to_node_id=LineageStore.node_artifact("s3", bucket, key),
+                edge_type=EDGE_PIPELINE_OUTPUT_STORED,
+                occurred_at=utcnow(),
+                db_name=job.db_name,
+                edge_metadata={
+                    "db_name": job.db_name,
+                    "pipeline_id": pipeline_ref,
+                    "artifact_key": artifact_key,
+                    "dataset_name": dataset_name,
+                    "node_id": node_id,
+                    "lakefs_commit_id": merge_commit_id,
+                    "lakefs_branch": base_branch,
+                },
+            )
+
+        await record_lineage_or_raise(
+            lineage_store=self.lineage,
+            required=self.lineage_required,
+            record_call=_record_pipeline_output_lineage,
+            logger=logger,
+            operation="pipeline_worker.deploy.pipeline_output_stored",
+            zone=RuntimeZone.CORE,
+            context={
+                "db_name": job.db_name,
+                "pipeline_id": pipeline_ref,
+                "artifact_key": artifact_key,
+                "dataset_name": dataset_name,
+                "node_id": node_id,
+            },
+        )
+
+    async def _publish_deploy_outputs(
+        self,
+        *,
+        job: PipelineJob,
+        pipeline_ref: str,
+        artifact_repo: str,
+        base_branch: str,
+        merge_commit_id: str,
+        output_write_mode: str,
+        staged_outputs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        build_outputs: List[Dict[str, Any]] = []
+        for item in staged_outputs:
+            publication = await self._resolve_deploy_output_publication(
+                job=job,
+                pipeline_ref=pipeline_ref,
+                artifact_repo=artifact_repo,
+                base_branch=base_branch,
+                merge_commit_id=merge_commit_id,
+                output_write_mode=output_write_mode,
+                item=item,
+            )
+            build_outputs.append(
+                self._build_deploy_output_record(
+                    item=item,
+                    publication=publication,
+                    merge_commit_id=merge_commit_id,
+                    base_branch=base_branch,
+                )
+            )
+            await self._record_deploy_output_lineage(
+                job=job,
+                pipeline_ref=pipeline_ref,
+                artifact_key=str(publication["artifact_key"]),
+                dataset_name=str(publication["dataset_name"]),
+                node_id=str(item.get("node_id") or "") or None,
+                merge_commit_id=merge_commit_id,
+                base_branch=base_branch,
+            )
+        return build_outputs
+
+    def _merge_watermark_keys(
+        self,
+        *,
+        next_watermark: Optional[Any],
+        previous_watermark: Optional[Any],
+        previous_watermark_keys: List[str],
+        next_watermark_keys: List[str],
+    ) -> List[str]:
+        merged_keys: List[str] = []
+        if next_watermark is not None:
+            if (
+                previous_watermark is not None
+                and previous_watermark_keys
+                and _watermark_values_match(previous_watermark, next_watermark)
+            ):
+                merged_keys = [*previous_watermark_keys, *next_watermark_keys]
+            else:
+                merged_keys = list(next_watermark_keys)
+        elif previous_watermark is not None and previous_watermark_keys:
+            merged_keys = list(previous_watermark_keys)
+        if not merged_keys:
+            return []
+        deduped_keys: List[str] = []
+        seen_keys: set[str] = set()
+        for item in merged_keys:
+            if item in seen_keys:
+                continue
+            seen_keys.add(item)
+            deduped_keys.append(item)
+        return deduped_keys
+
+    async def _persist_deploy_watermarks(
+        self,
+        *,
+        resolved_pipeline_id: Optional[str],
+        branch: str,
+        execution_semantics: str,
+        input_snapshots: List[Dict[str, Any]],
+        watermark_column: Optional[str],
+        previous_watermark: Optional[Any],
+        previous_watermark_keys: List[str],
+    ) -> Optional[Dict[str, Any]]:
+        watermark_update: Optional[Dict[str, Any]] = None
+        if (
+            execution_semantics not in {"incremental", "streaming"}
+            or not resolved_pipeline_id
+            or not input_snapshots
+        ):
+            return watermark_update
+
+        next_watermark = (
+            _max_watermark_from_snapshots(input_snapshots, watermark_column=watermark_column)
+            if watermark_column
+            else None
+        )
+        next_watermark_keys = (
+            _collect_watermark_keys_from_snapshots(
+                input_snapshots,
+                watermark_column=watermark_column,
+                watermark_value=next_watermark,
+            )
+            if watermark_column and next_watermark is not None
+            else []
+        )
+        input_commit_map = _collect_input_commit_map(input_snapshots)
+        if (next_watermark is None and not input_commit_map) or not self.pipeline_registry:
+            return watermark_update
+
+        watermarks_payload: Dict[str, Any] = {}
+        if watermark_column:
+            watermarks_payload["watermark_column"] = watermark_column
+            if next_watermark is not None:
+                watermarks_payload["watermark_value"] = next_watermark
+            elif previous_watermark is not None:
+                watermarks_payload["watermark_value"] = previous_watermark
+            merged_keys = self._merge_watermark_keys(
+                next_watermark=next_watermark,
+                previous_watermark=previous_watermark,
+                previous_watermark_keys=previous_watermark_keys,
+                next_watermark_keys=next_watermark_keys,
+            )
+            if merged_keys:
+                watermarks_payload["watermark_keys"] = merged_keys
+        if input_commit_map:
+            watermarks_payload["input_commits"] = input_commit_map
+
+        try:
+            await self.pipeline_registry.upsert_watermarks(
+                pipeline_id=resolved_pipeline_id,
+                branch=branch,
+                watermarks=watermarks_payload,
+            )
+            watermark_update = watermarks_payload
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist pipeline watermarks (pipeline_id=%s): %s",
+                resolved_pipeline_id,
+                exc,
+            )
+        return watermark_update
+
+    async def _run_deploy_mode(
+        self,
+        *,
+        job: PipelineJob,
+        lock: Optional[PipelineLock],
+        tables: Dict[str, DataFrame],
+        target_node_ids: List[str],
+        output_nodes: Dict[str, Dict[str, Any]],
+        definition: Dict[str, Any],
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_ref: str,
+        run_ref: str,
+        execution_semantics: str,
+        diff_empty_inputs: bool,
+        has_incremental_input: bool,
+        incremental_inputs_have_additive_updates: Optional[bool],
+        preview_limit: int,
+        temp_dirs: List[str],
+        persisted_dfs: List[DataFrame],
+        input_snapshots: List[Dict[str, Any]],
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        inputs_payload: Dict[str, Any],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        code_version: Optional[str],
+        spark_conf: Dict[str, Any],
+        resolved_pipeline_id: Optional[str],
+        previous_watermark: Optional[Any],
+        previous_watermark_keys: List[str],
+        watermark_column: Optional[str],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        if not self.storage or not self.lakefs_client:
+            raise RuntimeError("lakeFS services are not configured")
+        if lock:
+            lock.raise_if_lost()
+
+        artifact_repo = _resolve_lakefs_repository()
+        await self.storage.create_bucket(artifact_repo)
+        base_branch = safe_lakefs_ref(job.branch or "main")
+        output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
+        prepared = await self._prepare_deploy_output_work(
+            job=job,
+            lock=lock,
+            tables=tables,
+            target_node_ids=target_node_ids,
+            output_nodes=output_nodes,
+            definition=definition,
+            declared_outputs=declared_outputs,
+            pipeline_ref=pipeline_ref,
+            output_write_mode=output_write_mode,
+            execution_semantics=execution_semantics,
+            has_incremental_input=has_incremental_input,
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+            preview_limit=preview_limit,
+            temp_dirs=temp_dirs,
+            persisted_dfs=persisted_dfs,
+            input_commit_payload=input_commit_payload,
+            inputs_payload=inputs_payload,
+            record_build=record_build,
+            record_run=record_run,
+            record_artifact=record_artifact,
+            emit_job_event=emit_job_event,
+        )
+        if not prepared:
+            return
+
+        output_work, has_output_rows = prepared
+        no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
+        if no_op_candidate and not has_output_rows:
+            no_op_payload = {
+                "outputs": [],
+                "definition_hash": job.definition_hash,
+                "branch": base_branch,
+                "execution_semantics": execution_semantics,
+                "pipeline_spec_hash": pipeline_spec_hash,
+                "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                "code_version": code_version,
+                "spark_conf": spark_conf,
+                "no_op": True,
+                "input_snapshots": input_snapshots,
+            }
+            await record_build(
+                status="DEPLOYED",
+                output_json=no_op_payload,
+            )
+            await record_run(
+                job_id=job.job_id,
+                mode="deploy",
+                status="DEPLOYED",
+                node_id=job.node_id,
+                input_lakefs_commits=input_commit_payload,
+                output_json=no_op_payload,
+                finished_at=utcnow(),
+            )
+            await emit_job_event(status="DEPLOYED", output={"no_op": True, "outputs": []})
+            return
+
+        run_branch, commit_id, merge_commit_id, staged_outputs = await self._stage_deploy_outputs(
+            job=job,
+            lock=lock,
+            pipeline_ref=pipeline_ref,
+            run_ref=run_ref,
+            artifact_repo=artifact_repo,
+            base_branch=base_branch,
+            output_work=output_work,
+            output_write_mode=output_write_mode,
+            execution_semantics=execution_semantics,
+            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+        )
+        build_outputs = await self._publish_deploy_outputs(
+            job=job,
+            pipeline_ref=pipeline_ref,
+            artifact_repo=artifact_repo,
+            base_branch=base_branch,
+            merge_commit_id=merge_commit_id,
+            output_write_mode=output_write_mode,
+            staged_outputs=staged_outputs,
+        )
+
+        await record_build(
+            status="DEPLOYED",
+            output_json={
+                "outputs": build_outputs,
+                "definition_hash": job.definition_hash,
+                "branch": base_branch,
+                "execution_semantics": execution_semantics,
+                "input_snapshots": input_snapshots,
+                "lakefs": {
+                    "repository": artifact_repo,
+                    "base_branch": base_branch,
+                    "run_branch": run_branch,
+                    "commit_id": commit_id,
+                    "merge_commit_id": merge_commit_id,
+                },
+            },
+            deployed_commit_id=merge_commit_id,
+        )
+
+        watermark_update = await self._persist_deploy_watermarks(
+            resolved_pipeline_id=resolved_pipeline_id,
+            branch=job.branch or "main",
+            execution_semantics=execution_semantics,
+            input_snapshots=input_snapshots,
+            watermark_column=watermark_column,
+            previous_watermark=previous_watermark,
+            previous_watermark_keys=previous_watermark_keys,
+        )
+
+        await record_run(
+            job_id=job.job_id,
+            mode="deploy",
+            status="DEPLOYED",
+            node_id=job.node_id,
+            input_lakefs_commits=input_commit_payload,
+            output_lakefs_commit_id=merge_commit_id,
+            output_json={
+                "outputs": build_outputs,
+                "definition_hash": job.definition_hash,
+                "branch": base_branch,
+                "execution_semantics": execution_semantics,
+                "pipeline_spec_hash": pipeline_spec_hash,
+                "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                "code_version": code_version,
+                "spark_conf": spark_conf,
+                "input_snapshots": input_snapshots,
+                "watermarks": watermark_update,
+                "lakefs": {
+                    "repository": artifact_repo,
+                    "base_branch": base_branch,
+                    "run_branch": run_branch,
+                    "commit_id": commit_id,
+                    "merge_commit_id": merge_commit_id,
+                },
+            },
+            finished_at=utcnow(),
+        )
+        await emit_job_event(
+            status="DEPLOYED",
+            lakefs={
+                "repository": artifact_repo,
+                "base_branch": base_branch,
+                "run_branch": run_branch,
+                "commit_id": commit_id,
+                "merge_commit_id": merge_commit_id,
+            },
+            output={"outputs": build_outputs},
+        )
+
+    async def _resolve_execution_node_dataframe(
+        self,
+        *,
+        job: PipelineJob,
+        node_id: str,
+        node: Dict[str, Any],
+        tables: Dict[str, DataFrame],
+        incoming: Dict[str, List[str]],
+        parameters: Dict[str, Any],
+        preview_meta: Dict[str, Any],
+        preview_sampling_seed: int,
+        input_snapshots: List[Dict[str, Any]],
+        input_sampling: Dict[str, Any],
+        temp_dirs: List[str],
+        previous_input_commits: Dict[str, str],
+        use_lakefs_diff: bool,
+        execution_semantics: str,
+        watermark_column: Optional[str],
+        previous_watermark: Optional[Any],
+        previous_watermark_keys: List[str],
+        is_preview: bool,
+    ) -> DataFrame:
+        metadata = node.get("metadata") or {}
+        node_type = str(node.get("type") or "transform")
+        inputs = [tables[src] for src in incoming.get(node_id, []) if src in tables]
+
+        if node_type == "input":
+            df = await self._load_input_dataframe(
+                job.db_name,
+                metadata,
+                temp_dirs,
+                job.branch,
+                node_id=node_id,
+                input_snapshots=input_snapshots,
+                previous_commit_id=previous_input_commits.get(node_id),
+                use_lakefs_diff=use_lakefs_diff and execution_semantics in {"incremental", "streaming"},
+                watermark_column=watermark_column if execution_semantics in {"incremental", "streaming"} else None,
+                watermark_after=previous_watermark if execution_semantics in {"incremental", "streaming"} else None,
+                watermark_keys=previous_watermark_keys if execution_semantics in {"incremental", "streaming"} else None,
+            )
+            if is_preview:
+                sampling_strategy = self._resolve_sampling_strategy(metadata, preview_meta)
+                if sampling_strategy:
+                    df = self._apply_sampling_strategy(
+                        df,
+                        sampling_strategy,
+                        node_id=node_id,
+                        seed=preview_sampling_seed,
+                    )
+                    input_sampling[node_id] = sampling_strategy
+                    self._attach_sampling_snapshot(
+                        input_snapshots,
+                        node_id=node_id,
+                        sampling_strategy=sampling_strategy,
+                    )
+            return df
+
+        if node_type == "output":
+            return inputs[0] if inputs else self._empty_dataframe()
+
+        transform_metadata = dict(metadata)
+        operation = normalize_operation(transform_metadata.get("operation"))
+        if operation == "udf" and self._udf_spark_parity_enabled:
+            resolved = await resolve_udf_reference(
+                metadata=transform_metadata,
+                pipeline_registry=self.pipeline_registry,
+                require_reference=self._udf_require_reference,
+                require_version_pinning=self._udf_require_version_pinning,
+                code_cache=self._udf_code_cache,
+            )
+            transform_metadata["__resolved_udf_code"] = resolved.code
+        return self._apply_transform(transform_metadata, inputs, parameters)
+
+    async def _record_schema_check_failure(
+        self,
+        *,
+        job: PipelineJob,
+        node_id: str,
+        schema_errors: List[str],
+        execution_semantics: str,
+        is_preview: bool,
+        is_build: bool,
+        run_mode: str,
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        record_preview: Callable[..., Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        schema_payload = self._build_error_payload(
+            message="Pipeline schema checks failed",
+            errors=schema_errors,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            external_code="PIPELINE_SCHEMA_CHECK_FAILED",
+            stage="schema_checks",
+            job=job,
+            node_id=node_id,
+            context={"execution_semantics": execution_semantics},
+        )
+        if is_preview:
+            await record_preview(
+                status="FAILED",
+                row_count=0,
+                sample_json=schema_payload,
+                job_id=job.job_id,
+                node_id=job.node_id,
+            )
+        elif not is_build:
+            await record_build(
+                status="FAILED",
+                output_json=schema_payload,
+            )
+        await record_run(
+            job_id=job.job_id,
+            mode=run_mode,
+            status="FAILED",
+            node_id=job.node_id,
+            sample_json=schema_payload if is_preview else None,
+            output_json=schema_payload if not is_preview else None,
+            finished_at=utcnow(),
+        )
+        await record_artifact(status="FAILED", errors=schema_errors)
+        await emit_job_event(status="FAILED", errors=schema_errors)
+        logger.error("Pipeline schema checks failed: %s", schema_errors)
+
+    async def _record_validation_failure(
+        self,
+        *,
+        job: PipelineJob,
+        validation_errors: List[str],
+        execution_semantics: str,
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        is_preview: bool,
+        is_build: bool,
+        run_mode: str,
+        record_preview: Callable[..., Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        validation_payload = self._build_error_payload(
+            message="Pipeline validation failed",
+            errors=validation_errors,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            external_code="PIPELINE_DEFINITION_INVALID",
+            stage="validate",
+            job=job,
+            context={
+                "execution_semantics": execution_semantics,
+                "pipeline_spec_hash": pipeline_spec_hash,
+                "pipeline_spec_commit_id": pipeline_spec_commit_id,
+            },
+        )
+        if is_preview:
+            await record_preview(
+                status="FAILED",
+                row_count=0,
+                sample_json=validation_payload,
+                job_id=job.job_id,
+                node_id=job.node_id,
+            )
+        elif not is_build:
+            await record_build(
+                status="FAILED",
+                output_json=validation_payload,
+            )
+        await record_run(
+            job_id=job.job_id,
+            mode=run_mode,
+            status="FAILED",
+            node_id=job.node_id,
+            sample_json=validation_payload if is_preview else None,
+            output_json=validation_payload if not is_preview else None,
+            finished_at=utcnow(),
+        )
+        await record_artifact(status="FAILED", errors=validation_errors)
+        await emit_job_event(status="FAILED", errors=validation_errors)
+        logger.error("Pipeline validation failed: %s", validation_errors)
+
+    def _derive_post_node_execution_state(
+        self,
+        *,
+        input_snapshots: List[Dict[str, Any]],
+        execution_semantics: str,
+        preview_limit: Optional[int],
+    ) -> Tuple[
+        Optional[List[Dict[str, Any]]],
+        Dict[str, Any],
+        bool,
+        bool,
+        Optional[bool],
+        int,
+    ]:
+        input_commit_payload = self._build_input_commit_payload(input_snapshots)
+        inputs_payload = {
+            "snapshots": input_snapshots,
+            "lakefs_commits": input_commit_payload,
+        }
+        diff_empty_inputs = _inputs_diff_empty(input_snapshots)
+        has_incremental_input = execution_semantics in {"incremental", "streaming"}
+        incremental_inputs_have_additive_updates: Optional[bool] = None
+        if has_incremental_input:
+            has_diff_signal = any(
+                isinstance(snapshot, dict) and bool(snapshot.get("diff_requested"))
+                for snapshot in input_snapshots
+            )
+            if has_diff_signal:
+                incremental_inputs_have_additive_updates = not diff_empty_inputs
+        resolved_preview_limit = int(preview_limit or 200)
+        resolved_preview_limit = max(1, min(500, resolved_preview_limit))
+        return (
+            input_commit_payload,
+            inputs_payload,
+            diff_empty_inputs,
+            has_incremental_input,
+            incremental_inputs_have_additive_updates,
+            resolved_preview_limit,
+        )
+
+    def _validate_execution_prerequisites(self) -> None:
+        if not self.pipeline_registry or not self.dataset_registry:
+            raise RuntimeError("Registry services not available")
+        if not self.spark:
+            raise RuntimeError("Spark session not initialized")
+        if not self.storage:
+            raise RuntimeError("Storage service not available")
+
+    def _build_execution_graph(
+        self,
+        *,
+        definition: Dict[str, Any],
+    ) -> Tuple[
+        Dict[str, Any],
+        Dict[str, Dict[str, Any]],
+        Dict[str, List[str]],
+        Dict[str, Any],
+        Dict[str, Dict[str, Any]],
+        List[str],
+    ]:
+        preview_meta = definition.get("__preview_meta__") or {}
+        nodes = normalize_nodes(definition.get("nodes"))
+        for node in nodes.values():
+            node["metadata"] = normalize_transform_metadata(node.get("metadata"))
+        edges = normalize_edges(definition.get("edges"))
+        incoming = build_incoming(edges)
+        parameters = normalize_parameters(definition.get("parameters"))
+        output_nodes = {
+            node_id: node for node_id, node in nodes.items() if str(node.get("type") or "") == "output"
+        }
+        order = topological_sort(nodes, edges, include_unordered=False)
+        return preview_meta, nodes, incoming, parameters, output_nodes, order
+
+    async def _resolve_execution_pipeline_context(
+        self,
+        *,
+        job: PipelineJob,
+        definition: Dict[str, Any],
+        execution_semantics: str,
+    ) -> Optional[
+        Tuple[
+            Optional[str],
+            str,
+            Optional[str],
+            Optional[Any],
+            List[str],
+            Dict[str, str],
+        ]
+    ]:
         resolved_pipeline_id = await self._resolve_pipeline_id(job)
         if resolved_pipeline_id:
             try:
@@ -1144,81 +3217,58 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 )
                 pipeline_record = None
             if not pipeline_record:
-                # Enterprise safety: scheduled/queued jobs can outlive the pipeline row
-                # (e.g. smoke tests clean up immediately). This is non-retryable.
                 logger.warning(
                     "Dropping stale pipeline job for missing pipeline (pipeline_id=%s job_id=%s mode=%s)",
                     resolved_pipeline_id,
                     job.job_id,
                     getattr(job, "mode", None),
                 )
-                return
+                return None
+
         pipeline_ref = resolved_pipeline_id or str(job.pipeline_id)
         watermark_column = _resolve_watermark_column(
             incremental=resolve_incremental_config(definition),
             metadata=definition.get("settings") if isinstance(definition.get("settings"), dict) else {},
         )
-        previous_watermark: Optional[Any] = None
-        previous_watermark_keys: list[str] = []
-        previous_input_commits: Dict[str, str] = {}
-        if execution_semantics in {"incremental", "streaming"} and resolved_pipeline_id:
-            try:
-                state = await self.pipeline_registry.get_watermarks(
-                    pipeline_id=resolved_pipeline_id,
-                    branch=job.branch or "main",
-                )
-                stored_column = str(
-                    state.get("watermark_column")
-                    or state.get("watermarkColumn")
-                    or state.get("column")
-                    or ""
-                ).strip()
-                stored_value = (
-                    state.get("watermark_value")
-                    if "watermark_value" in state
-                    else state.get("watermarkValue")
-                    if "watermarkValue" in state
-                    else state.get("value")
-                )
-                if watermark_column:
-                    if stored_column and stored_column != watermark_column:
-                        previous_watermark = None
-                        previous_watermark_keys = []
-                    else:
-                        previous_watermark = stored_value
-                        stored_keys = None
-                        if isinstance(state, dict):
-                            stored_keys = state.get("watermark_keys") or state.get("watermarkKeys")
-                        if isinstance(stored_keys, list):
-                            for item in stored_keys:
-                                item_str = str(item or "").strip()
-                                if item_str:
-                                    previous_watermark_keys.append(item_str)
-                commits_payload = (
-                    state.get("input_commits")
-                    if isinstance(state, dict)
-                    else None
-                )
-                if commits_payload is None and isinstance(state, dict):
-                    commits_payload = state.get("inputCommits")
-                if isinstance(commits_payload, dict):
-                    for key, value in commits_payload.items():
-                        node_key = str(key or "").strip()
-                        commit_value = str(value or "").strip()
-                        if node_key and commit_value:
-                            previous_input_commits[node_key] = commit_value
-            except Exception as exc:
-                logger.warning("Failed to load pipeline watermarks (pipeline_id=%s): %s", resolved_pipeline_id, exc)
-
-        lock: Optional[PipelineLock] = None
-        spark_conf = self._collect_spark_conf()
-        code_version = _resolve_code_version()
-        pipeline_spec_commit_id = (
-            str(job.definition_commit_id).strip() if job.definition_commit_id else None
+        (
+            previous_watermark,
+            previous_watermark_keys,
+            previous_input_commits,
+        ) = await self._load_previous_watermark_state(
+            job=job,
+            resolved_pipeline_id=resolved_pipeline_id,
+            execution_semantics=execution_semantics,
+            watermark_column=watermark_column,
         )
-        pipeline_spec_hash = str(job.definition_hash).strip() if job.definition_hash else None
-        declared_outputs = definition.get("outputs") if isinstance(definition.get("outputs"), list) else []
+        return (
+            resolved_pipeline_id,
+            pipeline_ref,
+            watermark_column,
+            previous_watermark,
+            previous_watermark_keys,
+            previous_input_commits,
+        )
 
+    def _resolve_run_mode(self, *, job: PipelineJob) -> Tuple[str, bool, bool]:
+        job_mode = str(job.mode or "deploy").strip().lower()
+        is_preview = job_mode == "preview"
+        is_build = job_mode == "build"
+        run_mode = "preview" if is_preview else "build" if is_build else "deploy"
+        return run_mode, is_preview, is_build
+
+    def _build_run_record_callbacks(
+        self,
+        *,
+        resolved_pipeline_id: Optional[str],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        spark_conf: Dict[str, Any],
+        code_version: Optional[str],
+    ) -> Tuple[
+        Callable[..., Any],
+        Callable[..., Any],
+        Callable[..., Any],
+    ]:
         async def record_preview(**kwargs: Any) -> None:
             if not resolved_pipeline_id or not self.pipeline_registry:
                 return
@@ -1241,8 +3291,22 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 **kwargs,
             )
 
-        artifact_id: Optional[str] = None
-        run_id: Optional[str] = None
+        return record_preview, record_build, record_run
+
+    def _build_artifact_recorder_callback(
+        self,
+        *,
+        job: PipelineJob,
+        resolved_pipeline_id: Optional[str],
+        run_mode: str,
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+    ) -> Tuple[
+        Callable[..., Any],
+        Dict[str, Optional[str]],
+    ]:
+        artifact_state: Dict[str, Optional[str]] = {"artifact_id": None, "run_id": None}
 
         async def record_artifact(
             *,
@@ -1253,7 +3317,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             sampling_strategy: Optional[Dict[str, Any]] = None,
             errors: Optional[List[str]] = None,
         ) -> Optional[str]:
-            nonlocal artifact_id, run_id
             if not resolved_pipeline_id or not self.pipeline_registry:
                 return None
             if run_mode not in {"preview", "build"}:
@@ -1261,47 +3324,50 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             error_payload: Dict[str, Any] = {}
             if errors:
                 error_payload["errors"] = errors
-            lakefs = lakefs or {}
-            artifact_id = await self.pipeline_registry.upsert_artifact(
+            lakefs_payload = lakefs or {}
+            artifact_state["artifact_id"] = await self.pipeline_registry.upsert_artifact(
                 pipeline_id=resolved_pipeline_id,
                 job_id=job.job_id,
-                run_id=run_id,
+                run_id=artifact_state.get("run_id"),
                 mode=run_mode,
                 status=status,
-                artifact_id=artifact_id,
+                artifact_id=artifact_state.get("artifact_id"),
                 definition_hash=job.definition_hash,
                 definition_commit_id=job.definition_commit_id,
                 pipeline_spec_hash=pipeline_spec_hash,
                 pipeline_spec_commit_id=pipeline_spec_commit_id,
                 inputs=inputs,
-                lakefs_repository=lakefs.get("repository"),
-                lakefs_branch=lakefs.get("branch"),
-                lakefs_commit_id=lakefs.get("commit_id"),
+                lakefs_repository=lakefs_payload.get("repository"),
+                lakefs_branch=lakefs_payload.get("branch"),
+                lakefs_commit_id=lakefs_payload.get("commit_id"),
                 outputs=outputs,
                 declared_outputs=declared_outputs,
                 sampling_strategy=sampling_strategy,
                 error=error_payload,
             )
-            return artifact_id
+            return artifact_state.get("artifact_id")
 
-        job_mode = str(job.mode or "deploy").strip().lower()
-        is_preview = job_mode == "preview"
-        is_build = job_mode == "build"
-        run_mode = "preview" if is_preview else "build" if is_build else "deploy"
-        preview_sampling_seed = self._preview_sampling_seed(job.job_id)
-        use_lakefs_diff = self.use_lakefs_diff
+        return record_artifact, artifact_state
 
+    def _build_job_event_callback(
+        self,
+        *,
+        job: PipelineJob,
+        pipeline_ref: str,
+        run_mode: str,
+        execution_semantics: str,
+    ) -> Callable[..., Any]:
         async def emit_job_event(
             *,
             status: str,
-            errors: Optional[list[str]] = None,
-            lakefs: Optional[dict[str, Any]] = None,
-            output: Optional[dict[str, Any]] = None,
+            errors: Optional[List[str]] = None,
+            lakefs: Optional[Dict[str, Any]] = None,
+            output: Optional[Dict[str, Any]] = None,
         ) -> None:
             if run_mode not in {"build", "deploy"}:
                 return
             event_type = "PIPELINE_JOB_SUCCEEDED" if status in {"SUCCESS", "DEPLOYED"} else "PIPELINE_JOB_FAILED"
-            payload: dict[str, Any] = {
+            payload: Dict[str, Any] = {
                 "pipeline_id": pipeline_ref,
                 "job_id": job.job_id,
                 "mode": run_mode,
@@ -1325,6 +3391,94 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 data=payload,
             )
 
+        return emit_job_event
+
+    def _build_artifact_event_callbacks(
+        self,
+        *,
+        job: PipelineJob,
+        resolved_pipeline_id: Optional[str],
+        pipeline_ref: str,
+        run_mode: str,
+        execution_semantics: str,
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+    ) -> Tuple[
+        Callable[..., Any],
+        Callable[..., Any],
+        Dict[str, Optional[str]],
+    ]:
+        record_artifact, artifact_state = self._build_artifact_recorder_callback(
+            job=job,
+            resolved_pipeline_id=resolved_pipeline_id,
+            run_mode=run_mode,
+            declared_outputs=declared_outputs,
+            pipeline_spec_hash=pipeline_spec_hash,
+            pipeline_spec_commit_id=pipeline_spec_commit_id,
+        )
+        emit_job_event = self._build_job_event_callback(
+            job=job,
+            pipeline_ref=pipeline_ref,
+            run_mode=run_mode,
+            execution_semantics=execution_semantics,
+        )
+        return record_artifact, emit_job_event, artifact_state
+
+    def _build_execution_recorders(
+        self,
+        *,
+        job: PipelineJob,
+        resolved_pipeline_id: Optional[str],
+        pipeline_ref: str,
+        run_mode: str,
+        execution_semantics: str,
+        declared_outputs: List[Dict[str, Any]],
+        pipeline_spec_hash: Optional[str],
+        pipeline_spec_commit_id: Optional[str],
+        spark_conf: Dict[str, Any],
+        code_version: Optional[str],
+    ) -> Tuple[
+        Callable[..., Any],
+        Callable[..., Any],
+        Callable[..., Any],
+        Callable[..., Any],
+        Callable[..., Any],
+        Dict[str, Optional[str]],
+    ]:
+        record_preview, record_build, record_run = self._build_run_record_callbacks(
+            resolved_pipeline_id=resolved_pipeline_id,
+            pipeline_spec_hash=pipeline_spec_hash,
+            pipeline_spec_commit_id=pipeline_spec_commit_id,
+            spark_conf=spark_conf,
+            code_version=code_version,
+        )
+        record_artifact, emit_job_event, artifact_state = self._build_artifact_event_callbacks(
+            job=job,
+            resolved_pipeline_id=resolved_pipeline_id,
+            pipeline_ref=pipeline_ref,
+            run_mode=run_mode,
+            execution_semantics=execution_semantics,
+            declared_outputs=declared_outputs,
+            pipeline_spec_hash=pipeline_spec_hash,
+            pipeline_spec_commit_id=pipeline_spec_commit_id,
+        )
+        return record_preview, record_build, record_run, record_artifact, emit_job_event, artifact_state
+
+    async def _start_execution_tracking(
+        self,
+        *,
+        job: PipelineJob,
+        resolved_pipeline_id: Optional[str],
+        run_mode: str,
+        is_preview: bool,
+        is_build: bool,
+        artifact_state: Dict[str, Optional[str]],
+        record_preview: Callable[..., Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        record_artifact: Callable[..., Any],
+    ) -> str:
         if is_preview:
             await record_preview(
                 status="RUNNING",
@@ -1353,1613 +3507,472 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                     job_id=job.job_id,
                 )
                 if run_record:
-                    run_id = run_record.get("run_id")
+                    artifact_state["run_id"] = run_record.get("run_id")
             except Exception as exc:
                 logger.debug("Failed to resolve run_id for job %s: %s", job.job_id, exc)
 
-        run_ref = run_id or job.job_id
         await record_artifact(status="RUNNING")
+        return str(artifact_state.get("run_id") or job.job_id)
 
-        validation_errors = self._validate_definition(definition, require_output=not is_preview)
-        if requested_node_error:
-            validation_errors.append(requested_node_error)
-        if execution_semantics in {"incremental", "streaming"} and not watermark_column:
-            validation_errors.append(
-                f"{execution_semantics} pipelines require settings.watermarkColumn to be configured"
-            )
-        validation_errors.extend(self._validate_required_subgraph(nodes, incoming, required_node_ids))
-        if validation_errors:
-            validation_payload = self._build_error_payload(
-                message="Pipeline validation failed",
-                errors=validation_errors,
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                category=ErrorCategory.INPUT,
-                status_code=422,
-                external_code="PIPELINE_DEFINITION_INVALID",
-                stage="validate",
+    async def _execute_ordered_nodes(
+        self,
+        *,
+        job: PipelineJob,
+        order_run: List[str],
+        nodes: Dict[str, Dict[str, Any]],
+        tables: Dict[str, DataFrame],
+        incoming: Dict[str, List[str]],
+        parameters: Dict[str, Any],
+        preview_meta: Dict[str, Any],
+        preview_sampling_seed: int,
+        input_snapshots: List[Dict[str, Any]],
+        input_sampling: Dict[str, Any],
+        temp_dirs: List[str],
+        previous_input_commits: Dict[str, str],
+        use_lakefs_diff: bool,
+        execution_semantics: str,
+        watermark_column: Optional[str],
+        previous_watermark: Optional[Any],
+        previous_watermark_keys: List[str],
+        is_preview: bool, is_build: bool,
+        run_mode: str, input_commit_payload: Optional[List[Dict[str, Any]]],
+        record_preview: Callable[..., Any], record_build: Callable[..., Any],
+        record_run: Callable[..., Any], record_artifact: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> bool:
+        for node_id in order_run:
+            node = nodes[node_id]
+            metadata = node.get("metadata") or {}
+            df = await self._resolve_execution_node_dataframe(
                 job=job,
-                context={
-                    "execution_semantics": execution_semantics,
-                    "pipeline_spec_hash": pipeline_spec_hash,
-                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                },
+                node_id=node_id,
+                node=node,
+                tables=tables,
+                incoming=incoming,
+                parameters=parameters,
+                preview_meta=preview_meta,
+                preview_sampling_seed=preview_sampling_seed,
+                input_snapshots=input_snapshots,
+                input_sampling=input_sampling,
+                temp_dirs=temp_dirs,
+                previous_input_commits=previous_input_commits,
+                use_lakefs_diff=use_lakefs_diff,
+                execution_semantics=execution_semantics,
+                watermark_column=watermark_column,
+                previous_watermark=previous_watermark,
+                previous_watermark_keys=previous_watermark_keys,
+                is_preview=is_preview,
             )
-            if is_preview:
-                await record_preview(
-                    status="FAILED",
-                    row_count=0,
-                    sample_json=validation_payload,
-                    job_id=job.job_id,
-                    node_id=job.node_id,
-                )
-            elif not is_build:
-                await record_build(
-                    status="FAILED",
-                    output_json=validation_payload,
-                )
-            await record_run(
-                job_id=job.job_id,
-                mode=run_mode,
-                status="FAILED",
-                node_id=job.node_id,
-                sample_json=validation_payload if is_preview else None,
-                output_json=validation_payload if not is_preview else None,
-                finished_at=utcnow(),
+            table_ops = self._build_table_ops(df)
+            schema_errors = await self._run_spark(
+                lambda: validate_schema_checks(
+                    table_ops,
+                    metadata.get("schemaChecks") or [],
+                    error_prefix=f"schema check failed ({node_id}): ",
+                ),
+                label=f"schema_checks:{node_id}",
             )
-            await record_artifact(status="FAILED", errors=validation_errors)
-            await emit_job_event(status="FAILED", errors=validation_errors)
-            logger.error("Pipeline validation failed: %s", validation_errors)
-            return
+            if schema_errors:
+                await self._record_schema_check_failure(
+                    job=job,
+                    node_id=node_id,
+                    schema_errors=schema_errors,
+                    execution_semantics=execution_semantics,
+                    is_preview=is_preview,
+                    is_build=is_build,
+                    run_mode=run_mode,
+                    input_commit_payload=input_commit_payload,
+                    record_preview=record_preview,
+                    record_build=record_build,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
+                    emit_job_event=emit_job_event,
+                )
+                return False
 
-        if run_mode in {"build", "deploy"}:
-            lock = await self._acquire_pipeline_lock(job)
+            tables[node_id] = df
+        return True
+
+    async def _record_execution_failure(
+        self,
+        *,
+        job: PipelineJob,
+        exc: Exception,
+        is_preview: bool,
+        is_build: bool,
+        run_mode: str,
+        input_commit_payload: Optional[List[Dict[str, Any]]],
+        record_preview: Callable[..., Any],
+        record_build: Callable[..., Any],
+        record_run: Callable[..., Any],
+        emit_job_event: Callable[..., Any],
+    ) -> None:
+        execution_payload = self._build_error_payload(
+            message="Pipeline execution failed",
+            errors=[str(exc)],
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=500,
+            external_code="PIPELINE_EXECUTION_FAILED",
+            stage="execution",
+            job=job,
+            context={"exception_type": exc.__class__.__name__},
+        )
+        if is_preview:
+            await record_preview(
+                status="FAILED",
+                row_count=0,
+                sample_json=execution_payload,
+                job_id=job.job_id,
+                node_id=job.node_id,
+            )
+        elif not is_build:
+            await record_build(
+                status="FAILED",
+                output_json=execution_payload,
+            )
+        await record_run(
+            job_id=job.job_id,
+            mode=run_mode,
+            status="FAILED",
+            node_id=job.node_id,
+            sample_json=execution_payload if is_preview else None,
+            output_json=execution_payload if not is_preview else None,
+            input_lakefs_commits=input_commit_payload,
+            finished_at=utcnow(),
+        )
+        await emit_job_event(status="FAILED", errors=[str(exc)])
+        logger.exception("Pipeline execution failed: %s", exc)
+
+    async def _cleanup_execution_resources(
+        self,
+        *,
+        lock: Optional[PipelineLock],
+        temp_dirs: List[str],
+        persisted_dfs: List[DataFrame],
+        prev_spark_conf: Dict[str, Optional[str]],
+        prev_cast_mode: str,
+    ) -> None:
+        if lock:
+            await lock.release()
+        for path in temp_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+        if _PYSPARK_AVAILABLE and persisted_dfs:
+            for df in persisted_dfs:
+                try:
+                    df.unpersist(blocking=False)
+                except Exception as exc:
+                    logger.warning("Failed to unpersist persisted dataframe: %s", exc, exc_info=True)
+        if self.spark and prev_spark_conf:
+            for key, value in prev_spark_conf.items():
+                try:
+                    if value is None:
+                        self.spark.conf.unset(key)
+                    else:
+                        self.spark.conf.set(key, value)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to restore Spark conf key %s: %s",
+                        key,
+                        exc,
+                        exc_info=True,
+                    )
+        self.cast_mode = prev_cast_mode
+
+    async def _execute_job(self, job: PipelineJob) -> None:
+        self._validate_execution_prerequisites()
+
+        definition = job.definition_json or {}
+        prev_spark_conf, prev_cast_mode = self._apply_job_overrides(definition)
+        tables: Dict[str, DataFrame] = {}
+        input_snapshots: List[Dict[str, Any]] = []
+        input_sampling: Dict[str, Any] = {}
+        input_commit_payload: Optional[List[Dict[str, Any]]] = None
+        temp_dirs: List[str] = []
+        persisted_dfs: List[DataFrame] = []
+        lock: Optional[PipelineLock] = None
+
+        run_mode, is_preview, is_build = self._resolve_run_mode(job=job)
+
+        async def _noop(**kwargs: Any) -> None:
+            _ = kwargs
+            return None
+
+        record_preview: Callable[..., Any] = _noop
+        record_build: Callable[..., Any] = _noop
+        record_run: Callable[..., Any] = _noop
+        record_artifact: Callable[..., Any] = _noop
+        emit_job_event: Callable[..., Any] = _noop
 
         try:
-            for node_id in order_run:
-                node = nodes[node_id]
-                metadata = node.get("metadata") or {}
-                node_type = str(node.get("type") or "transform")
-                inputs = [tables[src] for src in incoming.get(node_id, []) if src in tables]
+            (
+                preview_meta,
+                nodes,
+                incoming,
+                parameters,
+                output_nodes,
+                order,
+            ) = self._build_execution_graph(definition=definition)
+            execution_semantics = _resolve_execution_semantics(job=job, definition=definition)
 
-                if node_type == "input":
-                    df = await self._load_input_dataframe(
-                        job.db_name,
-                        metadata,
-                        temp_dirs,
-                        job.branch,
-                        node_id=node_id,
-                        input_snapshots=input_snapshots,
-                        previous_commit_id=previous_input_commits.get(node_id),
-                        use_lakefs_diff=use_lakefs_diff and execution_semantics in {"incremental", "streaming"},
-                        watermark_column=watermark_column if execution_semantics in {"incremental", "streaming"} else None,
-                        watermark_after=previous_watermark if execution_semantics in {"incremental", "streaming"} else None,
-                        watermark_keys=previous_watermark_keys if execution_semantics in {"incremental", "streaming"} else None,
-                    )
-                    if is_preview:
-                        sampling_strategy = self._resolve_sampling_strategy(metadata, preview_meta)
-                        if sampling_strategy:
-                            df = self._apply_sampling_strategy(
-                                df,
-                                sampling_strategy,
-                                node_id=node_id,
-                                seed=preview_sampling_seed,
-                            )
-                            input_sampling[node_id] = sampling_strategy
-                            self._attach_sampling_snapshot(
-                                input_snapshots,
-                                node_id=node_id,
-                                sampling_strategy=sampling_strategy,
-                            )
-                elif node_type == "output":
-                    df = inputs[0] if inputs else self._empty_dataframe()
-                else:
-                    transform_metadata = dict(metadata)
-                    operation = normalize_operation(transform_metadata.get("operation"))
-                    if operation == "udf" and self._udf_spark_parity_enabled:
-                        resolved = await resolve_udf_reference(
-                            metadata=transform_metadata,
-                            pipeline_registry=self.pipeline_registry,
-                            require_reference=self._udf_require_reference,
-                            require_version_pinning=self._udf_require_version_pinning,
-                            code_cache=self._udf_code_cache,
-                        )
-                        transform_metadata["__resolved_udf_code"] = resolved.code
-                    df = self._apply_transform(transform_metadata, inputs, parameters)
+            (
+                target_node_ids,
+                required_node_ids,
+                order_run,
+                requested_node_error,
+            ) = self._plan_execution_scope(
+                job=job,
+                nodes=nodes,
+                order=order,
+                incoming=incoming,
+                output_nodes=output_nodes,
+                execution_semantics=execution_semantics,
+            )
 
-                table_ops = self._build_table_ops(df)
-                schema_errors = await self._run_spark(
-                    lambda: validate_schema_checks(
-                        table_ops,
-                        metadata.get("schemaChecks") or [],
-                        error_prefix=f"schema check failed ({node_id}): ",
-                    ),
-                    label=f"schema_checks:{node_id}",
+            pipeline_context = await self._resolve_execution_pipeline_context(
+                job=job,
+                definition=definition,
+                execution_semantics=execution_semantics,
+            )
+            if not pipeline_context:
+                return
+            (
+                resolved_pipeline_id,
+                pipeline_ref,
+                watermark_column,
+                previous_watermark,
+                previous_watermark_keys,
+                previous_input_commits,
+            ) = pipeline_context
+
+            spark_conf = self._collect_spark_conf()
+            code_version = _resolve_code_version()
+            pipeline_spec_commit_id = (
+                str(job.definition_commit_id).strip() if job.definition_commit_id else None
+            )
+            pipeline_spec_hash = str(job.definition_hash).strip() if job.definition_hash else None
+            declared_outputs = definition.get("outputs") if isinstance(definition.get("outputs"), list) else []
+            preview_sampling_seed = self._preview_sampling_seed(job.job_id)
+            use_lakefs_diff = self.use_lakefs_diff
+
+            (
+                record_preview,
+                record_build,
+                record_run,
+                record_artifact,
+                emit_job_event,
+                artifact_state,
+            ) = self._build_execution_recorders(
+                job=job,
+                resolved_pipeline_id=resolved_pipeline_id,
+                pipeline_ref=pipeline_ref,
+                run_mode=run_mode,
+                execution_semantics=execution_semantics,
+                declared_outputs=declared_outputs,
+                pipeline_spec_hash=pipeline_spec_hash,
+                pipeline_spec_commit_id=pipeline_spec_commit_id,
+                spark_conf=spark_conf,
+                code_version=code_version,
+            )
+
+            run_ref = await self._start_execution_tracking(
+                job=job,
+                resolved_pipeline_id=resolved_pipeline_id,
+                run_mode=run_mode,
+                is_preview=is_preview,
+                is_build=is_build,
+                artifact_state=artifact_state,
+                record_preview=record_preview,
+                record_build=record_build,
+                record_run=record_run,
+                record_artifact=record_artifact,
+            )
+
+            validation_errors = self._validate_definition(definition, require_output=not is_preview)
+            if requested_node_error:
+                validation_errors.append(requested_node_error)
+            if execution_semantics in {"incremental", "streaming"} and not watermark_column:
+                validation_errors.append(
+                    f"{execution_semantics} pipelines require settings.watermarkColumn to be configured"
                 )
-                if schema_errors:
-                    schema_payload = self._build_error_payload(
-                        message="Pipeline schema checks failed",
-                        errors=schema_errors,
-                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                        category=ErrorCategory.INPUT,
-                        status_code=422,
-                        external_code="PIPELINE_SCHEMA_CHECK_FAILED",
-                        stage="schema_checks",
-                        job=job,
-                        node_id=node_id,
-                        context={"execution_semantics": execution_semantics},
-                    )
-                    if is_preview:
-                        await record_preview(
-                            status="FAILED",
-                            row_count=0,
-                            sample_json=schema_payload,
-                            job_id=job.job_id,
-                            node_id=job.node_id,
-                        )
-                    elif not is_build:
-                        await record_build(
-                            status="FAILED",
-                            output_json=schema_payload,
-                        )
-                    await record_run(
-                        job_id=job.job_id,
-                        mode=run_mode,
-                        status="FAILED",
-                        node_id=job.node_id,
-                        sample_json=schema_payload if is_preview else None,
-                        output_json=schema_payload if not is_preview else None,
-                        finished_at=utcnow(),
-                    )
-                    await record_artifact(status="FAILED", errors=schema_errors)
-                    await emit_job_event(status="FAILED", errors=schema_errors)
-                    logger.error("Pipeline schema checks failed: %s", schema_errors)
-                    return
-
-                tables[node_id] = df
-
-            input_commit_payload = self._build_input_commit_payload(input_snapshots)
-            inputs_payload = {
-                "snapshots": input_snapshots,
-                "lakefs_commits": input_commit_payload,
-            }
-            diff_empty_inputs = _inputs_diff_empty(input_snapshots)
-            has_incremental_input = execution_semantics in {"incremental", "streaming"}
-            incremental_inputs_have_additive_updates: Optional[bool] = None
-            if has_incremental_input:
-                has_diff_signal = any(
-                    isinstance(snapshot, dict) and bool(snapshot.get("diff_requested"))
-                    for snapshot in input_snapshots
+            validation_errors.extend(self._validate_required_subgraph(nodes, incoming, required_node_ids))
+            if validation_errors:
+                await self._record_validation_failure(
+                    job=job,
+                    validation_errors=validation_errors,
+                    execution_semantics=execution_semantics,
+                    pipeline_spec_hash=pipeline_spec_hash,
+                    pipeline_spec_commit_id=pipeline_spec_commit_id,
+                    is_preview=is_preview,
+                    is_build=is_build,
+                    run_mode=run_mode,
+                    record_preview=record_preview,
+                    record_build=record_build,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
+                    emit_job_event=emit_job_event,
                 )
-                if has_diff_signal:
-                    incremental_inputs_have_additive_updates = not diff_empty_inputs
-            preview_limit = int(job.preview_limit or 200)
-            preview_limit = max(1, min(500, preview_limit))
+                return
+
+            if run_mode in {"build", "deploy"}:
+                lock = await self._acquire_pipeline_lock(job)
+
+            nodes_executed = await self._execute_ordered_nodes(
+                job=job,
+                order_run=order_run,
+                nodes=nodes,
+                tables=tables,
+                incoming=incoming,
+                parameters=parameters,
+                preview_meta=preview_meta,
+                preview_sampling_seed=preview_sampling_seed,
+                input_snapshots=input_snapshots,
+                input_sampling=input_sampling,
+                temp_dirs=temp_dirs,
+                previous_input_commits=previous_input_commits,
+                use_lakefs_diff=use_lakefs_diff,
+                execution_semantics=execution_semantics,
+                watermark_column=watermark_column,
+                previous_watermark=previous_watermark,
+                previous_watermark_keys=previous_watermark_keys,
+                is_preview=is_preview,
+                is_build=is_build,
+                run_mode=run_mode,
+                input_commit_payload=input_commit_payload,
+                record_preview=record_preview,
+                record_build=record_build,
+                record_run=record_run,
+                record_artifact=record_artifact,
+                emit_job_event=emit_job_event,
+            )
+            if not nodes_executed:
+                return
+
+            (
+                input_commit_payload,
+                inputs_payload,
+                diff_empty_inputs,
+                has_incremental_input,
+                incremental_inputs_have_additive_updates,
+                preview_limit,
+            ) = self._derive_post_node_execution_state(
+                input_snapshots=input_snapshots,
+                execution_semantics=execution_semantics,
+                preview_limit=job.preview_limit,
+            )
 
             if is_preview:
-                primary_id = target_node_ids[0] if target_node_ids else None
-                output_df = tables.get(primary_id) if primary_id else self._empty_dataframe()
-                schema_columns = _schema_from_dataframe(output_df)
-                row_count = int(await self._run_spark(lambda: output_df.count(), label=f"count:preview:{primary_id}"))
-                schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
-                output_ops = self._build_table_ops(output_df)
-                contract_errors = await self._run_spark(
-                    lambda: validate_schema_contract(output_ops, schema_contract),
-                    label=f"schema_contract:preview:{primary_id}",
-                )
-                if contract_errors:
-                    contract_payload = self._build_error_payload(
-                        message="Pipeline schema contract failed",
-                        errors=contract_errors,
-                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                        category=ErrorCategory.INPUT,
-                        status_code=422,
-                        external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
-                        stage="schema_contract",
-                        job=job,
-                        node_id=primary_id,
-                        context={"execution_semantics": execution_semantics},
-                    )
-                    await record_preview(
-                        status="FAILED",
-                        row_count=row_count,
-                        sample_json=contract_payload,
-                        job_id=job.job_id,
-                        node_id=job.node_id,
-                    )
-                    await record_run(
-                        job_id=job.job_id,
-                        mode="preview",
-                        status="FAILED",
-                        node_id=job.node_id,
-                        row_count=row_count,
-                        sample_json=contract_payload,
-                        input_lakefs_commits=input_commit_payload,
-                        finished_at=utcnow(),
-                    )
-                    await record_artifact(
-                        status="FAILED",
-                        errors=contract_errors,
-                        inputs=inputs_payload,
-                    )
-                    logger.error("Pipeline schema contract failed: %s", contract_errors)
-                    return
-
-                output_meta = nodes.get(primary_id, {}) if primary_id else {}
-                output_metadata = output_meta.get("metadata") or {}
-                output_name = (
-                    output_metadata.get("outputName")
-                    or output_metadata.get("datasetName")
-                    or output_meta.get("title")
-                    or (primary_id or "preview_output")
-                )
-                output_kind = _resolve_declared_output_kind(
-                    declared_outputs=declared_outputs,
-                    output_node_id=primary_id,
-                    output_name=str(output_name or ""),
-                )
-                _validate_output_kind_metadata(
-                    output_kind=output_kind,
-                    output_metadata=output_metadata,
-                    node_id=str(primary_id or "preview_output"),
-                )
-                pk_semantics = resolve_pk_semantics(
-                    execution_semantics=execution_semantics,
+                await self._run_preview_mode(
+                    job=job,
                     definition=definition,
-                    output_metadata=output_metadata,
-                )
-                delete_column = resolve_delete_column(
-                    definition=definition,
-                    output_metadata=output_metadata,
-                )
-                pk_columns = resolve_pk_columns(
-                    definition=definition,
-                    output_metadata=output_metadata,
-                    output_name=output_name,
-                    output_node_id=primary_id,
-                    declared_outputs=declared_outputs,
-                )
-                available_columns = output_ops.columns
-                pk_semantic_errors = validate_pk_semantics(
-                    available_columns=available_columns,
-                    pk_semantics=pk_semantics,
-                    pk_columns=pk_columns,
-                    delete_column=delete_column,
-                )
-                expectations = build_expectations_with_pk(
-                    definition=definition,
-                    output_metadata=output_metadata,
-                    output_name=output_name,
-                    output_node_id=primary_id,
-                    declared_outputs=declared_outputs,
-                    pk_semantics=pk_semantics,
-                    delete_column=delete_column,
-                    pk_columns=pk_columns,
-                    available_columns=available_columns,
-                )
-                expectation_errors = pk_semantic_errors + await self._run_spark(
-                    lambda: validate_expectations(output_ops, expectations),
-                    label=f"expectations:preview:{primary_id}",
-                )
-                fk_errors = await self._evaluate_fk_expectations(
-                    expectations=expectations,
-                    output_df=output_df,
-                    db_name=job.db_name,
-                    branch=job.branch or "main",
+                    nodes=nodes,
+                    target_node_ids=target_node_ids,
+                    tables=tables,
+                    input_snapshots=input_snapshots,
+                    input_sampling=input_sampling,
                     temp_dirs=temp_dirs,
+                    preview_limit=preview_limit,
+                    execution_semantics=execution_semantics,
+                    declared_outputs=declared_outputs,
+                    pipeline_spec_hash=pipeline_spec_hash,
+                    pipeline_spec_commit_id=pipeline_spec_commit_id,
+                    code_version=code_version,
+                    spark_conf=spark_conf,
+                    input_commit_payload=input_commit_payload,
+                    inputs_payload=inputs_payload,
+                    record_preview=record_preview,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
                 )
-                expectation_errors = expectation_errors + fk_errors
-                sample_rows = await self._run_spark(
-                    lambda: output_df.limit(preview_limit).collect(),
-                    label=f"collect:preview:{primary_id}",
-                )
-                output_sample = [row.asDict(recursive=True) for row in sample_rows]
-                column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
-                sample_payload: Dict[str, Any] = {
-                    "columns": schema_columns,
-                    "rows": output_sample,
-                    "job_id": job.job_id,
-                    "row_count": row_count,
-                    "sample_row_count": len(output_sample),
-                    "sampling_strategy": {
-                        "output": {"type": "limit", "limit": preview_limit},
-                        **({"input": input_sampling} if input_sampling else {}),
-                    },
-                    "column_stats": column_stats,
-                    "definition_hash": job.definition_hash,
-                    "branch": job.branch or "main",
-                    "input_snapshots": input_snapshots,
-                    "execution_semantics": execution_semantics,
-                    "pipeline_spec_hash": pipeline_spec_hash,
-                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                    "code_version": code_version,
-                    "spark_conf": spark_conf,
-                }
-                if primary_id:
-                    sample_payload["node_id"] = primary_id
-                if expectation_errors:
-                    sample_payload["expectations"] = expectation_errors
-                preview_outputs = [
-                    {
-                        "node_id": primary_id,
-                        "output_name": output_name,
-                        "output_kind": output_kind,
-                        "dataset_name": output_name,
-                        "row_count": row_count,
-                        "columns": schema_columns,
-                        "schema_hash": _hash_schema_columns(schema_columns),
-                        "schema_json": {"columns": schema_columns},
-                        "rows": output_sample,
-                        "sample_row_count": len(output_sample),
-                        "column_stats": column_stats,
-                    }
-                ]
-                artifact_status = "FAILED" if expectation_errors else "SUCCESS"
-                artifact_id = await record_artifact(
-                    status=artifact_status,
-                    outputs=preview_outputs,
-                    inputs=inputs_payload,
-                    sampling_strategy={
-                        "output": {"type": "limit", "limit": preview_limit},
-                        **({"input": input_sampling} if input_sampling else {}),
-                    },
-                    errors=expectation_errors if expectation_errors else None,
-                )
-                if artifact_id:
-                    sample_payload["artifact_id"] = artifact_id
-
-                await record_preview(
-                    status="FAILED" if expectation_errors else "SUCCESS",
-                    row_count=row_count,
-                    sample_json=sample_payload,
-                    job_id=job.job_id,
-                    node_id=job.node_id,
-                )
-                await record_run(
-                    job_id=job.job_id,
-                    mode="preview",
-                    status="FAILED" if expectation_errors else "SUCCESS",
-                    node_id=job.node_id,
-                    row_count=row_count,
-                    sample_json=sample_payload,
-                    input_lakefs_commits=input_commit_payload,
-                    finished_at=utcnow(),
-                )
-                if expectation_errors:
-                    logger.error("Pipeline expectations failed: %s", expectation_errors)
                 return
 
             if is_build:
-                if not self.storage or not self.lakefs_client:
-                    raise RuntimeError("lakeFS services are not configured")
-                if lock:
-                    lock.raise_if_lost()
-                artifact_repo = _resolve_lakefs_repository()
-                await self.storage.create_bucket(artifact_repo)
-                output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
-                base_branch = safe_lakefs_ref(job.branch or "main")
-                output_work: List[Dict[str, Any]] = []
-                has_output_rows = False
-                no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
-                for node_id in target_node_ids:
-                    if lock:
-                        lock.raise_if_lost()
-                    output_df = tables.get(node_id, self._empty_dataframe())
-                    if _PYSPARK_AVAILABLE:
-                        # Build mode touches the same DataFrame multiple times (count/sample/write). Persist the
-                        # final output to avoid recomputation spikes that can OOM-kill the worker in Docker.
-                        try:
-                            output_df = output_df.persist(StorageLevel.DISK_ONLY)
-                            persisted_dfs.append(output_df)
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to persist output dataframe for node %s: %s",
-                                node_id,
-                                exc,
-                                exc_info=True,
-                            )
-                    schema_columns = _schema_from_dataframe(output_df)
-                    delta_row_count = int(
-                        await self._run_spark(lambda: output_df.count(), label=f"count:build:{node_id}")
-                    )
-                    if delta_row_count > 0:
-                        has_output_rows = True
-                    schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
-                    output_ops = self._build_table_ops(output_df)
-                    contract_errors = await self._run_spark(
-                        lambda: validate_schema_contract(output_ops, schema_contract),
-                        label=f"schema_contract:build:{node_id}",
-                    )
-                    if contract_errors:
-                        contract_payload = self._build_error_payload(
-                            message="Pipeline schema contract failed",
-                            errors=contract_errors,
-                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                            category=ErrorCategory.INPUT,
-                            status_code=422,
-                            external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
-                            stage="schema_contract",
-                            job=job,
-                            node_id=node_id,
-                            context={"execution_semantics": execution_semantics},
-                        )
-                        await record_run(
-                            job_id=job.job_id,
-                            mode="build",
-                            status="FAILED",
-                            node_id=node_id,
-                            row_count=delta_row_count,
-                            output_json=contract_payload,
-                            input_lakefs_commits=input_commit_payload,
-                            finished_at=utcnow(),
-                        )
-                        await record_artifact(
-                            status="FAILED",
-                            errors=contract_errors,
-                            inputs=inputs_payload,
-                        )
-                        await emit_job_event(status="FAILED", errors=contract_errors)
-                        logger.error("Pipeline schema contract failed (build): %s", contract_errors)
-                        return
-
-                    output_meta = output_nodes.get(node_id) or {}
-                    metadata = output_meta.get("metadata") or {}
-                    output_name = (
-                        metadata.get("outputName")
-                        or metadata.get("datasetName")
-                        or output_meta.get("title")
-                        or job.output_dataset_name
-                    )
-                    output_kind = _resolve_declared_output_kind(
-                        declared_outputs=declared_outputs,
-                        output_node_id=node_id,
-                        output_name=str(output_name or ""),
-                    )
-                    _validate_output_kind_metadata(
-                        output_kind=output_kind,
-                        output_metadata=metadata,
-                        node_id=str(node_id),
-                    )
-                    pk_semantics = resolve_pk_semantics(
-                        execution_semantics=execution_semantics,
-                        definition=definition,
-                        output_metadata=metadata,
-                    )
-                    delete_column = resolve_delete_column(
-                        definition=definition,
-                        output_metadata=metadata,
-                    )
-                    pk_columns = resolve_pk_columns(
-                        definition=definition,
-                        output_metadata=metadata,
-                        output_name=output_name,
-                        output_node_id=node_id,
-                        declared_outputs=declared_outputs,
-                    )
-                    available_columns = output_ops.columns
-                    pk_semantic_errors = validate_pk_semantics(
-                        available_columns=available_columns,
-                        pk_semantics=pk_semantics,
-                        pk_columns=pk_columns,
-                        delete_column=delete_column,
-                    )
-                    expectations = build_expectations_with_pk(
-                        definition=definition,
-                        output_metadata=metadata,
-                        output_name=output_name,
-                        output_node_id=node_id,
-                        declared_outputs=declared_outputs,
-                        pk_semantics=pk_semantics,
-                        delete_column=delete_column,
-                        pk_columns=pk_columns,
-                        available_columns=available_columns,
-                    )
-                    expectation_errors = pk_semantic_errors + await self._run_spark(
-                        lambda: validate_expectations(output_ops, expectations),
-                        label=f"expectations:build:{node_id}",
-                    )
-                    fk_errors = await self._evaluate_fk_expectations(
-                        expectations=expectations,
-                        output_df=output_df,
-                        db_name=job.db_name,
-                        branch=job.branch or "main",
-                        temp_dirs=temp_dirs,
-                    )
-                    expectation_errors = expectation_errors + fk_errors
-                    if expectation_errors:
-                        expectation_payload = self._build_error_payload(
-                            message="Pipeline expectations failed",
-                            errors=expectation_errors,
-                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                            category=ErrorCategory.INPUT,
-                            status_code=422,
-                            external_code="PIPELINE_EXPECTATIONS_FAILED",
-                            stage="expectations",
-                            job=job,
-                            node_id=node_id,
-                            context={"execution_semantics": execution_semantics},
-                        )
-                        await record_run(
-                            job_id=job.job_id,
-                            mode="build",
-                            status="FAILED",
-                            node_id=node_id,
-                            row_count=delta_row_count,
-                            output_json=expectation_payload,
-                            input_lakefs_commits=input_commit_payload,
-                            finished_at=utcnow(),
-                        )
-                        await record_artifact(
-                            status="FAILED",
-                            errors=expectation_errors,
-                            inputs=inputs_payload,
-                        )
-                        await emit_job_event(status="FAILED", errors=expectation_errors)
-                        logger.error("Pipeline expectations failed (build): %s", expectation_errors)
-                        return
-
-                    dataset_name = str(output_name or job.output_dataset_name)
-                    write_mode_requested = output_write_mode
-                    write_mode_resolved = output_write_mode
-                    runtime_write_mode = output_write_mode
-                    write_policy_hash: Optional[str] = None
-                    pk_columns_policy: List[str] = []
-                    post_filtering_column: Optional[str] = None
-                    if output_kind == OUTPUT_KIND_DATASET:
-                        dataset_policy = resolve_dataset_write_policy(
-                            definition=definition,
-                            output_metadata=metadata,
-                            execution_semantics=execution_semantics,
-                            has_incremental_input=has_incremental_input,
-                            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                        )
-                        metadata = dict(dataset_policy.normalized_metadata)
-                        write_mode_requested = dataset_policy.requested_write_mode
-                        write_mode_resolved = dataset_policy.resolved_write_mode.value
-                        runtime_write_mode = dataset_policy.runtime_write_mode
-                        write_policy_hash = dataset_policy.policy_hash
-                        pk_columns_policy = list(dataset_policy.primary_key_columns)
-                        post_filtering_column = dataset_policy.post_filtering_column
-                        dataset_output_errors = validate_dataset_output_metadata(
-                            definition=definition,
-                            output_metadata=metadata,
-                            execution_semantics=execution_semantics,
-                            has_incremental_input=has_incremental_input,
-                            incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                            available_columns=_schema_column_names(schema_columns),
-                        )
-                        if dataset_output_errors:
-                            error_payload = self._build_error_payload(
-                                message="Dataset output metadata invalid",
-                                errors=dataset_output_errors,
-                                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                                category=ErrorCategory.INPUT,
-                                status_code=422,
-                                external_code="PIPELINE_DATASET_OUTPUT_METADATA_INVALID",
-                                stage="output_metadata",
-                                job=job,
-                                node_id=node_id,
-                                context={
-                                    "execution_semantics": execution_semantics,
-                                    "output_name": dataset_name,
-                                },
-                            )
-                            await record_run(
-                                job_id=job.job_id,
-                                mode="build",
-                                status="FAILED",
-                                node_id=node_id,
-                                row_count=delta_row_count,
-                                output_json=error_payload,
-                                input_lakefs_commits=input_commit_payload,
-                                finished_at=utcnow(),
-                            )
-                            await record_artifact(
-                                status="FAILED",
-                                errors=dataset_output_errors,
-                                inputs=inputs_payload,
-                            )
-                            await emit_job_event(status="FAILED", errors=dataset_output_errors)
-                            logger.error("Pipeline dataset output metadata invalid (build): %s", dataset_output_errors)
-                            return
-                        output_format = dataset_policy.output_format
-                        partition_cols = list(dataset_policy.partition_by)
-                    else:
-                        output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
-                        partition_cols = _resolve_partition_columns(
-                            definition=definition,
-                            output_metadata=metadata,
-                        )
-                    schema_hash = _hash_schema_columns(schema_columns)
-                    sample_rows = await self._run_spark(
-                        lambda: output_df.limit(preview_limit).collect(),
-                        label=f"collect:build:{node_id}",
-                    )
-                    output_sample = [row.asDict(recursive=True) for row in sample_rows]
-                    column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
-
-                    safe_name = dataset_name.replace(" ", "_")
-                    artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
-                    output_work.append(
-                        {
-                            "node_id": node_id,
-                            "output_name": output_name,
-                            "output_kind": output_kind,
-                            "output_metadata": dict(metadata),
-                            "dataset_name": dataset_name,
-                            "output_df": output_df,
-                            "output_format": output_format,
-                            "partition_columns": partition_cols,
-                            "write_mode_requested": write_mode_requested,
-                            "write_mode_resolved": write_mode_resolved,
-                            "runtime_write_mode": runtime_write_mode,
-                            "write_policy_hash": write_policy_hash,
-                            "pk_columns": pk_columns_policy,
-                            "post_filtering_column": post_filtering_column,
-                            "has_incremental_input": has_incremental_input,
-                            "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
-                            "artifact_prefix": artifact_prefix,
-                            "schema_columns": schema_columns,
-                            "schema_hash": schema_hash,
-                            "delta_row_count": delta_row_count,
-                            "output_sample": output_sample,
-                            "column_stats": column_stats,
-                        }
-                    )
-
-                if no_op_candidate and not has_output_rows:
-                    no_op_payload = {
-                        "outputs": [],
-                        "definition_hash": job.definition_hash,
-                        "branch": job.branch or "main",
-                        "execution_semantics": execution_semantics,
-                        "pipeline_spec_hash": pipeline_spec_hash,
-                        "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                        "code_version": code_version,
-                        "spark_conf": spark_conf,
-                        "no_op": True,
-                        "input_snapshots": input_snapshots,
-                    }
-                    await record_build(status="SUCCESS", output_json=no_op_payload)
-                    await record_run(
-                        job_id=job.job_id,
-                        mode="build",
-                        status="SUCCESS",
-                        node_id=job.node_id,
-                        input_lakefs_commits=input_commit_payload,
-                        output_json=no_op_payload,
-                        finished_at=utcnow(),
-                    )
-                    await record_artifact(
-                        status="SUCCESS",
-                        outputs=[],
-                        inputs=inputs_payload,
-                    )
-                    await emit_job_event(status="SUCCESS", output={"no_op": True, "outputs": []})
-                    return
-
-                build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}")
-                try:
-                    await self.lakefs_client.create_branch(
-                        repository=artifact_repo,
-                        name=build_branch,
-                        source=base_branch,
-                    )
-                except LakeFSConflictError:
-                    build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
-                    await self.lakefs_client.create_branch(
-                        repository=artifact_repo,
-                        name=build_branch,
-                        source=base_branch,
-                    )
-
-                build_outputs: List[Dict[str, Any]] = []
-                for item in output_work:
-                    output_df = item["output_df"]
-                    materialized = await self._materialize_output_by_kind(
-                        output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
-                        output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
-                        df=output_df,
-                        artifact_bucket=artifact_repo,
-                        prefix=f"{build_branch}/{item['artifact_prefix']}",
-                        db_name=job.db_name,
-                        branch=base_branch,
-                        dataset_name=str(item.get("dataset_name") or ""),
-                        execution_semantics=execution_semantics,
-                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                        write_mode=str(item.get("runtime_write_mode") or output_write_mode),
-                        file_prefix=job.job_id,
-                        file_format=item["output_format"],
-                        partition_cols=item["partition_columns"],
-                        base_row_count=int(item.get("delta_row_count") or 0),
-                    )
-                    if _PYSPARK_AVAILABLE:
-                        try:
-                            output_df.unpersist(blocking=False)
-                        except Exception as exc:
-                            logger.warning("Failed to unpersist output dataframe: %s", exc, exc_info=True)
-                    resolved_runtime_write_mode = str(
-                        materialized.get("runtime_write_mode")
-                        or item.get("runtime_write_mode")
-                        or output_write_mode
-                    )
-                    delta_row_count = int(
-                        materialized.get("delta_row_count")
-                        if materialized.get("delta_row_count") is not None
-                        else int(item.get("delta_row_count") or 0)
-                    )
-                    row_count = delta_row_count
-                    if resolved_runtime_write_mode == "append":
-                        try:
-                            existing_dataset = await self.dataset_registry.get_dataset_by_name(
-                                db_name=job.db_name,
-                                name=item["dataset_name"],
-                                branch=base_branch,
-                            )
-                            if existing_dataset:
-                                existing_version = await self.dataset_registry.get_latest_version(
-                                    dataset_id=existing_dataset.dataset_id
-                                )
-                                if existing_version and existing_version.row_count is not None:
-                                    row_count = int(existing_version.row_count) + delta_row_count
-                        except Exception as exc:
-                            logger.debug("Failed to resolve previous row_count for incremental build: %s", exc)
-                    build_outputs.append(
-                        {
-                            "node_id": item["node_id"],
-                            "output_name": item["output_name"],
-                            "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
-                            "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
-                            "dataset_name": item["dataset_name"],
-                            "artifact_key": materialized["artifact_key"],
-                            "artifact_prefix": item["artifact_prefix"],
-                            "output_format": materialized.get("output_format") or item["output_format"],
-                            "partition_columns": materialized.get("partition_by") or item["partition_columns"],
-                            "row_count": row_count,
-                            "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
-                            "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
-                            "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
-                            "runtime_write_mode": resolved_runtime_write_mode,
-                            "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
-                            "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
-                            "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
-                            "has_incremental_input": (
-                                materialized.get("has_incremental_input")
-                                if materialized.get("has_incremental_input") is not None
-                                else item.get("has_incremental_input")
-                            ),
-                            "incremental_inputs_have_additive_updates": (
-                                materialized.get("incremental_inputs_have_additive_updates")
-                                if materialized.get("incremental_inputs_have_additive_updates") is not None
-                                else item.get("incremental_inputs_have_additive_updates")
-                            ),
-                            "columns": item["schema_columns"],
-                            "schema_hash": item["schema_hash"],
-                            "schema_json": {"columns": item["schema_columns"]},
-                            "rows": item["output_sample"],
-                            "sample_row_count": len(item["output_sample"]),
-                            "column_stats": item["column_stats"],
-                        }
-                    )
-
-                if lock:
-                    lock.raise_if_lost()
-                commit_id = await self.lakefs_client.commit(
-                    repository=artifact_repo,
-                    branch=build_branch,
-                    message=f"Build pipeline {job.db_name}/{pipeline_ref} ({job.job_id})",
-                    metadata={
-                        "pipeline_id": pipeline_ref,
-                        "pipeline_job_id": job.job_id,
-                        "db_name": job.db_name,
-                        "mode": "build",
-                    },
-                )
-                for item in build_outputs:
-                    artifact_prefix = str(item.get("artifact_prefix") or "").lstrip("/")
-                    if artifact_prefix:
-                        item["artifact_commit_key"] = build_s3_uri(artifact_repo, f"{commit_id}/{artifact_prefix}")
-
-                artifact_id = await record_artifact(
-                    status="SUCCESS",
-                    outputs=build_outputs,
-                    inputs=inputs_payload,
-                    lakefs={
-                        "repository": artifact_repo,
-                        "branch": build_branch,
-                        "commit_id": commit_id,
-                    },
-                )
-
-                output_json = {
-                    "outputs": build_outputs,
-                    "definition_hash": job.definition_hash,
-                    "branch": job.branch or "main",
-                    "execution_semantics": execution_semantics,
-                    "pipeline_spec_hash": pipeline_spec_hash,
-                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                    "code_version": code_version,
-                    "spark_conf": spark_conf,
-                    "lakefs": {
-                        "repository": artifact_repo,
-                        "base_branch": base_branch,
-                        "build_branch": build_branch,
-                        "commit_id": commit_id,
-                    },
-                    "ontology": (
-                        (definition.get("__build_meta__") or {}).get("ontology")
-                        if isinstance(definition.get("__build_meta__"), dict)
-                        else None
-                    ),
-                    "input_snapshots": input_snapshots,
-                }
-                if artifact_id:
-                    output_json["artifact_id"] = artifact_id
-
-                await record_run(
-                    job_id=job.job_id,
-                    mode="build",
-                    status="SUCCESS",
-                    node_id=job.node_id,
-                    input_lakefs_commits=input_commit_payload,
-                    output_lakefs_commit_id=commit_id,
-                    output_json=output_json,
-                    finished_at=utcnow(),
-                )
-                output_payload = {"outputs": build_outputs}
-                if artifact_id:
-                    output_payload["artifact_id"] = artifact_id
-                await emit_job_event(
-                    status="SUCCESS",
-                    lakefs={
-                        "repository": artifact_repo,
-                        "base_branch": base_branch,
-                        "build_branch": build_branch,
-                        "commit_id": commit_id,
-                    },
-                    output=output_payload,
-                )
-                return
-
-            if not self.storage or not self.lakefs_client:
-                raise RuntimeError("lakeFS services are not configured")
-            if lock:
-                lock.raise_if_lost()
-
-            artifact_repo = _resolve_lakefs_repository()
-            await self.storage.create_bucket(artifact_repo)
-            base_branch = safe_lakefs_ref(job.branch or "main")
-
-            output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
-            output_work: List[Dict[str, Any]] = []
-            has_output_rows = False
-            no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
-            for node_id in target_node_ids:
-                if lock:
-                    lock.raise_if_lost()
-                output_df = tables.get(node_id, self._empty_dataframe())
-                schema_columns = _schema_from_dataframe(output_df)
-                delta_row_count = int(
-                    await self._run_spark(lambda: output_df.count(), label=f"count:deploy:{node_id}")
-                )
-                if delta_row_count > 0:
-                    has_output_rows = True
-                schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
-                output_ops = self._build_table_ops(output_df)
-                contract_errors = await self._run_spark(
-                    lambda: validate_schema_contract(output_ops, schema_contract),
-                    label=f"schema_contract:deploy:{node_id}",
-                )
-                if contract_errors:
-                    contract_payload = self._build_error_payload(
-                        message="Pipeline schema contract failed",
-                        errors=contract_errors,
-                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                        category=ErrorCategory.INPUT,
-                        status_code=422,
-                        external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
-                        stage="schema_contract",
-                        job=job,
-                        node_id=node_id,
-                        context={"execution_semantics": execution_semantics},
-                    )
-                    await record_build(
-                        status="FAILED",
-                        output_json=contract_payload,
-                    )
-                    await record_run(
-                        job_id=job.job_id,
-                        mode="deploy",
-                        status="FAILED",
-                        node_id=node_id,
-                        row_count=delta_row_count,
-                        output_json=contract_payload,
-                        input_lakefs_commits=input_commit_payload,
-                        finished_at=utcnow(),
-                    )
-                    await record_artifact(
-                        status="FAILED",
-                        errors=contract_errors,
-                        inputs=inputs_payload,
-                    )
-                    await emit_job_event(status="FAILED", errors=contract_errors)
-                    logger.error("Pipeline schema contract failed: %s", contract_errors)
-                    return
-
-                output_meta = output_nodes.get(node_id) or {}
-                metadata = output_meta.get("metadata") or {}
-                output_name = (
-                    metadata.get("outputName")
-                    or metadata.get("datasetName")
-                    or output_meta.get("title")
-                    or job.output_dataset_name
-                )
-                output_kind = _resolve_declared_output_kind(
+                await self._run_build_mode(
+                    job=job,
+                    lock=lock,
+                    tables=tables,
+                    target_node_ids=target_node_ids,
+                    output_nodes=output_nodes,
+                    definition=definition,
                     declared_outputs=declared_outputs,
-                    output_node_id=node_id,
-                    output_name=str(output_name or ""),
-                )
-                _validate_output_kind_metadata(
-                    output_kind=output_kind,
-                    output_metadata=metadata,
-                    node_id=str(node_id),
-                )
-                pk_semantics = resolve_pk_semantics(
+                    pipeline_ref=pipeline_ref,
+                    run_ref=run_ref,
                     execution_semantics=execution_semantics,
-                    definition=definition,
-                    output_metadata=metadata,
-                )
-                delete_column = resolve_delete_column(
-                    definition=definition,
-                    output_metadata=metadata,
-                )
-                pk_columns = resolve_pk_columns(
-                    definition=definition,
-                    output_metadata=metadata,
-                    output_name=output_name,
-                    output_node_id=node_id,
-                    declared_outputs=declared_outputs,
-                )
-                available_columns = output_ops.columns
-                pk_semantic_errors = validate_pk_semantics(
-                    available_columns=available_columns,
-                    pk_semantics=pk_semantics,
-                    pk_columns=pk_columns,
-                    delete_column=delete_column,
-                )
-                expectations = build_expectations_with_pk(
-                    definition=definition,
-                    output_metadata=metadata,
-                    output_name=output_name,
-                    output_node_id=node_id,
-                    declared_outputs=declared_outputs,
-                    pk_semantics=pk_semantics,
-                    delete_column=delete_column,
-                    pk_columns=pk_columns,
-                    available_columns=available_columns,
-                )
-                expectation_errors = pk_semantic_errors + await self._run_spark(
-                    lambda: validate_expectations(output_ops, expectations),
-                    label=f"expectations:deploy:{node_id}",
-                )
-                fk_errors = await self._evaluate_fk_expectations(
-                    expectations=expectations,
-                    output_df=output_df,
-                    db_name=job.db_name,
-                    branch=job.branch or "main",
-                    temp_dirs=temp_dirs,
-                )
-                expectation_errors = expectation_errors + fk_errors
-                if expectation_errors:
-                    expectation_payload = self._build_error_payload(
-                        message="Pipeline expectations failed",
-                        errors=expectation_errors,
-                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                        category=ErrorCategory.INPUT,
-                        status_code=422,
-                        external_code="PIPELINE_EXPECTATIONS_FAILED",
-                        stage="expectations",
-                        job=job,
-                        node_id=node_id,
-                        context={"execution_semantics": execution_semantics},
-                    )
-                    await record_build(
-                        status="FAILED",
-                        output_json=expectation_payload,
-                    )
-                    await record_run(
-                        job_id=job.job_id,
-                        mode="deploy",
-                        status="FAILED",
-                        node_id=node_id,
-                        row_count=delta_row_count,
-                        output_json=expectation_payload,
-                        input_lakefs_commits=input_commit_payload,
-                        finished_at=utcnow(),
-                    )
-                    await record_artifact(
-                        status="FAILED",
-                        errors=expectation_errors,
-                        inputs=inputs_payload,
-                    )
-                    await emit_job_event(status="FAILED", errors=expectation_errors)
-                    logger.error("Pipeline expectations failed: %s", expectation_errors)
-                    return
-
-                sample_rows = await self._run_spark(
-                    lambda: output_df.limit(preview_limit).collect(),
-                    label=f"collect:deploy:{node_id}",
-                )
-                output_sample = [row.asDict(recursive=True) for row in sample_rows]
-
-                dataset_name = str(output_name or job.output_dataset_name)
-                write_mode_requested = output_write_mode
-                write_mode_resolved = output_write_mode
-                runtime_write_mode = output_write_mode
-                write_policy_hash: Optional[str] = None
-                pk_columns_policy: List[str] = []
-                post_filtering_column: Optional[str] = None
-                if output_kind == OUTPUT_KIND_DATASET:
-                    dataset_policy = resolve_dataset_write_policy(
-                        definition=definition,
-                        output_metadata=metadata,
-                        execution_semantics=execution_semantics,
-                        has_incremental_input=has_incremental_input,
-                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                    )
-                    metadata = dict(dataset_policy.normalized_metadata)
-                    write_mode_requested = dataset_policy.requested_write_mode
-                    write_mode_resolved = dataset_policy.resolved_write_mode.value
-                    runtime_write_mode = dataset_policy.runtime_write_mode
-                    write_policy_hash = dataset_policy.policy_hash
-                    pk_columns_policy = list(dataset_policy.primary_key_columns)
-                    post_filtering_column = dataset_policy.post_filtering_column
-                    dataset_output_errors = validate_dataset_output_metadata(
-                        definition=definition,
-                        output_metadata=metadata,
-                        execution_semantics=execution_semantics,
-                        has_incremental_input=has_incremental_input,
-                        incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                        available_columns=_schema_column_names(schema_columns),
-                    )
-                    if dataset_output_errors:
-                        expectation_payload = self._build_error_payload(
-                            message="Dataset output metadata invalid",
-                            errors=dataset_output_errors,
-                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                            category=ErrorCategory.INPUT,
-                            status_code=422,
-                            external_code="PIPELINE_DATASET_OUTPUT_METADATA_INVALID",
-                            stage="output_metadata",
-                            job=job,
-                            node_id=node_id,
-                            context={
-                                "execution_semantics": execution_semantics,
-                                "output_name": dataset_name,
-                            },
-                        )
-                        await record_build(
-                            status="FAILED",
-                            output_json=expectation_payload,
-                        )
-                        await record_run(
-                            job_id=job.job_id,
-                            mode="deploy",
-                            status="FAILED",
-                            node_id=node_id,
-                            row_count=delta_row_count,
-                            output_json=expectation_payload,
-                            input_lakefs_commits=input_commit_payload,
-                            finished_at=utcnow(),
-                        )
-                        await record_artifact(
-                            status="FAILED",
-                            errors=dataset_output_errors,
-                            inputs=inputs_payload,
-                        )
-                        await emit_job_event(status="FAILED", errors=dataset_output_errors)
-                        logger.error("Pipeline dataset output metadata invalid: %s", dataset_output_errors)
-                        return
-                    output_format = dataset_policy.output_format
-                    partition_cols = list(dataset_policy.partition_by)
-                else:
-                    output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
-                    partition_cols = _resolve_partition_columns(
-                        definition=definition,
-                        output_metadata=metadata,
-                    )
-                safe_name = dataset_name.replace(" ", "_")
-                artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
-                column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
-                output_work.append(
-                    {
-                        "node_id": node_id,
-                        "output_name": output_name,
-                        "output_kind": output_kind,
-                        "output_metadata": dict(metadata),
-                        "dataset_name": dataset_name,
-                        "output_df": output_df,
-                        "artifact_prefix": artifact_prefix,
-                        "output_format": output_format,
-                        "partition_columns": partition_cols,
-                        "write_mode_requested": write_mode_requested,
-                        "write_mode_resolved": write_mode_resolved,
-                        "runtime_write_mode": runtime_write_mode,
-                        "write_policy_hash": write_policy_hash,
-                        "pk_columns": pk_columns_policy,
-                        "post_filtering_column": post_filtering_column,
-                        "has_incremental_input": has_incremental_input,
-                        "incremental_inputs_have_additive_updates": incremental_inputs_have_additive_updates,
-                        "row_count": delta_row_count,
-                        "columns": schema_columns,
-                        "rows": output_sample,
-                        "sample_row_count": len(output_sample),
-                        "column_stats": column_stats,
-                    }
-                )
-
-            if no_op_candidate and not has_output_rows:
-                no_op_payload = {
-                    "outputs": [],
-                    "definition_hash": job.definition_hash,
-                    "branch": base_branch,
-                    "execution_semantics": execution_semantics,
-                    "pipeline_spec_hash": pipeline_spec_hash,
-                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                    "code_version": code_version,
-                    "spark_conf": spark_conf,
-                    "no_op": True,
-                    "input_snapshots": input_snapshots,
-                }
-                await record_build(
-                    status="DEPLOYED",
-                    output_json=no_op_payload,
-                )
-                await record_run(
-                    job_id=job.job_id,
-                    mode="deploy",
-                    status="DEPLOYED",
-                    node_id=job.node_id,
-                    input_lakefs_commits=input_commit_payload,
-                    output_json=no_op_payload,
-                    finished_at=utcnow(),
-                )
-                await emit_job_event(status="DEPLOYED", output={"no_op": True, "outputs": []})
-                return
-
-            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}")
-            try:
-                await self.lakefs_client.create_branch(
-                    repository=artifact_repo,
-                    name=run_branch,
-                    source=base_branch,
-                )
-            except LakeFSConflictError:
-                run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
-                await self.lakefs_client.create_branch(
-                    repository=artifact_repo,
-                    name=run_branch,
-                    source=base_branch,
-                )
-
-            staged_outputs: List[Dict[str, Any]] = []
-            for item in output_work:
-                branch_prefix = f"{run_branch}/{item['artifact_prefix']}"
-                materialized = await self._materialize_output_by_kind(
-                    output_kind=str(item.get("output_kind") or OUTPUT_KIND_DATASET),
-                    output_metadata=item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
-                    df=item["output_df"],
-                    artifact_bucket=artifact_repo,
-                    prefix=branch_prefix,
-                    db_name=job.db_name,
-                    branch=base_branch,
-                    dataset_name=str(item.get("dataset_name") or ""),
-                    execution_semantics=execution_semantics,
+                    diff_empty_inputs=diff_empty_inputs,
+                    has_incremental_input=has_incremental_input,
                     incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
-                    write_mode=str(item.get("runtime_write_mode") or output_write_mode),
-                    file_prefix=job.job_id,
-                    file_format=item["output_format"],
-                    partition_cols=item["partition_columns"],
-                    base_row_count=int(item.get("row_count") or 0),
+                    preview_limit=preview_limit,
+                    temp_dirs=temp_dirs,
+                    persisted_dfs=persisted_dfs,
+                    input_snapshots=input_snapshots,
+                    input_commit_payload=input_commit_payload,
+                    inputs_payload=inputs_payload,
+                    pipeline_spec_hash=pipeline_spec_hash,
+                    pipeline_spec_commit_id=pipeline_spec_commit_id,
+                    code_version=code_version,
+                    spark_conf=spark_conf,
+                    record_build=record_build,
+                    record_run=record_run,
+                    record_artifact=record_artifact,
+                    emit_job_event=emit_job_event,
                 )
-                resolved_runtime_write_mode = str(
-                    materialized.get("runtime_write_mode")
-                    or item.get("runtime_write_mode")
-                    or output_write_mode
-                )
-                delta_row_count = int(
-                    materialized.get("delta_row_count")
-                    if materialized.get("delta_row_count") is not None
-                    else int(item.get("row_count") or 0)
-                )
-                staged_outputs.append(
-                    {
-                        "node_id": item["node_id"],
-                        "output_name": item.get("output_name"),
-                        "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
-                        "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
-                        "dataset_name": item["dataset_name"],
-                        "artifact_prefix": item["artifact_prefix"],
-                        "output_format": materialized.get("output_format") or item["output_format"],
-                        "partition_columns": materialized.get("partition_by") or item["partition_columns"],
-                        "row_count": delta_row_count,
-                        "write_mode_requested": materialized.get("write_mode_requested") or item.get("write_mode_requested"),
-                        "write_mode_resolved": materialized.get("write_mode_resolved") or item.get("write_mode_resolved"),
-                        "runtime_write_mode": resolved_runtime_write_mode,
-                        "pk_columns": materialized.get("pk_columns") or item.get("pk_columns") or [],
-                        "post_filtering_column": materialized.get("post_filtering_column") or item.get("post_filtering_column"),
-                        "write_policy_hash": materialized.get("write_policy_hash") or item.get("write_policy_hash"),
-                        "has_incremental_input": (
-                            materialized.get("has_incremental_input")
-                            if materialized.get("has_incremental_input") is not None
-                            else item.get("has_incremental_input")
-                        ),
-                        "incremental_inputs_have_additive_updates": (
-                            materialized.get("incremental_inputs_have_additive_updates")
-                            if materialized.get("incremental_inputs_have_additive_updates") is not None
-                            else item.get("incremental_inputs_have_additive_updates")
-                        ),
-                        "columns": item["columns"],
-                        "rows": item["rows"],
-                        "sample_row_count": item["sample_row_count"],
-                        "column_stats": item["column_stats"],
-                    }
-                )
+                return
 
-            if lock:
-                lock.raise_if_lost()
-            commit_id = await self.lakefs_client.commit(
-                repository=artifact_repo,
-                branch=run_branch,
-                message=f"Build pipeline outputs {job.db_name}/{pipeline_ref} ({job.job_id})",
-                metadata={
-                    "pipeline_id": pipeline_ref,
-                    "pipeline_job_id": job.job_id,
-                    "db_name": job.db_name,
-                    "mode": "deploy",
-                },
-            )
-
-            if lock:
-                lock.raise_if_lost()
-            merge_commit_id = await self.lakefs_client.merge(
-                repository=artifact_repo,
-                source_ref=run_branch,
-                destination_branch=base_branch,
-                message=f"Publish pipeline outputs {job.db_name}/{pipeline_ref} ({job.job_id})",
-                metadata={
-                    "pipeline_id": pipeline_ref,
-                    "pipeline_job_id": job.job_id,
-                    "db_name": job.db_name,
-                    "mode": "deploy",
-                    "run_branch": run_branch,
-                    "run_commit_id": commit_id,
-                },
-                allow_empty=False,
-            )
-
-            try:
-                await self.lakefs_client.delete_branch(repository=artifact_repo, name=run_branch)
-            except Exception as exc:
-                logger.info("Failed to delete run branch %s after merge: %s", run_branch, exc)
-
-            build_outputs: List[Dict[str, Any]] = []
-            for item in staged_outputs:
-                artifact_prefix = str(item.get("artifact_prefix") or "").lstrip("/")
-                artifact_key = build_s3_uri(artifact_repo, f"{merge_commit_id}/{artifact_prefix}")
-                dataset_name = str(item.get("dataset_name") or "")
-                schema_columns = item.get("columns") if isinstance(item.get("columns"), list) else []
-                output_sample = item.get("rows") if isinstance(item.get("rows"), list) else []
-                delta_row_count = int(item.get("row_count") or 0)
-
-                dataset = await self.dataset_registry.get_dataset_by_name(
-                    db_name=job.db_name,
-                    name=dataset_name,
-                    branch=base_branch,
-                )
-                resolved_runtime_write_mode = str(item.get("runtime_write_mode") or output_write_mode)
-                total_row_count = delta_row_count
-                if resolved_runtime_write_mode == "append" and dataset:
-                    previous = await self.dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
-                    if previous and previous.row_count is not None:
-                        total_row_count = int(previous.row_count) + delta_row_count
-                if not dataset:
-                    dataset = await self.dataset_registry.create_dataset(
-                        db_name=job.db_name,
-                        name=dataset_name,
-                        description=None,
-                        source_type="pipeline",
-                        source_ref=pipeline_ref,
-                        schema_json={"columns": schema_columns},
-                        branch=base_branch,
-                    )
-                version = await self.dataset_registry.add_version(
-                    dataset_id=dataset.dataset_id,
-                    lakefs_commit_id=merge_commit_id,
-                    artifact_key=artifact_key,
-                    row_count=total_row_count,
-                    sample_json={
-                        "columns": schema_columns,
-                        "rows": output_sample,
-                        "row_count": total_row_count,
-                        "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
-                        "write_mode_requested": item.get("write_mode_requested"),
-                        "write_mode_resolved": item.get("write_mode_resolved"),
-                        "runtime_write_mode": resolved_runtime_write_mode,
-                        "pk_columns": item.get("pk_columns") or [],
-                        "write_policy_hash": item.get("write_policy_hash"),
-                        "has_incremental_input": item.get("has_incremental_input"),
-                        "incremental_inputs_have_additive_updates": item.get(
-                            "incremental_inputs_have_additive_updates"
-                        ),
-                        "sample_row_count": len(output_sample),
-                        "column_stats": item.get("column_stats") or {},
-                    },
-                    schema_json={"columns": schema_columns},
-                )
-                objectify_job_id = await self._maybe_enqueue_objectify_job(
-                    dataset=dataset,
-                    version=version,
-                )
-                relationship_job_ids = await self._maybe_enqueue_relationship_jobs(
-                    dataset=dataset,
-                    version=version,
-                )
-
-                build_outputs.append(
-                    {
-                        "node_id": item.get("node_id"),
-                        "output_name": item.get("output_name"),
-                        "output_kind": item.get("output_kind", OUTPUT_KIND_DATASET),
-                        "output_metadata": item.get("output_metadata") if isinstance(item.get("output_metadata"), dict) else {},
-                        "dataset_name": dataset_name,
-                        "artifact_key": artifact_key,
-                        "row_count": total_row_count,
-                        "delta_row_count": delta_row_count if resolved_runtime_write_mode == "append" else None,
-                        "write_mode_requested": item.get("write_mode_requested"),
-                        "write_mode_resolved": item.get("write_mode_resolved"),
-                        "runtime_write_mode": resolved_runtime_write_mode,
-                        "pk_columns": item.get("pk_columns") or [],
-                        "post_filtering_column": item.get("post_filtering_column"),
-                        "write_policy_hash": item.get("write_policy_hash"),
-                        "has_incremental_input": item.get("has_incremental_input"),
-                        "incremental_inputs_have_additive_updates": item.get(
-                            "incremental_inputs_have_additive_updates"
-                        ),
-                        "lakefs_commit_id": merge_commit_id,
-                        "lakefs_branch": base_branch,
-                        "objectify_job_id": objectify_job_id,
-                        "relationship_job_ids": relationship_job_ids,
-                    }
-                )
-
-                parsed = parse_s3_uri(artifact_key)
-                if parsed:
-                    bucket, key = parsed
-
-                    async def _record_pipeline_output_lineage() -> None:
-                        await self.lineage.record_link(  # type: ignore[union-attr]
-                            from_node_id=LineageStore.node_aggregate("Pipeline", pipeline_ref),
-                            to_node_id=LineageStore.node_artifact("s3", bucket, key),
-                            edge_type=EDGE_PIPELINE_OUTPUT_STORED,
-                            occurred_at=utcnow(),
-                            db_name=job.db_name,
-                            edge_metadata={
-                                "db_name": job.db_name,
-                                "pipeline_id": pipeline_ref,
-                                "artifact_key": artifact_key,
-                                "dataset_name": dataset_name,
-                                "node_id": item.get("node_id"),
-                                "lakefs_commit_id": merge_commit_id,
-                                "lakefs_branch": base_branch,
-                            },
-                        )
-
-                    await record_lineage_or_raise(
-                        lineage_store=self.lineage,
-                        required=self.lineage_required,
-                        record_call=_record_pipeline_output_lineage,
-                        logger=logger,
-                        operation="pipeline_worker.deploy.pipeline_output_stored",
-                        zone=RuntimeZone.CORE,
-                        context={
-                            "db_name": job.db_name,
-                            "pipeline_id": pipeline_ref,
-                            "artifact_key": artifact_key,
-                            "dataset_name": dataset_name,
-                            "node_id": item.get("node_id"),
-                        },
-                    )
-
-            await record_build(
-                status="DEPLOYED",
-                output_json={
-                    "outputs": build_outputs,
-                    "definition_hash": job.definition_hash,
-                    "branch": base_branch,
-                    "execution_semantics": execution_semantics,
-                    "input_snapshots": input_snapshots,
-                    "lakefs": {
-                        "repository": artifact_repo,
-                        "base_branch": base_branch,
-                        "run_branch": run_branch,
-                        "commit_id": commit_id,
-                        "merge_commit_id": merge_commit_id,
-                    },
-                },
-                deployed_commit_id=merge_commit_id,
-            )
-
-            watermark_update: Optional[Dict[str, Any]] = None
-            if (
-                execution_semantics in {"incremental", "streaming"}
-                and resolved_pipeline_id
-                and input_snapshots
-            ):
-                next_watermark = (
-                    _max_watermark_from_snapshots(input_snapshots, watermark_column=watermark_column)
-                    if watermark_column
-                    else None
-                )
-                next_watermark_keys = (
-                    _collect_watermark_keys_from_snapshots(
-                        input_snapshots,
-                        watermark_column=watermark_column,
-                        watermark_value=next_watermark,
-                    )
-                    if watermark_column and next_watermark is not None
-                    else []
-                )
-                input_commit_map = _collect_input_commit_map(input_snapshots)
-                if (next_watermark is not None or input_commit_map) and self.pipeline_registry:
-                    watermarks_payload: Dict[str, Any] = {}
-                    if watermark_column:
-                        watermarks_payload["watermark_column"] = watermark_column
-                        if next_watermark is not None:
-                            watermarks_payload["watermark_value"] = next_watermark
-                        elif previous_watermark is not None:
-                            watermarks_payload["watermark_value"] = previous_watermark
-                        merged_keys: list[str] = []
-                        if next_watermark is not None:
-                            if (
-                                previous_watermark is not None
-                                and previous_watermark_keys
-                                and _watermark_values_match(previous_watermark, next_watermark)
-                            ):
-                                merged_keys = [*previous_watermark_keys, *next_watermark_keys]
-                            else:
-                                merged_keys = list(next_watermark_keys)
-                        elif previous_watermark is not None and previous_watermark_keys:
-                            merged_keys = list(previous_watermark_keys)
-                        if merged_keys:
-                            deduped_keys: list[str] = []
-                            seen_keys: set[str] = set()
-                            for item in merged_keys:
-                                if item in seen_keys:
-                                    continue
-                                seen_keys.add(item)
-                                deduped_keys.append(item)
-                            watermarks_payload["watermark_keys"] = deduped_keys
-                    if input_commit_map:
-                        watermarks_payload["input_commits"] = input_commit_map
-                    try:
-                        await self.pipeline_registry.upsert_watermarks(
-                            pipeline_id=resolved_pipeline_id,
-                            branch=job.branch or "main",
-                            watermarks=watermarks_payload,
-                        )
-                        watermark_update = watermarks_payload
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to persist pipeline watermarks (pipeline_id=%s): %s",
-                            resolved_pipeline_id,
-                            exc,
-                        )
-
-            await record_run(
-                job_id=job.job_id,
-                mode="deploy",
-                status="DEPLOYED",
-                node_id=job.node_id,
-                input_lakefs_commits=input_commit_payload,
-                output_lakefs_commit_id=merge_commit_id,
-                output_json={
-                    "outputs": build_outputs,
-                    "definition_hash": job.definition_hash,
-                    "branch": base_branch,
-                    "execution_semantics": execution_semantics,
-                    "pipeline_spec_hash": pipeline_spec_hash,
-                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                    "code_version": code_version,
-                    "spark_conf": spark_conf,
-                    "input_snapshots": input_snapshots,
-                    "watermarks": watermark_update,
-                    "lakefs": {
-                        "repository": artifact_repo,
-                        "base_branch": base_branch,
-                        "run_branch": run_branch,
-                        "commit_id": commit_id,
-                        "merge_commit_id": merge_commit_id,
-                    },
-                },
-                finished_at=utcnow(),
-            )
-            await emit_job_event(
-                status="DEPLOYED",
-                lakefs={
-                    "repository": artifact_repo,
-                    "base_branch": base_branch,
-                    "run_branch": run_branch,
-                    "commit_id": commit_id,
-                    "merge_commit_id": merge_commit_id,
-                },
-                output={"outputs": build_outputs},
+            await self._run_deploy_mode(
+                job=job,
+                lock=lock,
+                tables=tables,
+                target_node_ids=target_node_ids,
+                output_nodes=output_nodes,
+                definition=definition,
+                declared_outputs=declared_outputs,
+                pipeline_ref=pipeline_ref,
+                run_ref=run_ref,
+                execution_semantics=execution_semantics,
+                diff_empty_inputs=diff_empty_inputs,
+                has_incremental_input=has_incremental_input,
+                incremental_inputs_have_additive_updates=incremental_inputs_have_additive_updates,
+                preview_limit=preview_limit,
+                temp_dirs=temp_dirs,
+                persisted_dfs=persisted_dfs,
+                input_snapshots=input_snapshots,
+                input_commit_payload=input_commit_payload,
+                inputs_payload=inputs_payload,
+                pipeline_spec_hash=pipeline_spec_hash,
+                pipeline_spec_commit_id=pipeline_spec_commit_id,
+                code_version=code_version,
+                spark_conf=spark_conf,
+                resolved_pipeline_id=resolved_pipeline_id,
+                previous_watermark=previous_watermark,
+                previous_watermark_keys=previous_watermark_keys,
+                watermark_column=watermark_column,
+                record_build=record_build,
+                record_run=record_run,
+                record_artifact=record_artifact,
+                emit_job_event=emit_job_event,
             )
         except Exception as exc:
-            execution_payload = self._build_error_payload(
-                message="Pipeline execution failed",
-                errors=[str(exc)],
-                code=ErrorCode.INTERNAL_ERROR,
-                category=ErrorCategory.INTERNAL,
-                status_code=500,
-                external_code="PIPELINE_EXECUTION_FAILED",
-                stage="execution",
+            await self._record_execution_failure(
                 job=job,
-                context={"exception_type": exc.__class__.__name__},
+                exc=exc,
+                is_preview=is_preview,
+                is_build=is_build,
+                run_mode=run_mode,
+                input_commit_payload=input_commit_payload,
+                record_preview=record_preview,
+                record_build=record_build,
+                record_run=record_run,
+                emit_job_event=emit_job_event,
             )
-            if is_preview:
-                await record_preview(
-                    status="FAILED",
-                    row_count=0,
-                    sample_json=execution_payload,
-                    job_id=job.job_id,
-                    node_id=job.node_id,
-                )
-            elif not is_build:
-                await record_build(
-                    status="FAILED",
-                    output_json=execution_payload,
-                )
-            await record_run(
-                job_id=job.job_id,
-                mode=run_mode,
-                status="FAILED",
-                node_id=job.node_id,
-                sample_json=execution_payload if is_preview else None,
-                output_json=execution_payload if not is_preview else None,
-                input_lakefs_commits=input_commit_payload,
-                finished_at=utcnow(),
-            )
-            await emit_job_event(status="FAILED", errors=[str(exc)])
-            logger.exception("Pipeline execution failed: %s", exc)
             raise
         finally:
-            if lock:
-                await lock.release()
-            for path in temp_dirs:
-                shutil.rmtree(path, ignore_errors=True)
-            if _PYSPARK_AVAILABLE and persisted_dfs:
-                for df in persisted_dfs:
-                    try:
-                        df.unpersist(blocking=False)
-                    except Exception as exc:
-                        logger.warning("Failed to unpersist persisted dataframe: %s", exc, exc_info=True)
-            # Restore any per-job overrides so the next run starts from the worker defaults.
-            if self.spark and prev_spark_conf:
-                for key, value in prev_spark_conf.items():
-                    try:
-                        if value is None:
-                            self.spark.conf.unset(key)
-                        else:
-                            self.spark.conf.set(key, value)
-                    except Exception as exc:
-                        # Best-effort restore; some conf keys may be non-modifiable.
-                        logger.warning(
-                            "Failed to restore Spark conf key %s: %s",
-                            key,
-                            exc,
-                            exc_info=True,
-                        )
-            self.cast_mode = prev_cast_mode
+            await self._cleanup_execution_resources(
+                lock=lock,
+                temp_dirs=temp_dirs,
+                persisted_dfs=persisted_dfs,
+                prev_spark_conf=prev_spark_conf,
+                prev_cast_mode=prev_cast_mode,
+            )
 
     async def _maybe_enqueue_objectify_job(self, *, dataset, version) -> Optional[str]:
         if not self.objectify_registry:
@@ -3563,18 +4576,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             raise ValueError("virtual output refresh_mode must be one of: on_read|scheduled")
         dataset_style_keys = [
             key
-            for key in (
-                "write_mode",
-                "writeMode",
-                "primary_key_columns",
-                "primaryKeyColumns",
-                "post_filtering_column",
-                "postFilteringColumn",
-                "output_format",
-                "outputFormat",
-                "partition_by",
-                "partitionBy",
-            )
+            for key in ("write_mode", "writeMode", "primary_key_columns", "primaryKeyColumns", "post_filtering_column", "postFilteringColumn", "output_format", "outputFormat", "partition_by", "partitionBy")
             if output_metadata.get(key) not in (None, "", [])
         ]
         if dataset_style_keys:
@@ -3585,28 +4587,21 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if not self.storage:
             raise RuntimeError("Storage service not available")
         await self.storage.create_bucket(artifact_bucket)
-
         normalized_prefix = (prefix or "").lstrip("/").rstrip("/")
         if not normalized_prefix:
             raise ValueError("prefix is required")
-
         resolved_write_mode = str(write_mode or "overwrite").strip().lower() or "overwrite"
         if resolved_write_mode not in {"overwrite", "append"}:
             raise ValueError("write_mode must be overwrite or append")
-
         if resolved_write_mode == "overwrite":
             await self.storage.delete_prefix(artifact_bucket, normalized_prefix)
-
         manifest_name = "virtual_manifest.json"
         if resolved_write_mode == "append":
             unique_prefix = str(file_prefix or "").strip().replace("/", "_") or uuid4().hex[:12]
             manifest_name = f"{unique_prefix}_virtual_manifest.json"
-
         manifest_key = f"{normalized_prefix}/{manifest_name}"
-        resolved_row_count_hint = (
-            int(row_count_hint)
-            if row_count_hint is not None
-            else int(await self._run_spark(lambda: df.count(), label=f"count:virtual:{normalized_prefix}"))
+        resolved_row_count_hint = int(row_count_hint) if row_count_hint is not None else int(
+            await self._run_spark(lambda: df.count(), label=f"count:virtual:{normalized_prefix}")
         )
         manifest = {
             "output_kind": OUTPUT_KIND_VIRTUAL,
@@ -3926,66 +4921,121 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 keys.append(str(value))
         return keys
 
-    async def _load_input_dataframe(
+    def _build_dataset_input_snapshot(
         self,
-        db_name: str,
-        metadata: Dict[str, Any],
-        temp_dirs: list[str],
-        branch: Optional[str],
         *,
         node_id: str,
-        input_snapshots: Optional[list[dict[str, Any]]] = None,
-        previous_commit_id: Optional[str] = None,
-        use_lakefs_diff: bool = False,
-        watermark_column: Optional[str] = None,
-        watermark_after: Optional[Any] = None,
-        watermark_keys: Optional[list[str]] = None,
+        context: _DatasetInputLoadContext,
+        lakefs_commit_id: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "node_id": node_id,
+            "dataset_id": context.dataset.dataset_id,
+            "dataset_name": context.dataset.name,
+            "dataset_branch": context.resolved_branch,
+            "requested_dataset_branch": context.requested_branch,
+            "used_fallback": context.used_fallback,
+            "lakefs_commit_id": lakefs_commit_id,
+            "version_id": context.version.version_id,
+            "artifact_key": context.version.artifact_key,
+        }
+
+    def _annotate_diff_snapshot(
+        self,
+        *,
+        snapshot: Dict[str, Any],
+        previous_commit_id: Optional[str],
+        diff_ok: bool,
+        diff_paths_count: int,
+    ) -> None:
+        snapshot.update(
+            {
+                "previous_commit_id": previous_commit_id,
+                "diff_requested": True,
+                "diff_ok": diff_ok,
+                "diff_paths_count": diff_paths_count,
+                "diff_empty": bool(diff_ok and diff_paths_count == 0),
+            }
+        )
+
+    def _append_input_snapshot(
+        self,
+        *,
+        input_snapshots: Optional[list[dict[str, Any]]],
+        snapshot: Optional[dict[str, Any]],
+    ) -> None:
+        if input_snapshots is not None and snapshot is not None:
+            input_snapshots.append(snapshot)
+
+    async def _load_external_input_dataframe_with_snapshot(
+        self,
+        *,
+        read_config: Dict[str, Any],
+        node_id: str,
+        temp_dirs: list[str],
+        input_snapshots: Optional[list[dict[str, Any]]],
     ) -> DataFrame:
-        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
+        read_mode = _resolve_external_read_mode(read_config=read_config)
+        df = await self._run_spark(
+            lambda: self._load_external_input_dataframe(read_config, node_id=node_id, temp_dirs=temp_dirs),
+            label=f"external_input:{node_id}",
+        )
+        if input_snapshots is None:
+            return df
+
+        fmt = (
+            str(
+                read_config.get("format")
+                or read_config.get("file_format")
+                or read_config.get("fileFormat")
+                or ""
+            )
+            .strip()
+            .lower()
+            or None
+        )
+        options = self._normalize_read_options(read_config)
+        stream_trigger_mode: Optional[str] = None
+        stream_timeout_seconds: Optional[int] = None
+        if read_mode == "streaming":
+            stream_trigger_mode = _resolve_streaming_trigger_mode(
+                read_config=read_config,
+                default_mode=self.spark_streaming_default_trigger,
+            )
+            stream_timeout_seconds = _resolve_streaming_timeout_seconds(
+                read_config=read_config,
+                default_seconds=self.spark_streaming_await_timeout_seconds,
+            )
+        input_snapshots.append(
+            {
+                "node_id": node_id,
+                "source_type": "external",
+                "read_mode": read_mode,
+                "format": fmt,
+                "stream_trigger_mode": stream_trigger_mode,
+                "stream_timeout_seconds": stream_timeout_seconds,
+                "options": self._mask_sensitive_options(options),
+            }
+        )
+        return df
+
+    async def _resolve_dataset_input_load_context(
+        self,
+        *,
+        db_name: str,
+        node_id: str,
+        selection: Any,
+        input_snapshots: Optional[list[dict[str, Any]]],
+    ) -> Tuple[_DatasetInputLoadContext, Optional[dict[str, Any]]]:
         dataset_id = selection.dataset_id
         dataset_name = selection.dataset_name
         requested_branch = selection.requested_branch
-
-        read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
-
-        # External inputs (no DatasetRegistry selection) are loaded directly via Spark read config.
-        if not dataset_id and not dataset_name:
-            read_mode = _resolve_external_read_mode(read_config=read_config)
-            df = await self._run_spark(
-                lambda: self._load_external_input_dataframe(read_config, node_id=node_id, temp_dirs=temp_dirs),
-                label=f"external_input:{node_id}",
-            )
-            if input_snapshots is not None:
-                fmt = str(read_config.get("format") or read_config.get("file_format") or read_config.get("fileFormat") or "").strip().lower() or None
-                options = self._normalize_read_options(read_config)
-                stream_trigger_mode: Optional[str] = None
-                stream_timeout_seconds: Optional[int] = None
-                if read_mode == "streaming":
-                    stream_trigger_mode = _resolve_streaming_trigger_mode(
-                        read_config=read_config,
-                        default_mode=self.spark_streaming_default_trigger,
-                    )
-                    stream_timeout_seconds = _resolve_streaming_timeout_seconds(
-                        read_config=read_config,
-                        default_seconds=self.spark_streaming_await_timeout_seconds,
-                    )
-                input_snapshots.append(
-                    {
-                        "node_id": node_id,
-                        "source_type": "external",
-                        "read_mode": read_mode,
-                        "format": fmt,
-                        "stream_trigger_mode": stream_trigger_mode,
-                        "stream_timeout_seconds": stream_timeout_seconds,
-                        "options": self._mask_sensitive_options(options),
-                    }
-                )
-            return df
 
         if not self.dataset_registry:
             raise RuntimeError("Dataset registry not initialized")
         if not dataset_id and not dataset_name:
             raise ValueError(f"Input node {node_id} is missing dataset selection")
+
         resolution = await resolve_dataset_version(
             self.dataset_registry,
             db_name=db_name,
@@ -4004,24 +5054,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 f"Input node {node_id} dataset has no versions in requested/fallback branches (datasetName={dataset.name} requested_branch={requested_branch})"
             )
         if not version.artifact_key:
-            raise RuntimeError(f"Input node {node_id} dataset version has no artifact_key (dataset_id={dataset.dataset_id})")
-
-        resolved_branch_value = resolved_branch or dataset.branch or requested_branch
-        used_fallback = resolution.used_fallback
-
-        snapshot: Optional[dict[str, Any]] = None
-        if input_snapshots is not None:
-            snapshot = {
-                "node_id": node_id,
-                "dataset_id": dataset.dataset_id,
-                "dataset_name": dataset.name,
-                "dataset_branch": resolved_branch_value,
-                "requested_dataset_branch": requested_branch,
-                "used_fallback": used_fallback,
-                "lakefs_commit_id": version.lakefs_commit_id,
-                "version_id": version.version_id,
-                "artifact_key": version.artifact_key,
-            }
+            raise RuntimeError(
+                f"Input node {node_id} dataset version has no artifact_key (dataset_id={dataset.dataset_id})"
+            )
 
         parsed = parse_s3_uri(version.artifact_key)
         if not parsed:
@@ -4030,181 +5065,262 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             )
         bucket, key = parsed
         current_commit_id = str(version.lakefs_commit_id or "").strip()
-        artifact_prefix = self._strip_commit_prefix(key, current_commit_id)
-        dataset_branch_for_diff = safe_lakefs_ref(resolved_branch_value or "main")
-        diff_requested = bool(
-            use_lakefs_diff and previous_commit_id and current_commit_id and self.lakefs_client
+        resolved_branch_value = resolved_branch or dataset.branch or requested_branch
+
+        context = _DatasetInputLoadContext(
+            dataset=dataset,
+            version=version,
+            requested_branch=requested_branch,
+            resolved_branch=resolved_branch_value,
+            used_fallback=resolution.used_fallback,
+            bucket=bucket,
+            key=key,
+            current_commit_id=current_commit_id,
+            artifact_prefix=self._strip_commit_prefix(key, current_commit_id),
         )
-        if diff_requested:
-            diff_paths: List[str] = []
-            diff_ok = True
-            if previous_commit_id != current_commit_id:
-                diff_paths, diff_ok = await self._list_lakefs_diff_paths(
-                    repository=bucket,
-                    ref=dataset_branch_for_diff,
-                    since=previous_commit_id,
-                    prefix=artifact_prefix,
-                    node_id=node_id,
+        snapshot = (
+            self._build_dataset_input_snapshot(
+                node_id=node_id,
+                context=context,
+                lakefs_commit_id=version.lakefs_commit_id,
+            )
+            if input_snapshots is not None
+            else None
+        )
+        return context, snapshot
+
+    async def _load_full_dataset_input_dataframe(
+        self,
+        *,
+        context: _DatasetInputLoadContext,
+        metadata: Dict[str, Any],
+        temp_dirs: list[str],
+        node_id: str,
+    ) -> DataFrame:
+        source_type = str(getattr(context.dataset, "source_type", "") or "").strip().lower()
+        read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
+        if source_type == "media":
+            df = await self._load_media_prefix_dataframe(context.bucket, context.key, node_id=node_id)
+        else:
+            df = await self._load_artifact_dataframe(
+                context.bucket,
+                context.key,
+                temp_dirs,
+                read_config=read_config,
+            )
+        return self._apply_schema_casts(df, dataset=context.dataset, version=context.version)
+
+    async def _apply_input_watermark_and_snapshot(
+        self,
+        *,
+        df: DataFrame,
+        node_id: str,
+        snapshot: Optional[dict[str, Any]],
+        watermark_column: Optional[str],
+        watermark_after: Optional[Any],
+        watermark_keys: Optional[list[str]],
+        label_scope: Optional[str],
+        tolerate_max_errors: bool,
+        always_compute_watermark_max: bool,
+    ) -> DataFrame:
+        resolved_watermark_column = str(watermark_column or "").strip()
+        if not resolved_watermark_column:
+            return df
+        if resolved_watermark_column not in df.columns:
+            raise ValueError(
+                f"Input node {node_id} is missing watermark column '{resolved_watermark_column}'"
+            )
+        if snapshot is not None:
+            snapshot["watermark_column"] = resolved_watermark_column
+            if watermark_after is not None:
+                snapshot["watermark_after"] = watermark_after
+        df = self._apply_watermark_filter(
+            df,
+            watermark_column=resolved_watermark_column,
+            watermark_after=watermark_after,
+            watermark_keys=watermark_keys,
+        )
+
+        if not always_compute_watermark_max and snapshot is None:
+            return df
+
+        label_suffix = f"{label_scope}:{node_id}" if label_scope else node_id
+        if tolerate_max_errors:
+            try:
+                watermark_max = await self._run_spark(
+                    lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
+                    .collect()[0]["watermark_max"],
+                    label=f"watermark_max:{label_suffix}",
                 )
-            diff_paths_count = len(diff_paths)
-            parquet_paths = [path for path in diff_paths if path.endswith(".parquet")]
-            if snapshot is not None:
-                snapshot.update(
-                    {
-                        "previous_commit_id": previous_commit_id,
-                        "diff_requested": True,
-                        "diff_ok": diff_ok,
-                        "diff_paths_count": diff_paths_count,
-                        "diff_empty": bool(diff_ok and diff_paths_count == 0),
-                    }
+            except Exception as exc:
+                logger.warning(
+                    "Failed to compute watermark max for node %s (column=%s): %s",
+                    node_id,
+                    resolved_watermark_column,
+                    exc,
+                    exc_info=True,
                 )
-            if diff_ok and diff_paths_count == 0:
-                if snapshot is not None:
-                    input_snapshots.append(snapshot)
-                return self._empty_dataframe()
-            if parquet_paths:
-                df = await self._load_parquet_keys_dataframe(
-                    bucket=bucket,
-                    keys=[f"{current_commit_id}/{path.lstrip('/')}" for path in parquet_paths],
-                    temp_dirs=temp_dirs,
-                    prefix=f"{current_commit_id}/{artifact_prefix}".rstrip("/"),
-                )
-                df = self._apply_schema_casts(df, dataset=dataset, version=version)
-                if snapshot is not None:
-                    snapshot["diff_used"] = True
-                    snapshot["diff_parquet_paths"] = len(parquet_paths)
-                resolved_watermark_column = str(watermark_column or "").strip()
-                if resolved_watermark_column:
-                    if resolved_watermark_column not in df.columns:
-                        raise ValueError(
-                            f"Input node {node_id} is missing watermark column '{resolved_watermark_column}'"
-                        )
-                    df = self._apply_watermark_filter(
+                watermark_max = None
+        else:
+            watermark_max = await self._run_spark(
+                lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
+                .collect()[0]["watermark_max"],
+                label=f"watermark_max:{label_suffix}",
+            )
+
+        if snapshot is not None:
+            snapshot["watermark_max"] = watermark_max
+            if watermark_max is not None:
+                snapshot["watermark_keys"] = await self._run_spark(
+                    lambda: self._collect_watermark_keys(
                         df,
                         watermark_column=resolved_watermark_column,
-                        watermark_after=watermark_after,
-                        watermark_keys=watermark_keys,
-                    )
-                    if input_snapshots is not None:
-                        snapshot = {
-                            "node_id": node_id,
-                            "dataset_id": dataset.dataset_id,
-                            "dataset_name": dataset.name,
-                            "dataset_branch": resolved_branch_value,
-                            "requested_dataset_branch": requested_branch,
-                            "used_fallback": used_fallback,
-                            "lakefs_commit_id": current_commit_id,
-                            "previous_commit_id": previous_commit_id,
-                            "version_id": version.version_id,
-                            "artifact_key": version.artifact_key,
-                            "diff_requested": True,
-                            "diff_ok": diff_ok,
-                            "diff_paths_count": diff_paths_count,
-                            "diff_empty": bool(diff_ok and diff_paths_count == 0),
-                            "diff_used": True,
-                            "diff_parquet_paths": len(parquet_paths),
-                        }
-                        snapshot["watermark_column"] = resolved_watermark_column
-                        if watermark_after is not None:
-                            snapshot["watermark_after"] = watermark_after
-                        try:
-                            watermark_max = await self._run_spark(
-                                lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
-                                .collect()[0]["watermark_max"],
-                                label=f"watermark_max:diff:{node_id}",
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Failed to compute watermark max for node %s (column=%s): %s",
-                                node_id,
-                                resolved_watermark_column,
-                                exc,
-                                exc_info=True,
-                            )
-                            watermark_max = None
-                        snapshot["watermark_max"] = watermark_max
-                        if watermark_max is not None:
-                            snapshot["watermark_keys"] = await self._run_spark(
-                                lambda: self._collect_watermark_keys(
-                                    df,
-                                    watermark_column=resolved_watermark_column,
-                                    watermark_value=watermark_max,
-                                ),
-                                label=f"watermark_keys:diff:{node_id}",
-                            )
-                        input_snapshots.append(snapshot)
-                elif input_snapshots is not None:
-                    input_snapshots.append(
-                        {
-                            "node_id": node_id,
-                            "dataset_id": dataset.dataset_id,
-                            "dataset_name": dataset.name,
-                            "dataset_branch": resolved_branch_value,
-                            "requested_dataset_branch": requested_branch,
-                            "used_fallback": used_fallback,
-                            "lakefs_commit_id": current_commit_id,
-                            "previous_commit_id": previous_commit_id,
-                            "version_id": version.version_id,
-                            "artifact_key": version.artifact_key,
-                            "diff_requested": True,
-                            "diff_ok": diff_ok,
-                            "diff_paths_count": diff_paths_count,
-                            "diff_empty": bool(diff_ok and diff_paths_count == 0),
-                            "diff_used": True,
-                            "diff_parquet_paths": len(parquet_paths),
-                        }
-                    )
-                return df
+                        watermark_value=watermark_max,
+                    ),
+                    label=f"watermark_keys:{label_suffix}",
+                )
+        return df
+
+    async def _try_load_diff_input_dataframe(
+        self,
+        *,
+        context: _DatasetInputLoadContext,
+        node_id: str,
+        temp_dirs: list[str],
+        input_snapshots: Optional[list[dict[str, Any]]],
+        base_snapshot: Optional[dict[str, Any]],
+        previous_commit_id: Optional[str],
+        use_lakefs_diff: bool,
+        watermark_column: Optional[str],
+        watermark_after: Optional[Any],
+        watermark_keys: Optional[list[str]],
+    ) -> Optional[DataFrame]:
+        if not bool(use_lakefs_diff and previous_commit_id and context.current_commit_id and self.lakefs_client):
+            return None
+        diff_paths: List[str] = []
+        diff_ok = True
+        dataset_branch_for_diff = safe_lakefs_ref(context.resolved_branch or "main")
+        if previous_commit_id != context.current_commit_id:
+            diff_paths, diff_ok = await self._list_lakefs_diff_paths(
+                repository=context.bucket,
+                ref=dataset_branch_for_diff,
+                since=previous_commit_id,
+                prefix=context.artifact_prefix,
+                node_id=node_id,
+            )
+        diff_paths_count = len(diff_paths)
+        parquet_paths = [path for path in diff_paths if path.endswith(".parquet")]
+        if base_snapshot is not None:
+            self._annotate_diff_snapshot(
+                snapshot=base_snapshot,
+                previous_commit_id=previous_commit_id,
+                diff_ok=diff_ok,
+                diff_paths_count=diff_paths_count,
+            )
+        if diff_ok and diff_paths_count == 0:
+            self._append_input_snapshot(input_snapshots=input_snapshots, snapshot=base_snapshot)
+            return self._empty_dataframe()
+        if not parquet_paths:
             if diff_ok and diff_paths_count:
                 logger.warning(
                     "lakeFS diff returned %s paths without parquet data for input node %s; falling back to full load",
                     diff_paths_count,
                     node_id,
                 )
+            return None
+        df = await self._load_parquet_keys_dataframe(
+            bucket=context.bucket,
+            keys=[f"{context.current_commit_id}/{path.lstrip('/')}" for path in parquet_paths],
+            temp_dirs=temp_dirs,
+            prefix=f"{context.current_commit_id}/{context.artifact_prefix}".rstrip("/"),
+        )
+        df = self._apply_schema_casts(df, dataset=context.dataset, version=context.version)
+        diff_snapshot = dict(base_snapshot) if base_snapshot is not None else None
+        if diff_snapshot is not None:
+            diff_snapshot["lakefs_commit_id"] = context.current_commit_id
+            diff_snapshot["diff_used"] = True
+            diff_snapshot["diff_parquet_paths"] = len(parquet_paths)
+        df = await self._apply_input_watermark_and_snapshot(
+            df=df,
+            node_id=node_id,
+            snapshot=diff_snapshot,
+            watermark_column=watermark_column,
+            watermark_after=watermark_after,
+            watermark_keys=watermark_keys,
+            label_scope="diff",
+            tolerate_max_errors=True,
+            always_compute_watermark_max=False,
+        )
+        self._append_input_snapshot(input_snapshots=input_snapshots, snapshot=diff_snapshot)
+        return df
 
-        source_type = str(getattr(dataset, "source_type", "") or "").strip().lower()
+    async def _load_input_dataframe(
+        self,
+        db_name: str,
+        metadata: Dict[str, Any],
+        temp_dirs: list[str],
+        branch: Optional[str],
+        *,
+        node_id: str,
+        input_snapshots: Optional[list[dict[str, Any]]] = None,
+        previous_commit_id: Optional[str] = None,
+        use_lakefs_diff: bool = False,
+        watermark_column: Optional[str] = None,
+        watermark_after: Optional[Any] = None,
+        watermark_keys: Optional[list[str]] = None,
+    ) -> DataFrame:
+        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
+        dataset_id = selection.dataset_id
+        dataset_name = selection.dataset_name
         read_config = metadata.get("read") if isinstance(metadata.get("read"), dict) else {}
-        if source_type == "media":
-            df = await self._load_media_prefix_dataframe(bucket, key, node_id=node_id)
-        else:
-            df = await self._load_artifact_dataframe(bucket, key, temp_dirs, read_config=read_config)
-        df = self._apply_schema_casts(df, dataset=dataset, version=version)
 
-        resolved_watermark_column = str(watermark_column or "").strip()
-        if resolved_watermark_column:
-            if resolved_watermark_column not in df.columns:
-                raise ValueError(
-                    f"Input node {node_id} is missing watermark column '{resolved_watermark_column}'"
-                )
-            if snapshot is not None:
-                snapshot["watermark_column"] = resolved_watermark_column
-                if watermark_after is not None:
-                    snapshot["watermark_after"] = watermark_after
-            df = self._apply_watermark_filter(
-                df,
-                watermark_column=resolved_watermark_column,
-                watermark_after=watermark_after,
-                watermark_keys=watermark_keys,
+        if not dataset_id and not dataset_name:
+            return await self._load_external_input_dataframe_with_snapshot(
+                read_config=read_config,
+                node_id=node_id,
+                temp_dirs=temp_dirs,
+                input_snapshots=input_snapshots,
             )
-            watermark_max = await self._run_spark(
-                lambda: df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max"))
-                .collect()[0]["watermark_max"],
-                label=f"watermark_max:{node_id}",
-            )
-            if snapshot is not None:
-                snapshot["watermark_max"] = watermark_max
-                if watermark_max is not None:
-                    snapshot["watermark_keys"] = await self._run_spark(
-                        lambda: self._collect_watermark_keys(
-                            df,
-                            watermark_column=resolved_watermark_column,
-                            watermark_value=watermark_max,
-                        ),
-                        label=f"watermark_keys:{node_id}",
-                    )
 
-        if snapshot is not None:
-            input_snapshots.append(snapshot)
+        context, snapshot = await self._resolve_dataset_input_load_context(
+            db_name=db_name,
+            node_id=node_id,
+            selection=selection,
+            input_snapshots=input_snapshots,
+        )
+        diff_df = await self._try_load_diff_input_dataframe(
+            context=context,
+            node_id=node_id,
+            temp_dirs=temp_dirs,
+            input_snapshots=input_snapshots,
+            base_snapshot=snapshot,
+            previous_commit_id=previous_commit_id,
+            use_lakefs_diff=use_lakefs_diff,
+            watermark_column=watermark_column,
+            watermark_after=watermark_after,
+            watermark_keys=watermark_keys,
+        )
+        if diff_df is not None:
+            return diff_df
+
+        df = await self._load_full_dataset_input_dataframe(
+            context=context,
+            metadata=metadata,
+            temp_dirs=temp_dirs,
+            node_id=node_id,
+        )
+        df = await self._apply_input_watermark_and_snapshot(
+            df=df,
+            node_id=node_id,
+            snapshot=snapshot,
+            watermark_column=watermark_column,
+            watermark_after=watermark_after,
+            watermark_keys=watermark_keys,
+            label_scope=None,
+            tolerate_max_errors=False,
+            always_compute_watermark_max=True,
+        )
+        self._append_input_snapshot(input_snapshots=input_snapshots, snapshot=snapshot)
         return df
 
     def _preview_sampling_seed(self, job_id: str) -> int:
@@ -5379,24 +6495,22 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             label=f"read_local_file:{os.path.basename(file_path)}",
         )
 
-    async def _load_prefix_dataframe(
+    async def _collect_prefix_local_paths(
         self,
+        *,
         bucket: str,
         prefix: str,
         temp_dirs: list[str],
-        *,
-        read_config: Optional[Dict[str, Any]] = None,
-    ) -> DataFrame:
-        read_config = dict(read_config or {})
+    ) -> Tuple[Optional[str], List[str]]:
         objects = await self.storage.list_objects(bucket, prefix=prefix)
         keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
         data_keys = [key for key in keys if _is_data_object(key)]
         if not data_keys:
-            return self._empty_dataframe()
+            return None, []
 
         temp_dir = tempfile.mkdtemp(prefix="pipeline-input-")
         temp_dirs.append(temp_dir)
-        local_paths: list[str] = []
+        local_paths: List[str] = []
         normalized_prefix = str(prefix or "").lstrip("/").rstrip("/")
         if normalized_prefix:
             normalized_prefix = f"{normalized_prefix}/"
@@ -5412,7 +6526,17 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             local_path = os.path.join(temp_dir, rel_path)
             await self._download_object_to_path(bucket, key, local_path)
             local_paths.append(local_path)
+        return temp_dir, local_paths
 
+    async def _read_prefix_dataframe_from_local_paths(
+        self,
+        *,
+        temp_dir: str,
+        local_paths: List[str],
+        read_config: Dict[str, Any],
+        bucket: str,
+        prefix: str,
+    ) -> DataFrame:
         reader = self.spark.read
         options = self._normalize_read_options(read_config)
         schema_ddl = self._schema_ddl_from_read_config(read_config)
@@ -5467,6 +6591,30 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         extensions = sorted({os.path.splitext(path)[1] for path in local_paths if os.path.splitext(path)[1]})
         raise ValueError(
             f"Unsupported dataset artifact format in s3://{bucket}/{prefix} (extensions={','.join(extensions) or 'unknown'})"
+        )
+
+    async def _load_prefix_dataframe(
+        self,
+        bucket: str,
+        prefix: str,
+        temp_dirs: list[str],
+        *,
+        read_config: Optional[Dict[str, Any]] = None,
+    ) -> DataFrame:
+        read_config = dict(read_config or {})
+        temp_dir, local_paths = await self._collect_prefix_local_paths(
+            bucket=bucket,
+            prefix=prefix,
+            temp_dirs=temp_dirs,
+        )
+        if not temp_dir or not local_paths:
+            return self._empty_dataframe()
+        return await self._read_prefix_dataframe_from_local_paths(
+            temp_dir=temp_dir,
+            local_paths=local_paths,
+            read_config=read_config,
+            bucket=bucket,
+            prefix=prefix,
         )
 
     async def _download_object_to_path(self, bucket: str, key: str, local_path: str) -> None:

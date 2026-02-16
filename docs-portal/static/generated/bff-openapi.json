@@ -6368,16 +6368,6 @@
             }
           },
           {
-            "name": "preview",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Preview"
-            }
-          },
-          {
             "name": "branch",
             "in": "query",
             "required": false,

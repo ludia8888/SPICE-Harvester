@@ -50,6 +50,10 @@ jobs:
         run: |
           make PYTHON=python ${{ inputs.make-target }}
 
+      - name: Architecture guard
+        run: |
+          python scripts/architecture_guard.py
+
       - name: Enforce diff coverage on new lines
         if: ${{ inputs.make-target == 'backend-coverage' }}
         env:

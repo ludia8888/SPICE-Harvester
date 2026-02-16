@@ -406,6 +406,26 @@ def _normalize_field_moves(raw_value: Any) -> Dict[str, str]:
     return moves
 
 
+def _has_effective_pk_spec(spec: Dict[str, Any]) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    normalized = normalize_key_spec(spec.get("pk_spec") or {})
+    return bool(normalized.get("primary_key")) and bool(normalized.get("title_key"))
+
+
+def _has_effective_backing_source(spec: Dict[str, Any]) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    backing = spec.get("backing_source")
+    if not isinstance(backing, dict) or not backing:
+        return False
+    return bool(
+        str(backing.get("dataset_id") or "").strip()
+        or str(backing.get("ref") or "").strip()
+        or str(backing.get("kind") or "").strip()
+    )
+
+
 @trace_external_call("bff.object_type_contract.update_object_type_contract")
 async def update_object_type_contract(
     *,
@@ -523,6 +543,12 @@ async def update_object_type_contract(
             if set(prev_pk.get("title_key") or []) != set(pk_spec.get("title_key") or []):
                 pk_changed = True
 
+        bootstrap_contract_seed = not _has_effective_backing_source(existing_spec) and not _has_effective_pk_spec(
+            existing_spec
+        )
+        migration_backing_changed = backing_changed and not bootstrap_contract_seed
+        migration_pk_changed = pk_changed and not bootstrap_contract_seed
+
         migration_payload = payload.get("migration") if isinstance(payload.get("migration"), dict) else {}
         migration_approved = bool(migration_payload.get("approved")) if migration_payload else False
         reset_edits = bool(
@@ -550,7 +576,7 @@ async def update_object_type_contract(
                 if str(old_id).strip() and str(new_id).strip():
                     id_remap[str(old_id).strip()] = str(new_id).strip()
 
-        reindex_required = migration_approved and backing_changed
+        reindex_required = migration_approved and migration_backing_changed
         status_value_upper = str(status_value or "ACTIVE").strip().upper()
         if reindex_required and status_value_upper == "ACTIVE":
             if dataset is None or version is None:
@@ -642,7 +668,7 @@ async def update_object_type_contract(
 
         edit_impact = None
         edit_count = None
-        if pk_changed or impact_fields:
+        if migration_pk_changed or impact_fields:
             if impact_fields:
                 edit_impact = await dataset_registry.get_instance_edit_field_stats(
                     db_name=db_name,
@@ -657,7 +683,7 @@ async def update_object_type_contract(
                     class_id=class_id,
                     status="ACTIVE",
                 )
-        if pk_changed:
+        if migration_pk_changed:
             if edit_count and not reset_edits and not id_remap:
                 await dataset_registry.record_gate_result(
                     scope="object_type_migration",
@@ -665,8 +691,9 @@ async def update_object_type_contract(
                     subject_id=class_id,
                     status="FAIL",
                     details={
-                        "backing_changed": backing_changed,
-                        "pk_changed": pk_changed,
+                        "backing_changed": migration_backing_changed,
+                        "pk_changed": migration_pk_changed,
+                        "bootstrap_contract_seed": bootstrap_contract_seed,
                         "edit_count": edit_count,
                         "edit_impact": edit_impact,
                         "message": "PK 변경 시 편집 이력 초기화 필요",
@@ -679,15 +706,16 @@ async def update_object_type_contract(
                     external_code=ExternalErrorCode.OBJECT_TYPE_EDIT_RESET_REQUIRED,
                     extra={"edit_count": edit_count},
                 )
-        if (backing_changed or pk_changed) and not migration_approved:
+        if (migration_backing_changed or migration_pk_changed) and not migration_approved:
             await dataset_registry.record_gate_result(
                 scope="object_type_migration",
                 subject_type="object_type",
                 subject_id=class_id,
                 status="FAIL",
                 details={
-                    "backing_changed": backing_changed,
-                    "pk_changed": pk_changed,
+                    "backing_changed": migration_backing_changed,
+                    "pk_changed": migration_pk_changed,
+                    "bootstrap_contract_seed": bootstrap_contract_seed,
                     "message": "Migration approval required to change backing source or keys",
                 },
             )
@@ -696,7 +724,7 @@ async def update_object_type_contract(
                 "Migration approval required to change backing source or keys",
                 code=ErrorCode.CONFLICT,
                 external_code=ExternalErrorCode.OBJECT_TYPE_MIGRATION_REQUIRED,
-                extra={"backing_changed": backing_changed, "pk_changed": pk_changed},
+                extra={"backing_changed": migration_backing_changed, "pk_changed": migration_pk_changed},
             )
 
         edit_actions: Dict[str, Any] = {}
@@ -734,7 +762,7 @@ async def update_object_type_contract(
                 logging.getLogger(__name__).warning("Exception fallback at bff/services/object_type_contract_service.py:810", exc_info=True)
                 edit_actions["error"] = str(exc)
 
-        if pk_changed and id_remap and edit_count:
+        if migration_pk_changed and id_remap and edit_count:
             try:
                 remapped = await dataset_registry.remap_instance_edits(
                     db_name=db_name,
@@ -750,7 +778,7 @@ async def update_object_type_contract(
                 "id_remap": id_remap,
                 "remapped_edits": remapped,
             }
-        if pk_changed and reset_edits and edit_count:
+        if migration_pk_changed and reset_edits and edit_count:
             try:
                 cleared = await dataset_registry.clear_instance_edits(db_name=db_name, class_id=class_id)
             except Exception:
@@ -805,7 +833,7 @@ async def update_object_type_contract(
         reindex_job_id = None
         reindex_error = None
         if reindex_required and status_value_upper == "ACTIVE":
-            reason = "backing_and_pk_changed" if pk_changed else "backing_changed"
+            reason = "backing_and_pk_changed" if migration_pk_changed else "backing_changed"
             try:
                 reindex_job_id = await enqueue_objectify_job_for_mapping_spec(
                     objectify_registry=objectify_registry,
@@ -822,15 +850,16 @@ async def update_object_type_contract(
                 reindex_error = str(exc)
                 logger.warning("Failed to enqueue objectify reindex: %s", exc)
 
-        if backing_changed or pk_changed:
+        if migration_backing_changed or migration_pk_changed:
             await dataset_registry.record_gate_result(
                 scope="object_type_migration",
                 subject_type="object_type",
                 subject_id=class_id,
                 status="PASS",
                 details={
-                    "backing_changed": backing_changed,
-                    "pk_changed": pk_changed,
+                    "backing_changed": migration_backing_changed,
+                    "pk_changed": migration_pk_changed,
+                    "bootstrap_contract_seed": bootstrap_contract_seed,
                     "approved": True,
                     "edit_count": edit_count,
                     "reset_edits": reset_edits,
@@ -849,8 +878,9 @@ async def update_object_type_contract(
                     status="APPROVED" if migration_approved else "PENDING",
                     plan={
                         **(migration_payload or {}),
-                        "backing_changed": backing_changed,
-                        "pk_changed": pk_changed,
+                        "backing_changed": migration_backing_changed,
+                        "pk_changed": migration_pk_changed,
+                        "bootstrap_contract_seed": bootstrap_contract_seed,
                         "edit_count": edit_count,
                         "reset_edits": reset_edits,
                         "id_remap": id_remap or None,

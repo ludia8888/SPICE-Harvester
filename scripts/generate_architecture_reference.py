@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -12,6 +14,32 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ARCH_PATH = REPO_ROOT / "docs" / "ARCHITECTURE.md"
 COMPOSE_MAIN = REPO_ROOT / "docker-compose.full.yml"
+BACKEND_ROOT = REPO_ROOT / "backend"
+
+EXCLUDED_DIR_SEGMENTS = {"tests", "scripts", "examples", "perf", "__pycache__"}
+IO_IMPORT_PREFIXES = (
+    "httpx",
+    "requests",
+    "aiohttp",
+    "boto3",
+    "sqlalchemy",
+    "psycopg",
+    "psycopg2",
+    "redis",
+    "confluent_kafka",
+    "kafka",
+    "elasticsearch",
+    "opensearch",
+    "opensearchpy",
+    "pymongo",
+    "pyspark",
+    "pandas",
+)
+CORE_PATH_PREFIXES = (
+    "backend/shared/services/core/",
+    "backend/shared/utils/",
+    "backend/shared/interfaces/",
+)
 
 @dataclass
 class ComposeService:
@@ -20,6 +48,60 @@ class ComposeService:
     depends_on: List[str] = field(default_factory=list)
     extends_file: Optional[str] = None
     extends_service: Optional[str] = None
+
+
+@dataclass
+class _FunctionMetric:
+    file_rel: str
+    qualname: str
+    lineno: int
+    length: int
+    complexity: int
+
+
+@dataclass
+class _FileMetric:
+    file_rel: str
+    lines: int = 0
+    function_count: int = 0
+    class_count: int = 0
+    max_function_length: int = 0
+    max_function_complexity: int = 0
+
+
+@dataclass
+class _ClassMetric:
+    key: str
+    file_rel: str
+    simple_name: str
+    lineno: int
+    base_names: List[str]
+
+
+@dataclass
+class _ChecklistMetric:
+    index: int
+    label: str
+    numerator: int
+    denominator: int
+    target_percent: float
+    basis: str
+
+    @property
+    def ratio_percent(self) -> float:
+        if self.denominator <= 0:
+            return 0.0
+        return (self.numerator / self.denominator) * 100.0
+
+    @property
+    def status(self) -> str:
+        if self.ratio_percent <= self.target_percent:
+            return "PASS"
+        return "FAIL"
+
+    @property
+    def ratio_text(self) -> str:
+        return f"{self.numerator}/{self.denominator} ({self.ratio_percent:.2f}%)"
 
 
 def _strip_quotes(value: str) -> str:
@@ -435,11 +517,468 @@ def _render_router_summary(entries: Sequence[Tuple[str, str, str, str]]) -> str:
     )
 
 
+def _is_production_backend_file(path: Path) -> bool:
+    if path.suffix != ".py":
+        return False
+    try:
+        rel = path.relative_to(BACKEND_ROOT)
+    except ValueError:
+        return False
+    if len(rel.parts) < 2:
+        # Skip backend root-level helpers like conftest.py from architecture metrics.
+        return False
+    return not any(segment in EXCLUDED_DIR_SEGMENTS for segment in rel.parts)
+
+
+def _iter_production_backend_python_files() -> List[Path]:
+    files = [p for p in BACKEND_ROOT.rglob("*.py") if _is_production_backend_file(p)]
+    return sorted(files, key=lambda item: str(item.relative_to(REPO_ROOT)))
+
+
+def _top_module(import_name: Optional[str]) -> str:
+    if not import_name:
+        return ""
+    return import_name.split(".", 1)[0].strip()
+
+
+def _extract_base_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id.strip()
+    if isinstance(node, ast.Attribute):
+        return str(node.attr).strip()
+    if isinstance(node, ast.Subscript):
+        return _extract_base_name(node.value)
+    if isinstance(node, ast.Call):
+        return _extract_base_name(node.func)
+    return ""
+
+
+def _estimate_function_complexity(node: ast.AST) -> int:
+    complexity = 1
+    branch_nodes = (
+        ast.If,
+        ast.For,
+        ast.AsyncFor,
+        ast.While,
+        ast.Try,
+        ast.With,
+        ast.AsyncWith,
+        ast.IfExp,
+        ast.Match,
+    )
+    for child in ast.walk(node):
+        if isinstance(child, branch_nodes):
+            complexity += 1
+        elif isinstance(child, ast.ExceptHandler):
+            complexity += 1
+        elif isinstance(child, ast.BoolOp):
+            complexity += max(0, len(child.values) - 1)
+        elif isinstance(child, ast.comprehension):
+            complexity += 1
+    return complexity
+
+
+def _find_scc_components(graph: Dict[str, set[str]]) -> List[List[str]]:
+    index = 0
+    stack: List[str] = []
+    on_stack: set[str] = set()
+    indices: Dict[str, int] = {}
+    lowlink: Dict[str, int] = {}
+    components: List[List[str]] = []
+
+    def strongconnect(node: str) -> None:
+        nonlocal index
+        indices[node] = index
+        lowlink[node] = index
+        index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for neighbor in graph.get(node, set()):
+            if neighbor not in indices:
+                strongconnect(neighbor)
+                lowlink[node] = min(lowlink[node], lowlink[neighbor])
+            elif neighbor in on_stack:
+                lowlink[node] = min(lowlink[node], indices[neighbor])
+
+        if lowlink[node] != indices[node]:
+            return
+
+        component: List[str] = []
+        while stack:
+            w = stack.pop()
+            on_stack.discard(w)
+            component.append(w)
+            if w == node:
+                break
+        components.append(sorted(component))
+
+    for node in sorted(graph.keys()):
+        if node not in indices:
+            strongconnect(node)
+
+    return components
+
+
+def _render_architecture_quality_checklist() -> str:
+    files = _iter_production_backend_python_files()
+    if not files:
+        return "- No backend Python files found for checklist analysis.\n"
+
+    package_names = sorted(
+        {
+            str(path.relative_to(BACKEND_ROOT).parts[0])
+            for path in files
+            if len(path.relative_to(BACKEND_ROOT).parts) >= 2
+        }
+    )
+    internal_packages = set(package_names)
+    worker_packages = {
+        pkg for pkg in package_names if pkg.endswith("_worker")
+    } | {"pipeline_scheduler", "connector_trigger_service", "message_relay"}
+
+    package_edges: Dict[str, set[str]] = {pkg: set() for pkg in package_names}
+    reverse_edges: Dict[str, set[str]] = {pkg: set() for pkg in package_names}
+    total_internal_cross_imports = 0
+    layer_leak_imports: List[Tuple[str, int, str, str]] = []
+    io_core_direct_files: set[str] = set()
+    core_file_count = 0
+
+    file_metrics: Dict[str, _FileMetric] = {}
+    function_metrics: List[_FunctionMetric] = []
+    class_metrics: Dict[str, _ClassMetric] = {}
+    class_name_to_keys: Dict[str, List[str]] = defaultdict(list)
+
+    for path in files:
+        rel_repo = path.relative_to(REPO_ROOT).as_posix()
+        rel_backend = path.relative_to(BACKEND_ROOT)
+        file_rel = rel_backend.as_posix()
+        src_pkg = str(rel_backend.parts[0])
+
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        lines = len(text.splitlines())
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+
+        file_stat = _FileMetric(file_rel=file_rel, lines=lines)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    dst_pkg = _top_module(alias.name)
+                    if dst_pkg in internal_packages and dst_pkg != src_pkg:
+                        total_internal_cross_imports += 1
+                        package_edges[src_pkg].add(dst_pkg)
+                        reverse_edges[dst_pkg].add(src_pkg)
+                        if src_pkg == "shared" and dst_pkg != "shared":
+                            layer_leak_imports.append((file_rel, node.lineno, src_pkg, dst_pkg))
+                        elif src_pkg in worker_packages and dst_pkg == "bff":
+                            layer_leak_imports.append((file_rel, node.lineno, src_pkg, dst_pkg))
+                    if rel_repo.startswith(CORE_PATH_PREFIXES) and alias.name.startswith(IO_IMPORT_PREFIXES):
+                        io_core_direct_files.add(file_rel)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level > 0:
+                    continue
+                dst_pkg = _top_module(node.module)
+                if dst_pkg in internal_packages and dst_pkg != src_pkg:
+                    total_internal_cross_imports += 1
+                    package_edges[src_pkg].add(dst_pkg)
+                    reverse_edges[dst_pkg].add(src_pkg)
+                    if src_pkg == "shared" and dst_pkg != "shared":
+                        layer_leak_imports.append((file_rel, node.lineno, src_pkg, dst_pkg))
+                    elif src_pkg in worker_packages and dst_pkg == "bff":
+                        layer_leak_imports.append((file_rel, node.lineno, src_pkg, dst_pkg))
+                if rel_repo.startswith(CORE_PATH_PREFIXES) and (node.module or "").startswith(IO_IMPORT_PREFIXES):
+                    io_core_direct_files.add(file_rel)
+
+        if rel_repo.startswith(CORE_PATH_PREFIXES):
+            core_file_count += 1
+
+        def visit(node: ast.AST, class_stack: List[str]) -> None:
+            if isinstance(node, ast.ClassDef):
+                file_stat.class_count += 1
+                class_key = f"{file_rel}:{'.'.join(class_stack + [node.name])}:{node.lineno}"
+                base_names = [
+                    base_name
+                    for base_name in (_extract_base_name(base) for base in node.bases)
+                    if base_name
+                ]
+                class_metrics[class_key] = _ClassMetric(
+                    key=class_key,
+                    file_rel=file_rel,
+                    simple_name=node.name,
+                    lineno=node.lineno,
+                    base_names=base_names,
+                )
+                class_name_to_keys[node.name].append(class_key)
+                for child in node.body:
+                    visit(child, class_stack + [node.name])
+                return
+
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                file_stat.function_count += 1
+                start = node.lineno
+                end = getattr(node, "end_lineno", node.lineno)
+                length = max(1, end - start + 1)
+                complexity = _estimate_function_complexity(node)
+                file_stat.max_function_length = max(file_stat.max_function_length, length)
+                file_stat.max_function_complexity = max(file_stat.max_function_complexity, complexity)
+                function_metrics.append(
+                    _FunctionMetric(
+                        file_rel=file_rel,
+                        qualname=".".join(class_stack + [node.name]) if class_stack else node.name,
+                        lineno=start,
+                        length=length,
+                        complexity=complexity,
+                    )
+                )
+                for child in node.body:
+                    visit(child, class_stack)
+                return
+
+            for child in ast.iter_child_nodes(node):
+                visit(child, class_stack)
+
+        visit(tree, [])
+        file_metrics[file_rel] = file_stat
+
+    # Inheritance depth (approximate cross-module resolution by simple class names).
+    parents_by_class: Dict[str, List[str]] = {}
+    for class_key, info in class_metrics.items():
+        resolved_parents: List[str] = []
+        for base_name in info.base_names:
+            matches = class_name_to_keys.get(base_name, [])
+            if len(matches) == 1:
+                resolved_parents.append(matches[0])
+                continue
+            same_file = [key for key in matches if key.startswith(f"{info.file_rel}:")]
+            if len(same_file) == 1:
+                resolved_parents.append(same_file[0])
+        parents_by_class[class_key] = resolved_parents
+
+    depth_cache: Dict[str, int] = {}
+    visiting: set[str] = set()
+
+    def class_depth(class_key: str) -> int:
+        if class_key in depth_cache:
+            return depth_cache[class_key]
+        if class_key in visiting:
+            return 1
+        visiting.add(class_key)
+        parents = parents_by_class.get(class_key, [])
+        if not parents:
+            depth = 1
+        else:
+            depth = 1 + max(class_depth(parent) for parent in parents)
+        visiting.discard(class_key)
+        depth_cache[class_key] = depth
+        return depth
+
+    deep_inheritance_count = sum(1 for class_key in class_metrics if class_depth(class_key) >= 3)
+
+    scc_components = _find_scc_components(package_edges)
+    cycle_components = [component for component in scc_components if len(component) > 1]
+    cycle_packages = {pkg for component in cycle_components for pkg in component}
+
+    high_coupling_modules = 0
+    for pkg in package_names:
+        fan_in = len(reverse_edges.get(pkg, set()))
+        fan_out = len(package_edges.get(pkg, set()))
+        if (fan_in + fan_out) >= 4 or fan_in >= 5 or fan_out >= 4:
+            high_coupling_modules += 1
+
+    total_files = len(file_metrics)
+    total_functions = len(function_metrics)
+    total_classes = len(class_metrics)
+    safe_core_denominator = core_file_count if core_file_count > 0 else 1
+    safe_files_denominator = total_files if total_files > 0 else 1
+    safe_functions_denominator = total_functions if total_functions > 0 else 1
+    safe_classes_denominator = total_classes if total_classes > 0 else 1
+    safe_package_denominator = len(package_names) if package_names else 1
+    safe_import_denominator = total_internal_cross_imports if total_internal_cross_imports > 0 else 1
+
+    cohesion_risk_files = sum(
+        1
+        for metric in file_metrics.values()
+        if (
+            (metric.function_count >= 20 and metric.class_count == 0)
+            or metric.max_function_complexity >= 60
+            or (metric.lines >= 1500 and metric.function_count >= 20)
+        )
+    )
+    single_responsibility_risk_files = sum(
+        1
+        for metric in file_metrics.values()
+        if (
+            metric.lines >= 1000
+            or metric.function_count >= 30
+            or (metric.class_count >= 15 and metric.function_count >= 20)
+        )
+    )
+    heavy_responsibility_functions = sum(
+        1 for metric in function_metrics if metric.complexity >= 25 or metric.length >= 120
+    )
+    complex_functions = sum(1 for metric in function_metrics if metric.complexity >= 15)
+    long_methods = sum(1 for metric in function_metrics if metric.length >= 80)
+
+    checklist = [
+        _ChecklistMetric(
+            index=1,
+            label="계층 간 누수",
+            numerator=len(layer_leak_imports),
+            denominator=safe_import_denominator,
+            target_percent=0.50,
+            basis="layer_leak_imports / internal_cross_imports",
+        ),
+        _ChecklistMetric(
+            index=2,
+            label="의존성 튐(패키지 순환)",
+            numerator=len(cycle_packages),
+            denominator=safe_package_denominator,
+            target_percent=0.00,
+            basis="packages_in_scc(>1) / packages",
+        ),
+        _ChecklistMetric(
+            index=3,
+            label="I/O와 Core 직접 연결",
+            numerator=len(io_core_direct_files),
+            denominator=safe_core_denominator,
+            target_percent=5.00,
+            basis="io_importing_core_files / core_files",
+        ),
+        _ChecklistMetric(
+            index=4,
+            label="모듈 결합도 과다",
+            numerator=high_coupling_modules,
+            denominator=safe_package_denominator,
+            target_percent=15.00,
+            basis="high_coupling_modules / modules",
+        ),
+        _ChecklistMetric(
+            index=5,
+            label="파일 응집도 저하",
+            numerator=cohesion_risk_files,
+            denominator=safe_files_denominator,
+            target_percent=20.00,
+            basis="cohesion_risk_files / files",
+        ),
+        _ChecklistMetric(
+            index=6,
+            label="파일 단일 책임 위반",
+            numerator=single_responsibility_risk_files,
+            denominator=safe_files_denominator,
+            target_percent=12.00,
+            basis="single_responsibility_risk_files / files",
+        ),
+        _ChecklistMetric(
+            index=7,
+            label="함수 단일 책임 위반",
+            numerator=heavy_responsibility_functions,
+            denominator=safe_functions_denominator,
+            target_percent=10.00,
+            basis="(cc>=25 or len>=120) / functions",
+        ),
+        _ChecklistMetric(
+            index=8,
+            label="연속 상속 깊이(>=3)",
+            numerator=deep_inheritance_count,
+            denominator=safe_classes_denominator,
+            target_percent=5.00,
+            basis="classes_depth>=3 / classes",
+        ),
+        _ChecklistMetric(
+            index=9,
+            label="복잡도 과다(CC>=15)",
+            numerator=complex_functions,
+            denominator=safe_functions_denominator,
+            target_percent=15.00,
+            basis="cc>=15 / functions",
+        ),
+        _ChecklistMetric(
+            index=10,
+            label="롱메서드(len>=80)",
+            numerator=long_methods,
+            denominator=safe_functions_denominator,
+            target_percent=8.00,
+            basis="len>=80 / functions",
+        ),
+    ]
+
+    longest_functions = sorted(
+        function_metrics,
+        key=lambda metric: (metric.length, metric.complexity),
+        reverse=True,
+    )[:3]
+    most_complex_functions = sorted(
+        function_metrics,
+        key=lambda metric: (metric.complexity, metric.length),
+        reverse=True,
+    )[:3]
+
+    lines: List[str] = []
+    lines.append("- Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)")
+    lines.append(
+        "- Population: "
+        f"files **{total_files}**, functions **{total_functions}**, classes **{total_classes}**, "
+        f"internal cross-imports **{total_internal_cross_imports}**"
+    )
+    lines.append("")
+    lines.append("| # | Check | Ratio | Target | Status | Metric Basis |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
+    for metric in checklist:
+        lines.append(
+            f"| {metric.index} | {metric.label} | {metric.ratio_text} | <= {metric.target_percent:.2f}% | "
+            f"**{metric.status}** | `{metric.basis}` |"
+        )
+
+    lines.append("")
+    lines.append("### Top Risk Signals")
+    lines.append("")
+
+    if layer_leak_imports:
+        lines.append("- Layer leaks (sample):")
+        for file_rel, lineno, src_pkg, dst_pkg in layer_leak_imports[:5]:
+            lines.append(f"  - `{file_rel}:{lineno}` (`{src_pkg}` -> `{dst_pkg}`)")
+    else:
+        lines.append("- Layer leaks: none detected")
+
+    if cycle_components:
+        cycle_labels = ["/".join(component) for component in cycle_components[:5]]
+        lines.append(f"- Dependency cycles: {', '.join(f'`{label}`' for label in cycle_labels)}")
+    else:
+        lines.append("- Dependency cycles: none detected")
+
+    if io_core_direct_files:
+        sample = ", ".join(f"`{name}`" for name in sorted(io_core_direct_files)[:5])
+        lines.append(f"- I/O-core direct links (sample): {sample}")
+    else:
+        lines.append("- I/O-core direct links: none detected")
+
+    if longest_functions:
+        longest_text = ", ".join(
+            f"`{item.file_rel}:{item.lineno}` ({item.length} lines)"
+            for item in longest_functions
+        )
+        lines.append(f"- Longest functions: {longest_text}")
+
+    if most_complex_functions:
+        complex_text = ", ".join(
+            f"`{item.file_rel}:{item.lineno}` (CC={item.complexity})"
+            for item in most_complex_functions
+        )
+        lines.append(f"- Most complex functions: {complex_text}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _render_architecture_reference() -> str:
     services = _load_resolved_services()
     compose_inventory = _compose_inventory(services)
     compose_graph = _service_dependency_graph(services)
     topology_summary = _runtime_topology_summary(services)
+    architecture_quality = _render_architecture_quality_checklist()
     external_interfaces = _external_interfaces(services)
     critical_paths = _critical_runtime_paths(services)
     onboarding_quick_start = _onboarding_quick_start()
@@ -462,6 +1001,10 @@ def _render_architecture_reference() -> str:
     lines.append("## Runtime Topology Summary")
     lines.append("")
     lines.append(topology_summary.rstrip())
+    lines.append("")
+    lines.append("## Architecture Quality Checklist (Auto-Computed)")
+    lines.append("")
+    lines.append(architecture_quality.rstrip())
     lines.append("")
     lines.append("## External Interfaces (Published Ports)")
     lines.append("")
