@@ -2,6 +2,7 @@
 
 BFF에서 Funnel 분석 런타임을 in-process ASGI transport로 호출한다.
 외부 Funnel HTTP 서비스 주소/모드는 지원하지 않는다.
+Internal runtime routes are non-versioned and mounted under `/internal/funnel/*`.
 """
 
 import hashlib
@@ -75,7 +76,7 @@ class FunnelClient(ManagedAsyncClient):
         """
         try:
             response = await self.client.post(
-                "/api/v1/funnel/analyze",
+                "/internal/funnel/analyze",
                 json=request_data,
                 timeout=timeout_seconds,
             )
@@ -104,7 +105,7 @@ class FunnelClient(ManagedAsyncClient):
                 params["class_name"] = class_name
 
             response = await self.client.post(
-                "/api/v1/funnel/suggest-schema", json=analysis_results, params=params
+                "/internal/funnel/suggest-schema", json=analysis_results, params=params
             )
             response.raise_for_status()
             return response.json()
@@ -132,7 +133,7 @@ class FunnelClient(ManagedAsyncClient):
             include_complex_types: 복합 타입 포함 여부
 
         Returns:
-            FunnelPreviewResponse 형태의 미리보기 결과
+            TabularPreviewResponse 형태의 미리보기 결과
         """
         try:
             params = {
@@ -148,7 +149,7 @@ class FunnelClient(ManagedAsyncClient):
             if connection_id:
                 params["connection_id"] = connection_id
 
-            response = await self.client.post("/api/v1/funnel/preview/google-sheets", params=params)
+            response = await self.client.post("/internal/funnel/preview/google-sheets", params=params)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -363,7 +364,7 @@ class FunnelClient(ManagedAsyncClient):
         # Drop nulls to keep request minimal
         payload = {k: v for k, v in payload.items() if v is not None}
 
-        response = await self.client.post("/api/v1/funnel/structure/analyze/google-sheets", json=payload)
+        response = await self.client.post("/internal/funnel/structure/analyze/google-sheets", json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -482,7 +483,7 @@ class FunnelClient(ManagedAsyncClient):
         }
 
         response = await self.client.post(
-            "/api/v1/funnel/structure/analyze/excel",
+            "/internal/funnel/structure/analyze/excel",
             params=params,
             files=files,
             timeout=self.excel_timeout_seconds,
@@ -560,7 +561,7 @@ class FunnelClient(ManagedAsyncClient):
         }
 
         response = await self.client.post(
-            "/api/v1/funnel/structure/analyze/excel",
+            "/internal/funnel/structure/analyze/excel",
             params=params,
             files=files,
             timeout=self.excel_timeout_seconds,

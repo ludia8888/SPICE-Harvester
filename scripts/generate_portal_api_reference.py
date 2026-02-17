@@ -343,15 +343,20 @@ def _render_v1_reference(v1_endpoints: List[Endpoint]) -> str:
 
     lines: List[str] = []
     lines.append("---")
-    lines.append("title: v1 API Reference (Auto-Generated)")
-    lines.append("sidebar_label: v1 Complete Reference")
+    lines.append("title: v1 Internal API Reference (Auto-Generated)")
+    lines.append("sidebar_label: v1 Internal Reference")
     lines.append("sidebar_position: 11")
     lines.append("---")
     lines.append("")
-    lines.append("# Legacy v1 API Reference")
+    lines.append("# Internal v1 API Reference")
     lines.append("")
     lines.append(":::warning Deprecated")
-    lines.append("The v1 API is deprecated. Migrate to the [Foundry v2 API](./auto-v2-reference) for all new integrations.")
+    lines.append(
+        "The v1 API surface is internal/legacy compatibility scope and is not Foundry public ontology API."
+    )
+    lines.append(
+        "Use the [Foundry-aligned v2 API](./auto-v2-reference) for new external integrations."
+    )
     lines.append(":::")
     lines.append("")
     lines.append(":::info Auto-Generated")
@@ -408,10 +413,9 @@ def _render_api_overview_summary(endpoints: List[Endpoint]) -> str:
     lines.append("")
     lines.append(f"### v1 Endpoints ({len(v1)})")
     lines.append("")
-    lines.append(
-        "The v1 API covers the same functional areas with a legacy URL structure. "
-        "See the [v1 reference pages](./auto-v1-reference) for details."
-    )
+    lines.append("v1 routes are internal SPICE-specific/compatibility surfaces and may not map to Foundry public APIs.")
+    lines.append("For Foundry-style contracts, prefer [v2 reference pages](./auto-v2-reference).")
+    lines.append("The [v1 reference pages](./auto-v1-reference) are retained only for migration and internal operations.")
 
     return "\n".join(lines)
 

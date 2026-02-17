@@ -1,7 +1,7 @@
 """Pipeline dataset upload endpoints (BFF).
 
 This module composes dataset upload routers via `include_router` (Composite pattern)
-and re-exports selected endpoints for backwards compatibility.
+and re-exports selected endpoint callables used by tests.
 """
 
 
@@ -30,4 +30,3 @@ __all__ = [
     "upload_excel_dataset",
     "upload_media_dataset",
 ]
-

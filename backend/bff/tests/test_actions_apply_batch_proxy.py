@@ -35,28 +35,3 @@ def test_action_submit_batch_forwards_actor_identity():
     metadata = called.kwargs["json"]["metadata"]
     assert metadata["user_id"] == "alice"
     assert metadata["user_type"] == "service"
-
-
-def test_action_undo_forwards_actor_identity():
-    fake_oms = AsyncMock()
-    fake_oms.post.return_value = {"status": "PENDING"}
-    fake_oms.list_databases.return_value = {"data": {"databases": [{"name": "demo_db"}]}}
-
-    app.dependency_overrides[get_oms_client] = lambda: fake_oms
-    client = TestClient(app)
-    try:
-        with patch("bff.routers.foundry_ontology_v2.enforce_database_role", new=AsyncMock()):
-            res = client.post(
-                "/api/v2/ontologies/demo_db/actions/logs/00000000-0000-0000-0000-000000000123/undo",
-                headers={"X-User-ID": "alice", "X-User-Type": "service"},
-                json={"reason": "mistake"},
-            )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert res.status_code == 202, res.text
-    called = fake_oms.post.await_args
-    assert called.args[0] == "/api/v2/ontologies/demo_db/actions/logs/00000000-0000-0000-0000-000000000123/undo"
-    metadata = called.kwargs["json"]["metadata"]
-    assert metadata["user_id"] == "alice"
-    assert metadata["user_type"] == "service"

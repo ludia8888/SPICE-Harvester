@@ -181,22 +181,26 @@ async def _wait_for_action_log(
     timeout_seconds: int = 240,
     poll_interval_seconds: float = 1.0,
 ) -> Dict[str, Any]:
+    _ = session, headers
+    from bff.utils.action_log_serialization import serialize_action_log_record
+    from shared.services.registries.action_log_registry import ActionLogRegistry
+
     deadline = time.monotonic() + timeout_seconds
     last: Optional[Dict[str, Any]] = None
-    while time.monotonic() < deadline:
-        async with session.get(
-            f"{BFF_URL}/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
-            headers=headers,
-        ) as resp:
-            if resp.status != 200:
-                await asyncio.sleep(poll_interval_seconds)
-                continue
-            last = await resp.json()
-        rec = (last or {}).get("data") if isinstance(last, dict) else None
-        status_value = str((rec or {}).get("status") or "").upper()
-        if status_value in {"SUCCEEDED", "FAILED"}:
-            return last or {}
-        await asyncio.sleep(poll_interval_seconds)
+    action_logs = ActionLogRegistry()
+    await action_logs.connect()
+    try:
+        while time.monotonic() < deadline:
+            record = await action_logs.get_log(action_log_id=str(action_log_id))
+            if record and str(getattr(record, "db_name", "") or "").strip() == str(db_name or "").strip():
+                rec = serialize_action_log_record(record)
+                last = {"status": "success", "data": rec}
+                status_value = str(rec.get("status") or "").upper()
+                if status_value in {"SUCCEEDED", "FAILED"}:
+                    return last
+            await asyncio.sleep(poll_interval_seconds)
+    finally:
+        await action_logs.close()
     raise AssertionError(f"Timed out waiting for ActionLog completion (action_log_id={action_log_id}, last={last})")
 
 
@@ -845,10 +849,16 @@ async def test_action_writeback_e2e_smoke() -> None:
                 },
                 "metadata": {"source": "test_action_writeback_e2e_smoke"},
             }
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/action-types",
+            action_type_head = await _get_branch_head_commit(
+                session,
+                db_name=db_name,
+                branch=base_branch,
                 headers=db_headers,
-                params={"branch": base_branch, "expected_head_commit": ""},
+            )
+            resp = await session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/action-types",
+                headers=db_headers,
+                params={"branch": base_branch, "expected_head_commit": action_type_head},
                 json=action_type_payload,
             )
             created_action_type = await resp.json()
@@ -1094,10 +1104,16 @@ async def test_action_writeback_e2e_verification_suite() -> None:
                     submission_criteria="target.status == 'OPEN'",
                 ),
             ):
-                resp = await session.post(
-                    f"{BFF_URL}/api/v1/databases/{db_name}/ontology/action-types",
+                action_type_head = await _get_branch_head_commit(
+                    session,
+                    db_name=db_name,
+                    branch=base_branch,
                     headers=db_headers,
-                    params={"branch": base_branch, "expected_head_commit": ""},
+                )
+                resp = await session.post(
+                    f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/action-types",
+                    headers=db_headers,
+                    params={"branch": base_branch, "expected_head_commit": action_type_head},
                     json=action_payload,
                 )
                 created_action_type = await resp.json()
@@ -1442,12 +1458,11 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 @pytest.mark.requires_infra
 @pytest.mark.workflow
 @pytest.mark.asyncio
-async def test_action_batch_dependency_undo_e2e() -> None:
+async def test_action_batch_dependency_e2e() -> None:
     """
     End-to-end verification for:
     - batch submit contract
     - dependency-triggered dispatch in action-worker
-    - direct undo flow (OMS undo -> action-worker direct_undo)
     with real Event Store + lakeFS + ES overlay updates.
     """
 
@@ -1456,7 +1471,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
     repo_root = backend_dir.parent
 
     owner_id = f"batch_owner_{uuid.uuid4().hex[:8]}"
-    db_name = f"e2e_batch_undo_{uuid.uuid4().hex[:10]}"
+    db_name = f"e2e_batch_dependency_{uuid.uuid4().hex[:10]}"
     base_branch = "main"
     class_id = "Ticket"
     action_type_id = f"approve_ticket_batch_{uuid.uuid4().hex[:8]}"
@@ -1494,7 +1509,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                 return
 
             action_worker_env = _action_worker_env_from_dotenv(dotenv)
-            action_worker_env["ACTION_WORKER_GROUP"] = f"action-worker-batch-undo-{uuid.uuid4().hex[:8]}"
+            action_worker_env["ACTION_WORKER_GROUP"] = f"action-worker-batch-dependency-{uuid.uuid4().hex[:8]}"
             action_worker_proc = await _start_action_worker(env=action_worker_env, backend_dir=backend_dir)
             await asyncio.sleep(2.0)
 
@@ -1519,7 +1534,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                         "name": f"Ticket-{instance_id}",
                         "status": status,
                     },
-                    "metadata": {"kind": "ingest", "source": "test_action_batch_dependency_undo_e2e"},
+                    "metadata": {"kind": "ingest", "source": "test_action_batch_dependency_e2e"},
                 },
             )
             payload = await resp.json()
@@ -1534,7 +1549,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
 
             resp = await session.post(
                 f"{BFF_URL}/api/v1/databases",
-                json={"name": db_name, "description": "Action batch/dependency/undo E2E"},
+                json={"name": db_name, "description": "Action batch/dependency E2E"},
             )
             payload = await resp.json()
             assert resp.status in {201, 202}, payload
@@ -1549,7 +1564,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             ontology_payload = {
                 "id": class_id,
                 "label": {"en": "Ticket", "ko": "티켓"},
-                "description": {"en": "Ticket class (batch/dependency/undo)", "ko": "티켓 (batch/dependency/undo)"},
+                "description": {"en": "Ticket class (batch/dependency)", "ko": "티켓 (batch/dependency)"},
                 "properties": [
                     {
                         "name": "ticket_id",
@@ -1579,7 +1594,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                     },
                 ],
                 "relationships": [],
-                "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
+                "metadata": {"source": "test_action_batch_dependency_e2e"},
             }
             resp = await session.post(
                 f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
@@ -1597,7 +1612,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             action_type_payload = {
                 "id": action_type_id,
                 "label": {"en": "Approve Ticket Batch", "ko": "티켓 일괄 승인"},
-                "description": {"en": "Approve ticket for batch/dependency/undo e2e", "ko": "batch/dependency/undo 검증"},
+                "description": {"en": "Approve ticket for batch/dependency e2e", "ko": "batch/dependency 검증"},
                 "spec": {
                     "input_schema": {
                         "fields": [{"name": "ticket", "type": "object_ref", "required": True, "object_type": class_id}]
@@ -1618,12 +1633,18 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                         ],
                     },
                 },
-                "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
+                "metadata": {"source": "test_action_batch_dependency_e2e"},
             }
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/ontology/action-types",
+            action_type_head = await _get_branch_head_commit(
+                session,
+                db_name=db_name,
+                branch=base_branch,
                 headers=db_headers,
-                params={"branch": base_branch, "expected_head_commit": ""},
+            )
+            resp = await session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/action-types",
+                headers=db_headers,
+                params={"branch": base_branch, "expected_head_commit": action_type_head},
                 json=action_type_payload,
             )
             created_action_type = await resp.json()
@@ -1642,7 +1663,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                 base_branch=base_branch,
                 input_payload={"ticket": {"class_id": class_id, "instance_id": root_instance_id}},
                 headers=db_headers,
-                metadata={"source": "test_action_batch_dependency_undo_e2e", "item": "root"},
+                metadata={"source": "test_action_batch_dependency_e2e", "item": "root"},
                 correlation_id=f"batch-root-{uuid.uuid4()}",
             )
             child_action_log_id = await _submit_action_apply_v2(
@@ -1652,7 +1673,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
                 base_branch=base_branch,
                 input_payload={"ticket": {"class_id": class_id, "instance_id": child_instance_id}},
                 headers=db_headers,
-                metadata={"source": "test_action_batch_dependency_undo_e2e", "item": "child"},
+                metadata={"source": "test_action_batch_dependency_e2e", "item": "child"},
                 correlation_id=f"batch-child-{uuid.uuid4()}",
             )
 
@@ -1749,76 +1770,6 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             )
             assert child_overlay_doc.get("status") == "APPROVED"
             assert child_overlay_doc.get("approved_by") == owner_id
-
-            resp = await session.post(
-                f"{BFF_URL}/api/v2/ontologies/{db_name}/actions/logs/{child_action_log_id}/undo",
-                headers=db_headers,
-                json={
-                    "reason": "batch-child-undo",
-                    "base_branch": base_branch,
-                    "metadata": {"source": "test_action_batch_dependency_undo_e2e"},
-                },
-            )
-            undo_submit = await resp.json()
-            assert resp.status == 202, undo_submit
-            undo_action_log_id = str(undo_submit.get("action_log_id") or "").strip()
-            assert undo_action_log_id, undo_submit
-
-            undo_log_payload = await _wait_for_action_log(
-                session,
-                db_name=db_name,
-                action_log_id=undo_action_log_id,
-                headers=db_headers,
-            )
-            undo_rec = undo_log_payload.get("data") if isinstance(undo_log_payload.get("data"), dict) else {}
-            assert str(undo_rec.get("status") or "").upper() == "SUCCEEDED", undo_log_payload
-            assert str(undo_rec.get("writeback_commit_id") or "").strip(), undo_log_payload
-            assert str(undo_rec.get("action_applied_event_id") or "").strip(), undo_log_payload
-            await _assert_action_applied_event_in_event_store(str(undo_rec.get("action_applied_event_id")))
-
-            undo_metadata = undo_rec.get("metadata") if isinstance(undo_rec.get("metadata"), dict) else {}
-            assert str(undo_metadata.get("undo_of_action_log_id") or "").strip() == child_action_log_id
-            undo_result = undo_rec.get("result") if isinstance(undo_rec.get("result"), dict) else {}
-            assert bool(undo_result.get("direct_undo")) is True
-
-            undo_writeback_target = (
-                undo_rec.get("writeback_target") if isinstance(undo_rec.get("writeback_target"), dict) else {}
-            )
-            undo_repo = str(undo_writeback_target.get("repo") or "").strip() or "ontology-writeback"
-            undo_branch = str(undo_writeback_target.get("branch") or "").strip()
-            undo_commit_id = str(undo_rec.get("writeback_commit_id") or "").strip()
-            undo_patchset = await lakefs_storage.load_json(
-                bucket=undo_repo,
-                key=ref_key(undo_commit_id, writeback_patchset_key(undo_action_log_id)),
-            )
-            undo_targets = undo_patchset.get("targets")
-            assert isinstance(undo_targets, list) and undo_targets
-            assert any(
-                str(target.get("instance_id") or "").strip() == child_instance_id
-                for target in undo_targets
-                if isinstance(target, dict)
-            )
-
-            undo_lifecycle_id = _pick_first_lifecycle_id_any(undo_log_payload)
-            undo_overlay_doc = await _wait_for_es_overlay_doc_by_action_log(
-                es_base_url=es_base_url,
-                index_name=get_instances_index_name(db_name, branch=undo_branch),
-                doc_id=overlay_doc_id(instance_id=child_instance_id, lifecycle_id=undo_lifecycle_id),
-                action_log_id=undo_action_log_id,
-            )
-            assert undo_overlay_doc.get("status") == "OPEN"
-            assert undo_overlay_doc.get("approved_by") in {None, ""}
-
-            resp = await session.get(
-                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/{class_id}/{child_instance_id}",
-                headers=db_headers,
-                params={"branch": undo_branch},
-            )
-            read_payload = await resp.json()
-            assert resp.status == 200, read_payload
-            assert isinstance(read_payload, dict), read_payload
-            assert read_payload.get("status") == "OPEN"
-            assert read_payload.get("approved_by") in {None, ""}
 
         finally:
             await _stop_worker()

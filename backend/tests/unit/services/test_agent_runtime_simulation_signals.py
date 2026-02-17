@@ -10,8 +10,6 @@ def test_extract_action_simulation_signals_rejected_includes_reason() -> None:
     payload = {
         "status": "success",
         "data": {
-            "simulation_id": "11111111-1111-1111-1111-111111111111",
-            "version": 3,
             "preview_action_log_id": "preview-1",
             "results": [
                 {
@@ -32,7 +30,7 @@ def test_extract_action_simulation_signals_rejected_includes_reason() -> None:
     signals = _extract_action_simulation_signals(payload)
     assert signals["action_simulation_effective_status"] == "REJECTED"
     assert signals["action_log_reason"] == "state_mismatch"
-    assert signals["action_simulation_id"].endswith("111111111111")
+    assert signals["action_simulation_preview_action_log_id"] == "preview-1"
 
 
 @pytest.mark.unit
@@ -40,7 +38,7 @@ def test_extract_action_simulation_rejection_returns_enterprise() -> None:
     payload = {
         "status": "success",
         "data": {
-            "simulation_id": "11111111-1111-1111-1111-111111111111",
+            "preview_action_log_id": "preview-2",
             "results": [
                 {
                     "scenario_id": "default",
@@ -67,7 +65,7 @@ def test_extract_action_simulation_rejection_returns_none_when_accepted() -> Non
     payload = {
         "status": "success",
         "data": {
-            "simulation_id": "11111111-1111-1111-1111-111111111111",
+            "preview_action_log_id": "preview-3",
             "results": [
                 {"scenario_id": "default", "conflict_policy_override": None, "status": "ACCEPTED", "patchset_id": "p1"}
             ],
@@ -78,4 +76,3 @@ def test_extract_action_simulation_rejection_returns_none_when_accepted() -> Non
     assert error_key is None
     assert enterprise is None
     assert message is None
-

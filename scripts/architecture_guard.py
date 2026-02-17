@@ -5,6 +5,7 @@ Architecture guardrails for CI.
 Checks:
 1) Forbidden package dependency edges are not reintroduced.
 2) Auto-computed architecture checklist has no FAIL rows.
+3) Forbidden legacy API path literals are not reintroduced in production runtime code.
 """
 
 from __future__ import annotations
@@ -50,6 +51,48 @@ FORBIDDEN_EDGES: tuple[ForbiddenEdge, ...] = (
         src_pkg="bff",
         dst_pkg="mcp_servers",
         reason="BFF must consume MCP client abstractions via shared/services, not mcp_servers runtime package",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ForbiddenPathLiteral:
+    needle: str
+    reason: str
+
+
+FORBIDDEN_PATH_LITERALS: tuple[ForbiddenPathLiteral, ...] = (
+    ForbiddenPathLiteral(
+        needle="/actions/logs",
+        reason="Foundry public action surface is apply/applyBatch only (no action logs resource route)",
+    ),
+    ForbiddenPathLiteral(
+        needle="/actions/simulations",
+        reason="Foundry public action surface does not expose simulation resource routes",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/actions/",
+        reason="Legacy OMS async action v1 routes must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/grid",
+        reason="Legacy public Google Sheets grid extraction route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/preview",
+        reason="Legacy public Google Sheets preview route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/funnel/",
+        reason="Legacy public funnel v1 route prefix must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/version/",
+        reason="Legacy version-control v1 runtime path must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/branch/",
+        reason="Legacy branch-control v1 runtime path must remain removed",
     ),
 )
 
@@ -111,6 +154,20 @@ def _find_forbidden_imports(files: Iterable[Path]) -> list[str]:
     return violations
 
 
+def _find_forbidden_path_literals(files: Iterable[Path]) -> list[str]:
+    violations: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for rule in FORBIDDEN_PATH_LITERALS:
+            if rule.needle not in text:
+                continue
+            violations.append(
+                f"{path.relative_to(REPO_ROOT)}: "
+                f"`{rule.needle}` forbidden ({rule.reason})"
+            )
+    return violations
+
+
 def _compute_checklist_failures() -> list[str]:
     with tempfile.NamedTemporaryFile(suffix=".md", delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -157,6 +214,18 @@ def parse_args() -> argparse.Namespace:
         dest="strict_checklist",
         help="Do not fail on checklist FAIL rows (for temporary local analysis).",
     )
+    parser.add_argument(
+        "--strict-path-literals",
+        action="store_true",
+        default=True,
+        help="Fail when forbidden legacy path literals are found (default: true).",
+    )
+    parser.add_argument(
+        "--no-strict-path-literals",
+        action="store_false",
+        dest="strict_path_literals",
+        help="Do not fail on forbidden path literals (for temporary local analysis).",
+    )
     return parser.parse_args()
 
 
@@ -164,9 +233,10 @@ def main() -> int:
     args = parse_args()
     files = _iter_production_backend_python_files()
     violations = _find_forbidden_imports(files)
+    path_literal_violations = _find_forbidden_path_literals(files) if args.strict_path_literals else []
     checklist_failures = _compute_checklist_failures() if args.strict_checklist else []
 
-    if not violations and not checklist_failures:
+    if not violations and not checklist_failures and not path_literal_violations:
         print("Architecture guard passed.")
         return 0
 
@@ -174,6 +244,10 @@ def main() -> int:
     if violations:
         print("\n[forbidden-imports]")
         for item in violations:
+            print(f"- {item}")
+    if path_literal_violations:
+        print("\n[forbidden-path-literals]")
+        for item in path_literal_violations:
             print(f"- {item}")
     if checklist_failures:
         print("\n[quality-checklist]")

@@ -482,11 +482,11 @@ async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
     )
 
     assert response["status"] == "success"
-    funnel_analysis = response["data"]["funnel_analysis"]
-    assert funnel_analysis.get("columns"), "Expected fallback columns when Funnel is unavailable"
+    tabular_analysis = response["data"]["tabular_analysis"]
+    assert tabular_analysis.get("columns"), "Expected fallback columns when Funnel is unavailable"
     codes = {
         item.get("code")
-        for item in (funnel_analysis.get("risk_summary") or [])
+        for item in (tabular_analysis.get("risk_summary") or [])
         if isinstance(item, dict)
     }
     assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
@@ -579,7 +579,7 @@ async def test_approve_dataset_schema_updates_dataset():
 
 
 @pytest.mark.asyncio
-async def test_get_ingest_request_includes_funnel_analysis(monkeypatch):
+async def test_get_ingest_request_includes_tabular_analysis(monkeypatch):
     import bff.services.funnel_client as funnel_client
 
     monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
@@ -615,11 +615,11 @@ async def test_get_ingest_request_includes_funnel_analysis(monkeypatch):
 
     assert response["status"] == "success"
     assert response["data"]["ingest_request"]["ingest_request_id"] == ingest_request.ingest_request_id
-    assert response["data"]["funnel_analysis"]["risk_policy"]["suggestion_only"] is True
+    assert response["data"]["tabular_analysis"]["risk_policy"]["suggestion_only"] is True
 
 
 @pytest.mark.asyncio
-async def test_get_ingest_request_funnel_failure_uses_fallback(monkeypatch):
+async def test_get_ingest_request_tabular_analysis_failure_uses_fallback(monkeypatch):
     import bff.services.funnel_client as funnel_client
 
     monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
@@ -654,52 +654,14 @@ async def test_get_ingest_request_funnel_failure_uses_fallback(monkeypatch):
     )
 
     assert response["status"] == "success"
-    funnel_analysis = response["data"]["funnel_analysis"]
-    assert funnel_analysis.get("columns"), "Expected fallback analysis columns"
+    tabular_analysis = response["data"]["tabular_analysis"]
+    assert tabular_analysis.get("columns"), "Expected fallback analysis columns"
     codes = {
         item.get("code")
-        for item in (funnel_analysis.get("risk_summary") or [])
+        for item in (tabular_analysis.get("risk_summary") or [])
         if isinstance(item, dict)
     }
     assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
-
-
-@pytest.mark.asyncio
-async def test_reanalyze_dataset_version_returns_funnel_analysis(monkeypatch):
-    import bff.services.funnel_client as funnel_client
-
-    monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
-
-    dataset_registry = _FakeDatasetRegistry()
-    dataset = await dataset_registry.create_dataset(
-        db_name="core-db",
-        name="incoming",
-        description=None,
-        source_type="csv_upload",
-        source_ref="upload.csv",
-        schema_json={},
-        branch="main",
-    )
-    version = await dataset_registry.add_version(
-        dataset_id=dataset.dataset_id,
-        lakefs_commit_id="commit-1",
-        artifact_key="s3://bucket/key",
-        row_count=1,
-        sample_json={"columns": [{"name": "id"}], "rows": [{"id": 1}]},
-        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
-    )
-    request = _build_request({"X-DB-Name": "core-db"})
-
-    response = await pipeline_datasets.reanalyze_dataset_version(
-        dataset_id=dataset.dataset_id,
-        version_id=version.version_id,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
-
-    assert response["status"] == "success"
-    assert response["data"]["version"]["version_id"] == version.version_id
-    assert response["data"]["funnel_analysis"]["risk_policy"]["suggestion_only"] is True
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **517 settings** total.
+SPICE Harvester uses **45 configuration classes** with **516 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -203,11 +203,10 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Feature flags / opt-in endpoints.
 
-**4 settings**
+**3 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `enable_pull_requests` | `bool` | `False` | `ENABLE_PULL_REQUESTS` | Enable pull request endpoints (ENABLE_PULL_REQUESTS) |
 | `enable_pipeline_control_plane_events` | `bool` | `True` | `ENABLE_PIPELINE_CONTROL_PLANE_EVENTS` | Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS) |
 | `enable_sync_database_create_fallback` | `bool` | `True` | `ENABLE_SYNC_DATABASE_CREATE_FALLBACK` | Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK) |
 | `enable_oms_rollback` | `bool` | `False` | `ENABLE_OMS_ROLLBACK` | Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK) |

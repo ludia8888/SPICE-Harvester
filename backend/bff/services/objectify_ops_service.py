@@ -1,7 +1,6 @@
 """Objectify helper utilities (BFF).
 
-Extracted from `bff.routers.objectify_ops` to keep routers thin and to
-centralize shared logic behind a small service facade.
+Shared objectify helper logic for router/service call sites.
 """
 
 from __future__ import annotations

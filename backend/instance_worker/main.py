@@ -35,6 +35,7 @@ from shared.services.core.command_status_service import (
 )
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
+from shared.models.objectify_job import ObjectifyJob
 from shared.models.lineage_edge_types import (
     EDGE_EVENT_DELETED_ES_DOCUMENT,
     EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
@@ -64,6 +65,7 @@ from shared.services.core.worker_stores import WorkerObservability, initialize_w
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.errors.runtime_exception_policy import LineageRecordError, LineageUnavailableError
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import normalize_ontology_version
@@ -163,7 +165,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             lineage_required=self.lineage_required,
         )
         self.dataset_registry: Optional[DatasetRegistry] = None
-        self.bff_http: Optional[httpx.AsyncClient] = None
+        self.objectify_registry: Optional[ObjectifyRegistry] = None
         self.run_id = settings.observability.run_id
         self.code_sha = settings.observability.code_sha
         
@@ -307,17 +309,14 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             logger.warning(f"⚠️ DatasetRegistry unavailable (edits tracking disabled): {e}")
             self.dataset_registry = None
 
-        token = get_expected_token(BFF_TOKEN_ENV_KEYS)
-        headers: Dict[str, str] = {}
-        if token:
-            headers["X-Admin-Token"] = token
-        else:
-            logger.warning("No BFF auth token configured; link reindex calls may fail.")
-        self.bff_http = httpx.AsyncClient(
-            base_url=settings.services.bff_base_url,
-            timeout=60.0,
-            headers=headers,
-        )
+        # Objectify registry for direct link reindex enqueue (no BFF v1 dependency).
+        try:
+            self.objectify_registry = ObjectifyRegistry()
+            await self.objectify_registry.initialize()
+            logger.info("✅ ObjectifyRegistry connected (link reindex enqueue)")
+        except Exception as e:
+            logger.warning(f"⚠️ ObjectifyRegistry unavailable (link reindex enqueue disabled): {e}")
+            self.objectify_registry = None
 
         # Event Sourcing is now mandatory for write-side correctness.
         # Deprecated "direct Kafka publish" paths are removed because they break SSoT.
@@ -2076,13 +2075,78 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         return None
 
     async def _enqueue_link_reindex(self, *, db_name: str, link_type_id: str) -> None:
-        if not self.bff_http:
+        if not self.dataset_registry or not self.objectify_registry:
             return
         try:
-            resp = await self.bff_http.post(
-                f"/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex"
+            relationship = await self.dataset_registry.get_relationship_spec(link_type_id=link_type_id)
+            if not relationship:
+                logger.debug("Link reindex skipped: relationship spec missing for %s", link_type_id)
+                return
+
+            dataset = await self.dataset_registry.get_dataset(dataset_id=relationship.dataset_id)
+            if not dataset:
+                logger.debug("Link reindex skipped: dataset missing for link_type=%s", link_type_id)
+                return
+
+            version = None
+            if relationship.dataset_version_id:
+                version = await self.dataset_registry.get_version(version_id=relationship.dataset_version_id)
+                if version and getattr(version, "dataset_id", None) != relationship.dataset_id:
+                    version = None
+            if not version:
+                version = await self.dataset_registry.get_latest_version(dataset_id=relationship.dataset_id)
+            if not version or not version.artifact_key:
+                logger.debug("Link reindex skipped: dataset version/artifact missing for link_type=%s", link_type_id)
+                return
+
+            mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=relationship.mapping_spec_id)
+            if not mapping_spec:
+                logger.debug("Link reindex skipped: mapping spec missing for link_type=%s", link_type_id)
+                return
+
+            mapping_spec_version = int(relationship.mapping_spec_version or mapping_spec.version or 0)
+            if mapping_spec_version <= 0:
+                logger.debug("Link reindex skipped: invalid mapping spec version for link_type=%s", link_type_id)
+                return
+
+            dedupe_key = self.objectify_registry.build_dedupe_key(
+                dataset_id=dataset.dataset_id,
+                dataset_branch=dataset.branch,
+                mapping_spec_id=relationship.mapping_spec_id,
+                mapping_spec_version=mapping_spec_version,
+                dataset_version_id=version.version_id,
+                artifact_id=None,
+                artifact_output_name=dataset.name,
             )
-            resp.raise_for_status()
+            existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+            if existing:
+                return
+
+            options = dict(mapping_spec.options or {})
+            options.setdefault("mode", "link_index")
+            options.setdefault("relationship_spec_id", relationship.relationship_spec_id)
+            options.setdefault("link_type_id", link_type_id)
+
+            job = ObjectifyJob(
+                job_id=str(uuid4()),
+                db_name=db_name,
+                dataset_id=dataset.dataset_id,
+                dataset_version_id=version.version_id,
+                artifact_output_name=dataset.name,
+                dedupe_key=dedupe_key,
+                dataset_branch=dataset.branch,
+                artifact_key=version.artifact_key,
+                mapping_spec_id=relationship.mapping_spec_id,
+                mapping_spec_version=mapping_spec_version,
+                target_class_id=mapping_spec.target_class_id,
+                ontology_branch=options.get("ontology_branch"),
+                max_rows=options.get("max_rows"),
+                batch_size=options.get("batch_size"),
+                allow_partial=bool(options.get("allow_partial")),
+                options=options,
+                execution_mode="full",
+            )
+            await self.objectify_registry.enqueue_objectify_job(job=job)
         except Exception as exc:
             logger.warning("Failed to enqueue link reindex for %s: %s", link_type_id, exc)
 
@@ -2556,8 +2620,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             await self.processed_event_registry.close()
         if self.dataset_registry:
             await self.dataset_registry.close()
-        if self.bff_http:
-            await self.bff_http.aclose()
+        if self.objectify_registry:
+            await self.objectify_registry.close()
             
 
 async def main():

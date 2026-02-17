@@ -55,7 +55,6 @@ def main():
     files_to_fix = [
         'oms/entities/ontology.py',
         'oms/entities/label_mapping.py',
-        'oms/services/pull_request_service.py',
         'oms/services/corrected_command_handler.py',
         'oms/services/event_store.py',
         'shared/services/storage_service.py',

@@ -9,12 +9,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from bff.routers.pipeline_datasets_ops import (
-    _compute_funnel_analysis_from_sample,
+    _compute_tabular_analysis_from_sample,
 )
 
 from bff.routers.pipeline_deps import get_dataset_registry
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from bff.schemas.pipeline_datasets import FunnelAnalysisApiResponse
+from bff.schemas.pipeline_datasets import TabularAnalysisApiResponse
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.auth_utils import enforce_db_scope
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Pipeline Builder"])
 
-@router.get("/datasets/ingest-requests/{ingest_request_id}", response_model=FunnelAnalysisApiResponse)
+@router.get("/datasets/ingest-requests/{ingest_request_id}", response_model=TabularAnalysisApiResponse)
 @trace_endpoint("get_dataset_ingest_request")
 async def get_dataset_ingest_request(
     ingest_request_id: str,
@@ -41,13 +41,13 @@ async def get_dataset_ingest_request(
         except ValueError as exc:
             raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
         dataset = await dataset_registry.get_dataset(dataset_id=ingest_request.dataset_id)
-        funnel_analysis = await _compute_funnel_analysis_from_sample(ingest_request.sample_json)
+        tabular_analysis = await _compute_tabular_analysis_from_sample(ingest_request.sample_json)
         return ApiResponse.success(
             message="Ingest request fetched",
             data={
                 "dataset": dataset.__dict__ if dataset else None,
                 "ingest_request": ingest_request.__dict__,
-                "funnel_analysis": funnel_analysis,
+                "tabular_analysis": tabular_analysis,
             },
         ).to_dict()
     except HTTPException:

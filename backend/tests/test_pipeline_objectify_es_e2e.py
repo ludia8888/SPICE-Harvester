@@ -337,32 +337,46 @@ async def _upsert_object_type_contract(
     contract_payload: dict[str, Any],
 ) -> None:
     head_commit = await _get_head_commit(client, db_name=db_name, branch=branch)
-    create_payload = {"class_id": class_id, **contract_payload}
+    resource_payload = {
+        "id": class_id,
+        "label": {"en": class_id, "ko": class_id},
+        "description": {"en": f"{class_id} object type contract", "ko": f"{class_id} 오브젝트 타입 계약"},
+        "metadata": contract_payload.get("metadata") or {},
+        "spec": {
+            "backing_source": {
+                "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
+                **(
+                    {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
+                    if str(contract_payload.get("dataset_version_id") or "").strip()
+                    else {}
+                ),
+            },
+            "pk_spec": contract_payload.get("pk_spec") or {},
+            "status": str(contract_payload.get("status") or "ACTIVE").upper(),
+        },
+    }
     create_resp = await client.post(
-        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
+        f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
         params={"branch": branch, "expected_head_commit": head_commit},
-        json=create_payload,
+        json=resource_payload,
     )
     if create_resp.status_code in {200, 201}:
         return
     if create_resp.status_code == 409:
-        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types/{class_id}"
+        update_url = f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}"
         update_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": head_commit},
-            json=dict(contract_payload),
+            json=resource_payload,
         )
         if update_resp.status_code == 200:
             return
         first_error = update_resp.text
 
-        bootstrap_payload = dict(contract_payload)
-        bootstrap_payload["status"] = "INACTIVE"
-        bootstrap_payload["migration"] = {
-            "approved": True,
-            "reset_edits": True,
-            "note": "bootstrap_object_type_contract",
-        }
+        bootstrap_payload = dict(resource_payload)
+        bootstrap_spec = dict(resource_payload.get("spec") or {})
+        bootstrap_spec["status"] = "INACTIVE"
+        bootstrap_payload["spec"] = bootstrap_spec
         bootstrap_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": head_commit},
@@ -374,10 +388,14 @@ async def _upsert_object_type_contract(
                 f"{bootstrap_resp.text} (first_update_error={first_error})"
             )
 
+        activate_payload = dict(resource_payload)
+        activate_spec = dict(resource_payload.get("spec") or {})
+        activate_spec["status"] = str(contract_payload.get("status") or "ACTIVE").upper()
+        activate_payload["spec"] = activate_spec
         activate_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": head_commit},
-            json={"status": str(contract_payload.get('status') or 'ACTIVE').upper()},
+            json=activate_payload,
         )
         if activate_resp.status_code == 200:
             return

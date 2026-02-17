@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Query, Request, status
@@ -16,7 +16,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
-from bff.schemas.actions_requests import ActionUndoRequest
 from bff.routers.link_types_read import (
     _extract_resources as _extract_link_resources,
     _normalize_object_ref,
@@ -89,6 +88,11 @@ class BatchApplyActionRequestOptionsV2(BaseModel):
 class BatchApplyActionRequestV2(BaseModel):
     options: BatchApplyActionRequestOptionsV2 | None = None
     requests: list[BatchApplyActionRequestItemV2] = Field(default_factory=list, min_length=1, max_length=500)
+
+
+class ExecuteQueryRequestV2(BaseModel):
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    options: Dict[str, Any] | None = None
 
 
 def _foundry_error(
@@ -486,7 +490,7 @@ async def _search_object_type_rows(
     search_payload: dict[str, Any],
 ) -> dict[str, Any]:
     return await oms_client.post(
-        f"/api/v1/objects/{db_name}/{object_type}/search",
+        f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
         params={"branch": branch},
         json=search_payload,
     )
@@ -1557,6 +1561,131 @@ def _to_foundry_query_type_metadata_map(resources: list[dict[str, Any]]) -> dict
     return out
 
 
+def _resolve_query_placeholder_key(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    if text.startswith("${") and text.endswith("}") and len(text) > 3:
+        key = text[2:-1].strip()
+        return key or None
+
+    if text.startswith("{{") and text.endswith("}}") and len(text) > 4:
+        key = text[2:-2].strip()
+        return key or None
+
+    if text.startswith("$") and len(text) > 1:
+        key = text[1:].strip()
+        if key and all(ch.isalnum() or ch == "_" for ch in key):
+            return key
+
+    return None
+
+
+def _materialize_query_execution_value(value: Any, *, parameters: Dict[str, Any]) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _materialize_query_execution_value(inner, parameters=parameters)
+            for key, inner in value.items()
+        }
+    if isinstance(value, list):
+        return [_materialize_query_execution_value(item, parameters=parameters) for item in value]
+
+    placeholder = _resolve_query_placeholder_key(value)
+    if placeholder is None:
+        return value
+    if placeholder not in parameters:
+        raise ValueError(f"Missing required query parameter: {placeholder}")
+    return parameters[placeholder]
+
+
+def _extract_query_execution_plan(resource: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+
+    execution: dict[str, Any] = {}
+    for candidate in (
+        resource.get("execution"),
+        spec.get("execution"),
+        metadata.get("execution"),
+        resource.get("query"),
+        spec.get("query"),
+        metadata.get("query"),
+    ):
+        if isinstance(candidate, dict):
+            execution = candidate
+            break
+
+    search = execution.get("search") if isinstance(execution.get("search"), dict) else {}
+
+    object_type: str | None = None
+    for candidate in (
+        execution.get("objectType"),
+        execution.get("objectTypeApiName"),
+        execution.get("targetObjectType"),
+        execution.get("target_object_type"),
+        search.get("objectType"),
+        search.get("objectTypeApiName"),
+        search.get("targetObjectType"),
+        search.get("target_object_type"),
+        spec.get("objectType"),
+        spec.get("objectTypeApiName"),
+        spec.get("targetObjectType"),
+        spec.get("target_object_type"),
+        metadata.get("objectType"),
+        metadata.get("objectTypeApiName"),
+        metadata.get("targetObjectType"),
+        metadata.get("target_object_type"),
+    ):
+        normalized = str(candidate or "").strip()
+        if normalized:
+            object_type = normalized
+            break
+
+    payload: dict[str, Any] = {}
+    for source in (search, execution):
+        if not isinstance(source, dict):
+            continue
+        where = source.get("where")
+        if isinstance(where, dict):
+            payload["where"] = where
+        elif "where" in source and where is not None:
+            payload["where"] = where
+
+        filter_clause = source.get("filter")
+        if "where" not in payload and isinstance(filter_clause, dict):
+            payload["where"] = filter_clause
+
+        for key in ("pageSize", "pageToken", "select", "selectV2", "orderBy", "excludeRid", "snapshot"):
+            if key in source and source.get(key) is not None:
+                payload[key] = source.get(key)
+
+    return object_type, payload
+
+
+def _apply_query_execute_options(
+    *,
+    base_payload: dict[str, Any],
+    options: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(base_payload)
+    if not isinstance(options, dict):
+        return payload
+
+    for key in ("where", "filter", "pageSize", "pageToken", "select", "selectV2", "orderBy", "excludeRid", "snapshot"):
+        if key not in options:
+            continue
+        value = options.get(key)
+        if key == "filter":
+            if "where" not in payload and value is not None:
+                payload["where"] = value
+            continue
+        if value is not None:
+            payload[key] = value
+
+    return payload
+
+
 def _scoped_error_parameters(
     *,
     ontology: str,
@@ -2571,74 +2700,6 @@ async def apply_action_batch_v2(
         )
 
 
-@router.post(
-    "/{ontology}/actions/logs/{actionLogId}/undo",
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("bff.foundry_v2_ontology.undo_action")
-async def undo_action_v2(
-    ontology: str,
-    actionLogId: str,
-    body: ActionUndoRequest,
-    request: Request,
-    oms_client: OMSClient = OMSClientDep,
-):
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        action_log_id = str(UUID(str(actionLogId)))
-        await _require_domain_role(request, db_name=db_name)
-        principal_type, principal_id = resolve_database_actor(request.headers)
-    except Exception as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"actionLogId": str(actionLogId)},
-        )
-
-    try:
-        metadata = dict(body.metadata or {})
-        metadata["user_id"] = principal_id
-        metadata["user_type"] = principal_type
-        oms_payload: Dict[str, Any] = {
-            "reason": body.reason,
-            "correlation_id": body.correlation_id,
-            "metadata": metadata,
-            "base_branch": body.base_branch,
-            "overlay_branch": body.overlay_branch,
-        }
-        response = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/actions/logs/{action_log_id}/undo",
-            json=oms_payload,
-        )
-        if isinstance(response, dict):
-            return response
-        return {}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"actionLogId": action_log_id},
-            not_found_response=_not_found_error(
-                "ActionLogNotFound",
-                ontology=db_name,
-                parameters={"actionLogId": action_log_id},
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"actionLogId": action_log_id},
-        )
-    except Exception as exc:
-        return _internal_error_response(
-            log_message="Failed to undo action (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"actionLogId": action_log_id},
-        )
-
-
 @router.get("/{ontology}/queryTypes")
 @trace_endpoint("bff.foundry_v2_ontology.list_query_types")
 async def list_query_types_v2(
@@ -2763,6 +2824,132 @@ async def get_query_type_v2(
     except Exception as exc:
         return _internal_error_response(
             log_message="Failed to get query type (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"queryApiName": query_api_name},
+        )
+
+
+@router.post("/{ontology}/queries/{queryApiName}/execute")
+@trace_endpoint("bff.foundry_v2_ontology.execute_query")
+async def execute_query_v2(
+    ontology: str,
+    queryApiName: str,
+    body: ExecuteQueryRequestV2,
+    request: Request,
+    version: str | None = Query(default=None),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
+    transaction_id: str | None = Query(default=None, alias="transactionId"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        _ = sdk_package_rid, sdk_version, transaction_id
+        query_api_name = str(queryApiName or "").strip()
+        if not query_api_name:
+            raise ValueError("queryApiName is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"queryApiName": str(queryApiName)},
+        )
+
+    try:
+        payload = await oms_client.get_ontology_resource(
+            db_name,
+            resource_type="function",
+            resource_id=query_api_name,
+            branch="main",
+        )
+        resource = _extract_ontology_resource(payload)
+        if not resource:
+            return _not_found_error(
+                "QueryTypeNotFound",
+                ontology=db_name,
+                parameters={"queryApiName": query_api_name},
+            )
+
+        query_type = _to_foundry_query_type(resource)
+        if query_type is None:
+            return _not_found_error(
+                "QueryTypeNotFound",
+                ontology=db_name,
+                parameters={"queryApiName": query_api_name},
+            )
+
+        requested_version = str(version or "").strip()
+        if requested_version:
+            resolved_version = str(query_type.get("version") or "").strip()
+            if resolved_version and resolved_version != requested_version:
+                return _not_found_error(
+                    "QueryTypeNotFound",
+                    ontology=db_name,
+                    parameters={"queryApiName": query_api_name},
+                )
+
+        object_type, execution_payload = _extract_query_execution_plan(resource)
+        if not object_type:
+            raise ValueError("query execution spec requires objectType")
+
+        execution_payload = _apply_query_execute_options(
+            base_payload=execution_payload,
+            options=body.options,
+        )
+        parameters_payload = dict(body.parameters or {})
+        resolved_object_type = _materialize_query_execution_value(
+            object_type,
+            parameters=parameters_payload,
+        )
+        normalized_object_type = str(resolved_object_type or "").strip()
+        if not normalized_object_type:
+            raise ValueError("query execution spec resolved an empty objectType")
+        resolved_payload = _materialize_query_execution_value(
+            execution_payload,
+            parameters=parameters_payload,
+        )
+        if not isinstance(resolved_payload, dict):
+            raise ValueError("query execution spec must resolve to an object payload")
+        if "pageSize" not in resolved_payload:
+            resolved_payload["pageSize"] = 100
+
+        result = await oms_client.post(
+            f"/api/v2/ontologies/{db_name}/objects/{normalized_object_type}/search",
+            params={"branch": "main"},
+            json=resolved_payload,
+        )
+        if not isinstance(result, dict):
+            raise ValueError("query execution result must be a JSON object")
+        return {"value": result}
+    except ValueError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"ontology": db_name, "queryApiName": query_api_name, "message": str(exc)},
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"queryApiName": query_api_name},
+            not_found_response=_not_found_error(
+                "QueryTypeNotFound",
+                ontology=db_name,
+                parameters={"queryApiName": query_api_name},
+            ),
+            passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"queryApiName": query_api_name},
+        )
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to execute query (v2)",
             exc=exc,
             ontology=db_name,
             parameters={"queryApiName": query_api_name},
@@ -3685,7 +3872,7 @@ async def search_objects_v2(
 
     try:
         result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
             params={"branch": branch},
             json=payload,
         )
@@ -4368,7 +4555,7 @@ async def list_objects_v2(
 
     try:
         result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
             params={"branch": branch},
             json=payload,
         )
@@ -4483,7 +4670,7 @@ async def get_object_v2(
             payload["excludeRid"] = bool(exclude_rid)
 
         result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
             params={"branch": branch},
             json=payload,
         )
@@ -4624,7 +4811,7 @@ async def list_linked_objects_v2(
             "pageSize": 1,
         }
         source_result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
             params={"branch": branch},
             json=source_payload,
         )
@@ -4760,7 +4947,7 @@ async def list_linked_objects_v2(
 
     try:
         linked_result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{linked_object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{linked_object_type}/search",
             params={"branch": branch},
             json=search_payload,
         )
@@ -4885,7 +5072,7 @@ async def get_linked_object_v2(
             "pageSize": 1,
         }
         source_result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
             params={"branch": branch},
             json=source_payload,
         )
@@ -5031,7 +5218,7 @@ async def get_linked_object_v2(
 
     try:
         linked_result = await oms_client.post(
-            f"/api/v1/objects/{db_name}/{linked_object_type}/search",
+            f"/api/v2/ontologies/{db_name}/objects/{linked_object_type}/search",
             params={"branch": branch},
             json=payload,
         )

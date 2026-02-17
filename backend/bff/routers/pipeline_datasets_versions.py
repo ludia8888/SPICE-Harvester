@@ -11,18 +11,14 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 import bff.routers.pipeline_datasets_ops as ops
-from bff.routers.pipeline_datasets_ops import _compute_funnel_analysis_from_sample
-
 from bff.routers.pipeline_datasets_deps import get_objectify_job_queue
 from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_registry, get_pipeline_registry
-from bff.schemas.pipeline_datasets import FunnelAnalysisApiResponse
 from bff.services import pipeline_dataset_version_service
 from shared.config.app_config import AppConfig
 from shared.dependencies.providers import get_lineage_store
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.requests import ApiResponse
 from shared.observability.tracing import trace_endpoint
-from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -122,41 +118,3 @@ async def create_dataset_version(
         flush_dataset_ingest_outbox=ops.flush_dataset_ingest_outbox,
         build_dataset_event_payload=ops.build_dataset_event_payload,
     )
-
-
-@router.post(
-    "/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
-    response_model=FunnelAnalysisApiResponse,
-)
-@trace_endpoint("reanalyze_dataset_version")
-async def reanalyze_dataset_version(
-    dataset_id: str,
-    version_id: str,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    try:
-        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
-        if not dataset:
-            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-        try:
-            enforce_db_scope(request.headers, db_name=dataset.db_name)
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
-        version = await dataset_registry.get_version(version_id=version_id)
-        if not version or version.dataset_id != dataset.dataset_id:
-            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
-        funnel_analysis = await _compute_funnel_analysis_from_sample(version.sample_json)
-        return ApiResponse.success(
-            message="Funnel analysis refreshed",
-            data={
-                "dataset": dataset.__dict__,
-                "version": version.__dict__,
-                "funnel_analysis": funnel_analysis,
-            },
-        ).to_dict()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to reanalyze dataset version: {e}")
-        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)

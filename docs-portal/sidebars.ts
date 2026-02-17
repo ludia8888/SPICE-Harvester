@@ -128,19 +128,9 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: "category",
-      label: "Ontology v1",
-      items: [
-        "api/v1-object-types",
-        "api/v1-objects",
-        "api/v1-search",
-      ],
-    },
-    {
-      type: "category",
       label: "Complete Reference (Auto-Generated)",
       items: [
         "api/auto-v2-reference",
-        "api/auto-v1-reference",
       ],
     },
     "api/error-codes",

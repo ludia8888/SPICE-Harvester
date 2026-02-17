@@ -12,19 +12,18 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
-from shared.models.type_inference import FunnelAnalysisPayload
+from shared.models.type_inference import TabularAnalysisPayload
 
 
-class FunnelAnalysisData(BaseModel):
+class TabularAnalysisData(BaseModel):
     dataset: Optional[Dict[str, Any]] = Field(default=None)
     ingest_request: Optional[Dict[str, Any]] = Field(default=None)
     version: Optional[Dict[str, Any]] = Field(default=None)
-    funnel_analysis: FunnelAnalysisPayload
+    tabular_analysis: TabularAnalysisPayload
 
 
-class FunnelAnalysisApiResponse(BaseModel):
+class TabularAnalysisApiResponse(BaseModel):
     status: str
     message: str
-    data: FunnelAnalysisData
+    data: TabularAnalysisData
     errors: Optional[list[str]] = None
-

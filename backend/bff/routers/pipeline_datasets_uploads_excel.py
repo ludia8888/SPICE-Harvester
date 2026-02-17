@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from bff.routers.pipeline_datasets_ops import (
-    _build_funnel_analysis_payload,
+    _build_tabular_analysis_payload,
     _build_schema_columns,
     _columns_from_schema,
     _convert_xls_to_xlsx_bytes,
@@ -158,7 +158,7 @@ async def upload_excel_dataset(
         if row_count is None and sample_rows:
             row_count = len(sample_rows)
 
-        funnel_analysis = _build_funnel_analysis_payload(analysis_payload, inferred_schema)
+        tabular_analysis = _build_tabular_analysis_payload(analysis_payload, inferred_schema)
 
         sample_json = {"columns": _columns_from_schema(schema_columns), "rows": sample_rows}
         preview_payload: Dict[str, Any] = {
@@ -199,7 +199,7 @@ async def upload_excel_dataset(
             objectify_job_queue=objectify_job_queue,
             lineage_store=lineage_store,
             preview_payload=preview_payload,
-            funnel_analysis=funnel_analysis,
+            tabular_analysis=tabular_analysis,
             success_message="Excel dataset created",
         )
     except HTTPException:

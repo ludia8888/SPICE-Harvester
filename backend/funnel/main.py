@@ -1,17 +1,16 @@
-"""
-🔥 THINK ULTRA! Funnel Service - 독립 마이크로서비스
-타입 추론 및 스키마 제안 전용 서비스
+"""Internal Funnel runtime app.
 
-Port: 8003
+Funnel logic is retained as an in-process ASGI app only and is invoked via
+`bff.services.funnel_client.FunnelClient` transport.
+
+Legacy versioned internal routes are removed. Runtime endpoints are mounted
+under `/internal/funnel/*` only.
 """
 
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import FastAPI
-
-# Shared service factory import
-from shared.services.core.service_factory import create_fastapi_service, get_funnel_service_info, run_service
 
 from funnel.routers.type_inference_router import router as type_inference_router
 from shared.utils.app_logger import get_logger
@@ -45,17 +44,15 @@ async def lifespan(app: FastAPI):
     logger.info("🔄 Funnel Service 종료")
 
 
-# FastAPI 앱 생성 - Service Factory 사용
-service_info = get_funnel_service_info()
-app = create_fastapi_service(
-    service_info=service_info,
-    custom_lifespan=lifespan,
-    include_health_check=False,  # 기존 health check 유지
-    include_logging_middleware=True
+# Internal ASGI app (not a standalone external service).
+app = FastAPI(
+    title="Internal Funnel Runtime",
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
-# 라우터 등록
-app.include_router(type_inference_router, prefix="/api/v1")
+# Internal-only route mount (no `/api/v1` legacy prefix).
+app.include_router(type_inference_router, prefix="/internal")
 
 
 # 기본 엔드포인트들
@@ -66,12 +63,12 @@ async def root() -> Dict[str, Any]:
         "service": "funnel",
         "version": "0.1.0",
         "status": "running",
-        "description": "타입 추론 및 스키마 제안 전용 마이크로서비스",
+        "description": "타입 추론 및 스키마 제안 internal runtime",
         "endpoints": {
             "health": "/health",
-            "analyze": "/api/v1/funnel/analyze",
-            "suggest_schema": "/api/v1/funnel/suggest-schema",
-            "preview_google_sheets": "/api/v1/funnel/preview/google-sheets",
+            "analyze": "/internal/funnel/analyze",
+            "suggest_schema": "/internal/funnel/suggest-schema",
+            "preview_google_sheets": "/internal/funnel/preview/google-sheets",
             "docs": "/docs",
         },
     }
@@ -87,9 +84,5 @@ async def health_check() -> Dict[str, Any]:
     ).to_dict()
 
 
-# Note: CORS debug endpoint는 service_factory에서 자동 제공됨
-
-
 if __name__ == "__main__":
-    # Service Factory를 사용한 간소화된 서비스 실행
-    run_service(app, service_info, "funnel.main:app")
+    raise SystemExit("Standalone Funnel service runtime is removed; use BFF in-process runtime.")

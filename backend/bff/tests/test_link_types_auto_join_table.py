@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.requests import Request
 
-from bff.routers import link_types as link_types_router
+from bff.routers import link_types_ops as link_types_router
 
 
 class _FakeDatasetRegistry:

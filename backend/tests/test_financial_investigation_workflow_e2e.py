@@ -173,30 +173,62 @@ async def _upsert_object_type_contract(
 ) -> None:
     expected_head_commit = f"branch:{branch}"
     create_resp = await client.post(
-        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types",
+        f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
         params={"branch": branch, "expected_head_commit": expected_head_commit},
-        json={"class_id": class_id, **contract_payload},
+        json={
+            "id": class_id,
+            "label": {"en": class_id, "ko": class_id},
+            "description": {"en": f"{class_id} object type contract", "ko": f"{class_id} 오브젝트 타입 계약"},
+            "metadata": contract_payload.get("metadata") or {},
+            "spec": {
+                "backing_source": {
+                    "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
+                    **(
+                        {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
+                        if str(contract_payload.get("dataset_version_id") or "").strip()
+                        else {}
+                    ),
+                },
+                "pk_spec": contract_payload.get("pk_spec") or {},
+                "status": str(contract_payload.get("status") or "ACTIVE").upper(),
+            },
+        },
     )
     if create_resp.status_code in {200, 201}:
         return
     if create_resp.status_code == 409:
-        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/object-types/{class_id}"
+        update_url = f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}"
+        update_payload = {
+            "id": class_id,
+            "label": {"en": class_id, "ko": class_id},
+            "description": {"en": f"{class_id} object type contract", "ko": f"{class_id} 오브젝트 타입 계약"},
+            "metadata": contract_payload.get("metadata") or {},
+            "spec": {
+                "backing_source": {
+                    "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
+                    **(
+                        {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
+                        if str(contract_payload.get("dataset_version_id") or "").strip()
+                        else {}
+                    ),
+                },
+                "pk_spec": contract_payload.get("pk_spec") or {},
+                "status": str(contract_payload.get("status") or "ACTIVE").upper(),
+            },
+        }
         update_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": expected_head_commit},
-            json=dict(contract_payload),
+            json=update_payload,
         )
         if update_resp.status_code == 200:
             return
         first_error = update_resp.text
 
-        bootstrap_payload = dict(contract_payload)
-        bootstrap_payload["status"] = "INACTIVE"
-        bootstrap_payload["migration"] = {
-            "approved": True,
-            "reset_edits": True,
-            "note": "bootstrap_object_type_contract",
-        }
+        bootstrap_payload = dict(update_payload)
+        bootstrap_spec = dict(update_payload.get("spec") or {})
+        bootstrap_spec["status"] = "INACTIVE"
+        bootstrap_payload["spec"] = bootstrap_spec
         bootstrap_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": expected_head_commit},
@@ -208,10 +240,14 @@ async def _upsert_object_type_contract(
                 f"{bootstrap_resp.text} (first_update_error={first_error})"
             )
 
+        activate_payload = dict(update_payload)
+        activate_spec = dict(update_payload.get("spec") or {})
+        activate_spec["status"] = str(contract_payload.get("status") or "ACTIVE").upper()
+        activate_payload["spec"] = activate_spec
         activate_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": expected_head_commit},
-            json={"status": str(contract_payload.get('status') or 'ACTIVE').upper()},
+            json=activate_payload,
         )
         if activate_resp.status_code == 200:
             return
@@ -221,7 +257,7 @@ async def _upsert_object_type_contract(
     raise AssertionError(f"object-type create failed: {create_resp.status_code} {create_resp.text}")
 
 
-def _extract_funnel_types(payload: dict[str, Any]) -> dict[str, str]:
+def _extract_tabular_types(payload: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for item in (payload.get("columns") or []):
         if not isinstance(item, dict):
@@ -306,7 +342,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         tx_excel_version_id = str((tx_payload.get("version") or {}).get("version_id") or "")
         assert tx_excel_dataset_id and tx_excel_version_id
 
-        tx_types = _extract_funnel_types((tx_payload.get("funnel_analysis") or {}))
+        tx_types = _extract_tabular_types((tx_payload.get("tabular_analysis") or {}))
         assert tx_types.get("amount") in {"xsd:integer", "xsd:decimal"}, f"unexpected amount type: {tx_types}"
         assert tx_types.get("date") in {"xsd:date", "xsd:dateTime"}, f"unexpected date type: {tx_types}"
 

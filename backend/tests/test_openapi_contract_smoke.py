@@ -307,6 +307,7 @@ async def _wait_for_ontology_schema_ready(
     schema_url: str,
     branch: str,
     class_id: str,
+    include_preview: bool = False,
     timeout_seconds: int = 120,
     poll_interval_seconds: float = 1.0,
 ) -> None:
@@ -322,9 +323,12 @@ async def _wait_for_ontology_schema_ready(
     last_text: str = ""
 
     while time.monotonic() < deadline:
+        params: Dict[str, Any] = {"branch": branch}
+        if include_preview:
+            params["preview"] = "true"
         async with session.get(
             schema_url,
-            params={"branch": branch},
+            params=params,
             headers=BFF_HEADERS,
         ) as resp:
             status = resp.status
@@ -423,25 +427,94 @@ REMOVED_V1_COMPAT_OPERATIONS: set[tuple[str, str]] = {
         "GET",
         "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
     ),
+    ("POST", "/api/v1/databases/{db_name}/ontology/object-types"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/validate"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/{class_id}/schema"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/proposals"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/proposals"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/deploy"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/health"),
     ("POST", "/api/v1/databases/{db_name}/query"),
+    ("GET", "/api/v1/databases/{db_name}/query/builder"),
     ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate"),
     ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit"),
     ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch"),
     ("POST", "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo"),
+    ("GET", "/api/v1/databases/{db_name}/actions/logs"),
+    ("GET", "/api/v1/databases/{db_name}/actions/logs/{action_log_id}"),
+    ("GET", "/api/v1/databases/{db_name}/actions/simulations"),
+    ("GET", "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}"),
+    ("GET", "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions"),
+    ("GET", "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}"),
     ("GET", "/api/v1/databases/{db_name}/ontology/link-types"),
     ("GET", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/link-types"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex"),
     ("GET", "/api/v1/databases/{db_name}/ontology/action-types"),
     ("GET", "/api/v1/databases/{db_name}/ontology/action-types/{resource_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/action-types"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/action-types/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/action-types/{resource_id}"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/functions"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/functions/{resource_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/functions"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/functions/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/functions/{resource_id}"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/groups"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/groups"),
+    ("GET", "/api/v1/databases/{db_name}/ontology/groups/{resource_id}"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/groups/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/groups/{resource_id}"),
     ("GET", "/api/v1/databases/{db_name}/ontology/interfaces"),
     ("GET", "/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/interfaces"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}"),
     ("GET", "/api/v1/databases/{db_name}/ontology/shared-properties"),
     ("GET", "/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/shared-properties"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}"),
     ("GET", "/api/v1/databases/{db_name}/ontology/value-types"),
     ("GET", "/api/v1/databases/{db_name}/ontology/value-types/{resource_id}"),
+    ("POST", "/api/v1/databases/{db_name}/ontology/value-types"),
+    ("PUT", "/api/v1/databases/{db_name}/ontology/value-types/{resource_id}"),
+    ("DELETE", "/api/v1/databases/{db_name}/ontology/value-types/{resource_id}"),
     ("GET", "/api/v1/databases/{db_name}/classes"),
     ("GET", "/api/v1/databases/{db_name}/classes/{class_id}"),
     ("GET", "/api/v1/databases/{db_name}/class/{class_id}/instances"),
     ("GET", "/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}"),
+    ("POST", "/api/v1/databases/{db_name}/classes"),
+    ("GET", "/api/v1/databases/{db_name}/class/{class_id}/sample-values"),
+    ("POST", "/api/v1/pipeline-plans/compile"),
+    ("GET", "/api/v1/pipeline-plans/{plan_id}"),
+    ("POST", "/api/v1/pipeline-plans/{plan_id}/preview"),
+    ("POST", "/api/v1/pipeline-plans/{plan_id}/inspect-preview"),
+    ("POST", "/api/v1/pipeline-plans/{plan_id}/evaluate-joins"),
+    ("POST", "/api/v1/pipelines/simulate-definition"),
+    ("GET", "/api/v1/pipelines/branches"),
+    ("POST", "/api/v1/pipelines/branches/{branch}/archive"),
+    ("POST", "/api/v1/pipelines/branches/{branch}/restore"),
+    ("POST", "/api/v1/pipelines/{pipeline_id}/branches"),
+    ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-data"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-mappings"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-mappings-from-excel"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-google-sheets"),
+    ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-excel"),
+    ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/dry-run"),
+    ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/commit"),
+    ("POST", "/api/v1/databases/{db_name}/import-from-excel/dry-run"),
+    ("POST", "/api/v1/databases/{db_name}/import-from-excel/commit"),
+    ("POST", "/api/v1/data-connectors/google-sheets/grid"),
+    ("POST", "/api/v1/data-connectors/google-sheets/preview"),
     ("GET", "/api/v1/databases/{db_name}/branches"),
     ("POST", "/api/v1/databases/{db_name}/branches"),
     ("GET", "/api/v1/databases/{db_name}/branches/{branch_name}"),
@@ -457,6 +530,75 @@ REMOVED_V1_STRICT_ABSENT_PATHS: set[str] = {
     "/api/v1/databases/{db_name}/merge/simulate",
     "/api/v1/databases/{db_name}/merge/resolve",
     "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo",
+    "/api/v1/databases/{db_name}/query/builder",
+    "/api/v1/databases/{db_name}/actions/logs",
+    "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
+    "/api/v1/databases/{db_name}/actions/simulations",
+    "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}",
+    "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions",
+    "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}",
+    "/api/v1/databases/{db_name}/ontology/object-types",
+    "/api/v1/databases/{db_name}/ontology/object-types/{class_id}",
+    "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types",
+    "/api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}",
+    "/api/v1/databases/{db_name}/ontology/validate",
+    "/api/v1/databases/{db_name}/ontology/{class_id}/schema",
+    "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata",
+    "/api/v1/databases/{db_name}/ontology/proposals",
+    "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
+    "/api/v1/databases/{db_name}/ontology/deploy",
+    "/api/v1/databases/{db_name}/ontology/health",
+    "/api/v1/databases/{db_name}/ontology/link-types",
+    "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}",
+    "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits",
+    "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex",
+    "/api/v1/databases/{db_name}/ontology/action-types",
+    "/api/v1/databases/{db_name}/ontology/action-types/{resource_id}",
+    "/api/v1/databases/{db_name}/ontology/functions",
+    "/api/v1/databases/{db_name}/ontology/functions/{resource_id}",
+    "/api/v1/databases/{db_name}/ontology/groups",
+    "/api/v1/databases/{db_name}/ontology/groups/{resource_id}",
+    "/api/v1/databases/{db_name}/ontology/interfaces",
+    "/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}",
+    "/api/v1/databases/{db_name}/ontology/shared-properties",
+    "/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}",
+    "/api/v1/databases/{db_name}/ontology/value-types",
+    "/api/v1/databases/{db_name}/ontology/value-types/{resource_id}",
+    "/api/v1/databases/{db_name}/classes",
+    "/api/v1/databases/{db_name}/class/{class_id}/sample-values",
+    "/api/v1/pipeline-plans/compile",
+    "/api/v1/pipeline-plans/{plan_id}",
+    "/api/v1/pipeline-plans/{plan_id}/preview",
+    "/api/v1/pipeline-plans/{plan_id}/inspect-preview",
+    "/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
+    "/api/v1/pipelines/simulate-definition",
+    "/api/v1/pipelines/branches",
+    "/api/v1/pipelines/branches/{branch}/archive",
+    "/api/v1/pipelines/branches/{branch}/restore",
+    "/api/v1/pipelines/{pipeline_id}/branches",
+    "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
+    "/api/v1/databases/{db_name}/suggest-schema-from-data",
+    "/api/v1/databases/{db_name}/suggest-mappings",
+    "/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets",
+    "/api/v1/databases/{db_name}/suggest-mappings-from-excel",
+    "/api/v1/databases/{db_name}/suggest-schema-from-google-sheets",
+    "/api/v1/databases/{db_name}/suggest-schema-from-excel",
+    "/api/v1/databases/{db_name}/import-from-google-sheets/dry-run",
+    "/api/v1/databases/{db_name}/import-from-google-sheets/commit",
+    "/api/v1/databases/{db_name}/import-from-excel/dry-run",
+    "/api/v1/databases/{db_name}/import-from-excel/commit",
+    "/api/v1/data-connectors/google-sheets/grid",
+    "/api/v1/data-connectors/google-sheets/preview",
+}
+
+NON_FOUNDRY_V2_EXTENSION_ABSENT_PATHS: set[str] = {
+    "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo",
+    "/api/v2/ontologies/{ontology}/actions/logs",
+    "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}",
+    "/api/v2/ontologies/{ontology}/actions/simulations",
+    "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}",
+    "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions",
+    "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions/{version}",
 }
 
 
@@ -540,22 +682,6 @@ class SmokeContext:
     @property
     def dataset_name(self) -> str:
         return f"{self.db_name}_dataset"
-
-def _safe_pipeline_ref(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return "main"
-    allowed: list[str] = []
-    for ch in raw:
-        if ch.isalnum() or ch in {"-", "_", "."}:
-            allowed.append(ch)
-        else:
-            allowed.append("-")
-    cleaned = "".join(allowed).strip("-")
-    while "--" in cleaned:
-        cleaned = cleaned.replace("--", "-")
-    return cleaned or "main"
-
 
 @dataclass
 class RequestPlan:
@@ -648,6 +774,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "action_log_id": ctx.action_log_id or "00000000-0000-0000-0000-000000000000",
         "actionLogId": ctx.action_log_id or "00000000-0000-0000-0000-000000000000",
         "simulation_id": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
+        "simulationId": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
         "version": str(ctx.simulation_version or 1),
         "drift_id": "00000000-0000-0000-0000-000000000000",
         "subscription_id": "00000000-0000-0000-0000-000000000000",
@@ -707,6 +834,28 @@ def _ontology_payload(*, class_id: str, label_en: str, label_ko: str) -> Dict[st
         ],
         "relationships": [],
         "metadata": {"source": "openapi_smoke"},
+    }
+
+
+def _object_type_resource_payload(
+    *,
+    class_id: str,
+    backing_dataset_id: str,
+    pk_spec: Dict[str, Any],
+    status: str = "ACTIVE",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    backing_source: Dict[str, Any] = {"dataset_id": backing_dataset_id}
+    return {
+        "id": class_id,
+        "label": {"en": class_id, "ko": class_id},
+        "description": {"en": f"{class_id} object type (openapi smoke)", "ko": f"{class_id} 오브젝트 타입(스모크)"},
+        "metadata": metadata or {"source": "openapi_smoke"},
+        "spec": {
+            "backing_source": backing_source,
+            "pk_spec": pk_spec,
+            "status": str(status or "ACTIVE").upper(),
+        },
     }
 
 
@@ -861,10 +1010,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name, "branch": "main"})
 
-    if key == ("GET", "/api/v1/pipelines/branches"):
-        url = f"{BFF_URL}{op.path}"
-        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
-
     if key == ("GET", "/api/v1/pipelines/datasets"):
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
@@ -910,12 +1055,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
 
-    if key == ("POST", "/api/v1/pipelines/simulate-definition"):
-        url = f"{BFF_URL}{op.path}"
-        headers = {"X-DB-Name": ctx.db_name}
-        body = {"db_name": ctx.db_name, "branch": "main", "definition_json": {"nodes": [], "edges": [], "parameters": []}}
-        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body, headers=headers)
-
     if key == ("GET", "/api/v1/pipelines/{pipeline_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 404))
@@ -932,19 +1071,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "branch": "main",
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
-
-    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/branches"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"branch": ctx.branch_name}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
-
-    if key == ("POST", "/api/v1/pipelines/branches/{branch}/archive"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'branch': _safe_pipeline_ref(ctx.branch_name)})}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), params={"db_name": ctx.db_name})
-
-    if key == ("POST", "/api/v1/pipelines/branches/{branch}/restore"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'branch': _safe_pipeline_ref(ctx.branch_name)})}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), params={"db_name": ctx.db_name})
 
     if key == ("POST", "/api/v1/pipelines/{pipeline_id}/build"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -1039,11 +1165,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             },
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
-
-    if key == ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        headers = {"X-DB-Name": ctx.db_name}
-        return RequestPlan(op.method, op.path, url, (200, 404), json_body=None, headers=headers)
 
     if key == ("GET", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -1229,27 +1350,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"db_name": ctx.db_name}
         return RequestPlan(op.method, op.path, url, (200, 400, 422), params=params, form=form)
 
-    if key == ("POST", "/api/v1/databases/{db_name}/classes"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        wrapper_pk = f"{ctx.wrapper_class_id.lower()}_id"
-        body = {
-            "@id": ctx.wrapper_class_id,
-            "label": ctx.wrapper_class_id,
-            "description": "wrapper class (openapi smoke)",
-            # Linter requires a stable primary key property.
-            "properties": [
-                {
-                    "name": wrapper_pk,
-                    "type": "xsd:string",
-                    "label": f"{ctx.wrapper_class_id} ID",
-                    "required": True,
-                    "primaryKey": True,
-                    "titleKey": True,
-                }
-            ],
-            "relationships": [],
-        }
-        return RequestPlan(op.method, op.path, url, (200, 202, 409, 404), json_body=body)
     if key == ("DELETE", "/api/v1/databases/{db_name}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         expected_seq = await _get_write_side_last_sequence(aggregate_type="Database", aggregate_id=ctx.db_name)
@@ -1266,24 +1366,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품")
         return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
-
-    if key == ("GET", "/api/v1/databases/{db_name}/ontology/{class_id}/schema"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
-        return RequestPlan(op.method, op.path, url, (200,))
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/validate"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = _ontology_payload(class_id=f"Validate{ctx.class_id}", label_en="ValidateClass", label_ko="검증클래스")
-        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
-        body = {"source": "openapi_smoke", "note": "mapping metadata smoke"}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/object-types"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
     if key == ("GET", "/api/v2/ontologies"):
         url = f"{BFF_URL}{op.path}"
@@ -1364,6 +1446,11 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'queryApiName': 'missing_query_type'})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
+
+    if key == ("POST", "/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'queryApiName': 'missing_query_type'})}"
+        body = {"parameters": {}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
 
     if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/search"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
@@ -1455,10 +1542,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         )
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
 
-    if key == ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
-
     if key == ("PUT", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
@@ -1478,12 +1561,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     # ---------- Ontology Extensions ----------
     ontology_resource_collections = {
         "/api/v1/databases/{db_name}/ontology/link-types",
-        "/api/v1/databases/{db_name}/ontology/action-types",
-        "/api/v1/databases/{db_name}/ontology/functions",
-        "/api/v1/databases/{db_name}/ontology/groups",
-        "/api/v1/databases/{db_name}/ontology/interfaces",
-        "/api/v1/databases/{db_name}/ontology/shared-properties",
-        "/api/v1/databases/{db_name}/ontology/value-types",
     }
     ontology_resource_items = {f"{p}/{{resource_id}}" for p in ontology_resource_collections}
 
@@ -1500,18 +1577,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key[0] == "DELETE" and key[1] in ontology_resource_items:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 204, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/proposals"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
-
-    if key == ("POST", "/api/v1/databases/{db_name}/ontology/deploy"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
     # ---------- Async instances (write-side) ----------
     if key == ("POST", "/api/v1/databases/{db_name}/instances/{class_label}/create"):
@@ -1540,16 +1605,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id, 'instance_id': ctx.instance_id})}"
         expected_seq = await _get_write_side_last_sequence(aggregate_type="Instance", aggregate_id=ctx.instance_aggregate_id)
         return RequestPlan(op.method, op.path, url, (202, 404, 409), params={"expected_seq": expected_seq})
-
-    # ---------- Instances (read-side) ----------
-    if key == ("GET", "/api/v1/databases/{db_name}/class/{class_id}/sample-values"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
-        return RequestPlan(op.method, op.path, url, (200,))
-
-    # ---------- Query ----------
-    if key == ("GET", "/api/v1/databases/{db_name}/query/builder"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200,))
 
     # ---------- Graph ----------
     if key == ("GET", "/api/v1/graph-query/{db_name}/paths"):
@@ -1811,8 +1866,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         ("POST", "/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets"),
         ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/dry-run"),
         ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/commit"),
-        ("POST", "/api/v1/data-connectors/google-sheets/grid"),
-        ("POST", "/api/v1/data-connectors/google-sheets/preview"),
     }:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         # If a real sheet URL is provided, attempt a real call; otherwise trigger FastAPI validation (422).
@@ -1911,23 +1964,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 404))
 
-    # ---------- Pipeline Plans ----------
-    if key == ("POST", "/api/v1/pipeline-plans/compile"):
-        url = f"{BFF_URL}{op.path}"
-        # Intentionally omit data_scope so the handler fails fast (400) without invoking the planner.
-        # If the planner is disabled, it must degrade to a clear 503 (not 500).
-        body = {"goal": "openapi smoke pipeline plan compile"}
-        return RequestPlan(op.method, op.path, url, (400, 503), json_body=body, allow_5xx=True)
-
-    if key in {
-        ("POST", "/api/v1/pipeline-plans/{plan_id}/preview"),
-        ("POST", "/api/v1/pipeline-plans/{plan_id}/inspect-preview"),
-        ("POST", "/api/v1/pipeline-plans/{plan_id}/evaluate-joins"),
-    }:
-        # Use a fresh UUID so the plan is guaranteed to be missing -> deterministic 404.
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'plan_id': str(uuid.uuid4())})}"
-        return RequestPlan(op.method, op.path, url, (404, 400, 422), json_body={})
-
     # ---------- Actions (writeback) ----------
     if key == ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/apply"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
@@ -1957,11 +1993,6 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         params = {"branch": "main"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, params=params)
-
-    if key == ("POST", "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"reason": "openapi smoke undo coverage", "base_branch": "main"}
-        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), json_body=body)
 
     # ---------- AI (LLM) ----------
     if key == ("POST", "/api/v1/ai/intent"):
@@ -2040,6 +2071,10 @@ async def test_openapi_stable_contract_smoke():
     reintroduced_strict_absent = sorted(path for path in REMOVED_V1_STRICT_ABSENT_PATHS if path in spec_paths)
     assert not reintroduced_strict_absent, f"Reintroduced legacy paths in OpenAPI: {reintroduced_strict_absent}"
 
+    # Non-Foundry v2 extensions that previously leaked into public surface must stay absent.
+    reintroduced_non_foundry_v2 = sorted(path for path in NON_FOUNDRY_V2_EXTENSION_ABSENT_PATHS if path in spec_paths)
+    assert not reintroduced_non_foundry_v2, f"Reintroduced non-Foundry v2 extension paths in OpenAPI: {reintroduced_non_foundry_v2}"
+
     reintroduced_removed_ops = _collect_reintroduced_removed_ops(spec_paths_map)
     if reintroduced_removed_ops:
         print(f"[openapi] legacy compat operations still exposed: {reintroduced_removed_ops}")
@@ -2067,10 +2102,9 @@ async def test_openapi_stable_contract_smoke():
         "/api/v1/databases/{db_name}/ontology",
         "/api/v1/database/{db_name}/ontology",
     )
-    db_ontology_schema_path = _pick_spec_path(
+    object_type_full_metadata_path = _pick_spec_path(
         spec_paths,
-        "/api/v1/databases/{db_name}/ontology/{class_id}/schema",
-        "/api/v1/database/{db_name}/ontology/{class_id}/schema",
+        "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata",
     )
     db_instance_create_path = _pick_spec_path(
         spec_paths,
@@ -2160,7 +2194,6 @@ async def test_openapi_stable_contract_smoke():
             # Create ontology classes (Product + Order) on main. If the stack is running with
             # protected branches (e.g., ONTOLOGY_REQUIRE_PROPOSALS=true), writes to main will 409.
             # In that case, write to ctx.branch_name and merge/deploy into main via proposals.
-            proposal_id: Optional[str] = None
             deployment_recorded = False
             action_type_created = False
 
@@ -2251,7 +2284,7 @@ async def test_openapi_stable_contract_smoke():
                         proposal_class_meta[class_id] = (label_en, label_ko)
 
                 action_target_class = ctx.class_id
-                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
+                action_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
                     "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
@@ -2294,10 +2327,10 @@ async def test_openapi_stable_contract_smoke():
                 }
                 async with session.post(
                     action_type_url,
+                    headers=BFF_HEADERS,
                     params={"branch": ctx.branch_name, "expected_head_commit": branch_head},
                     json=action_type_body,
                 ) as resp:
-                    executed.add(("POST", "/api/v1/databases/{db_name}/ontology/action-types"))
                     if resp.status != 201:
                         raise AssertionError(
                             f"Failed to create action type on branch (http={resp.status}): {await resp.text()}"
@@ -2344,19 +2377,20 @@ async def test_openapi_stable_contract_smoke():
                 if not ctx.dataset_id:
                     raise AssertionError(f"Missing dataset_id in bootstrap dataset response: {payload}")
 
-                object_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/object-types"
+                object_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/object-types"
                 object_type_classes = [
                     (class_id, *proposal_class_meta.get(class_id, (class_id, class_id)))
                     for class_id in proposal_class_ids
                 ]
                 for class_id, label_en, label_ko in object_type_classes:
-                    schema_url = f"{BFF_URL}{_format_path(db_ontology_schema_path, ctx, overrides={'class_id': class_id})}"
+                    schema_url = f"{BFF_URL}{_format_path(object_type_full_metadata_path, ctx, overrides={'objectType': class_id})}"
                     try:
                         await _wait_for_ontology_schema_ready(
                             session,
                             schema_url=schema_url,
                             branch=ctx.branch_name,
                             class_id=class_id,
+                            include_preview=True,
                             timeout_seconds=60,
                         )
                     except AssertionError as schema_exc:
@@ -2395,6 +2429,7 @@ async def test_openapi_stable_contract_smoke():
                                 schema_url=schema_url,
                                 branch=ctx.branch_name,
                                 class_id=class_id,
+                                include_preview=True,
                             )
                         except AssertionError as post_recovery_exc:
                             raise AssertionError(
@@ -2403,7 +2438,7 @@ async def test_openapi_stable_contract_smoke():
                             ) from post_recovery_exc
                     object_type_plan = RequestPlan(
                         "POST",
-                        "/api/v1/databases/{db_name}/ontology/object-types",
+                        "/api/v1/database/{db_name}/ontology/resources/object-types",
                         object_type_url,
                         (201, 409),
                         params={
@@ -2414,13 +2449,13 @@ async def test_openapi_stable_contract_smoke():
                                 branch=ctx.branch_name,
                             ),
                         },
-                        json_body={
-                            "class_id": class_id,
-                            "backing_dataset_id": ctx.dataset_id,
-                            "pk_spec": {"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
-                            "status": "ACTIVE",
-                            "metadata": {"source": "openapi_smoke"},
-                        },
+                        json_body=_object_type_resource_payload(
+                            class_id=class_id,
+                            backing_dataset_id=ctx.dataset_id,
+                            pk_spec={"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
+                            status="ACTIVE",
+                            metadata={"source": "openapi_smoke"},
+                        ),
                         headers={"X-DB-Name": ctx.db_name},
                         note="smoke: bootstrap object type contract for ontology approval gates",
                     )
@@ -2432,7 +2467,7 @@ async def test_openapi_stable_contract_smoke():
                         update_url = f"{object_type_url}/{class_id}"
                         update_plan = RequestPlan(
                             "PUT",
-                            "/api/v1/databases/{db_name}/ontology/object-types/{class_id}",
+                            "/api/v1/database/{db_name}/ontology/resources/object-types/{resource_id}",
                             update_url,
                             (200,),
                             params={
@@ -2443,29 +2478,19 @@ async def test_openapi_stable_contract_smoke():
                                     branch=ctx.branch_name,
                                 ),
                             },
-                            json_body={
-                                "backing_dataset_id": ctx.dataset_id,
-                                "pk_spec": {"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
-                                "status": "ACTIVE",
-                                "metadata": {"source": "openapi_smoke"},
-                                "migration": {
-                                    "approved": True,
-                                    "reset_edits": True,
-                                },
-                            },
+                            json_body=_object_type_resource_payload(
+                                class_id=class_id,
+                                backing_dataset_id=ctx.dataset_id,
+                                pk_spec={"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
+                                status="ACTIVE",
+                                metadata={"source": "openapi_smoke"},
+                            ),
                             headers={"X-DB-Name": ctx.db_name},
                             note="smoke: converge object type contract when create is already present",
                         )
                         status, text, _ = await _request(session, update_plan)
                         executed.add((update_plan.method, update_plan.path_template))
                         if status not in update_plan.expected_statuses:
-                            if status == 409 and (
-                                "OBJECT_TYPE_MAPPING_SPEC_REQUIRED" in text
-                                or "OBJECT_TYPE_MIGRATION_REQUIRED" in text
-                            ):
-                                # Strict migration-gated profiles can require explicit mapping-spec
-                                # workflows that are outside this smoke setup.
-                                continue
                             raise AssertionError(
                                 f"Failed to converge object type contract for {class_id} (http={status}): {text[:800]}"
                             )
@@ -2475,63 +2500,14 @@ async def test_openapi_stable_contract_smoke():
                             f"Failed to bootstrap object type contract for {class_id} (http={status}): {text[:800]}"
                         )
 
-                # Propose + approve (merge) into main.
-                proposal_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/proposals"
-                proposal_body = {
-                    "source_branch": ctx.branch_name,
-                    "target_branch": "main",
-                    "title": f"OpenAPI smoke ontology ({ctx.db_name})",
-                    "description": "openapi contract smoke proposal (auto)",
-                    "author": "openapi_smoke",
-                }
-                proposal_plan = RequestPlan(
-                    "POST",
-                    "/api/v1/databases/{db_name}/ontology/proposals",
-                    proposal_url,
-                    (201,),
-                    json_body=proposal_body,
-                )
-                status, text, payload = await _request(session, proposal_plan)
-                executed.add((proposal_plan.method, proposal_plan.path_template))
-                if status != 201 or not isinstance(payload, dict):
-                    raise AssertionError(f"Failed to create ontology proposal (http={status}): {text[:800]}")
-                data = payload.get("data")
-                if isinstance(data, dict):
-                    proposal_id = str(data.get("id") or "").strip() or None
-                if not proposal_id:
-                    raise AssertionError(f"Missing proposal id in response: {payload}")
-
-                approve_url = f"{proposal_url}/{proposal_id}/approve"
-                approve_plan = RequestPlan(
-                    "POST",
-                    "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
-                    approve_url,
-                    (200,),
-                    json_body={"author": "openapi_smoke", "force": True},
-                )
-                status, text, payload = await _request(session, approve_plan)
-                executed.add((approve_plan.method, approve_plan.path_template))
-                if status != 200:
-                    raise AssertionError(f"Failed to approve ontology proposal (http={status}): {text[:800]}")
-
-                # Record deployment via the API (proves the full proposal->deploy path).
+                # Legacy BFF proposal/deploy routes are removed. For smoke setup, mark
+                # the latest main-head ontology commit as deployed via registry helper.
                 main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-                deploy_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/deploy"
-                deploy_plan = RequestPlan(
-                    "POST",
-                    "/api/v1/databases/{db_name}/ontology/deploy",
-                    deploy_url,
-                    (200,),
-                    json_body={
-                        "proposal_id": proposal_id,
-                        "ontology_commit_id": main_head,
-                        "author": "openapi_smoke",
-                    },
+                await _record_deployed_commit(
+                    db_name=ctx.db_name,
+                    target_branch="main",
+                    ontology_commit_id=main_head,
                 )
-                status, text, payload = await _request(session, deploy_plan)
-                executed.add((deploy_plan.method, deploy_plan.path_template))
-                if status != 200:
-                    raise AssertionError(f"Failed to deploy ontology (http={status}): {text[:800]}")
                 deployment_recorded = True
 
             # Create one instance (async) and wait
@@ -2557,7 +2533,7 @@ async def test_openapi_stable_contract_smoke():
             # Create one action type and mark the current ontology commit as deployed so Action simulation can run.
             if not action_type_created:
                 head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
+                action_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
                     "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
@@ -2594,16 +2570,14 @@ async def test_openapi_stable_contract_smoke():
                     "metadata": {"source": "openapi_smoke"},
                 }
 
-                action_type_plan = RequestPlan(
-                    "POST",
-                    "/api/v1/databases/{db_name}/ontology/action-types",
+                async with session.post(
                     action_type_url,
-                    (201, 409),
+                    headers=BFF_HEADERS,
                     params={"branch": "main", "expected_head_commit": head_commit},
-                    json_body=action_type_body,
-                )
-                status, text, _ = await _request(session, action_type_plan)
-                executed.add((action_type_plan.method, action_type_plan.path_template))
+                    json=action_type_body,
+                ) as resp:
+                    status = resp.status
+                    text = await resp.text()
 
                 if status == 201:
                     action_type_created = True
@@ -2614,75 +2588,25 @@ async def test_openapi_stable_contract_smoke():
                     action_branch = ctx.branch_name
 
                     branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=action_branch)
-                    action_type_branch_plan = RequestPlan(
-                        "POST",
-                        "/api/v1/databases/{db_name}/ontology/action-types",
+                    async with session.post(
                         action_type_url,
-                        (201,),
+                        headers=BFF_HEADERS,
                         params={"branch": action_branch, "expected_head_commit": branch_head},
-                        json_body=action_type_body,
-                        note="smoke: action-type proposal fallback write",
-                    )
-                    status, text, _ = await _request(session, action_type_branch_plan)
-                    executed.add((action_type_branch_plan.method, action_type_branch_plan.path_template))
+                        json=action_type_body,
+                    ) as resp:
+                        status = resp.status
+                        text = await resp.text()
                     if status != 201:
                         raise AssertionError(f"Failed to create action type on fallback branch (http={status}): {text[:800]}")
 
-                    proposal_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/proposals"
-                    proposal_body = {
-                        "source_branch": action_branch,
-                        "target_branch": "main",
-                        "title": f"OpenAPI smoke action-type ({ctx.db_name})",
-                        "description": "openapi contract smoke action-type proposal (auto)",
-                        "author": "openapi_smoke",
-                    }
-                    proposal_plan = RequestPlan(
-                        "POST",
-                        "/api/v1/databases/{db_name}/ontology/proposals",
-                        proposal_url,
-                        (201,),
-                        json_body=proposal_body,
-                    )
-                    status, text, payload = await _request(session, proposal_plan)
-                    executed.add((proposal_plan.method, proposal_plan.path_template))
-                    if status != 201 or not isinstance(payload, dict):
-                        raise AssertionError(f"Failed to create ontology proposal (http={status}): {text[:800]}")
-                    data = payload.get("data")
-                    if isinstance(data, dict):
-                        proposal_id = str(data.get("id") or "").strip() or None
-                    if not proposal_id:
-                        raise AssertionError(f"Missing proposal id in response: {payload}")
-
-                    approve_url = f"{proposal_url}/{proposal_id}/approve"
-                    approve_plan = RequestPlan(
-                        "POST",
-                        "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
-                        approve_url,
-                        (200,),
-                        json_body={"author": "openapi_smoke"},
-                    )
-                    status, text, _ = await _request(session, approve_plan)
-                    executed.add((approve_plan.method, approve_plan.path_template))
-                    if status != 200:
-                        raise AssertionError(f"Failed to approve ontology proposal (http={status}): {text[:800]}")
-
+                    # Legacy BFF proposal/deploy routes are removed. For smoke setup, mark
+                    # the latest main-head ontology commit as deployed via registry helper.
                     main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-                    deploy_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/deploy"
-                    deploy_plan = RequestPlan(
-                        "POST",
-                        "/api/v1/databases/{db_name}/ontology/deploy",
-                        deploy_url,
-                        (200,),
-                        json_body={
-                            "proposal_id": proposal_id,
-                            "ontology_commit_id": main_head,
-                            "author": "openapi_smoke",
-                        },
+                    await _record_deployed_commit(
+                        db_name=ctx.db_name,
+                        target_branch="main",
+                        ontology_commit_id=main_head,
                     )
-                    status, text, _ = await _request(session, deploy_plan)
-                    executed.add((deploy_plan.method, deploy_plan.path_template))
-                    if status != 200:
-                        raise AssertionError(f"Failed to deploy ontology (http={status}): {text[:800]}")
                     deployment_recorded = True
                     action_type_created = True
                 else:
@@ -2745,7 +2669,7 @@ async def test_openapi_stable_contract_smoke():
                 if isinstance(dataset, dict):
                     ctx.dataset_id = dataset.get("dataset_id") or ctx.dataset_id
 
-            # Create dataset version for ingest-request / funnel-analysis routes
+            # Create dataset version for ingest-request dependent routes.
             if ctx.dataset_id:
                 plan = await _build_plan(
                     Operation(

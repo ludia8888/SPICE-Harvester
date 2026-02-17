@@ -905,10 +905,6 @@ class FeatureFlagsSettings(BaseSettings):
         extra="ignore",
     )
 
-    enable_pull_requests: bool = Field(
-        default=False,
-        description="Enable pull request endpoints (ENABLE_PULL_REQUESTS)",
-    )
     enable_pipeline_control_plane_events: bool = Field(
         default=True,
         description="Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS)",

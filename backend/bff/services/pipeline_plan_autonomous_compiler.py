@@ -1,7 +1,7 @@
 """
 Pipeline plan compiler (single autonomous loop + MCP tools).
 
-Historically, `/api/v1/pipeline-plans/compile` had its own autonomous loop implementation.
+Historically, the legacy pipeline-plan compile endpoint had its own autonomous loop implementation.
 That duplication made enterprise improvements (batching, prompt prefix caching, compaction)
 hard to roll out consistently.
 

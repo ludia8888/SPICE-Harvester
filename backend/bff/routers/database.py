@@ -3,7 +3,7 @@ Database management router for BFF
 Handles database creation, deletion, and listing
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -93,13 +93,4 @@ async def get_database_expected_seq(
     Frontend policy: OCC tokens should be treated as resource versions, not user input.
     """
     return await database_service.get_database_expected_seq(db_name=db_name)
-
-
-@router.post("/{db_name}/classes")
-@trace_endpoint("bff.database.create_class")
-async def create_class(
-    db_name: str, class_data: Dict[str, Any], oms: OMSClient = OMSClientDep
-):
-    """데이터베이스에 새 클래스 생성"""
-    return await database_service.create_class(db_name=db_name, class_data=class_data, oms=oms)
 

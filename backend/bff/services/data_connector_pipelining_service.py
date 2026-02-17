@@ -113,10 +113,10 @@ async def start_pipelining_google_sheet(
             "total_rows": len(rows),
         }
 
-        funnel_analysis = await dataset_ops._compute_funnel_analysis_from_sample(
+        tabular_analysis = await dataset_ops._compute_tabular_analysis_from_sample(
             {"columns": [{"name": col} for col in columns], "rows": sample_rows}
         )
-        inferred_schema = funnel_analysis.get("columns") if isinstance(funnel_analysis, dict) else None
+        inferred_schema = tabular_analysis.get("columns") if isinstance(tabular_analysis, dict) else None
         if not isinstance(inferred_schema, list):
             inferred_schema = []
         schema_columns = dataset_ops._build_schema_columns(columns, inferred_schema)
@@ -267,7 +267,7 @@ async def start_pipelining_google_sheet(
                     "source_ref": dataset.source_ref,
                 },
                 "sample": {"columns": schema_columns, "rows": sample_rows},
-                "funnel_analysis": funnel_analysis,
+                "tabular_analysis": tabular_analysis,
                 "objectify_job_id": objectify_job_id,
             },
         }

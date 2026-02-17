@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from oms.dependencies import EventStoreDep, ensure_database_exists
@@ -23,46 +23,24 @@ from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
-from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.request_context import get_correlation_id
 from shared.security.database_access import has_database_access_config
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
-from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
-from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
+from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.storage.storage_service import create_storage_service
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
-from shared.utils.action_audit_policy import audit_action_log_input
-from shared.utils.action_input_schema import (
-    ActionInputSchemaError,
-    ActionInputValidationError,
-    validate_action_input,
-)
-from shared.utils.action_template_engine import (
-    ActionImplementationError,
-    compile_action_change_shape,
-)
+from shared.utils.action_template_engine import compile_action_change_shape
 from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
-from shared.utils.action_runtime_contracts import (
-    extract_required_action_interfaces,
-    load_action_target_runtime_contract,
-)
-from shared.utils.writeback_conflicts import (
-    compute_base_token,
-    compute_observed_base,
-)
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.action_data_access import evaluate_action_target_data_access
-from shared.utils.principal_policy import build_principal_tags
 from shared.utils.action_permission_profile import (
     ActionPermissionProfileError,
     requires_action_data_access_enforcement,
     resolve_action_permission_profile,
 )
-from shared.utils.writeback_lifecycle import derive_lifecycle_id
-from shared.utils.writeback_paths import ref_key, writeback_patchset_key
 from shared.observability.tracing import trace_endpoint
 
 from oms.services.action_simulation_service import (
@@ -150,14 +128,6 @@ class ActionSubmitBatchResponse(BaseModel):
     items: List[ActionSubmitBatchItemResponse]
 
 
-class ActionUndoRequest(BaseModel):
-    reason: Optional[str] = Field(default=None, max_length=2000, description="Optional undo reason")
-    correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
-    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
-    overlay_branch: Optional[str] = Field(default=None, description="Optional overlay branch override")
-
-
 class ActionSimulateScenarioRequest(BaseModel):
     scenario_id: Optional[str] = Field(default=None, description="Optional client-provided scenario identifier")
     conflict_policy: Optional[str] = Field(
@@ -207,9 +177,6 @@ class ActionSimulateRequest(BaseModel):
         default=None,
         description="Optional overlay branch override (default derived from writeback_target)",
     )
-    simulation_id: Optional[str] = Field(default=None, description="Optional simulation id for versioned reruns")
-    title: Optional[str] = Field(default=None, max_length=200)
-    description: Optional[str] = Field(default=None, max_length=2000)
     scenarios: Optional[list[ActionSimulateScenarioRequest]] = Field(
         default=None,
         description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
@@ -274,9 +241,8 @@ def _foundry_valid_action_validation_payload() -> Dict[str, Any]:
     return {
         "validation": {
             "result": "VALID",
-            "submissionCriteria": [],
-            "parameters": {},
-        }
+        },
+        "parameters": {},
     }
 
 
@@ -354,48 +320,6 @@ def _validate_batch_dependency_graph(
 
     for req_id in request_ids:
         _dfs(req_id)
-
-
-def _build_undo_inverse_changes(target: Dict[str, Any]) -> Dict[str, Any]:
-    observed = target.get("observed_base") if isinstance(target.get("observed_base"), dict) else {}
-    observed_fields = observed.get("fields") if isinstance(observed.get("fields"), dict) else {}
-    observed_links = observed.get("links") if isinstance(observed.get("links"), dict) else {}
-    applied = target.get("applied_changes") if isinstance(target.get("applied_changes"), dict) else {}
-    if bool(applied.get("delete")):
-        raise classified_http_exception(
-            status.HTTP_409_CONFLICT,
-            "Undo is not supported for delete actions",
-            code=ErrorCode.CONFLICT,
-        )
-
-    inverse_set: Dict[str, Any] = {}
-    inverse_unset: List[str] = []
-
-    touched_fields = set()
-    touched_fields.update((applied.get("set") or {}).keys() if isinstance(applied.get("set"), dict) else [])
-    touched_fields.update(applied.get("unset") or [] if isinstance(applied.get("unset"), list) else [])
-    for field in touched_fields:
-        field_key = str(field or "").strip()
-        if not field_key:
-            continue
-        if field_key in observed_fields and observed_fields.get(field_key) is not None:
-            inverse_set[field_key] = observed_fields.get(field_key)
-        else:
-            inverse_unset.append(field_key)
-
-    for link_field, link_value in observed_links.items():
-        field_key = str(link_field or "").strip()
-        if not field_key:
-            continue
-        inverse_set[field_key] = link_value if isinstance(link_value, list) else [str(link_value)]
-
-    return {
-        "set": inverse_set,
-        "unset": sorted(set(inverse_unset) - set(inverse_set.keys())),
-        "link_add": [],
-        "link_remove": [],
-        "delete": False,
-    }
 
 
 async def submit_action_async(
@@ -586,195 +510,10 @@ async def submit_action_batch_async(
     )
 
 
-@trace_endpoint("oms.action.undo")
-async def undo_action_async(
-    db_name: str = Depends(ensure_database_exists),
-    action_log_id: str = Path(..., description="Action log id to undo"),
-    *,
-    request: ActionUndoRequest,
-    event_store=EventStoreDep,
-) -> ActionSubmitResponse:
-    try:
-        source_action_log_id = str(UUID(str(action_log_id)))
-    except Exception as exc:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "action_log_id must be a UUID",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        ) from exc
-
-    action_logs = ActionLogRegistry()
-    await action_logs.connect()
-    try:
-        source = await action_logs.get_log(action_log_id=source_action_log_id)
-        if not source or source.db_name != db_name:
-            raise classified_http_exception(
-                status.HTTP_404_NOT_FOUND,
-                "ActionLog not found",
-                code=ErrorCode.RESOURCE_NOT_FOUND,
-            )
-        if source.status != ActionLogStatus.SUCCEEDED.value:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Undo requires a SUCCEEDED ActionLog",
-                code=ErrorCode.CONFLICT,
-            )
-        if not source.writeback_commit_id:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Undo requires writeback_commit_id",
-                code=ErrorCode.CONFLICT,
-            )
-        writeback_target = source.writeback_target or {}
-        repo = str(writeback_target.get("repo") or "").strip()
-        branch = str(writeback_target.get("branch") or "").strip()
-        if not repo or not branch:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Undo requires writeback_target repo/branch",
-                code=ErrorCode.CONFLICT,
-            )
-
-        storage = create_lakefs_storage_service(get_settings())
-        if not storage:
-            raise classified_http_exception(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "LakeFSStorageService unavailable",
-                code=ErrorCode.STORAGE_UNAVAILABLE,
-            )
-
-        patchset_key = ref_key(source.writeback_commit_id, writeback_patchset_key(source_action_log_id))
-        patchset = await storage.load_json(bucket=repo, key=patchset_key)
-        targets = patchset.get("targets") if isinstance(patchset, dict) else None
-        if not isinstance(targets, list) or not targets:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Undo source patchset targets not found",
-                code=ErrorCode.CONFLICT,
-            )
-
-        undo_targets: List[Dict[str, Any]] = []
-        for target in targets:
-            if not isinstance(target, dict):
-                continue
-            resource_rid = str(target.get("resource_rid") or "").strip()
-            class_id = resource_rid.split("@", 1)[0].split(":", 1)[-1] if resource_rid else ""
-            instance_id = str(target.get("instance_id") or "").strip()
-            if not class_id or not instance_id:
-                continue
-            undo_targets.append(
-                {
-                    "class_id": class_id,
-                    "instance_id": instance_id,
-                    "changes": _build_undo_inverse_changes(target),
-                }
-            )
-        if not undo_targets:
-            raise classified_http_exception(
-                status.HTTP_409_CONFLICT,
-                "Undo has no applicable targets",
-                code=ErrorCode.CONFLICT,
-            )
-
-        submit_context = source.metadata.get("__submit_context") if isinstance(source.metadata, dict) else None
-        resolved_base_branch = str(request.base_branch or "").strip() or (
-            str(submit_context.get("base_branch") or "").strip() if isinstance(submit_context, dict) else ""
-        )
-        if not resolved_base_branch:
-            resolved_base_branch = "main"
-        overlay_branch_resolved = str(request.overlay_branch or "").strip() or (
-            str(submit_context.get("overlay_branch") or "").strip() if isinstance(submit_context, dict) else ""
-        )
-        if not overlay_branch_resolved:
-            overlay_branch_resolved = branch
-
-        submitted_by = str((request.metadata or {}).get("user_id") or source.submitted_by or "").strip()
-        submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
-        if not submitted_by:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "request.metadata.user_id is required for action undo",
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-            )
-
-        undo_input = {"targets": undo_targets, "source_action_log_id": source_action_log_id}
-        action_log_id = uuid4()
-        effective_correlation_id = (request.correlation_id or get_correlation_id() or "").strip() or None
-        undo_metadata = dict(request.metadata or {})
-        undo_metadata["undo_of_action_log_id"] = source_action_log_id
-        undo_metadata["undo_reason"] = request.reason
-        undo_metadata["undo_contract"] = {
-            "mode": "object-storage-v2-revert",
-            "supports_partial_delete_recovery": False,
-        }
-        undo_metadata["__submit_context"] = {
-            "base_branch": resolved_base_branch,
-            "overlay_branch": overlay_branch_resolved,
-        }
-        enrich_metadata_with_current_trace(undo_metadata)
-
-        await action_logs.create_log(
-            action_log_id=action_log_id,
-            db_name=db_name,
-            action_type_id=source.action_type_id,
-            action_type_rid=source.action_type_rid,
-            resource_rid=None,
-            ontology_commit_id=source.ontology_commit_id,
-            input_payload=undo_input,
-            correlation_id=effective_correlation_id,
-            submitted_by=submitted_by,
-            writeback_target={"repo": repo, "branch": branch},
-            metadata=undo_metadata,
-        )
-
-        command = ActionCommand(
-            command_id=action_log_id,
-            db_name=db_name,
-            action_log_id=action_log_id,
-            action_type_id=source.action_type_id,
-            ontology_commit_id=str(source.ontology_commit_id or ""),
-            base_branch=resolved_base_branch,
-            overlay_branch=overlay_branch_resolved,
-            correlation_id=effective_correlation_id,
-            payload=undo_input,
-            metadata={
-                **(request.metadata or {}),
-                "user_id": submitted_by,
-                "user_type": submitted_by_type,
-                "correlation_id": effective_correlation_id,
-                "submitted_at": datetime.now(timezone.utc).isoformat(),
-                "ontology": {"ref": f"branch:{resolved_base_branch}", "commit": source.ontology_commit_id},
-                "direct_undo": True,
-                "undo_of_action_log_id": source_action_log_id,
-            },
-        )
-
-        envelope = EventEnvelope.from_command(
-            command,
-            actor=submitted_by,
-            kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
-            metadata={"service": "oms", "mode": "action_undo"},
-        )
-        await event_store.append_event(envelope)
-
-        return ActionSubmitResponse(
-            action_log_id=str(action_log_id),
-            status="PENDING",
-            db_name=db_name,
-            action_type_id=source.action_type_id,
-            ontology_commit_id=str(source.ontology_commit_id or ""),
-            base_branch=resolved_base_branch,
-            overlay_branch=overlay_branch_resolved,
-            writeback_target={"repo": repo, "branch": branch},
-        )
-    finally:
-        await action_logs.close()
-
-
 @trace_endpoint("oms.action.simulate")
 async def simulate_action_async(
-    db_name: str = Depends(ensure_database_exists),
-    action_type_id: str = Path(..., description="Action type identifier"),
+    db_name: str,
+    action_type_id: str,
     *,
     request: ActionSimulateRequest,
 ) -> Dict[str, Any]:
@@ -789,9 +528,6 @@ async def simulate_action_async(
     """
 
     dataset_registry: Optional[DatasetRegistry] = None
-    simulation_registry: Optional[ActionSimulationRegistry] = None
-    simulation_id: Optional[str] = None
-    version: Optional[int] = None
     action_type_rid: Optional[str] = None
     ontology_commit_id: Optional[str] = None
     submitted_by: Optional[str] = None
@@ -865,44 +601,6 @@ async def simulate_action_async(
             submitted_by_type=submitted_by_type,
             action_spec=spec,
         )
-
-        simulation_registry = ActionSimulationRegistry()
-        await simulation_registry.connect()
-        simulation_id = str(request.simulation_id or "").strip()
-        if simulation_id:
-            try:
-                simulation_id = str(UUID(simulation_id))
-            except Exception as exc:
-                raise classified_http_exception(
-                    status.HTTP_400_BAD_REQUEST,
-                    "simulation_id must be a UUID",
-                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
-                ) from exc
-            existing = await simulation_registry.get_simulation(simulation_id=simulation_id)
-            if not existing:
-                raise classified_http_exception(
-                    status.HTTP_404_NOT_FOUND,
-                    "ActionSimulation not found",
-                    code=ErrorCode.RESOURCE_NOT_FOUND,
-                )
-            if existing.db_name != db_name or existing.action_type_id != action_type_id:
-                raise classified_http_exception(
-                    status.HTTP_409_CONFLICT,
-                    "simulation_id does not match db_name/action_type_id",
-                    code=ErrorCode.CONFLICT,
-                )
-        else:
-            simulation_id = str(uuid4())
-            await simulation_registry.create_simulation(
-                simulation_id=simulation_id,
-                db_name=db_name,
-                action_type_id=action_type_id,
-                title=request.title,
-                description=request.description,
-                created_by=submitted_by,
-                created_by_type=submitted_by_type,
-            )
-        version = await simulation_registry.next_version(simulation_id=simulation_id)
 
         settings = get_settings()
         base_storage = create_storage_service(settings)
@@ -1186,8 +884,6 @@ async def simulate_action_async(
                 "overlay_branch": preflight.overlay_branch,
                 "writeback_target": preflight.writeback_target,
                 "preview_action_log_id": preview_action_log_id,
-                "simulation_id": simulation_id,
-                "version": version,
                 "assumptions": request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
                 "assumptions_applied": [
                     {"class_id": t.class_id, "instance_id": t.instance_id, **(t.assumptions or {})}
@@ -1199,94 +895,19 @@ async def simulate_action_async(
             },
         }
 
-        if simulation_registry:
-            await simulation_registry.create_version(
-                simulation_id=simulation_id,
-                version=version,
-                status="COMPUTED",
-                base_branch=preflight.base_branch,
-                overlay_branch=preflight.overlay_branch,
-                ontology_commit_id=ontology_commit_id,
-                action_type_rid=action_type_rid,
-                preview_action_log_id=preview_action_log_id,
-                input_payload=sanitized_input,
-                assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
-                scenarios=[s.model_dump(exclude_none=True) for s in scenarios],
-                result=result_payload.get("data") if isinstance(result_payload.get("data"), dict) else None,
-                error=None,
-                created_by=submitted_by,
-                created_by_type=submitted_by_type,
-            )
-
         return result_payload
 
     except ActionSimulationRejected as exc:
-        if simulation_registry and simulation_id and version is not None:
-            try:
-                await simulation_registry.create_version(
-                    simulation_id=simulation_id,
-                    version=version,
-                    status="REJECTED",
-                    base_branch=str(request.base_branch or "").strip() or "main",
-                    overlay_branch=str(request.overlay_branch or "").strip() or "main",
-                    ontology_commit_id=ontology_commit_id,
-                    action_type_rid=action_type_rid,
-                    preview_action_log_id=preview_action_log_id,
-                    input_payload=sanitize_input(request.input),
-                    assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
-                    scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
-                    result=None,
-                    error=exc.payload,
-                    created_by=submitted_by or "system",
-                    created_by_type=submitted_by_type or "user",
-                )
-            except (RuntimeError, ValueError, TypeError, KeyError) as registry_exc:
-                logger.warning(
-                    "Failed to persist rejected simulation version (simulation_id=%s, version=%s): %s",
-                    simulation_id,
-                    version,
-                    registry_exc,
-                    exc_info=True,
-                )
         raise classified_http_exception(
             exc.status_code,
             str(exc.payload),
             code=ErrorCode.ACTION_CONFLICT_POLICY_FAILED,
         ) from exc
-    except HTTPException as exc:
-        if simulation_registry and simulation_id and version is not None:
-            try:
-                await simulation_registry.create_version(
-                    simulation_id=simulation_id,
-                    version=version,
-                    status="FAILED",
-                    base_branch=str(request.base_branch or "").strip() or "main",
-                    overlay_branch=str(request.overlay_branch or "").strip() or "main",
-                    ontology_commit_id=ontology_commit_id,
-                    action_type_rid=action_type_rid,
-                    preview_action_log_id=preview_action_log_id,
-                    input_payload=sanitize_input(request.input),
-                    assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
-                    scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
-                    result=None,
-                    error={"error": ErrorCode.HTTP_ERROR.value, "status_code": int(exc.status_code), "detail": exc.detail},
-                    created_by=submitted_by or "system",
-                    created_by_type=submitted_by_type or "user",
-                )
-            except (RuntimeError, ValueError, TypeError, KeyError) as registry_exc:
-                logger.warning(
-                    "Failed to persist failed simulation version (simulation_id=%s, version=%s): %s",
-                    simulation_id,
-                    version,
-                    registry_exc,
-                    exc_info=True,
-                )
+    except HTTPException:
         raise
     finally:
         if dataset_registry:
             await dataset_registry.close()
-        if simulation_registry:
-            await simulation_registry.close()
 
 
 @foundry_router.post(
@@ -1352,7 +973,7 @@ async def apply_action_v2_oms(
         ),
         event_store=event_store,
     )
-    return {}
+    return _foundry_valid_action_validation_payload()
 
 
 @foundry_router.post(
@@ -1413,38 +1034,10 @@ async def apply_action_batch_v2_oms(
     return {}
 
 
-@foundry_router.post(
-    "/logs/{actionLogId}/undo",
-    response_model=ActionSubmitResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("oms.action.v2.undo")
-async def undo_action_v2_oms(
-    ontology: str,
-    actionLogId: str,
-    *,
-    request: ActionUndoRequest,
-    preview: bool = Query(False),
-    sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
-    sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
-    event_store=EventStoreDep,
-) -> ActionSubmitResponse:
-    _ = preview, sdk_package_rid, sdk_version
-    db_name = await _ensure_ontology_database_exists(ontology)
-    return await undo_action_async(
-        db_name=db_name,
-        action_log_id=actionLogId,
-        request=request,
-        event_store=event_store,
-    )
-
-
 # FastAPI + postponed annotations safety:
 # Keep request parameter annotations concrete so they are always treated as body models.
 submit_action_async.__annotations__["request"] = ActionSubmitRequest
 submit_action_batch_async.__annotations__["request"] = ActionSubmitBatchRequest
-undo_action_async.__annotations__["request"] = ActionUndoRequest
 simulate_action_async.__annotations__["request"] = ActionSimulateRequest
 apply_action_v2_oms.__annotations__["body"] = ApplyActionRequestV2
 apply_action_batch_v2_oms.__annotations__["body"] = ApplyActionBatchRequestV2
-undo_action_v2_oms.__annotations__["request"] = ActionUndoRequest

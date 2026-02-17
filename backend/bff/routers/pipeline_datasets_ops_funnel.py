@@ -1,4 +1,4 @@
-"""Pipeline dataset funnel/schema helpers.
+"""Pipeline dataset tabular-analysis helpers.
 
 Small, stable helpers extracted from `bff.routers.pipeline_datasets_ops`.
 """
@@ -84,10 +84,10 @@ def _rows_from_preview(columns: list[str], sample_rows: list[list[Any]]) -> list
     return rows
 
 
-FUNNEL_RISK_POLICY = {"stage": "funnel", "suggestion_only": True, "hard_gate": False}
+TABULAR_RISK_POLICY = {"stage": "tabular_inference", "suggestion_only": True, "hard_gate": False}
 
 
-def _build_funnel_analysis_payload(
+def _build_tabular_analysis_payload(
     analysis: Optional[Dict[str, Any]], inferred_schema: list[Dict[str, Any]]
 ) -> Dict[str, Any]:
     payload = dict(analysis or {})
@@ -96,7 +96,7 @@ def _build_funnel_analysis_payload(
     if "risk_summary" not in payload:
         payload["risk_summary"] = []
     if "risk_policy" not in payload:
-        payload["risk_policy"] = FUNNEL_RISK_POLICY
+        payload["risk_policy"] = TABULAR_RISK_POLICY
     return payload
 
 
@@ -161,11 +161,11 @@ def _extract_sample_rows(sample_json: Any, columns: list[str]) -> list[list[Any]
     return []
 
 
-async def _compute_funnel_analysis_from_sample(sample_json: Any) -> Dict[str, Any]:
+async def _compute_tabular_analysis_from_sample(sample_json: Any) -> Dict[str, Any]:
     columns = _extract_sample_columns(sample_json)
     rows = _extract_sample_rows(sample_json, columns)
     if not columns and not rows:
-        return _build_funnel_analysis_payload(None, [])
+        return _build_tabular_analysis_payload(None, [])
     try:
         from bff.services.funnel_client import FunnelClient
 
@@ -182,19 +182,19 @@ async def _compute_funnel_analysis_from_sample(sample_json: Any) -> Dict[str, An
             )
         analysis_payload = analysis if isinstance(analysis, dict) else None
         inferred_schema = (analysis_payload or {}).get("columns") or []
-        return _build_funnel_analysis_payload(analysis_payload, inferred_schema)
+        return _build_tabular_analysis_payload(analysis_payload, inferred_schema)
     except Exception as exc:
-        logger.warning("Funnel analysis failed: %s", exc)
-        from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+        logger.warning("Tabular analysis failed: %s", exc)
+        from shared.services.pipeline.pipeline_funnel_fallback import build_tabular_analysis_fallback
 
-        fallback = build_funnel_analysis_fallback(
+        fallback = build_tabular_analysis_fallback(
             columns=columns,
             rows=rows,
             include_complex_types=True,
             error=str(exc),
             stage="bff",
         )
-        return _build_funnel_analysis_payload(fallback, fallback.get("columns") or [])
+        return _build_tabular_analysis_payload(fallback, fallback.get("columns") or [])
 
 
 def _select_sample_row(
@@ -219,4 +219,3 @@ def _select_sample_row(
                 return row
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "File not found in dataset", code=ErrorCode.RESOURCE_NOT_FOUND)
     return candidates[0]
-

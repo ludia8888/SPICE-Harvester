@@ -13,7 +13,7 @@ from shared.services.pipeline.pipeline_type_utils import (
 
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
-# Rough KR + intl-ish phone patterns (fallback-only; Funnel remains source of truth).
+# Rough KR + intl-ish phone patterns (fallback-only; tabular runtime remains source of truth).
 _PHONE_PATTERNS: Tuple[re.Pattern[str], ...] = (
     # KR mobile: 010-1234-5678 / 01012345678
     re.compile(r"^(?:\+?82[- ]?)?(?:0)?1[016789][- ]?\d{3,4}[- ]?\d{4}$"),
@@ -175,9 +175,9 @@ def infer_type_fallback(
     include_complex_types: bool = True,
 ) -> Dict[str, Any]:
     """
-    Deterministic, dependency-free(ish) inference used when Funnel is unavailable.
+    Deterministic, dependency-free(ish) inference used when tabular runtime is unavailable.
 
-    Returns a Funnel-compatible TypeInferenceResult dict:
+    Returns a tabular-analysis-compatible TypeInferenceResult dict:
       { "type": "...", "confidence": 0..1, "reason": "...", "metadata": {...} }
     """
     sample = _sample_non_empty(values, max_samples=120)
@@ -280,7 +280,7 @@ def infer_type_fallback(
     }
 
 
-def build_funnel_analysis_fallback(
+def build_tabular_analysis_fallback(
     *,
     columns: Sequence[str],
     rows: Sequence[Sequence[Any]],
@@ -289,12 +289,12 @@ def build_funnel_analysis_fallback(
     stage: str = "bff",
 ) -> Dict[str, Any]:
     """
-    Build a Funnel-compatible analysis payload from sample rows without calling Funnel.
+    Build a tabular-analysis-compatible payload from sample rows without calling runtime.
 
     Intended usage:
-    - CSV ingest preview when Funnel is down
-    - /datasets/.../funnel-analysis recompute when Funnel is down
-    - Google Sheets registration preview when Funnel is down
+    - CSV ingest preview when runtime is down
+    - dataset tabular-analysis recompute when runtime is down
+    - Google Sheets registration preview when runtime is down
     """
     safe_columns = [str(c) for c in (columns or []) if str(c)]
     safe_rows: List[List[Any]] = [
@@ -363,5 +363,5 @@ def build_funnel_analysis_fallback(
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "risk_summary": risk_summary,
-        "risk_policy": {"stage": "funnel", "suggestion_only": True, "hard_gate": False},
+        "risk_policy": {"stage": "tabular_inference", "suggestion_only": True, "hard_gate": False},
     }

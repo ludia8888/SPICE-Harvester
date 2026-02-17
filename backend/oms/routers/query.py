@@ -12,11 +12,10 @@ from json import dumps as json_dumps
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, Query, status
+from fastapi import APIRouter, Body, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from oms.dependencies import ValidatedDatabaseName
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep
 from shared.observability.tracing import trace_endpoint
@@ -24,12 +23,13 @@ from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_branch_name,
     validate_class_id,
+    validate_db_name,
 )
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+foundry_router = APIRouter(prefix="/v2/ontologies/{ontology}/objects", tags=["Foundry Object Search v2"])
 
 # Foundry docs: json queries can be nested at most three levels deep.
 # Internal depth starts at 0 for root, so max allowed depth index is 2.
@@ -401,17 +401,13 @@ def _flatten_source(source: Dict[str, Any]) -> Dict[str, Any]:
     return flat
 
 
-@router.post(
-    "/objects/{db_name}/{object_type}/search",
-    response_model=SearchObjectsResponseV2,
-)
-@trace_endpoint("oms.query.search_objects_v2")
-async def search_objects_v2(
-    payload: Dict[str, Any] = Body(...),
-    db_name: str = Depends(ValidatedDatabaseName),
-    object_type: str = ...,
-    branch: str = Query(default="main"),
-    es: ElasticsearchServiceDep = ...,
+async def _search_objects_v2_impl(
+    payload: Dict[str, Any],
+    *,
+    db_name: str,
+    object_type: str,
+    branch: str,
+    es: ElasticsearchServiceDep,
 ) -> SearchObjectsResponseV2 | JSONResponse:
     """
     Foundry Search Objects API v2-compatible object search.
@@ -509,3 +505,25 @@ async def search_objects_v2(
             error_name="InternalServerError",
             parameters={"message": "Failed to execute object search"},
         )
+
+
+@foundry_router.post(
+    "/{objectType}/search",
+    response_model=SearchObjectsResponseV2,
+)
+@trace_endpoint("oms.query.search_objects_v2_foundry")
+async def search_objects_v2_foundry(
+    ontology: str,
+    payload: Dict[str, Any] = Body(...),
+    objectType: str = ...,
+    branch: str = Query(default="main"),
+    es: ElasticsearchServiceDep = ...,
+) -> SearchObjectsResponseV2 | JSONResponse:
+    db_name = validate_db_name(ontology)
+    return await _search_objects_v2_impl(
+        payload=payload,
+        db_name=db_name,
+        object_type=objectType,
+        branch=branch,
+        es=es,
+    )

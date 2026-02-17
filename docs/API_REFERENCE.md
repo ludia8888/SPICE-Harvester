@@ -22,22 +22,22 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **262**
+- Total documented endpoints: **193**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 228 |
+| `v1` | 159 |
 | `v2` | 34 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `databases` | 71 |
-| `pipelines` | 35 |
 | `ontologies` | 34 |
+| `pipelines` | 29 |
+| `databases` | 15 |
 | `admin` | 13 |
-| `data-connectors` | 13 |
+| `data-connectors` | 11 |
 | `lineage` | 10 |
 | `monitoring` | 10 |
 | `config` | 9 |
@@ -46,21 +46,10 @@
 | `schema-changes` | 7 |
 | `backing-datasources` | 5 |
 | `graph-query` | 5 |
-| `pipeline-plans` | 5 |
 | `tasks` | 5 |
+| `ai` | 3 |
 
 ## Endpoint Catalog (`/api/v1`, `/api/v2`)
-
-### Actions
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/actions/logs` | List Action Logs | `v1` | no | no | `list_action_logs_api_v1_databases__db_name__actions_logs_get` |
-| `GET` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}` | Get Action Log | `v1` | no | no | `get_action_log_api_v1_databases__db_name__actions_logs__action_log_id__get` |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations` | List Action Simulations | `v1` | no | no | `list_action_simulations_api_v1_databases__db_name__actions_simulations_get` |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | Get Action Simulation | `v1` | no | no | `get_action_simulation_api_v1_databases__db_name__actions_simulations__simulation_id__get` |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | List Action Simulation Versions | `v1` | no | no | `list_action_simulation_versions_api_v1_databases__db_name__actions_simulations__simulation_id__versions_get` |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | Get Action Simulation Version | `v1` | no | no | `get_action_simulation_version_api_v1_databases__db_name__actions_simulations__simulation_id__versions__version__get` |
 
 ### Admin
 
@@ -172,10 +161,8 @@
 | `GET` | `/api/v1/data-connectors/google-sheets/connections` | List Google Sheets connections | `v1` | no | no | `list_google_sheets_connections_api_v1_data_connectors_google_sheets_connections_get` |
 | `DELETE` | `/api/v1/data-connectors/google-sheets/connections/{connection_id}` | Remove Google Sheets connection | `v1` | no | no | `delete_google_sheets_connection_api_v1_data_connectors_google_sheets_connections__connection_id__delete` |
 | `GET` | `/api/v1/data-connectors/google-sheets/drive/spreadsheets` | List Google Sheets spreadsheets | `v1` | no | no | `list_google_sheets_spreadsheets_api_v1_data_connectors_google_sheets_drive_spreadsheets_get` |
-| `POST` | `/api/v1/data-connectors/google-sheets/grid` | Extract Google Sheets grid + merges | `v1` | no | no | `extract_google_sheet_grid_api_v1_data_connectors_google_sheets_grid_post` |
 | `GET` | `/api/v1/data-connectors/google-sheets/oauth/callback` | Google Sheets OAuth callback | `v1` | no | no | `google_sheets_oauth_callback_api_v1_data_connectors_google_sheets_oauth_callback_get` |
 | `POST` | `/api/v1/data-connectors/google-sheets/oauth/start` | Start Google Sheets OAuth flow | `v1` | no | no | `start_google_sheets_oauth_api_v1_data_connectors_google_sheets_oauth_start_post` |
-| `POST` | `/api/v1/data-connectors/google-sheets/preview` | Preview Google Sheet data (for Funnel) | `v1` | no | no | `preview_google_sheet_for_funnel_api_v1_data_connectors_google_sheets_preview_post` |
 | `POST` | `/api/v1/data-connectors/google-sheets/register` | Register Google Sheet for data monitoring | `v1` | no | no | `register_google_sheet_api_v1_data_connectors_google_sheets_register_post` |
 | `GET` | `/api/v1/data-connectors/google-sheets/registered` | List registered Google Sheets | `v1` | no | no | `list_registered_sheets_api_v1_data_connectors_google_sheets_registered_get` |
 | `GET` | `/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets` | List worksheets for a spreadsheet | `v1` | no | no | `list_google_sheets_worksheets_api_v1_data_connectors_google_sheets_spreadsheets__sheet_id__worksheets_get` |
@@ -191,7 +178,6 @@
 | `POST` | `/api/v1/databases` | Create Database | `v1` | no | no | `create_database_api_v1_databases_post` |
 | `GET` | `/api/v1/databases/{db_name}` | Get Database | `v1` | no | no | `get_database_api_v1_databases__db_name__get` |
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | `v1` | no | no | `delete_database_api_v1_databases__db_name__delete` |
-| `POST` | `/api/v1/databases/{db_name}/classes` | Create Class | `v1` | no | no | `create_class_api_v1_databases__db_name__classes_post` |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | `v1` | no | no | `get_database_expected_seq_api_v1_databases__db_name__expected_seq_get` |
 
 ### Document Bundles
@@ -209,7 +195,6 @@
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes` | List Action Types V2 | `v2` | no | no | `list_action_types_v2_api_v2_ontologies__ontology__actionTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` | Get Action Type By Rid V2 | `v2` | no | no | `get_action_type_by_rid_v2_api_v2_ontologies__ontology__actionTypes_byRid__actionTypeRid__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/{actionType}` | Get Action Type V2 | `v2` | no | no | `get_action_type_v2_api_v2_ontologies__ontology__actionTypes__actionType__get` |
-| `POST` | `/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo` | Undo Action V2 | `v2` | no | no | `undo_action_v2_api_v2_ontologies__ontology__actions_logs__actionLogId__undo_post` |
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/apply` | Apply Action V2 | `v2` | no | no | `apply_action_v2_api_v2_ontologies__ontology__actions__action__apply_post` |
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/applyBatch` | Apply Action Batch V2 | `v2` | no | no | `apply_action_batch_v2_api_v2_ontologies__ontology__actions__action__applyBatch_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/fullMetadata` | Get Full Metadata V2 | `v2` | no | no | `get_full_metadata_v2_api_v2_ontologies__ontology__fullMetadata_get` |
@@ -232,6 +217,7 @@
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | `v2` | no | no | `get_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` | List Linked Objects V2 | `v2` | no | no | `list_linked_objects_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}` | Get Linked Object V2 | `v2` | no | no | `get_linked_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType___linkedObjectPrimaryKey__get` |
+| `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | `v2` | no | no | `execute_query_v2_api_v2_ontologies__ontology__queries__queryApiName__execute_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/queryTypes` | List Query Types V2 | `v2` | no | no | `list_query_types_v2_api_v2_ontologies__ontology__queryTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}` | Get Query Type V2 | `v2` | no | no | `get_query_type_v2_api_v2_ontologies__ontology__queryTypes__queryApiName__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/sharedPropertyTypes` | List Shared Property Types V2 | `v2` | no | no | `list_shared_property_types_v2_api_v2_ontologies__ontology__sharedPropertyTypes_get` |
@@ -275,12 +261,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/` | Root | `v1` | no | no | `root_api_v1__get` |
 | `GET` | `/api/v1/health` | Health Check | `v1` | no | no | `health_check_api_v1_health_get` |
-
-### Instance Management
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/sample-values` | Get Class Sample Values | `v1` | no | no | `get_class_sample_values_api_v1_databases__db_name__class__class_id__sample_values_get` |
 
 ### Label Mappings
 
@@ -340,73 +320,11 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/ontology-agent/runs` | Run ontology agent | `v1` | no | no | `run_ontology_agent_api_v1_ontology_agent_runs_post` |
 
-### Ontology Extensions
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/databases/{db_name}/ontology/action-types` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_action_types_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_action_types__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_action_types__resource_id__delete` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/deploy` | Deploy Ontology | `v1` | no | no | `deploy_ontology_api_v1_databases__db_name__ontology_deploy_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/functions` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_functions_get` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/functions` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_functions_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_functions__resource_id__get` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_functions__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_functions__resource_id__delete` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/groups` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_groups_get` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/groups` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_groups_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_groups__resource_id__get` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_groups__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_groups__resource_id__delete` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/health` | Ontology Health | `v1` | no | no | `ontology_health_api_v1_databases__db_name__ontology_health_get` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/interfaces` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_interfaces_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_interfaces__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_interfaces__resource_id__delete` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/proposals` | List Ontology Proposals | `v1` | no | no | `list_ontology_proposals_api_v1_databases__db_name__ontology_proposals_get` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/proposals` | Create Ontology Proposal | `v1` | no | no | `create_ontology_proposal_api_v1_databases__db_name__ontology_proposals_post` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | Approve Ontology Proposal | `v1` | no | no | `approve_ontology_proposal_api_v1_databases__db_name__ontology_proposals__proposal_id__approve_post` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/shared-properties` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_shared_properties_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__delete` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/value-types` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_value_types_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_value_types__resource_id__put` |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_value_types__resource_id__delete` |
-
-### Ontology Link Types
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types` | Create Link Type | `v1` | no | no | `create_link_type_api_v1_databases__db_name__ontology_link_types_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Update Link Type | `v1` | no | no | `update_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__put` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | `v1` | no | no | `list_link_edits_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_get` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | `v1` | no | no | `create_link_edit_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_post` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex` | Reindex Link Type | `v1` | no | no | `reindex_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__reindex_post` |
-
 ### Ontology Management
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/databases/{db_name}/import-from-excel/commit` | Commit Import From Excel | `v1` | no | no | `commit_import_from_excel_api_v1_databases__db_name__import_from_excel_commit_post` |
-| `POST` | `/api/v1/databases/{db_name}/import-from-excel/dry-run` | Dry Run Import From Excel | `v1` | no | no | `dry_run_import_from_excel_api_v1_databases__db_name__import_from_excel_dry_run_post` |
-| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/commit` | Commit Import From Google Sheets | `v1` | no | no | `commit_import_from_google_sheets_api_v1_databases__db_name__import_from_google_sheets_commit_post` |
-| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/dry-run` | Dry Run Import From Google Sheets | `v1` | no | no | `dry_run_import_from_google_sheets_api_v1_databases__db_name__import_from_google_sheets_dry_run_post` |
 | `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | `v1` | no | no | `create_ontology_api_v1_databases__db_name__ontology_post` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/validate` | Validate Ontology Create Bff | `v1` | no | no | `validate_ontology_create_bff_api_v1_databases__db_name__ontology_validate_post` |
-| `POST` | `/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` | Save Mapping Metadata | `v1` | no | no | `save_mapping_metadata_api_v1_databases__db_name__ontology__class_id__mapping_metadata_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/{class_id}/schema` | Get Ontology Schema | `v1` | no | no | `get_ontology_schema_api_v1_databases__db_name__ontology__class_id__schema_get` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings` | Suggest Mappings | `v1` | no | no | `suggest_mappings_api_v1_databases__db_name__suggest_mappings_post` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-excel` | Suggest Mappings From Excel | `v1` | no | no | `suggest_mappings_from_excel_api_v1_databases__db_name__suggest_mappings_from_excel_post` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets` | Suggest Mappings From Google Sheets | `v1` | no | no | `suggest_mappings_from_google_sheets_api_v1_databases__db_name__suggest_mappings_from_google_sheets_post` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-data` | Suggest Schema From Data | `v1` | no | no | `suggest_schema_from_data_api_v1_databases__db_name__suggest_schema_from_data_post` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-excel` | Suggest Schema From Excel | `v1` | no | no | `suggest_schema_from_excel_api_v1_databases__db_name__suggest_schema_from_excel_post` |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-google-sheets` | Suggest Schema From Google Sheets | `v1` | no | no | `suggest_schema_from_google_sheets_api_v1_databases__db_name__suggest_schema_from_google_sheets_post` |
-
-### Ontology Object Types
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/databases/{db_name}/ontology/object-types` | Create Object Type Contract | `v1` | no | no | `create_object_type_contract_api_v1_databases__db_name__ontology_object_types_post` |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/object-types/{class_id}` | Update Object Type Contract | `v1` | no | no | `update_object_type_contract_api_v1_databases__db_name__ontology_object_types__class_id__put` |
 
 ### Ops
 
@@ -420,9 +338,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/pipelines` | List Pipelines | `v1` | no | no | `list_pipelines_api_v1_pipelines_get` |
 | `POST` | `/api/v1/pipelines` | Create Pipeline | `v1` | no | no | `create_pipeline_api_v1_pipelines_post` |
-| `GET` | `/api/v1/pipelines/branches` | List Pipeline Branches | `v1` | no | no | `list_pipeline_branches_api_v1_pipelines_branches_get` |
-| `POST` | `/api/v1/pipelines/branches/{branch}/archive` | Archive Pipeline Branch | `v1` | no | no | `archive_pipeline_branch_api_v1_pipelines_branches__branch__archive_post` |
-| `POST` | `/api/v1/pipelines/branches/{branch}/restore` | Restore Pipeline Branch | `v1` | no | no | `restore_pipeline_branch_api_v1_pipelines_branches__branch__restore_post` |
 | `GET` | `/api/v1/pipelines/datasets` | List Datasets | `v1` | no | no | `list_datasets_api_v1_pipelines_datasets_get` |
 | `POST` | `/api/v1/pipelines/datasets` | Create Dataset | `v1` | no | no | `create_dataset_api_v1_pipelines_datasets_post` |
 | `POST` | `/api/v1/pipelines/datasets/csv-upload` | Upload Csv Dataset | `v1` | no | no | `upload_csv_dataset_api_v1_pipelines_datasets_csv_upload_post` |
@@ -432,9 +347,7 @@
 | `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | `v1` | no | no | `upload_media_dataset_api_v1_pipelines_datasets_media_upload_post` |
 | `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | `v1` | no | no | `get_dataset_raw_file_api_v1_pipelines_datasets__dataset_id__raw_file_get` |
 | `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | `v1` | no | no | `create_dataset_version_api_v1_pipelines_datasets__dataset_id__versions_post` |
-| `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis` | Reanalyze Dataset Version | `v1` | no | no | `reanalyze_dataset_version_api_v1_pipelines_datasets__dataset_id__versions__version_id__funnel_analysis_post` |
 | `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | `v1` | no | no | `list_pipeline_proposals_api_v1_pipelines_proposals_get` |
-| `POST` | `/api/v1/pipelines/simulate-definition` | Simulate Pipeline Definition | `v1` | no | no | `simulate_pipeline_definition_api_v1_pipelines_simulate_definition_post` |
 | `GET` | `/api/v1/pipelines/udfs` | List Udfs | `v1` | no | no | `list_udfs_api_v1_pipelines_udfs_get` |
 | `POST` | `/api/v1/pipelines/udfs` | Create Udf | `v1` | no | no | `create_udf_api_v1_pipelines_udfs_post` |
 | `GET` | `/api/v1/pipelines/udfs/{udf_id}` | Get Udf | `v1` | no | no | `get_udf_api_v1_pipelines_udfs__udf_id__get` |
@@ -444,7 +357,6 @@
 | `PUT` | `/api/v1/pipelines/{pipeline_id}` | Update Pipeline | `v1` | no | no | `update_pipeline_api_v1_pipelines__pipeline_id__put` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts` | List Pipeline Artifacts | `v1` | no | no | `list_pipeline_artifacts_api_v1_pipelines__pipeline_id__artifacts_get` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}` | Get Pipeline Artifact | `v1` | no | no | `get_pipeline_artifact_api_v1_pipelines__pipeline_id__artifacts__artifact_id__get` |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/branches` | Create Pipeline Branch | `v1` | no | no | `create_pipeline_branch_api_v1_pipelines__pipeline_id__branches_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build Pipeline | `v1` | no | no | `build_pipeline_api_v1_pipelines__pipeline_id__build_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy Pipeline | `v1` | no | no | `deploy_pipeline_api_v1_pipelines__pipeline_id__deploy_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview Pipeline | `v1` | no | no | `preview_pipeline_api_v1_pipelines__pipeline_id__preview_post` |
@@ -453,22 +365,6 @@
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/reject` | Reject Pipeline Proposal | `v1` | no | no | `reject_pipeline_proposal_api_v1_pipelines__pipeline_id__proposals_reject_post` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/readiness` | Get Pipeline Readiness | `v1` | no | no | `get_pipeline_readiness_api_v1_pipelines__pipeline_id__readiness_get` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/runs` | List Pipeline Runs | `v1` | no | no | `list_pipeline_runs_api_v1_pipelines__pipeline_id__runs_get` |
-
-### Pipeline Plans
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/pipeline-plans/compile` | Compile Plan | `v1` | no | no | `compile_plan_api_v1_pipeline_plans_compile_post` |
-| `GET` | `/api/v1/pipeline-plans/{plan_id}` | Get Plan | `v1` | no | no | `get_plan_api_v1_pipeline_plans__plan_id__get` |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/evaluate-joins` | Evaluate Joins | `v1` | no | no | `evaluate_joins_api_v1_pipeline_plans__plan_id__evaluate_joins_post` |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/inspect-preview` | Inspect Plan Preview | `v1` | no | no | `inspect_plan_preview_api_v1_pipeline_plans__plan_id__inspect_preview_post` |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/preview` | Preview Plan | `v1` | no | no | `preview_plan_api_v1_pipeline_plans__plan_id__preview_post` |
-
-### Query
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/query/builder` | Query Builder Info | `v1` | no | no | `query_builder_info_api_v1_databases__db_name__query_builder_get` |
 
 ### Schema Changes
 

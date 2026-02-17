@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from bff.routers.pipeline_datasets_ops import (
-    _build_funnel_analysis_payload,
+    _build_tabular_analysis_payload,
     _build_schema_columns,
     _columns_from_schema,
     _default_dataset_name,
@@ -108,9 +108,9 @@ async def upload_csv_dataset(
             inferred_schema = (analysis_payload or {}).get("columns") or []
         except Exception as exc:
             logger.warning("CSV type inference failed: %s", exc)
-            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+            from shared.services.pipeline.pipeline_funnel_fallback import build_tabular_analysis_fallback
 
-            analysis_payload = build_funnel_analysis_fallback(
+            analysis_payload = build_tabular_analysis_fallback(
                 columns=columns,
                 rows=preview_rows,
                 include_complex_types=True,
@@ -119,7 +119,7 @@ async def upload_csv_dataset(
             )
             inferred_schema = (analysis_payload or {}).get("columns") or []
 
-        funnel_analysis = _build_funnel_analysis_payload(analysis_payload, inferred_schema)
+        tabular_analysis = _build_tabular_analysis_payload(analysis_payload, inferred_schema)
         schema_columns = _build_schema_columns(columns, inferred_schema)
         schema_json = {"columns": schema_columns}
         sample_rows = _rows_from_preview(columns, preview_rows)
@@ -171,7 +171,7 @@ async def upload_csv_dataset(
             objectify_job_queue=objectify_job_queue,
             lineage_store=lineage_store,
             preview_payload=preview_payload,
-            funnel_analysis=funnel_analysis,
+            tabular_analysis=tabular_analysis,
             success_message="CSV dataset created",
         )
     except HTTPException:

@@ -10,7 +10,7 @@ if [ -d "spice_harvester" ]; then
     echo "✅ spice_harvester directory exists"
     
     # Check subdirectories
-    REQUIRED_DIRS=("oms" "bff" "funnel" "data_connector" "shared")
+    REQUIRED_DIRS=("oms" "bff" "data_connector" "shared")
     for dir in "${REQUIRED_DIRS[@]}"; do
         if [ -d "spice_harvester/$dir" ]; then
             echo "✅ spice_harvester/$dir exists"
@@ -24,7 +24,7 @@ fi
 
 echo ""
 echo "2. Checking startup scripts:"
-SCRIPTS=("start_oms.sh" "start_bff.sh" "start_funnel.sh")
+SCRIPTS=("start_oms.sh" "start_bff.sh")
 for script in "${SCRIPTS[@]}"; do
     if [ -f "$script" ]; then
         if grep -q "spice_harvester" "$script"; then

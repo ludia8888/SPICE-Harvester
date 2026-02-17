@@ -27,7 +27,7 @@ _RECIPE_GUARD_OPERATIONS: list[tuple[str, str]] = [
     ("POST", "/api/v2/ontologies/{ontology}/objectSets/createTemporary"),
     ("GET", "/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}"),
     ("GET", "/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}"),
-    ("POST", "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo"),
+    ("POST", "/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute"),
     ("GET", "/api/v1/lineage/column-lineage"),
 ]
 

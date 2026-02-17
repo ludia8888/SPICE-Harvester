@@ -70,7 +70,7 @@ def _build_dataset_upload_response(
     result: Any,
     preview: Dict[str, Any],
     source: Any,
-    funnel_analysis: Any,
+    tabular_analysis: Any,
     schema_json: Dict[str, Any],
 ) -> Dict[str, Any]:
     data: Dict[str, Any] = {
@@ -78,7 +78,7 @@ def _build_dataset_upload_response(
         "version": result.version.__dict__,
         "preview": preview,
         "source": source,
-        "funnel_analysis": funnel_analysis,
+        "tabular_analysis": tabular_analysis,
         "ingest_request_id": result.ingest_request.ingest_request_id,
         "schema_status": getattr(result.ingest_request, "schema_status", "PENDING"),
         "schema_suggestion": schema_json,
@@ -87,4 +87,3 @@ def _build_dataset_upload_response(
     if objectify_job_id:
         data["objectify_job_id"] = objectify_job_id
     return data
-

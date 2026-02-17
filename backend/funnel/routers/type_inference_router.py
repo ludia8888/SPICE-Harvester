@@ -7,11 +7,12 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 
+from data_connector.google_sheets.service import GoogleSheetsService
 from funnel.services.data_processor import FunnelDataProcessor
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest, SheetGrid
+from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest
 from shared.models.structure_patch import SheetStructurePatch
 from shared.models.structure_analysis import (
     SheetStructureAnalysisRequest,
@@ -20,7 +21,7 @@ from shared.models.structure_analysis import (
 from shared.models.type_inference import (
     DatasetAnalysisRequest,
     DatasetAnalysisResponse,
-    FunnelPreviewResponse,
+    TabularPreviewResponse,
 )
 from shared.utils.app_logger import get_logger
 from funnel.services.structure_patch import apply_structure_patch
@@ -233,38 +234,50 @@ async def analyze_excel_structure(
 @router.post("/structure/analyze/google-sheets", response_model=SheetStructureAnalysisResponse)
 async def analyze_google_sheets_structure(
     request: GoogleSheetStructureAnalysisRequest,
+    processor: FunnelDataProcessor = Depends(get_data_processor),
 ) -> SheetStructureAnalysisResponse:
     """
-    Google Sheets URL → (BFF에서 values+metadata(merges) 가져오기) → grid/merged_cells → 구조 분석
+    Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
     """
     import asyncio
 
-    import httpx
-
-    from shared.config.settings import get_settings
-
     try:
-        bff_url = get_settings().services.bff_base_url
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{bff_url}/api/v1/data-connectors/google-sheets/grid",
-                json={
-                    "sheet_url": str(request.sheet_url),
-                    "worksheet_name": request.worksheet_name,
-                    "api_key": request.api_key,
-                    "connection_id": request.connection_id,
-                    "max_rows": request.max_rows,
-                    "max_cols": request.max_cols,
-                    "trim_trailing_empty": request.trim_trailing_empty,
-                },
-            )
-            resp.raise_for_status()
-            sheet_grid = SheetGrid(**resp.json())
-    except httpx.HTTPStatusError as e:
+        access_token = await processor.resolve_optional_access_token(
+            connection_id=request.connection_id,
+        )
+        google_sheets_service = GoogleSheetsService(api_key=request.api_key)
+        sheet_id, metadata, worksheet_title, worksheet_sheet_id, values = await google_sheets_service.fetch_sheet_values(
+            str(request.sheet_url),
+            worksheet_name=request.worksheet_name,
+            api_key=request.api_key,
+            access_token=access_token,
+        )
+        merges = SheetGridParser.merged_cells_from_google_metadata(
+            metadata.model_dump(),
+            worksheet_name=worksheet_title,
+            sheet_id=worksheet_sheet_id,
+        )
+        sheet_grid = SheetGridParser.from_google_sheets_values(
+            values,
+            merged_cells=merges,
+            sheet_name=worksheet_title,
+            options=SheetGridParseOptions(
+                trim_trailing_empty=bool(request.trim_trailing_empty),
+                max_rows=request.max_rows,
+                max_cols=request.max_cols,
+            ),
+            metadata={
+                "sheet_id": sheet_id,
+                "sheet_title": metadata.title,
+                "worksheet_title": worksheet_title,
+                "sheet_url": str(request.sheet_url),
+            },
+        )
+    except ValueError as e:
         raise classified_http_exception(
-            status_code=e.response.status_code,
-            detail=f"Failed to fetch Google Sheets grid: {e.response.text}",
-            code=ErrorCode.UPSTREAM_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to fetch Google Sheets grid: {str(e)}",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     except Exception as e:
         raise classified_http_exception(
@@ -347,7 +360,7 @@ async def delete_structure_patch(sheet_signature: str) -> Dict[str, Any]:
     return {"deleted": bool(deleted), "sheet_signature": sheet_signature}
 
 
-@router.post("/preview/google-sheets", response_model=FunnelPreviewResponse)
+@router.post("/preview/google-sheets", response_model=TabularPreviewResponse)
 async def preview_google_sheets_with_inference(
     sheet_url: str,
     worksheet_name: str = None,
@@ -356,7 +369,7 @@ async def preview_google_sheets_with_inference(
     infer_types: bool = True,
     include_complex_types: bool = False,
     processor: FunnelDataProcessor = Depends(get_data_processor),
-) -> FunnelPreviewResponse:
+) -> TabularPreviewResponse:
     """
     Google Sheets 데이터를 미리보기하고 타입을 추론합니다.
 

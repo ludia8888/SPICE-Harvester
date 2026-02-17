@@ -335,7 +335,7 @@ def test_ai_query_label_query_maps_upstream_5xx_to_503(client):
     }
     fake_mapper.convert_to_display_batch.return_value = []
 
-    req = httpx.Request("POST", "http://oms:8000/api/v1/objects/testdb/Customer/search")
+    req = httpx.Request("POST", "http://oms:8000/api/v2/ontologies/testdb/objects/Customer/search")
     resp = httpx.Response(
         status_code=500,
         request=req,

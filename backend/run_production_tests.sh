@@ -124,7 +124,7 @@ Options:
 Notes:
 - Tests live under `backend/tests/` (run from `backend/`).
 - Full suite expects local ports from docker compose:
-  OMS 8000, BFF 8002, Funnel 8003.
+  OMS 8000, BFF 8002.
   Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 39092.
   If you use repo root `.env` port overrides (recommended), this script will auto-detect them.
 USAGE
@@ -591,7 +591,7 @@ if [[ "$MODE" == "full" ]]; then
     RUN_LIVE_OMS_SMOKE=true "$PYTHON_BIN" -m pytest tests/test_oms_smoke.py -q
   fi
 
-  # 4) Full stack core flow (OMS/BFF/Funnel + Kafka + ES)
+  # 4) Full stack core flow (OMS/BFF internal runtimes + Kafka + ES)
   if [[ "$RUN_CORE" == "true" ]]; then
     "$PYTHON_BIN" -m pytest tests/test_core_functionality.py -q
   fi

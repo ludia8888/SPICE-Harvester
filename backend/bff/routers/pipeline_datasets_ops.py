@@ -8,11 +8,11 @@ implementation details to smaller helpers (Composite + Facade).
 
 
 from bff.routers.pipeline_datasets_ops_funnel import (
-    FUNNEL_RISK_POLICY,
-    _build_funnel_analysis_payload,
+    TABULAR_RISK_POLICY,
+    _build_tabular_analysis_payload,
     _build_schema_columns,
     _columns_from_schema,
-    _compute_funnel_analysis_from_sample,
+    _compute_tabular_analysis_from_sample,
     _extract_sample_columns,
     _extract_sample_rows,
     _normalize_inferred_type,
@@ -49,14 +49,14 @@ from shared.services.events.dataset_ingest_outbox import build_dataset_event_pay
 from shared.services.storage.event_store import event_store
 
 __all__ = [
-    "FUNNEL_RISK_POLICY",
+    "TABULAR_RISK_POLICY",
     "_acquire_lakefs_commit_lock",
-    "_build_funnel_analysis_payload",
+    "_build_tabular_analysis_payload",
     "_build_ingest_request_fingerprint",
     "_build_schema_columns",
     "_columns_from_schema",
     "_commit_lakefs_with_predicate_fallback",
-    "_compute_funnel_analysis_from_sample",
+    "_compute_tabular_analysis_from_sample",
     "_convert_xls_to_xlsx_bytes",
     "_dataset_artifact_prefix",
     "_default_dataset_name",

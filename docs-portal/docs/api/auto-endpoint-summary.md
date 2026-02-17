@@ -2,15 +2,17 @@
 
 | Category | Endpoints | Base Path |
 |----------|-----------|-----------|
-| Ontologies | 10 | `/api/v2/ontologies` |
+| Ontologies | 11 | `/api/v2/ontologies` |
 | Object Types | 6 | `/api/v2/ontologies/{ontology}/objectTypes` |
-| Actions | 6 | `/api/v2/ontologies/{ontology}/actionTypes` |
+| Actions | 5 | `/api/v2/ontologies/{ontology}/actionTypes` |
 | Links & Link Types | 4 | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` |
 | Query Types | 2 | `/api/v2/ontologies/{ontology}/queryTypes` |
 | Interface Types | 2 | `/api/v2/ontologies/{ontology}/interfaceTypes` |
 | Shared Property Types | 2 | `/api/v2/ontologies/{ontology}/sharedPropertyTypes` |
 | Value Types | 2 | `/api/v2/ontologies/{ontology}/valueTypes` |
 
-### v1 Endpoints (228)
+### v1 Endpoints (159)
 
-The v1 API covers the same functional areas with a legacy URL structure. See the [v1 reference pages](./auto-v1-reference) for details.
+v1 routes are internal SPICE-specific/compatibility surfaces and may not map to Foundry public APIs.
+For Foundry-style contracts, prefer [v2 reference pages](./auto-v2-reference).
+The [v1 reference pages](./auto-v1-reference) are retained only for migration and internal operations.

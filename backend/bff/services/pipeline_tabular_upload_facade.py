@@ -34,7 +34,7 @@ async def finalize_tabular_upload(
     objectify_job_queue: Any,
     lineage_store: Any,
     preview_payload: Dict[str, Any],
-    funnel_analysis: Any,
+    tabular_analysis: Any,
     success_message: str,
 ) -> Dict[str, Any]:
     result = await upload_tabular_dataset(
@@ -74,7 +74,7 @@ async def finalize_tabular_upload(
         result=result,
         preview=preview_payload,
         source=source_metadata,
-        funnel_analysis=funnel_analysis,
+        tabular_analysis=tabular_analysis,
         schema_json=schema_json,
     )
 
@@ -82,4 +82,3 @@ async def finalize_tabular_upload(
         message=success_message,
         data=data,
     ).to_dict()
-

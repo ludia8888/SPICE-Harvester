@@ -9,14 +9,12 @@ sub-router focused and maintainable.
 from fastapi import APIRouter
 
 from bff.routers import (
-    pipeline_branches,
     pipeline_catalog,
     pipeline_datasets,
     pipeline_detail,
     pipeline_execution,
     pipeline_history,
     pipeline_proposals,
-    pipeline_simulation,
     pipeline_udfs,
 )
 
@@ -26,9 +24,7 @@ router = APIRouter(tags=["Pipeline Builder"])
 
 # Include static/top-level routes first to avoid shadowing by dynamic `/{pipeline_id}` routes.
 router.include_router(pipeline_catalog.router, prefix=_PIPELINES_PREFIX)
-router.include_router(pipeline_simulation.router, prefix=_PIPELINES_PREFIX)
 router.include_router(pipeline_udfs.router, prefix=_PIPELINES_PREFIX)
-router.include_router(pipeline_branches.router, prefix=_PIPELINES_PREFIX)
 router.include_router(pipeline_proposals.router, prefix=_PIPELINES_PREFIX)
 router.include_router(pipeline_datasets.router, prefix=_PIPELINES_PREFIX)
 

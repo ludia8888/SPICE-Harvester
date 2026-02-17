@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.models.common import DataType
-from shared.models.type_inference import ColumnAnalysisResult, ColumnProfile, FunnelRiskItem
+from shared.models.type_inference import ColumnAnalysisResult, ColumnProfile, TabularRiskItem
 
 from funnel.services.schema_utils import normalize_property_name
 
@@ -25,15 +25,15 @@ def assess_dataset_risks(
     data: List[List[Any]],
     columns: List[str],
     analysis_results: List[ColumnAnalysisResult],
-) -> Tuple[List[FunnelRiskItem], Dict[str, List[FunnelRiskItem]], Dict[str, ColumnProfile]]:
+) -> Tuple[List[TabularRiskItem], Dict[str, List[TabularRiskItem]], Dict[str, ColumnProfile]]:
     sample_rows = len(data)
-    risk_summary: List[FunnelRiskItem] = []
-    column_risks: Dict[str, List[FunnelRiskItem]] = {}
+    risk_summary: List[TabularRiskItem] = []
+    column_risks: Dict[str, List[TabularRiskItem]] = {}
     column_profiles: Dict[str, ColumnProfile] = {}
 
     if sample_rows == 0:
         risk_summary.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="no_sample_rows",
                 severity="info",
                 message="No sample rows available for inference.",
@@ -45,7 +45,7 @@ def assess_dataset_risks(
 
     if sample_rows < MIN_SAMPLE_ROWS:
         risk_summary.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="sample_size_low",
                 severity="info",
                 message="Sample size is small; inference may be unstable.",
@@ -86,7 +86,7 @@ def _build_column_data_map(
     return data_map
 
 
-def _append_name_collision_risks(columns: List[str], risks: List[FunnelRiskItem]) -> None:
+def _append_name_collision_risks(columns: List[str], risks: List[TabularRiskItem]) -> None:
     normalized: Dict[str, List[str]] = {}
     for col in columns:
         key = normalize_property_name(col)
@@ -96,7 +96,7 @@ def _append_name_collision_risks(columns: List[str], risks: List[FunnelRiskItem]
         if len(original_names) < 2:
             continue
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="normalized_name_collision",
                 severity="warning",
                 message="Multiple columns normalize to the same schema name.",
@@ -111,14 +111,14 @@ def _append_name_collision_risks(columns: List[str], risks: List[FunnelRiskItem]
 
 def _assess_column_risks(
     column_name: str, result: ColumnAnalysisResult
-) -> List[FunnelRiskItem]:
-    risks: List[FunnelRiskItem] = []
+) -> List[TabularRiskItem]:
+    risks: List[TabularRiskItem] = []
     inferred = result.inferred_type
     metadata = inferred.metadata or {}
 
     if result.total_count == 0 or result.non_empty_count == 0:
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="all_values_empty",
                 severity="info",
                 message="Column has no non-empty sample values.",
@@ -131,7 +131,7 @@ def _assess_column_risks(
 
     if inferred.confidence < LOW_CONFIDENCE_THRESHOLD:
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="low_confidence_type",
                 severity="warning",
                 message="Inferred type confidence is low.",
@@ -146,7 +146,7 @@ def _assess_column_risks(
 
     if result.null_ratio >= WARN_NULL_RATIO:
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="high_null_ratio",
                 severity="warning",
                 message="Null/empty ratio is high.",
@@ -160,7 +160,7 @@ def _assess_column_risks(
         )
     elif result.null_ratio >= INFO_NULL_RATIO:
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="moderate_null_ratio",
                 severity="info",
                 message="Null/empty ratio is noticeable.",
@@ -174,7 +174,7 @@ def _assess_column_risks(
         result.unique_ratio < KEY_UNIQUE_RATIO_MIN or result.null_ratio > KEY_NULL_RATIO_MAX
     ):
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="key_candidate_not_unique",
                 severity="warning",
                 message="Key-like column is not unique or has missing values.",
@@ -193,7 +193,7 @@ def _assess_column_risks(
     candidate_gap = metadata.get("confidence_gap")
     if isinstance(candidate_gap, (int, float)) and candidate_gap <= AMBIGUOUS_GAP_MAX:
         risks.append(
-            FunnelRiskItem(
+            TabularRiskItem(
                 code="ambiguous_type_candidates",
                 severity="info",
                 message="Top inferred types are close; ambiguity is possible.",
@@ -210,7 +210,7 @@ def _assess_column_risks(
             ratio = matched / total
             if ratio < 0.9:
                 risks.append(
-                    FunnelRiskItem(
+                    TabularRiskItem(
                         code="mixed_numeric_values",
                         severity="warning",
                         message="Not all samples match the numeric type.",
@@ -226,7 +226,7 @@ def _assess_column_risks(
         ambiguous = metadata.get("ambiguous_count")
         if isinstance(ambiguous, int) and ambiguous > 0:
             risks.append(
-                FunnelRiskItem(
+                TabularRiskItem(
                     code="ambiguous_date_format",
                     severity="warning",
                     message="Date format appears ambiguous in samples.",
@@ -241,7 +241,7 @@ def _assess_column_risks(
         fuzzy = metadata.get("fuzzy_matches")
         if isinstance(fuzzy, int) and fuzzy > 0:
             risks.append(
-                FunnelRiskItem(
+                TabularRiskItem(
                     code="fuzzy_datetime_matches",
                     severity="info",
                     message="Datetime patterns are inferred with fuzzy matches.",

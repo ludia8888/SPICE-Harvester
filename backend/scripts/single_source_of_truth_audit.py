@@ -34,7 +34,7 @@ def check_duplicate_dependencies() -> Tuple[Dict[str, List[str]], int]:
     total_violations = 0
     
     services_to_check = [
-        'bff', 'oms', 'funnel', 'message_relay',
+        'bff', 'oms', 'message_relay',
         'instance_worker', 'ontology_worker', 'projection_worker',
         'tests'
     ]
@@ -83,7 +83,6 @@ def check_version_consistency() -> Tuple[Dict[str, Dict[str, str]], int]:
         ('tests/requirements.txt', backend_dir / 'tests' / 'requirements.txt'),
         ('bff/requirements.txt', backend_dir / 'bff' / 'requirements.txt'),
         ('oms/requirements.txt', backend_dir / 'oms' / 'requirements.txt'),
-        ('funnel/requirements.txt', backend_dir / 'funnel' / 'requirements.txt'),
         ('message_relay/requirements.txt', backend_dir / 'message_relay' / 'requirements.txt'),
     ]
     
@@ -107,7 +106,7 @@ def check_single_source_compliance() -> bool:
     print("\n🎯 SINGLE SOURCE OF TRUTH COMPLIANCE")
     print("=" * 50)
     
-    services = ['bff', 'oms', 'funnel', 'message_relay', 'instance_worker', 'ontology_worker', 'projection_worker']
+    services = ['bff', 'oms', 'message_relay', 'instance_worker', 'ontology_worker', 'projection_worker']
     compliant_services = 0
     non_compliant = []
     

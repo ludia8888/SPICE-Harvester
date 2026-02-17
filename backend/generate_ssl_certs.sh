@@ -20,9 +20,9 @@ mkdir -p $SSL_DIR
 # 인증서 유효 기간 (일)
 DAYS=365
 
-# 서비스 목록
-SERVICES=("oms" "bff" "funnel")
-PORTS=("8000" "8002" "8003")
+# 서비스 목록 (external runtime only)
+SERVICES=("oms" "bff")
+PORTS=("8000" "8002")
 
 # Root CA 생성
 echo -e "\n${YELLOW}1. Root CA 생성중...${NC}"
@@ -106,7 +106,6 @@ DNS.1 = localhost
 DNS.2 = *.spice-harvester.local
 DNS.3 = oms
 DNS.4 = bff
-DNS.5 = funnel
 IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
@@ -131,7 +130,6 @@ cat > $SSL_DIR/README.md <<EOF
 - **Root CA**: ssl/ca.crt, ssl/ca.key
 - **OMS**: ssl/oms/server.crt, ssl/oms/server.key
 - **BFF**: ssl/bff/server.crt, ssl/bff/server.key
-- **Funnel**: ssl/funnel/server.crt, ssl/funnel/server.key
 - **공통 와일드카드**: ssl/common/server.crt, ssl/common/server.key
 
 ## 사용 방법

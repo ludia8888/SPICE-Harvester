@@ -13,7 +13,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 
 **Total v2 endpoints: 34**
 
-### Ontologies (10 endpoints)
+### Ontologies (11 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -27,6 +27,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes` | Load Object Set Multiple Object Types V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces` | Load Object Set Objects Or Interfaces V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | No |
+| `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | No |
 
 ### Object Types (6 endpoints)
 
@@ -39,14 +40,13 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/search` | Search Objects V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | No |
 
-### Actions (6 endpoints)
+### Actions (5 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes` | List Action Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` | Get Action Type By Rid V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/{actionType}` | Get Action Type V2 | No |
-| `POST` | `/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo` | Undo Action V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/apply` | Apply Action V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/applyBatch` | Apply Action Batch V2 | No |
 

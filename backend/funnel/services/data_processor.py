@@ -6,20 +6,20 @@ Data Connector와 OMS/BFF 사이의 데이터 처리 레이어
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import httpx
-
+from data_connector.google_sheets.auth import GoogleOAuth2Client
+from data_connector.google_sheets.service import GoogleSheetsService
 from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 
 from funnel.services.risk_assessor import assess_dataset_risks
 from funnel.services.schema_utils import normalize_property_name
 from funnel.services.type_inference import FunnelTypeInferenceService
-from shared.config.settings import get_settings
 from shared.models.type_inference import (
     ColumnAnalysisResult,
     DatasetAnalysisRequest,
     DatasetAnalysisResponse,
-    FunnelPreviewResponse,
+    TabularPreviewResponse,
 )
+from shared.services.registries.connector_registry import ConnectorRegistry
 
 
 class FunnelDataProcessor:
@@ -35,6 +35,78 @@ class FunnelDataProcessor:
     def __init__(self):
         self.type_inference_service = FunnelTypeInferenceService
 
+    async def resolve_optional_access_token(
+        self,
+        *,
+        connection_id: Optional[str],
+    ) -> Optional[str]:
+        resolved_connection_id = str(connection_id or "").strip()
+        if not resolved_connection_id:
+            return None
+
+        connector_registry = ConnectorRegistry()
+        await connector_registry.connect()
+        try:
+            source = await connector_registry.get_source(
+                source_type="google_sheets_connection",
+                source_id=resolved_connection_id,
+            )
+            if not source or not source.enabled:
+                raise ValueError("Connection not found")
+
+            config = dict(source.config_json or {})
+            token = str(config.get("access_token") or "").strip() or None
+            expires_at = config.get("expires_at")
+            refresh_token = config.get("refresh_token")
+            oauth_client = GoogleOAuth2Client()
+
+            if token and expires_at:
+                try:
+                    expires_at_float = float(expires_at)
+                except (TypeError, ValueError):
+                    expires_at_float = None
+                if expires_at_float and oauth_client.is_token_expired(expires_at_float):
+                    token = None
+
+            if not token and refresh_token:
+                refreshed = await oauth_client.refresh_access_token(str(refresh_token))
+                config.update(
+                    {
+                        "access_token": refreshed.get("access_token"),
+                        "expires_at": refreshed.get("expires_at"),
+                        "refresh_token": refreshed.get("refresh_token", refresh_token),
+                    }
+                )
+                await connector_registry.upsert_source(
+                    source_type=source.source_type,
+                    source_id=source.source_id,
+                    enabled=True,
+                    config_json=config,
+                )
+                token = str(config.get("access_token") or "").strip() or None
+
+            return token
+        finally:
+            await connector_registry.close()
+
+    @staticmethod
+    def _normalize_preview_response(preview: Any) -> GoogleSheetPreviewResponse:
+        columns = [str(column) for column in (preview.columns or [])]
+        sample_rows = [
+            ["" if value is None else str(value) for value in row]
+            for row in (preview.sample_rows or [])
+            if isinstance(row, list)
+        ]
+        return GoogleSheetPreviewResponse(
+            sheet_id=str(preview.sheet_id),
+            sheet_title=str(preview.sheet_title),
+            worksheet_title=str(preview.worksheet_title or ""),
+            columns=columns,
+            sample_rows=sample_rows,
+            total_rows=int(preview.total_rows or 0),
+            total_columns=int(preview.total_columns or len(columns)),
+        )
+
     async def process_google_sheets_preview(
         self,
         sheet_url: str,
@@ -43,7 +115,7 @@ class FunnelDataProcessor:
         connection_id: Optional[str] = None,
         infer_types: bool = True,
         include_complex_types: bool = False,
-    ) -> FunnelPreviewResponse:
+    ) -> TabularPreviewResponse:
         """
         Google Sheets 데이터를 처리하고 타입을 추론합니다.
 
@@ -64,20 +136,17 @@ class FunnelDataProcessor:
             api_key=api_key,
             connection_id=connection_id,
         )
-
-        # Google Sheets service 호출 (실제로는 의존성 주입으로 처리)
-        # 여기서는 직접 HTTP 요청으로 시뮬레이션
-        timeout = httpx.Timeout(30.0, connect=5.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            bff_url = get_settings().services.bff_base_url
-            response = await client.post(
-                f"{bff_url}/api/v1/data-connectors/google-sheets/preview",
-                json=preview_request.model_dump(),
-            )
-
-            response.raise_for_status()
-
-            sheets_preview = GoogleSheetPreviewResponse(**response.json())
+        access_token = await self.resolve_optional_access_token(
+            connection_id=preview_request.connection_id,
+        )
+        google_sheets_service = GoogleSheetsService(api_key=preview_request.api_key)
+        connector_preview = await google_sheets_service.preview_sheet(
+            str(preview_request.sheet_url),
+            worksheet_name=preview_request.worksheet_name,
+            api_key=preview_request.api_key,
+            access_token=access_token,
+        )
+        sheets_preview = self._normalize_preview_response(connector_preview)
 
         # 2. 타입 추론 수행
         inferred_schema = None
@@ -98,7 +167,7 @@ class FunnelDataProcessor:
             )
 
         # 3. Funnel response 생성
-        return FunnelPreviewResponse(
+        return TabularPreviewResponse(
             source_metadata={
                 "type": "google_sheets",
                 "sheet_id": sheets_preview.sheet_id,

@@ -30,12 +30,15 @@ Official references:
 - Apply Action Batch (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/actions/apply-action-batch
 - List Query Types (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/list-query-types
 - Get Query Type (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/get-query-type
+- Execute Query (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/queries/execute-query
 - List Value Types (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/list-ontology-value-types
 - Get Value Type (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/get-ontology-value-type
 - List Ontologies (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontologies/list-ontologies
 - Connectivity Table Imports (v2): https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/table-imports/create-table-import
 - Datasets Schema (v2): https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/get-dataset-schema
 - API Errors (v2): https://www.palantir.com/docs/foundry/api/general/overview/errors
+- Pipeline Builder Overview: https://www.palantir.com/docs/foundry/pipeline-builder/overview
+- Create Build (Orchestration v2): https://www.palantir.com/docs/foundry/api/v2/orchestration-v2-resources/builds/create-build
 - Object Edits Overview: https://www.palantir.com/docs/foundry/object-edits/overview
 - How Edits Are Applied: https://www.palantir.com/docs/foundry/object-edits/how-edits-applied/
 
@@ -45,7 +48,7 @@ Supplementary references (non-authoritative, validation aid only):
 - Palantir Developer Community: https://community.palantir.com/
 
 Current status:
-- [x] OMS Search Objects read surface is Foundry-style (`/objects/{db_name}/{object_type}/search`).
+- [x] OMS Search Objects read surface is Foundry v2 path-aligned (`/api/v2/ontologies/{ontology}/objects/{objectType}/search`), and legacy v1 object-search path is removed from OpenAPI.
 - [x] SearchJsonQueryV2 operator mapping is implemented in OMS router.
 - [x] SearchJsonQueryV2 contract aligned with Foundry docs: undocumented `in` operator removed; `isNull` supports boolean null/not-null semantics.
 - [x] Search Objects branch parameter now accepts Foundry-style branch RID values (`ri.ontology.main.branch...`) in addition to branch names.
@@ -59,20 +62,61 @@ Current status:
 - [x] Migration guide and alignment checklist are cross-synced for P0 strict compat semantics (preview required, fullMetadata branch `rid` shape, strict fixed-on policy).
 - [x] v2-successor가 존재하는 주요 v1 read/query compat endpoints are code-deleted (operation removed from runtime handlers and OpenAPI).
 - [x] v1 query compatibility endpoint (`POST /api/v1/databases/{db}/query`) is removed from runtime handlers/OpenAPI; callers must use v2 object search.
+- [x] v1 query helper endpoint (`GET /api/v1/databases/{db}/query/builder`) is removed from runtime handlers/OpenAPI; Foundry public surface에는 dedicated builder-metadata endpoint가 없습니다.
+- [x] v1 pipeline-plan compile endpoint (`POST /api/v1/pipeline-plans/compile`) is removed from BFF runtime/OpenAPI; Foundry public API surface에는 direct plan-compile endpoint가 없습니다.
+- [x] v1 pipeline-plan read endpoint (`GET /api/v1/pipeline-plans/{plan_id}`) is removed from BFF runtime/OpenAPI; Foundry public API surface에는 direct plan-read endpoint가 없습니다.
+- [x] v1 pipeline-plan preview/inspection/join-evaluation endpoints (`POST /api/v1/pipeline-plans/{plan_id}/preview`, `/inspect-preview`, `/evaluate-joins`) are removed from BFF runtime/OpenAPI; Foundry public API surface에는 direct plan-preview resources가 없습니다.
+- [x] v1 pipeline definition simulation endpoint (`POST /api/v1/pipelines/simulate-definition`) is removed from BFF runtime/OpenAPI; Foundry public API surface에는 dedicated definition simulation endpoint가 없습니다.
+- [x] v1 pipeline branch management endpoints (`GET /api/v1/pipelines/branches`, `POST /api/v1/pipelines/branches/{branch}/archive`, `POST /api/v1/pipelines/branches/{branch}/restore`, `POST /api/v1/pipelines/{pipeline_id}/branches`) are removed from BFF runtime/OpenAPI; Foundry public API surface에는 dedicated pipeline-branch management endpoints가 없습니다.
+- [x] v1 pipeline dataset reanalysis endpoint (`POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`) is removed from BFF runtime/OpenAPI; Foundry public API surface에는 dedicated tabular reanalysis endpoint가 없습니다.
+- [x] v1 ontology suggestion/import endpoints (`POST /api/v1/databases/{db}/suggest-schema-from-*`, `/suggest-mappings*`, `/import-from-google-sheets/*`, `/import-from-excel/*`) are removed from BFF runtime/OpenAPI; Foundry public API surface에는 direct schema/mapping suggestion or instance-import endpoints가 없습니다.
 - [x] v1 ontology read compatibility endpoints (`GET /api/v1/databases/{db}/ontology/link-types*`, `/action-types*`, `/interfaces*`, `/shared-properties*`, `/value-types*`) are removed from BFF runtime/OpenAPI; callers must use v2 `objectTypes/*/outgoingLinkTypes*`, `actionTypes*`, `interfaceTypes*`, `sharedPropertyTypes*`, `valueTypes*`.
+- [x] v1 ontology object-type write compatibility endpoints (`POST/PUT /api/v1/databases/{db}/ontology/object-types*`) are removed from BFF runtime/OpenAPI; Foundry public surface에는 dedicated object-type write endpoint가 없습니다.
+- [x] v1 ontology validate compatibility endpoint (`POST /api/v1/databases/{db}/ontology/validate`) is removed from BFF runtime/OpenAPI; Foundry public ontologies v2 surface에는 dedicated create-validation endpoint가 없습니다.
+- [x] v1 ontology schema/mapping-metadata compatibility endpoints (`GET /api/v1/databases/{db}/ontology/{class_id}/schema`, `POST /api/v1/databases/{db}/ontology/{class_id}/mapping-metadata`) are removed from BFF runtime/OpenAPI; callers must use v2 object type metadata reads (`/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata`) and internal metadata annotation flows are no longer public.
+- [x] v1 ontology proposals/health read compatibility endpoints (`GET /api/v1/databases/{db}/ontology/proposals`, `GET /api/v1/databases/{db}/ontology/health`) are removed from BFF runtime/OpenAPI; Foundry 공개 ontologies v2 surface에는 direct proposal-list/health diagnostics resources가 없습니다.
+- [x] v1 ontology proposal/deploy write compatibility endpoints (`POST /api/v1/databases/{db}/ontology/proposals`, `POST /api/v1/databases/{db}/ontology/proposals/{proposal_id}/approve`, `POST /api/v1/databases/{db}/ontology/deploy`) are removed from BFF runtime/OpenAPI; Foundry 공개 ontologies v2 surface에는 direct governance proposal/deploy resources가 없습니다.
+- [x] OMS legacy ontology governance/health routes (`GET|POST /api/v1/database/{db}/ontology/proposals*`, `POST /api/v1/database/{db}/ontology/deploy`, `GET /api/v1/database/{db}/ontology/health`) are removed from OMS runtime/OpenAPI; governance/deploy lifecycle는 internal service path only로 유지됩니다.
+- [x] OMS legacy pull-request routes (`/api/v1/database/{db}/pull-requests*`) are removed from OMS runtime/OpenAPI; Foundry public surface와 무관한 governance API는 공개 표면에서 제외됩니다.
+- [x] Legacy pull-request persistence tables are retired via forward migration (`backend/database/migrations/016_remove_legacy_pull_requests.sql`); runtime no longer depends on `pull_requests*` schema.
+- [x] v1 ontology link-type write/edit/reindex compatibility endpoints (`POST/PUT /api/v1/databases/{db}/ontology/link-types*`, `GET/POST /api/v1/databases/{db}/ontology/link-types/{linkType}/edits`, `POST /api/v1/databases/{db}/ontology/link-types/{linkType}/reindex`) are removed from BFF runtime/OpenAPI; Foundry public surface에는 dedicated link-type write/edit/reindex endpoint가 없습니다.
+- [x] Legacy BFF link-type router composition shim (`bff/routers/link_types.py`) is code-deleted; link-type helper logic is anchored in service modules.
+- [x] v1 ontology action-type write compatibility endpoints (`POST/PUT/DELETE /api/v1/databases/{db}/ontology/action-types*`) are removed from BFF runtime/OpenAPI; Foundry public surface에는 dedicated action-type write endpoint가 없습니다.
+- [x] v1 ontology function read compatibility endpoints (`GET /api/v1/databases/{db}/ontology/functions*`) are removed from BFF runtime/OpenAPI; callers must use v2 `queryTypes*` and query execution surface (`queries/{queryApiName}/execute`).
+- [x] v1 ontology function write compatibility endpoints (`POST/PUT/DELETE /api/v1/databases/{db}/ontology/functions*`) are removed from BFF runtime/OpenAPI; Foundry public surface에는 dedicated query-type write endpoint가 없습니다.
+- [x] v1 ontology groups endpoints (`/api/v1/databases/{db}/ontology/groups*`) are removed from BFF runtime/OpenAPI; Foundry 공개 ontologies v2 surface에 direct groups resource가 없습니다.
+- [x] v1 ontology interface/shared-property/value-type write compatibility endpoints (`POST/PUT/DELETE /api/v1/databases/{db}/ontology/interfaces*`, `/shared-properties*`, `/value-types*`) are removed from BFF runtime/OpenAPI; Foundry 공개 surface에는 dedicated write endpoints가 없습니다.
 - [x] v1 classes read compatibility endpoints (`GET /api/v1/databases/{db}/classes`, `/classes/{class_id}`) are removed from BFF runtime/OpenAPI; callers must use v2 `objectTypes*` read surfaces.
 - [x] v1 instances read compatibility endpoints (`GET /api/v1/databases/{db}/class/{class_id}/instances`, `/class/{class_id}/instance/{instance_id}`) are removed from BFF runtime/OpenAPI; callers must use v2 `objects/{objectType}` and `objects/{objectType}/{primaryKey}`.
+- [x] v1 classes write/sample-values compatibility endpoints (`POST /api/v1/databases/{db}/classes`, `GET /api/v1/databases/{db}/class/{class_id}/sample-values`) are removed from BFF runtime/OpenAPI; Foundry public API surface에는 direct class-write/sample-values endpoint가 없습니다.
 - [x] v1 single-action submit compatibility endpoints (`POST /api/v1/databases/{db}/actions/{actionType}/submit`, `POST /api/v1/actions/{db}/async/{actionType}/submit`) are removed from BFF/OMS runtime OpenAPI surfaces.
 - [x] v1 batch submit compatibility endpoint (`POST /api/v1/databases/{db}/actions/{actionType}/submit-batch`) is removed from BFF runtime/OpenAPI; callers must use v2 `applyBatch`.
-- [x] v1 undo compatibility endpoint (`POST /api/v1/databases/{db}/actions/logs/{action_log_id}/undo`) is removed from BFF runtime/OpenAPI; callers must use v2 `POST /api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo`.
-- [x] OMS legacy async action endpoints (`POST /api/v1/actions/{db}/async/{actionType}/submit-batch`, `POST /api/v1/actions/{db}/async/logs/{actionLogId}/undo`) are removed from runtime OpenAPI; callers must use v2 action apply/undo surfaces.
+- [x] v1 undo compatibility endpoint (`POST /api/v1/databases/{db}/actions/logs/{action_log_id}/undo`) is removed from BFF runtime/OpenAPI; Foundry public action-resource surface에는 dedicated undo successor가 없습니다.
+- [x] OMS legacy async action endpoints (`POST /api/v1/actions/{db}/async/{actionType}/submit-batch`, `POST /api/v1/actions/{db}/async/logs/{actionLogId}/undo`) are removed from runtime OpenAPI; 공개 계약은 v2 action `apply/applyBatch` 중심으로 고정됩니다.
 - [x] OMS legacy async simulate endpoint (`POST /api/v1/actions/{db}/async/{actionType}/simulate`) is removed from runtime OpenAPI; validation-only execution uses v2 `apply` with `options.mode=VALIDATE_ONLY`.
 - [x] v1 simulate compatibility endpoint (`POST /api/v1/databases/{db}/actions/{actionType}/simulate`) is removed from BFF runtime/OpenAPI; callers must use v2 `apply` with `options.mode=VALIDATE_ONLY`.
 - [x] Foundry v2 action apply surfaces are exposed with official path/parameter shape: `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` (`branch`, `sdkPackageRid`, `sdkVersion`, `transactionId` + body `options.mode`), `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` (`branch`, `sdkPackageRid`, `sdkVersion`).
+- [x] `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` 응답은 빈 객체 대신 validation payload(`validation.result=VALID`, top-level `parameters`)를 반환하도록 고정되어 Foundry action apply 응답 형태와 정합성을 유지합니다.
+- [x] 2026-02-17 공식문서 재검증: Foundry Actions 공개 표면은 `apply`/`applyBatch` 중심이며 Action logs/simulations 전용 엔드포인트는 공개 v2 Actions 문서 집합에 포함되지 않습니다 (`https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/action-basics/`, `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/apply-action`, `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/apply-action-batch`).
+- [x] Foundry v2 query execute surface is exposed with official path/parameter shape: `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` (`version`, `sdkPackageRid`, `sdkVersion`, `transactionId`; no `branch`).
+- [x] v1 action log/simulation read compatibility endpoints (`GET /api/v1/databases/{db}/actions/logs*`, `GET /api/v1/databases/{db}/actions/simulations*`) are removed from BFF runtime/OpenAPI.
+- [x] Dedicated action log/simulation read routes are not exposed in public `/api/v2/ontologies/*` surface (Foundry action-resource parity).
+- [x] CI architecture static guard (`scripts/architecture_guard.py`) blocks forbidden runtime path literals reintroduction across production code (`/actions/logs*`, `/actions/simulations*`, legacy `/api/v1/actions/*`, `/api/v1/funnel/*`, `/api/v1/version/*`, `/api/v1/branch/*`, legacy Google Sheets sheet-tool paths).
+- [x] OMS public OpenAPI no longer exposes `POST /api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo`; 공개 action surface는 `apply`/`applyBatch` only로 고정.
+- [x] `VALIDATE_ONLY` execution no longer persists internal simulation registry state in OMS; public Foundry contract remains validation-result response only.
+- [x] OMS action runtime no longer imports/uses `ActionSimulationRegistry`; `apply` paths are decoupled from internal simulation-version persistence.
+- [x] Legacy simulation registry module (`shared/services/registries/action_simulation_registry.py`) is code-deleted and guarded against reintroduction.
+- [x] Legacy action simulation persistence schema/tables are retired via forward migration (`backend/database/migrations/017_remove_legacy_action_simulations.sql`).
+- [x] Action worker runtime no longer contains legacy `direct_undo` execution branch; writeback runtime contracts are constrained to Foundry-aligned action apply/applyBatch flow.
 - [x] BFF action v2 runtime no longer proxies to legacy OMS async v1 routes (`/api/v1/actions/{db}/async/*`); internal calls use OMS v2 action paths (`/api/v2/ontologies/{ontology}/actions/*`).
+- [x] BFF Foundry v2 read/search runtime no longer proxies to OMS v1 object-search route (`/api/v1/objects/{db}/{objectType}/search`); internal calls use OMS v2 object-search path (`/api/v2/ontologies/{ontology}/objects/{objectType}/search`).
 - [x] Action writeback E2E suites no longer call legacy OMS async submit-batch routes; action submission uses v2 `apply` (`/api/v2/ontologies/{ontology}/actions/{action}/apply`) and log lookup for completion tracking.
 - [x] OpenAPI smoke recipe guard covers Foundry v2 preview/action/query endpoints and prevents bool `preview` query regressions in request plans.
 - [x] Foundry v2 OpenAPI parameter-surface guard explicitly verifies official actionTypes/queryTypes/fullMetadata contracts (branch/pagination/preview/sdk parameter rules).
+- [x] Legacy pipeline compile/simulation router shims (`bff/routers/pipeline_plans_compile.py`, `bff/routers/pipeline_simulation.py`) are code-deleted and no longer composed by pipeline routers.
+- [x] Legacy pipeline plan read/preview router shims (`bff/routers/pipeline_plans_read.py`, `bff/routers/pipeline_plans_preview.py`) are code-deleted and no longer composed by pipeline routers.
+- [x] Legacy pipeline-plans composition router shim (`bff/routers/pipeline_plans.py`) is code-deleted and no longer mounted by `bff/main.py`.
+- [x] Legacy pipeline branch composition router shim (`bff/routers/pipeline_branches.py`) is code-deleted and no longer composed by `bff/routers/pipeline.py`.
 - [x] ES-native graph traversal path exists without TerminusDB dependency.
 - [x] Ontology persistence in Postgres profile no longer depends on TerminusDB runtime in OMS (legacy/hybrid adapter retained by feature mode).
 - [x] OMS boot path supports Postgres-first startup without eager Terminus initialization (`resource_storage_backend=postgres`).
@@ -125,6 +169,7 @@ Phase 2: Remove ontology runtime dependency on TerminusDB (high impact)
 - [x] BFF `OMSClient` legacy branch/version helper methods are removed to prevent `/branch` or `/version` usage from new code paths.
 - [x] BFF pipeline build/promote no longer gates on legacy ontology head-commit APIs (`/version/head`); build metadata uses Foundry-style branch refs.
 - [x] Worker runtimes (`objectify-worker`, `instance-worker`) no longer call legacy OMS `/version/{db}/head`; ontology stamps are generated from branch refs (`branch:<name>`).
+- [x] `instance-worker` relationship sync runtime no longer calls legacy BFF link reindex route (`POST /api/v1/databases/{db}/ontology/link-types/{linkType}/reindex`); reindex enqueue is registry-local (`DatasetRegistry` + `ObjectifyRegistry`).
 - [x] BFF pipeline ontology mismatch error payload no longer uses Terminus-specific field names (`bundle_terminus_commit_id`); generic ontology version/ref keys are used.
 - [x] Shared ontology version resolver no longer performs legacy branch/version lookups (`version_control_service` / `get_branch_info`); Foundry-style branch ref is canonical.
 - [x] Action target runtime contract resolution is resource-registry only; Terminus ontology fallback is removed.
@@ -160,6 +205,13 @@ Phase 2: Remove ontology runtime dependency on TerminusDB (high impact)
 - [x] Type-inference mapping request default target is Foundry (`target_system=foundry`), not legacy Terminus.
 - [x] Tabular type inference/sheet structure analysis runtime is internal-only (in-process ASGI); external Funnel HTTP transport mode is removed from default runtime configuration.
 - [x] Default gateway/proxy, compose topology, and deploy/test bootstrap scripts no longer expose or start external Funnel HTTP surfaces (`/api/funnel/*`, `/health/funnel`, separate `funnel` service).
+- [x] Standalone Funnel service artifacts are removed (`backend/start_funnel.sh`, `backend/funnel/Dockerfile`, `backend/funnel/requirements.txt`); Funnel logic remains an internal in-process runtime module only.
+- [x] `backend/funnel/main.py` no longer boots an external service process; standalone execution exits with explicit removal message and only in-process ASGI runtime app is supported.
+- [x] Internal Funnel runtime no longer uses legacy versioned route prefix (`/api/v1/funnel/*`); in-process endpoints are mounted on internal-only namespace (`/internal/funnel/*`).
+- [x] Pipeline dataset ingest/read payload key is renamed from legacy `funnel_analysis` to `tabular_analysis` in public BFF responses/OpenAPI (internal type-inference runtime naming remains implementation detail).
+- [x] Internal Funnel Google Sheets structure-analysis path no longer performs BFF HTTP roundtrips to `/api/v1/data-connectors/google-sheets/grid`; runtime calls connector library service (`GoogleSheetsService`) directly.
+- [x] BFF public Google Sheets sheet-tool routes (`POST /api/v1/data-connectors/google-sheets/grid`, `POST /api/v1/data-connectors/google-sheets/preview`) are code-deleted; tabular sheet extraction/preview is internal runtime behavior only.
+- [x] BFF helper shim routers (`bff/routers/link_types_ops.py`, `bff/routers/objectify_ops.py`) are code-deleted; helper logic is anchored in service modules only.
 - [x] Foundry API v2 overview/index has no Funnel/type-inference public resource group; tabular inference remains private runtime behavior only.
 - [x] Error taxonomy no longer emits Terminus-specific runtime codes (`TERMINUS_CONFLICT`, `TERMINUS_UNAVAILABLE`); upstream failures are classified with generic Foundry-neutral codes.
 - [x] Legacy Terminus service modules (`oms/services/async_terminus.py`, `oms/services/terminus/*`) and branch-name adapter helpers were removed from backend runtime.

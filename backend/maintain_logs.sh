@@ -286,7 +286,7 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  $0                                      # Use defaults"
     echo "  LOG_MAX_SIZE_MB=10 $0                   # Larger rotation size"
     echo "  LOG_DELETE_AFTER_DAYS=14 $0             # Keep logs longer"
-    echo "  LOG_SERVICE_NAMES='oms bff funnel' $0   # More services"
+    echo "  LOG_SERVICE_NAMES='oms bff objectify-worker' $0   # More services"
     echo ""
     echo "Cron Examples:"
     echo "  0 * * * * $SCRIPT_DIR/maintain_logs.sh   # Every hour"

@@ -194,6 +194,23 @@ def test_foundry_v2_object_set_aggregate_and_temporary_query_params():
 
 
 @pytest.mark.unit
+def test_foundry_v2_execute_query_keeps_foundry_query_params():
+    app = FastAPI()
+    app.include_router(foundry_ontology_v2.router, prefix="/api")
+    schema = app.openapi()
+
+    params = _param_names(
+        schema,
+        path="/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute",
+        method="post",
+    )
+
+    assert {"version", "sdkPackageRid", "sdkVersion", "transactionId"} <= set(params)
+    assert "branch" not in params
+    assert "preview" not in params
+
+
+@pytest.mark.unit
 def test_foundry_v2_list_objects_includes_foundry_query_params():
     app = FastAPI()
     app.include_router(foundry_ontology_v2.router, prefix="/api")
@@ -415,7 +432,7 @@ async def test_foundry_v2_load_object_set_objects_routes_to_object_search(
     called_path = oms_client.post.await_args.args[0]
     called_params = oms_client.post.await_args.kwargs["params"]
     called_payload = oms_client.post.await_args.kwargs["json"]
-    assert called_path == "/api/v1/objects/sales_db/Order/search"
+    assert called_path == "/api/v2/ontologies/sales_db/objects/Order/search"
     assert called_params == {"branch": "main"}
     assert called_payload["pageSize"] == 25
     assert called_payload["select"] == ["id", "status"]

@@ -4,7 +4,7 @@
 This guide covers read/query routes and action execution routes that now have Foundry-style v2 successors.
 It also documents the strict-compat baseline used to harden v2 wire/behavior parity.
 
-## Cross-Check Baseline (2026-02-16)
+## Cross-Check Baseline (2026-02-17)
 - Official docs baseline follows `docs/FOUNDRY_ALIGNMENT_CHECKLIST.md` reference URLs.
 - API v2 overview/index: `https://www.palantir.com/docs/foundry/api/v2`
 - `Get Ontology Full Metadata` canonical URL: `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontologies/get-ontology-full-metadata`
@@ -32,6 +32,10 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - `Query Types` canonical references:
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/list-query-types`
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/get-query-type`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/queries/execute-query`
+- `Pipeline Builder / Orchestration` canonical references:
+  - `https://www.palantir.com/docs/foundry/pipeline-builder/overview`
+  - `https://www.palantir.com/docs/foundry/api/v2/orchestration-v2-resources/builds/create-build`
 - Supplementary (non-authoritative) validation sources:
   - Foundry platform Python SDK: `https://github.com/palantir/foundry-platform-python`
   - Foundry SDK object-set preview contract (`load_links`): `https://github.com/palantir/foundry-platform-python/blob/develop/foundry_sdk/v2/ontologies/ontology_object_set.py`
@@ -40,7 +44,7 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.
 - 제거된 operation은 OpenAPI에서 노출되지 않으며, 런타임에서도 더 이상 제공되지 않습니다.
-- 동일 path에 다른 method가 남아 있는 경우(`object-types`의 `POST/PUT`), 제거된 method 호출은 `405`로 종료될 수 있습니다.
+- CI static guard(`scripts/architecture_guard.py`)가 production code의 legacy path literal 재유입(`actions/logs*`, `actions/simulations*`, `/api/v1/actions/*`, `/api/v1/funnel/*`, `/api/v1/version/*`, `/api/v1/branch/*`)을 차단합니다.
 
 ### Removed v1 compatibility routes (code deleted)
 These routes are fully deleted from runtime handlers and OpenAPI:
@@ -48,29 +52,116 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 - `GET /api/v1/databases/{db_name}/ontology/object-types/{class_id}`
 - `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types`
 - `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}`
+- `POST /api/v1/databases/{db_name}/ontology/object-types`
+- `PUT /api/v1/databases/{db_name}/ontology/object-types/{class_id}`
+- `POST /api/v1/databases/{db_name}/ontology/validate`
+- `GET /api/v1/databases/{db_name}/ontology/{class_id}/schema`
+- `POST /api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata`
+- `GET /api/v1/databases/{db_name}/ontology/proposals`
+- `POST /api/v1/databases/{db_name}/ontology/proposals`
+- `POST /api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve`
+- `POST /api/v1/databases/{db_name}/ontology/deploy`
+- `GET /api/v1/databases/{db_name}/ontology/health`
 - `POST /api/v1/databases/{db_name}/query`
+- `GET /api/v1/databases/{db_name}/query/builder`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch`
 - `POST /api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo`
+- `GET /api/v1/databases/{db_name}/actions/logs`
+- `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}`
+- `GET /api/v1/databases/{db_name}/actions/simulations`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}`
 - `POST /api/v1/actions/{db_name}/async/{action_type_id}/submit`
 - `POST /api/v1/actions/{db_name}/async/{action_type_id}/submit-batch`
 - `POST /api/v1/actions/{db_name}/async/{action_type_id}/simulate`
 - `POST /api/v1/actions/{db_name}/async/logs/{action_log_id}/undo`
 - `GET /api/v1/databases/{db_name}/ontology/link-types`
 - `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}`
+- `POST /api/v1/databases/{db_name}/ontology/link-types`
+- `PUT /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}`
+- `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits`
+- `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits`
+- `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex`
 - `GET /api/v1/databases/{db_name}/ontology/action-types`
 - `GET /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
+- `POST /api/v1/databases/{db_name}/ontology/action-types`
+- `PUT /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/action-types/{resource_id}`
+- `GET /api/v1/databases/{db_name}/ontology/functions`
+- `GET /api/v1/databases/{db_name}/ontology/functions/{resource_id}`
+- `POST /api/v1/databases/{db_name}/ontology/functions`
+- `PUT /api/v1/databases/{db_name}/ontology/functions/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/functions/{resource_id}`
+- `GET /api/v1/databases/{db_name}/ontology/groups`
+- `POST /api/v1/databases/{db_name}/ontology/groups`
+- `GET /api/v1/databases/{db_name}/ontology/groups/{resource_id}`
+- `PUT /api/v1/databases/{db_name}/ontology/groups/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/groups/{resource_id}`
 - `GET /api/v1/databases/{db_name}/ontology/interfaces`
 - `GET /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
+- `POST /api/v1/databases/{db_name}/ontology/interfaces`
+- `PUT /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `GET /api/v1/databases/{db_name}/ontology/shared-properties`
 - `GET /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}`
+- `POST /api/v1/databases/{db_name}/ontology/shared-properties`
+- `PUT /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}`
 - `GET /api/v1/databases/{db_name}/ontology/value-types`
 - `GET /api/v1/databases/{db_name}/ontology/value-types/{resource_id}`
+- `POST /api/v1/databases/{db_name}/ontology/value-types`
+- `PUT /api/v1/databases/{db_name}/ontology/value-types/{resource_id}`
+- `DELETE /api/v1/databases/{db_name}/ontology/value-types/{resource_id}`
 - `GET /api/v1/databases/{db_name}/classes`
 - `GET /api/v1/databases/{db_name}/classes/{class_id}`
 - `GET /api/v1/databases/{db_name}/class/{class_id}/instances`
 - `GET /api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}`
+- `POST /api/v1/databases/{db_name}/classes`
+- `GET /api/v1/databases/{db_name}/class/{class_id}/sample-values`
+- `POST /api/v1/objects/{db_name}/{object_type}/search`
+- `POST /api/v1/pipeline-plans/compile`
+- `GET /api/v1/pipeline-plans/{plan_id}`
+- `POST /api/v1/pipeline-plans/{plan_id}/preview`
+- `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview`
+- `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins`
+- `POST /api/v1/pipelines/simulate-definition`
+- `GET /api/v1/pipelines/branches`
+- `POST /api/v1/pipelines/branches/{branch}/archive`
+- `POST /api/v1/pipelines/branches/{branch}/restore`
+- `POST /api/v1/pipelines/{pipeline_id}/branches`
+- `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-data`
+- `POST /api/v1/databases/{db_name}/suggest-mappings`
+- `POST /api/v1/databases/{db_name}/suggest-mappings-from-google-sheets`
+- `POST /api/v1/databases/{db_name}/suggest-mappings-from-excel`
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-google-sheets`
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-excel`
+- `POST /api/v1/databases/{db_name}/import-from-google-sheets/dry-run`
+- `POST /api/v1/databases/{db_name}/import-from-google-sheets/commit`
+- `POST /api/v1/databases/{db_name}/import-from-excel/dry-run`
+- `POST /api/v1/databases/{db_name}/import-from-excel/commit`
+- `POST /api/v1/data-connectors/google-sheets/grid`
+- `POST /api/v1/data-connectors/google-sheets/preview`
+
+### Removed OMS legacy governance routes (code deleted)
+These OMS-internal v1 governance endpoints are also removed from runtime handlers and OpenAPI:
+- `GET /api/v1/database/{db_name}/ontology/proposals`
+- `POST /api/v1/database/{db_name}/ontology/proposals`
+- `POST /api/v1/database/{db_name}/ontology/proposals/{proposal_id}/approve`
+- `POST /api/v1/database/{db_name}/ontology/deploy`
+- `GET /api/v1/database/{db_name}/ontology/health`
+- `GET /api/v1/database/{db_name}/pull-requests`
+- `POST /api/v1/database/{db_name}/pull-requests`
+- `GET /api/v1/database/{db_name}/pull-requests/{pr_id}`
+- `POST /api/v1/database/{db_name}/pull-requests/{pr_id}/merge`
+- `POST /api/v1/database/{db_name}/pull-requests/{pr_id}/close`
+- `GET /api/v1/database/{db_name}/pull-requests/{pr_id}/diff`
+
+Legacy pull-request persistence schema is also retired with forward migration:
+- `backend/database/migrations/016_remove_legacy_pull_requests.sql`
 
 ## Endpoint Mapping
 | v1 | v2 successor |
@@ -79,37 +170,107 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 | `GET /api/v1/databases/{db_name}/ontology/object-types/{class_id}` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}` |
 | `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/object-types/{object_type_api_name}/outgoing-link-types/{link_type_api_name}` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}` |
+| `POST /api/v1/databases/{db_name}/ontology/object-types` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/object-types/{class_id}` | No direct Foundry public write endpoint |
+| `POST /api/v1/databases/{db_name}/ontology/validate` | No direct Foundry public endpoint (ontology create-lint endpoint is product-internal behavior) |
+| `GET /api/v1/databases/{db_name}/ontology/{class_id}/schema` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` |
+| `POST /api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` | No direct Foundry public endpoint (mapping-metadata annotation is product-internal behavior) |
+| `GET /api/v1/databases/{db_name}/ontology/proposals` | No direct Foundry public endpoint (proposal listing is product-internal governance behavior) |
+| `POST /api/v1/databases/{db_name}/ontology/proposals` | No direct Foundry public endpoint (proposal creation is product-internal governance behavior) |
+| `POST /api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | No direct Foundry public endpoint (proposal approval is product-internal governance behavior) |
+| `POST /api/v1/databases/{db_name}/ontology/deploy` | No direct Foundry public endpoint (ontology deployment registration is product-internal governance behavior) |
+| `GET /api/v1/databases/{db_name}/ontology/health` | No direct Foundry public endpoint (ontology health diagnostics are product-internal behavior) |
 | `POST /api/v1/databases/{db_name}/query` | `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` |
+| `POST /api/v1/objects/{db_name}/{object_type}/search` | `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` |
+| `GET /api/v1/databases/{db_name}/query/builder` | No direct Foundry public action/query-resource endpoint |
+| `POST /api/v1/pipeline-plans/compile` | No direct Foundry public endpoint (pipeline plan compile is product-internal behavior) |
+| `GET /api/v1/pipeline-plans/{plan_id}` | No direct Foundry public endpoint (pipeline plan read is product-internal behavior) |
+| `POST /api/v1/pipeline-plans/{plan_id}/preview` | No direct Foundry public endpoint (pipeline plan preview is product-internal behavior) |
+| `POST /api/v1/pipeline-plans/{plan_id}/inspect-preview` | No direct Foundry public endpoint (pipeline plan inspection is product-internal behavior) |
+| `POST /api/v1/pipeline-plans/{plan_id}/evaluate-joins` | No direct Foundry public endpoint (pipeline plan join evaluation is product-internal behavior) |
+| `POST /api/v1/pipelines/simulate-definition` | No direct Foundry public endpoint (definition simulation endpoint is not exposed) |
+| `GET /api/v1/pipelines/branches` | No direct Foundry public endpoint (pipeline branch management is product-internal behavior) |
+| `POST /api/v1/pipelines/branches/{branch}/archive` | No direct Foundry public endpoint (pipeline branch archive is product-internal behavior) |
+| `POST /api/v1/pipelines/branches/{branch}/restore` | No direct Foundry public endpoint (pipeline branch restore is product-internal behavior) |
+| `POST /api/v1/pipelines/{pipeline_id}/branches` | No direct Foundry public endpoint (pipeline branch creation is product-internal behavior) |
+| `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis` | No direct Foundry public endpoint (tabular reanalysis is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-schema-from-data` | No direct Foundry public endpoint (schema suggestion is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-mappings` | No direct Foundry public endpoint (mapping suggestion is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-mappings-from-google-sheets` | No direct Foundry public endpoint (mapping suggestion from connector sample is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-mappings-from-excel` | No direct Foundry public endpoint (mapping suggestion from file sample is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-schema-from-google-sheets` | No direct Foundry public endpoint (schema suggestion from connector sample is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/suggest-schema-from-excel` | No direct Foundry public endpoint (schema suggestion from file sample is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/import-from-google-sheets/dry-run` | No direct Foundry public endpoint (instance import preview is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/import-from-google-sheets/commit` | No direct Foundry public endpoint (instance import commit is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/import-from-excel/dry-run` | No direct Foundry public endpoint (instance import preview is product-internal behavior) |
+| `POST /api/v1/databases/{db_name}/import-from-excel/commit` | No direct Foundry public endpoint (instance import commit is product-internal behavior) |
+| `POST /api/v1/data-connectors/google-sheets/grid` | No direct Foundry public endpoint (tabular connector grid extraction is product-internal behavior) |
+| `POST /api/v1/data-connectors/google-sheets/preview` | No direct Foundry public endpoint (tabular connector preview is product-internal behavior) |
 | `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate` | `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` (`options.mode=VALIDATE_ONLY`) |
 | `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit` | `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` |
 | `POST /api/v1/actions/{db_name}/async/{action_type_id}/submit` | `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` |
 | `POST /api/v1/actions/{db_name}/async/{action_type_id}/submit-batch` | `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` |
 | `POST /api/v1/actions/{db_name}/async/{action_type_id}/simulate` | `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` (`options.mode=VALIDATE_ONLY`) |
 | `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch` | `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` |
-| `POST /api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` | `POST /api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo` |
+| `POST /api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/logs` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/simulations` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | No direct Foundry public action-resource endpoint |
+| `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | No direct Foundry public action-resource endpoint |
 | `GET /api/v1/databases/{db_name}/ontology/link-types` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}` |
+| `POST /api/v1/databases/{db_name}/ontology/link-types` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | No direct Foundry public write endpoint |
+| `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | No direct Foundry public write endpoint |
+| `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | No direct Foundry public write endpoint |
+| `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex` | No direct Foundry public write endpoint |
 | `GET /api/v1/databases/{db_name}/ontology/action-types` | `GET /api/v2/ontologies/{ontology}/actionTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | `GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}` |
+| `POST /api/v1/databases/{db_name}/ontology/action-types` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | No direct Foundry public write endpoint |
+| `DELETE /api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | No direct Foundry public write endpoint |
+| `GET /api/v1/databases/{db_name}/ontology/functions` | `GET /api/v2/ontologies/{ontology}/queryTypes` |
+| `GET /api/v1/databases/{db_name}/ontology/functions/{resource_id}` | `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}` |
+| `POST /api/v1/databases/{db_name}/ontology/functions` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/functions/{resource_id}` | No direct Foundry public write endpoint |
+| `DELETE /api/v1/databases/{db_name}/ontology/functions/{resource_id}` | No direct Foundry public write endpoint |
+| `GET /api/v1/databases/{db_name}/ontology/groups` | No direct Foundry public counterpart |
+| `POST /api/v1/databases/{db_name}/ontology/groups` | No direct Foundry public counterpart |
+| `GET /api/v1/databases/{db_name}/ontology/groups/{resource_id}` | No direct Foundry public counterpart |
+| `PUT /api/v1/databases/{db_name}/ontology/groups/{resource_id}` | No direct Foundry public counterpart |
+| `DELETE /api/v1/databases/{db_name}/ontology/groups/{resource_id}` | No direct Foundry public counterpart |
 | `GET /api/v1/databases/{db_name}/ontology/interfaces` | `GET /api/v2/ontologies/{ontology}/interfaceTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}` |
+| `POST /api/v1/databases/{db_name}/ontology/interfaces` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | No direct Foundry public write endpoint |
+| `DELETE /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | No direct Foundry public write endpoint |
 | `GET /api/v1/databases/{db_name}/ontology/shared-properties` | `GET /api/v2/ontologies/{ontology}/sharedPropertyTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | `GET /api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}` |
+| `POST /api/v1/databases/{db_name}/ontology/shared-properties` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | No direct Foundry public write endpoint |
+| `DELETE /api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | No direct Foundry public write endpoint |
 | `GET /api/v1/databases/{db_name}/ontology/value-types` | `GET /api/v2/ontologies/{ontology}/valueTypes` |
 | `GET /api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | `GET /api/v2/ontologies/{ontology}/valueTypes/{valueType}` |
+| `POST /api/v1/databases/{db_name}/ontology/value-types` | No direct Foundry public write endpoint |
+| `PUT /api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | No direct Foundry public write endpoint |
+| `DELETE /api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | No direct Foundry public write endpoint |
 | `GET /api/v1/databases/{db_name}/classes` | `GET /api/v2/ontologies/{ontology}/objectTypes` |
 | `GET /api/v1/databases/{db_name}/classes/{class_id}` | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}` |
 | `GET /api/v1/databases/{db_name}/class/{class_id}/instances` | `GET /api/v2/ontologies/{ontology}/objects/{objectType}` |
 | `GET /api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}` | `GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` |
+| `POST /api/v1/databases/{db_name}/classes` | No direct Foundry public write endpoint |
+| `GET /api/v1/databases/{db_name}/class/{class_id}/sample-values` | No direct Foundry public endpoint (sample-values profile is product-internal behavior) |
 | (new in v2) | `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` |
 | (new in v2) | `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` |
-| (new in v2-like actions) | `POST /api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/fullMetadata` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/queryTypes` |
 | (new in v2) | `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}` |
+| (new in v2) | `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` |
 | (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/interfaceTypes` |
 | (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}` |
 | (new in v2, preview param supported) | `GET /api/v2/ontologies/{ontology}/valueTypes` |
@@ -130,6 +291,13 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 - tabular type inference runtime은 내부(in-process) 컴포넌트로 고정되며, external Funnel HTTP transport mode는 제거되었습니다.
 - 기본 gateway/nginx 구성에서는 Funnel 전용 프록시 경로(`/api/funnel/*`, `/health/funnel`)를 노출하지 않습니다.
 - compose/deploy/test 기본 경로에서도 별도 Funnel 서비스 부팅 단계가 존재하지 않습니다.
+- standalone Funnel 서비스 아티팩트(`backend/start_funnel.sh`, `backend/funnel/Dockerfile`, `backend/funnel/requirements.txt`)는 제거되었고, Funnel 로직은 BFF 내부 in-process runtime으로만 사용됩니다.
+- `backend/funnel/main.py`의 standalone 실행 경로도 제거되어(실행 시 종료), external Funnel 서비스 프로세스는 기본 런타임에서 지원되지 않습니다.
+- 내부 Funnel runtime 라우트도 레거시 버전 경로(`/api/v1/funnel/*`)를 사용하지 않으며, internal namespace(`/internal/funnel/*`)로 고정됩니다.
+- Pipeline dataset ingest/read 응답의 legacy 키 `funnel_analysis`는 제거되고 `tabular_analysis`로 통일됩니다(Foundry public surface 비정합 내부 용어 축소 목적).
+- 내부 Funnel의 Google Sheets 구조분석 경로도 BFF HTTP 왕복(`/api/v1/data-connectors/google-sheets/grid`)을 사용하지 않고, connector library(`GoogleSheetsService`) 직접 호출로 고정됩니다.
+- `instance-worker`의 relationship object 동기화 경로는 더 이상 legacy BFF `POST /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex`를 호출하지 않으며, ObjectifyRegistry/DatasetRegistry 기반 내부 enqueue로 동작합니다.
+- BFF 내부의 legacy link-type 라우터 composition shim (`bff/routers/link_types.py`)과 helper shim (`bff/routers/link_types_ops.py`)은 코드 삭제되었고, 링크 타입 매핑 로직은 service module(`bff/services/link_types_mapping_service.py`)로 고정됩니다.
 - Action: 외부 통합 계약은 `/api/v2/ontologies/*` 중심으로 유지하고, Funnel 계열 경로를 신규 공개 계약으로 추가하지 않습니다.
 
 ### Pagination
@@ -162,6 +330,7 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 - `GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}` 및 `/actionTypes/byRid/{actionTypeRid}`는 `branch`만 사용 (pagination/preview/sdks 미사용)
 - `GET /api/v2/ontologies/{ontology}/queryTypes`는 `pageSize/pageToken`만 사용 (branch 미사용)
 - `GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}`는 `version`, `sdkPackageRid`, `sdkVersion`를 허용
+- `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute`는 `version`, `sdkPackageRid`, `sdkVersion`, `transactionId`를 허용 (branch 미사용)
 - `GET /api/v2/ontologies/{ontology}/valueTypes`는 pagination 파라미터를 받지 않음
 - `POST /api/v2/ontologies/{ontology}/actions/{action}/apply`는 query로 `branch`, `sdkPackageRid`, `sdkVersion`, `transactionId`를 사용하고, 실행 모드는 body `options.mode`로 제어
 - `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch`는 query로 `branch`, `sdkPackageRid`, `sdkVersion`를 사용
@@ -188,13 +357,21 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 ### Action Execution (Foundry-style)
 - Batch apply: `POST /v2/ontologies/{ontology}/actions/{action}/applyBatch`는 v2 공식 경로입니다.
 - Dependency trigger: batch item은 `dependencies`(`on`, `trigger_on`)로 선행 액션 완료 조건을 정의
-- Undo contract: `POST /actions/logs/{actionLogId}/undo`는 OSv2 revert 계약으로 비동기 undo 액션을 생성
+- Undo/revert는 Foundry 공개 action-resource 표면에 별도 리소스로 노출되지 않으며, 공개 v2 정합성 범위는 `apply`/`applyBatch`에 한정됩니다.
+- ActionLog/Simulation dedicated read routes는 Foundry 공식 공개 action-resource surface에 포함되지 않습니다.
+- Runtime note: OMS public OpenAPI에서도 `/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo`는 제거되며, action-worker의 `direct_undo` 실행 경로도 삭제되어 undo/revert는 런타임 표준 경로에서 제외됩니다.
 - Runtime note: BFF -> OMS 내부 프록시도 `/api/v2/ontologies/{ontology}/actions/*` 경로를 사용하며, legacy `/api/v1/actions/{db_name}/async/*` 경로 의존은 제거되었습니다.
+- Runtime note: `apply` + `options.mode=VALIDATE_ONLY` 경로는 내부 simulation 레지스트리 상태를 더 이상 생성/갱신하지 않으며, Foundry 공개 계약에 맞춰 validation 결과 payload만 반환합니다.
+- Runtime note: `apply`의 기본 실행 경로(`VALIDATE_AND_EXECUTE`)도 응답으로 validation payload(`validation` + top-level `parameters`)를 반환하도록 고정되어, 성공 시 빈 객체가 아닌 Foundry-style validation envelope을 제공합니다.
+- Runtime note: OMS action runtime에서 `ActionSimulationRegistry` 의존을 제거해 apply 실행 경로와 내부 simulation 버전 저장 모델 간 결합을 해소했습니다.
+- Runtime note: legacy simulation registry module은 코드에서 제거되었고, legacy persistence schema/tables는 `backend/database/migrations/017_remove_legacy_action_simulations.sql`로 정리됩니다.
 - Runtime note: live action writeback E2E suites도 OMS v1 async submit-batch 경로를 더 이상 호출하지 않으며, v2 `apply` 호출 + action log 조회 방식으로 동작합니다.
+- 2026-02-17 공식문서 재검증: Foundry Actions 공개 엔드포인트는 `POST /v2/ontologies/{ontology}/actions/{action}/apply`, `POST /v2/ontologies/{ontology}/actions/{action}/applyBatch`이며, logs/simulations 계열 전용 read/write 엔드포인트는 공식 v2 Actions 표면에 포함되지 않습니다 (`https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/action-basics/`, `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/apply-action`, `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/actions/apply-action-batch`).
+- Runtime note: BFF Foundry v2 read/search 내부 프록시는 OMS v1 object-search 경로(`/api/v1/objects/{db}/{objectType}/search`)를 더 이상 사용하지 않고, OMS v2 경로(`/api/v2/ontologies/{ontology}/objects/{objectType}/search`)를 사용합니다.
+- Runtime note: OMS public OpenAPI에서도 legacy object-search 경로(`/api/v1/objects/{db_name}/{object_type}/search`)는 제거되고, Foundry v2 object-search 경로(`/api/v2/ontologies/{ontology}/objects/{objectType}/search`)만 노출됩니다.
+- Runtime note: BFF public OpenAPI에서도 legacy pipeline planner/simulation/branch 경로(`/api/v1/pipeline-plans/compile`, `/api/v1/pipeline-plans/{plan_id}`, `/api/v1/pipeline-plans/{plan_id}/preview`, `/api/v1/pipeline-plans/{plan_id}/inspect-preview`, `/api/v1/pipeline-plans/{plan_id}/evaluate-joins`, `/api/v1/pipelines/simulate-definition`, `/api/v1/pipelines/branches`, `/api/v1/pipelines/branches/{branch}/archive`, `/api/v1/pipelines/branches/{branch}/restore`, `/api/v1/pipelines/{pipeline_id}/branches`)는 제거되며, Foundry 공개 API 정합성 범위에서 제외됩니다.
 - 제약:
   - `trigger_on`은 `SUCCEEDED|FAILED|COMPLETED`만 허용
-  - undo는 원본 ActionLog가 `SUCCEEDED`이고 patchset이 존재해야 함
-  - delete 기반 액션은 undo 대상에서 제외됨
 
 ## Recommended Cutover Steps
 1. v2 라우트로 읽기/검색 요청을 먼저 전환

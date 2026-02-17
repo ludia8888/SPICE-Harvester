@@ -290,7 +290,7 @@ async def test_agent_runtime_compacts_large_tool_payload_instead_of_omitting(mon
             return False
 
         async def request(self, method, url, params=None, json=None, headers=None):  # noqa: ANN001
-            if url.rstrip("/") != "http://bff/api/v1/pipeline-plans/p1/preview":
+            if url.rstrip("/") != "http://bff/api/v1/pipelines/p1/preview":
                 raise AssertionError(f"unexpected url: {url}")
             return FakeResponse(
                 {
@@ -311,10 +311,10 @@ async def test_agent_runtime_compacts_large_tool_payload_instead_of_omitting(mon
 
     tool_call = AgentToolCall(
         step_id="preview",
-        tool_id="pipeline_plans.preview",
+        tool_id="pipelines.preview",
         service="bff",
         method="POST",
-        path="/api/v1/pipeline-plans/p1/preview",
+        path="/api/v1/pipelines/p1/preview",
         query={},
         body={"include_run_tables": True},
         headers={},

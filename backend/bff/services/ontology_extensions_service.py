@@ -13,12 +13,7 @@ import httpx
 from fastapi import HTTPException
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.schemas.ontology_extensions_requests import (
-    OntologyApproveRequest,
-    OntologyDeployRequest,
-    OntologyProposalRequest,
-    OntologyResourceRequest,
-)
+from bff.schemas.ontology_extensions_requests import OntologyResourceRequest
 from bff.services.oms_client import OMSClient
 from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
@@ -188,77 +183,3 @@ async def delete_resource(
     )
 
 
-@trace_external_call("bff.ontology_extensions.list_ontology_proposals")
-async def list_ontology_proposals(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    status_filter: Optional[str],
-    limit: int,
-) -> Dict[str, Any]:
-    return await _call_oms(
-        action="list ontology proposals",
-        func=lambda: oms_client.list_ontology_proposals(
-            validate_db_name(db_name),
-            status_filter=status_filter,
-            limit=limit,
-        ),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.create_ontology_proposal")
-async def create_ontology_proposal(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    request: OntologyProposalRequest,
-) -> Dict[str, Any]:
-    return await _call_oms(
-        action="create ontology proposal",
-        func=lambda: oms_client.create_ontology_proposal(
-            validate_db_name(db_name),
-            sanitize_input(request.model_dump(mode="json")),
-        ),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.approve_ontology_proposal")
-async def approve_ontology_proposal(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    proposal_id: str,
-    request: OntologyApproveRequest,
-) -> Dict[str, Any]:
-    return await _call_oms(
-        action="approve ontology proposal",
-        func=lambda: oms_client.approve_ontology_proposal(
-            validate_db_name(db_name),
-            proposal_id,
-            sanitize_input(request.model_dump(mode="json")),
-        ),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.deploy_ontology")
-async def deploy_ontology(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    request: OntologyDeployRequest,
-) -> Dict[str, Any]:
-    return await _call_oms(
-        action="deploy ontology",
-        func=lambda: oms_client.deploy_ontology(
-            validate_db_name(db_name),
-            sanitize_input(request.model_dump(mode="json")),
-        ),
-    )
-
-
-@trace_external_call("bff.ontology_extensions.ontology_health")
-async def ontology_health(*, oms_client: OMSClient, db_name: str, branch: str) -> Dict[str, Any]:
-    return await _call_oms(
-        action="fetch ontology health",
-        func=lambda: oms_client.get_ontology_health(validate_db_name(db_name), branch=branch),
-    )

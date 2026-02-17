@@ -164,6 +164,14 @@ class _FakeOMSClient:
                                 "version": "1.0.0",
                                 "parameters": {"status": {"type": "string"}},
                                 "output": {"type": "array", "items": {"type": "object"}},
+                                "query": {
+                                    "objectType": "Account",
+                                    "where": {
+                                        "type": "eq",
+                                        "field": "account_id",
+                                        "value": "${accountId}",
+                                    },
+                                },
                             },
                         }
                     ]
@@ -280,6 +288,14 @@ class _FakeOMSClient:
                         "version": "1.0.0",
                         "parameters": {"status": {"type": "string"}},
                         "output": {"type": "array", "items": {"type": "object"}},
+                        "query": {
+                            "objectType": "Account",
+                            "where": {
+                                "type": "eq",
+                                "field": "account_id",
+                                "value": "${accountId}",
+                            },
+                        },
                     },
                 }
             }
@@ -390,6 +406,38 @@ class _MissingSharedPropertyOMSClient(_FakeOMSClient):
         )
 
 
+class _MissingQueryExecutionSpecOMSClient(_FakeOMSClient):
+    async def get_ontology_resource(  # noqa: ANN001, ANN003
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):
+        response = await super().get_ontology_resource(
+            db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+        if resource_type != "function" or resource_id != "findAccounts":
+            return response
+
+        if not isinstance(response, dict):
+            return response
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return response
+        spec = data.get("spec")
+        if not isinstance(spec, dict):
+            return response
+
+        mutated = dict(spec)
+        mutated.pop("query", None)
+        return {"data": {**data, "spec": mutated}}
+
+
 class _ListDatabasesStatusErrorOMSClient(_FakeOMSClient):
     async def list_databases(self):  # noqa: ANN201
         request = httpx.Request("GET", "http://oms/api/v1/database/list")
@@ -480,7 +528,7 @@ class _LinkedPaginationOMSClient(_FakeOMSClient):
         payload = kwargs.get("json") if isinstance(kwargs, dict) else None
         where = payload.get("where") if isinstance(payload, dict) else None
 
-        if path.endswith("/objects/test_db/Account/search"):
+        if path.endswith("/ontologies/test_db/objects/Account/search"):
             if isinstance(where, dict) and where.get("type") == "eq" and where.get("field") == "account_id":
                 return {
                     "data": [
@@ -495,7 +543,7 @@ class _LinkedPaginationOMSClient(_FakeOMSClient):
                     "totalCount": "1",
                 }
 
-        if path.endswith("/objects/test_db/User/search"):
+        if path.endswith("/ontologies/test_db/objects/User/search"):
             if isinstance(where, dict) and where.get("type") == "eq" and where.get("field") == "user_id":
                 value = str(where.get("value") or "").strip()
                 if not value:
@@ -721,7 +769,7 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
 
     assert isinstance(response, dict)
     assert response["ontology"]["apiName"] == "test_db"
-    assert response["branch"]["name"] == "main"
+    assert response["branch"]["rid"] == "main"
 
     assert "Account" in response["objectTypes"]
     account_full_metadata = response["objectTypes"]["Account"]
@@ -742,7 +790,7 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
 
 
 @pytest.mark.asyncio
-async def test_get_full_metadata_v2_allows_preview_false():
+async def test_get_full_metadata_v2_requires_preview_true():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
     router_v2._require_domain_role = _noop_require_domain_role
@@ -757,8 +805,11 @@ async def test_get_full_metadata_v2_allows_preview_false():
     finally:
         router_v2._require_domain_role = original_require
 
-    assert isinstance(response, dict)
-    assert response["ontology"]["apiName"] == "test_db"
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "ApiFeaturePreviewUsageOnly"
 
 
 @pytest.mark.asyncio
@@ -1046,7 +1097,90 @@ async def test_get_query_type_v2_mismatched_version_returns_not_found():
 
 
 @pytest.mark.asyncio
-async def test_list_interface_types_v2_allows_preview_false():
+async def test_execute_query_v2_runs_function_query_and_returns_value_envelope():
+    request = Request({"type": "http", "headers": []})
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.execute_query_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
+            request=request,
+            version="1.0.0",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert "value" in response
+    assert response["value"]["data"][0]["account_id"] == "acc-1"
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/objects/Account/search"
+    assert fake_client.last_post[1]["json"]["where"]["value"] == "acc-1"
+
+
+@pytest.mark.asyncio
+async def test_execute_query_v2_missing_required_parameter_returns_invalid_argument():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.execute_query_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            body=router_v2.ExecuteQueryRequestV2(parameters={}),
+            request=request,
+            version="1.0.0",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_execute_query_v2_without_execution_spec_returns_invalid_argument():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.execute_query_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
+            request=request,
+            version="1.0.0",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=_MissingQueryExecutionSpecOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_list_interface_types_v2_requires_preview_true():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
     router_v2._require_domain_role = _noop_require_domain_role
@@ -1063,8 +1197,11 @@ async def test_list_interface_types_v2_allows_preview_false():
     finally:
         router_v2._require_domain_role = original_require
 
-    assert isinstance(response, dict)
-    assert response["data"][0]["apiName"] == "Auditable"
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "ApiFeaturePreviewUsageOnly"
 
 
 @pytest.mark.asyncio
@@ -1091,7 +1228,7 @@ async def test_list_interface_types_v2_returns_foundry_raw_shape_with_preview():
 
 
 @pytest.mark.asyncio
-async def test_list_shared_property_types_v2_allows_preview_false():
+async def test_list_shared_property_types_v2_requires_preview_true():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
     router_v2._require_domain_role = _noop_require_domain_role
@@ -1108,8 +1245,11 @@ async def test_list_shared_property_types_v2_allows_preview_false():
     finally:
         router_v2._require_domain_role = original_require
 
-    assert isinstance(response, dict)
-    assert response["data"][0]["apiName"] == "TenantScope"
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "ApiFeaturePreviewUsageOnly"
 
 
 @pytest.mark.asyncio
@@ -1183,7 +1323,7 @@ async def test_get_shared_property_type_v2_missing_returns_not_found():
 
 
 @pytest.mark.asyncio
-async def test_list_value_types_v2_allows_preview_false():
+async def test_list_value_types_v2_requires_preview_true():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
     router_v2._require_domain_role = _noop_require_domain_role
@@ -1197,8 +1337,11 @@ async def test_list_value_types_v2_allows_preview_false():
     finally:
         router_v2._require_domain_role = original_require
 
-    assert isinstance(response, dict)
-    assert response["data"][0]["apiName"] == "Money"
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "ApiFeaturePreviewUsageOnly"
 
 
 @pytest.mark.asyncio
@@ -1275,7 +1418,7 @@ async def test_get_object_type_full_metadata_v2_returns_foundry_shape():
             objectType="Account",
             request=request,
             branch="main",
-            preview=False,
+            preview=True,
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1300,7 +1443,7 @@ async def test_get_object_type_full_metadata_v2_missing_returns_object_type_not_
             objectType="MissingType",
             request=request,
             branch="main",
-            preview=False,
+            preview=True,
             oms_client=_MissingObjectTypeOMSClient(),
         )
     finally:
@@ -1819,7 +1962,7 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
     assert payload["errorName"] == "LinkedObjectNotFound"
     assert payload["parameters"]["linkedObjectPrimaryKey"] == "u-404"
     assert fake.last_post is not None
-    assert fake.last_post[0].endswith("/objects/test_db/Account/search")
+    assert fake.last_post[0].endswith("/ontologies/test_db/objects/Account/search")
 
 
 @pytest.mark.asyncio

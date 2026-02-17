@@ -4,8 +4,7 @@ Pipeline datasets router composition (BFF).
 This module composes dataset-related endpoints using router composition
 (Composite pattern) to keep each router focused and maintainable.
 
-Selected helpers and endpoints are re-exported for backwards compatibility with
-existing tests/imports.
+Selected helpers and endpoints are re-exported for direct test invocation.
 """
 
 
@@ -17,12 +16,27 @@ from bff.routers import (
     pipeline_datasets_uploads,
     pipeline_datasets_versions,
 )
-from bff.routers.pipeline_datasets_uploads_csv import upload_csv_dataset
+from bff.routers.pipeline_datasets_ingest import approve_dataset_schema, get_dataset_ingest_request
+from bff.routers.pipeline_datasets_ops import _maybe_enqueue_objectify_job, _sanitize_s3_metadata
+from bff.routers.pipeline_datasets_ops import _detect_csv_delimiter, _parse_csv_content
+from bff.routers.pipeline_datasets_uploads import upload_csv_dataset, upload_excel_dataset, upload_media_dataset
 from bff.routers.pipeline_datasets_versions import create_dataset_version
 
 # Re-export endpoint functions used directly by tests.
 
-__all__ = ["router", "create_dataset_version", "upload_csv_dataset"]
+__all__ = [
+    "router",
+    "_maybe_enqueue_objectify_job",
+    "_detect_csv_delimiter",
+    "_parse_csv_content",
+    "_sanitize_s3_metadata",
+    "approve_dataset_schema",
+    "create_dataset_version",
+    "get_dataset_ingest_request",
+    "upload_csv_dataset",
+    "upload_excel_dataset",
+    "upload_media_dataset",
+]
 
 router = APIRouter(tags=["Pipeline Builder"])
 

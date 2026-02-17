@@ -102,7 +102,7 @@ class OMSServiceContainer:
         # 1. Initialize S3/MinIO Event Store (SSoT) - CRITICAL: This goes first!
         await self._initialize_event_store()
         
-        # 2. Initialize Postgres (MVCC) for proposals/pull-requests
+        # 2. Initialize Postgres (MVCC) for OMS relational runtime state
         await self._initialize_postgres()
 
         # 3. Initialize JSON-LD converter
@@ -143,7 +143,7 @@ class OMSServiceContainer:
             ) from e
     
     async def _initialize_postgres(self) -> None:
-        """Initialize Postgres MVCC pool (required for pull requests/proposals)."""
+        """Initialize Postgres MVCC pool for OMS relational runtime state."""
         try:
             await postgres_db.connect()
             self._oms_services["postgres_db"] = postgres_db
@@ -594,20 +594,13 @@ if get_settings().is_development:
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology_extensions.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
-app.include_router(query.router, prefix="/api/v1", tags=["object-search"])
+app.include_router(query.foundry_router, prefix="/api", tags=["foundry-object-search-v2"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(action_async.foundry_router, prefix="/api", tags=["foundry-actions-v2"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 logger.info("Deprecated /branch and /version routers are permanently disabled (Foundry-style profile)")
-
-# Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
-if get_settings().features.enable_pull_requests:
-    from oms.routers import pull_request
-
-    app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])
-else:
-    logger.info("Pull request endpoints disabled (set ENABLE_PULL_REQUESTS=true to enable)")
+logger.info("Legacy pull-request router is disabled (Foundry-aligned public surface)")
 
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])

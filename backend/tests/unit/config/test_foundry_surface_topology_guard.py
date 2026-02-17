@@ -46,6 +46,19 @@ def test_full_compose_bff_does_not_depend_on_funnel_service() -> None:
     assert "\n  funnel:\n" not in compose
 
 
+def test_full_compose_does_not_enable_legacy_pull_request_surface() -> None:
+    root = _repo_root()
+    compose = (root / "docker-compose.full.yml").read_text(encoding="utf-8")
+    assert "ENABLE_PULL_REQUESTS" not in compose
+
+
+def test_settings_do_not_expose_legacy_pull_request_feature_flag() -> None:
+    root = _repo_root()
+    settings_text = (root / "backend" / "shared" / "config" / "settings.py").read_text(encoding="utf-8")
+    assert "enable_pull_requests" not in settings_text
+    assert "ENABLE_PULL_REQUESTS" not in settings_text
+
+
 def test_funnel_service_absent_in_compose_variants() -> None:
     root = _repo_root()
     https_compose = (root / "backend" / "docker-compose-https.yml").read_text(encoding="utf-8")
@@ -77,6 +90,15 @@ def test_deploy_scripts_do_not_reference_external_funnel_health() -> None:
     assert "FUNNEL_RUNTIME_MODE" not in production_tests_sh
     assert 'wait_for_url "Funnel"' not in production_tests_sh
     assert "FUNNEL_URL" not in production_tests_sh
+
+
+def test_ssl_cert_generator_does_not_assume_external_funnel_service() -> None:
+    root = _repo_root()
+    ssl_script = (root / "backend" / "generate_ssl_certs.sh").read_text(encoding="utf-8")
+
+    assert 'SERVICES=("oms" "bff" "funnel")' not in ssl_script
+    assert "DNS.5 = funnel" not in ssl_script
+    assert "- **Funnel**:" not in ssl_script
 
 
 def test_local_start_script_does_not_start_funnel_process() -> None:

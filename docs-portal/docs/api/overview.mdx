@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # API Overview
 
-SPICE Harvester exposes 275 REST API endpoints across two API versions. This page covers authentication, base URLs, versioning, pagination, and error handling conventions.
+SPICE Harvester exposes a Foundry-aligned public API surface under `/api/v2/ontologies/*` and internal compatibility routes under `/api/v1/*`. This page covers authentication, base URLs, versioning, pagination, and error handling conventions.
 
 ## Base URL
 
@@ -67,34 +67,33 @@ curl -X POST https://your-domain.com/api/v2/auth/refresh \
 
 ## API Versioning
 
-SPICE Harvester maintains two API versions:
+SPICE Harvester API surfaces are split by contract role:
 
-| Version | Endpoints | Status | Description |
-|---------|-----------|--------|-------------|
-| **v2** | 24 | **Active** | Foundry-aligned API. Use this for all new integrations. |
-| **v1** | 251 | **Deprecated** | Legacy API. Functional but no new features. Migrate to v2. |
+| Version | Contract Role | Status | Description |
+|---------|---------------|--------|-------------|
+| **v2** | Public Foundry-aligned surface | **Active** | Use this for external/new integrations. |
+| **v1** | Internal compatibility/operations | Restricted | Not the Foundry public ontology contract. |
 
 ### Version Selection
 
 Include the version in the URL path:
 
 ```
-/api/v2/ontologies/...    # Foundry v2 (recommended)
-/api/v1/ontology/...      # Legacy v1 (deprecated)
+/api/v2/ontologies/...    # Foundry-aligned public surface (recommended)
+/api/v1/...               # Internal compatibility/ops surface
 ```
 
 ### v1 to v2 Migration
 
-The v2 API is a superset of v1 functionality with a Foundry-compatible interface. Key differences:
+The v2 API is the canonical Foundry-aligned integration contract. Key differences:
 
 | Aspect | v1 | v2 |
 |--------|----|----|
-| URL structure | `/api/v1/ontology/{id}/...` | `/api/v2/ontologies/{apiName}/...` |
-| Identifiers | Numeric IDs | String `apiName` values |
-| Object format | `{id, type, data: {...}}` | `{__rid, __primaryKey, __apiName, properties: {...}}` |
-| Search | Custom filter syntax | `SearchJsonQueryV2` with 13 operators |
-| Pagination | `offset` + `limit` | Opaque `pageToken` |
-| Error format | `{error, message}` | `{errorCode, errorName, errorInstanceId, parameters}` |
+| URL structure | product-specific/internal | `/api/v2/ontologies/{ontology}/...` |
+| Contract scope | mixed compatibility routes | Foundry-aligned public ontology resources |
+| Search | mixed query shapes | `SearchJsonQueryV2` |
+| Pagination | mixed offset/token patterns | Opaque `pageToken` |
+| Error format | mixed envelopes | `{errorCode, errorName, errorInstanceId, parameters}` |
 
 See the [Foundry Migration Guide](/docs/guides/platform-admin/foundry-migration) for step-by-step migration instructions.
 
@@ -235,24 +234,11 @@ X-RateLimit-Reset: 1705312200
 
 ## Endpoint Summary
 
-### v2 Endpoints (24)
+For live endpoint counts and latest route inventory, see:
 
-| Category | Endpoints | Base Path |
-|----------|-----------|-----------|
-| Object Types | 2 | `/api/v2/ontologies/{ontologyApiName}/objectTypes` |
-| Objects | 3 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}` |
-| Search | 1 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/search` |
-| Actions | 3 | `/api/v2/ontologies/{ontologyApiName}/actions` |
-| Link Types | 2 | `/api/v2/ontologies/{ontologyApiName}/linkTypes` |
-| Links | 3 | `/api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/links` |
-| Ontologies | 2 | `/api/v2/ontologies` |
-| Auth | 3 | `/api/v2/auth` |
-| Health | 1 | `/api/v2/health` |
-| Lineage | 4 | `/api/v2/ontologies/{ontologyApiName}/lineage` |
-
-### v1 Endpoints (251)
-
-The v1 API covers the same functional areas with a legacy URL structure. See the [v1 reference pages](./v1-object-types) for details.
+- [Auto Endpoint Summary](./auto-endpoint-summary)
+- [v2 Complete Reference](./auto-v2-reference)
+- [v1 Internal Reference](./auto-v1-reference)
 
 ## Next Steps
 

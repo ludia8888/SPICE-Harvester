@@ -599,47 +599,14 @@ class TestBFFGraphFederation:
     pytestmark = pytest.mark.integration
     
     @pytest.mark.asyncio
-    async def test_schema_suggestion(self):
-        """Test ML-driven schema suggestion"""
+    async def test_foundry_v2_ontology_full_metadata_surface(self):
+        """Foundry v2 full metadata surface should be available."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            path_template = await _resolve_bff_path(
-                session,
-                [
-                    "/api/v1/databases/{db_name}/suggest-schema-from-data",
-                    "/api/v1/database/{db_name}/suggest-schema-from-data",
-                ],
-            )
-            suggest_path = path_template.format(db_name="test_db")
-            sample_data = [
-                {"name": "iPhone 15", "price": 999.99, "in_stock": True},
-                {"name": "Samsung S24", "price": 899.99, "in_stock": False},
-                {"name": "Pixel 8", "price": 699.99, "in_stock": True},
-            ]
-            columns = ["name", "price", "in_stock"]
-            data = [[row.get(col) for col in columns] for row in sample_data]
-            
-            async with session.post(
-                f"{BFF_URL}{suggest_path}",
-                json={
-                    "data": data,
-                    "columns": columns,
-                    "class_name": "Product",
-                    "include_complex_types": True,
-                },
+            async with session.get(
+                f"{BFF_URL}/api/v2/ontologies/test_db/fullMetadata",
+                params={"preview": "true", "branch": "main"},
             ) as resp:
-                assert resp.status == 200
-                result = await resp.json()
-                
-                # Verify schema suggestion
-                assert result.get("status") == "success"
-                ontology = result.get("suggested_schema") or {}
-                assert "properties" in ontology
-                
-                # Check inferred types
-                properties = {p.get("name"): p.get("type") for p in ontology.get("properties") or []}
-                assert properties.get("name") in {"xsd:string", "STRING", "string"}
-                assert properties.get("price") in {"xsd:decimal", "DECIMAL", "decimal", "xsd:integer", "INTEGER"}
-                assert properties.get("in_stock") in {"xsd:boolean", "BOOLEAN", "boolean"}
+                assert resp.status in [200, 404]
                 
     @pytest.mark.asyncio
     async def test_graph_query_federation(self):

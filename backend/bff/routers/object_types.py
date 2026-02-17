@@ -26,6 +26,8 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 logger = logging.getLogger(__name__)
 
+# Public v1 object-type contract routes are code-deleted from BFF runtime.
+# This module is retained for internal helper logic and direct service-level tests.
 router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Object Types"])
 
 
@@ -250,7 +252,6 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
     return out
 
 
-@router.post("/object-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
 @trace_endpoint("bff.object_types.create_object_type_contract")
 async def create_object_type_contract(
     db_name: str,
@@ -279,7 +280,6 @@ async def create_object_type_contract(
     )
 
 
-@router.put("/object-types/{class_id}", response_model=ApiResponse)
 @trace_endpoint("bff.object_types.update_object_type_contract")
 async def update_object_type_contract(
     db_name: str,

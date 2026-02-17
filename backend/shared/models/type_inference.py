@@ -1,6 +1,4 @@
-"""
-Funnel Service Models
-"""
+"""Tabular type inference models."""
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -10,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 def _default_risk_policy() -> Dict[str, Any]:
-    return {"stage": "funnel", "suggestion_only": True, "hard_gate": False}
+    return {"stage": "tabular_inference", "suggestion_only": True, "hard_gate": False}
 
 
 class TypeInferenceResult(BaseModel):
@@ -22,8 +20,8 @@ class TypeInferenceResult(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional metadata")
 
 
-class FunnelRiskItem(BaseModel):
-    """Risk signal emitted by Funnel (suggestion-only)."""
+class TabularRiskItem(BaseModel):
+    """Risk signal emitted by tabular inference runtime (suggestion-only)."""
 
     code: str = Field(..., description="Machine-readable risk identifier")
     severity: str = Field(..., description="info | warning (suggestion-only)")
@@ -33,8 +31,8 @@ class FunnelRiskItem(BaseModel):
     suggested_actions: List[str] = Field(
         default_factory=list, description="Recommended follow-up actions"
     )
-    is_suggestion: bool = Field(default=True, description="Funnel signals are suggestions only")
-    stage: str = Field(default="funnel", description="Origin stage for the risk signal")
+    is_suggestion: bool = Field(default=True, description="Tabular inference signals are suggestions only")
+    stage: str = Field(default="tabular_inference", description="Origin stage for the risk signal")
 
 
 class ColumnProfile(BaseModel):
@@ -84,16 +82,16 @@ class ColumnAnalysisResult(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="Unique/non-empty ratio"
     )
     profile: Optional[ColumnProfile] = Field(default=None, description="Sample-based profile")
-    risk_flags: List[FunnelRiskItem] = Field(
+    risk_flags: List[TabularRiskItem] = Field(
         default_factory=list, description="Suggestion-only risk signals"
     )
 
 
-class FunnelAnalysisPayload(BaseModel):
-    """Funnel analysis payload (suggestion-only)."""
+class TabularAnalysisPayload(BaseModel):
+    """Tabular analysis payload (suggestion-only)."""
 
     columns: List[ColumnAnalysisResult] = Field(default_factory=list)
-    risk_summary: List[FunnelRiskItem] = Field(default_factory=list)
+    risk_summary: List[TabularRiskItem] = Field(default_factory=list)
     risk_policy: Dict[str, Any] = Field(default_factory=_default_risk_policy)
 
 
@@ -112,7 +110,7 @@ class DatasetAnalysisResponse(BaseModel):
     columns: List[ColumnAnalysisResult]
     analysis_metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    risk_summary: List[FunnelRiskItem] = Field(
+    risk_summary: List[TabularRiskItem] = Field(
         default_factory=list, description="Dataset-level risk signals"
     )
     risk_policy: Dict[str, Any] = Field(
@@ -139,7 +137,7 @@ class SchemaGenerationResponse(BaseModel):
     confidence_score: float
 
 
-class FunnelPreviewRequest(BaseModel):
+class TabularPreviewRequest(BaseModel):
     """Request for data preview with type inference"""
 
     source_type: str = Field(..., description="Type of data source (google_sheets, csv, etc.)")
@@ -148,7 +146,7 @@ class FunnelPreviewRequest(BaseModel):
     infer_types: bool = Field(default=True, description="Whether to infer column types")
 
 
-class FunnelPreviewResponse(BaseModel):
+class TabularPreviewResponse(BaseModel):
     """Preview response with inferred types"""
 
     source_metadata: Dict[str, Any]
@@ -157,7 +155,7 @@ class FunnelPreviewResponse(BaseModel):
     inferred_schema: Optional[List[ColumnAnalysisResult]] = None
     total_rows: int
     preview_rows: int
-    risk_summary: List[FunnelRiskItem] = Field(
+    risk_summary: List[TabularRiskItem] = Field(
         default_factory=list, description="Dataset-level risk signals"
     )
     risk_policy: Dict[str, Any] = Field(

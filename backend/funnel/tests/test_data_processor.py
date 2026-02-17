@@ -1,42 +1,10 @@
 from __future__ import annotations
 
 import pytest
-import httpx
+from types import SimpleNamespace
 
 from funnel.services.data_processor import FunnelDataProcessor
 from shared.models.type_inference import ColumnAnalysisResult, DatasetAnalysisRequest, TypeInferenceResult
-
-
-class _FakeResponse:
-    def __init__(self, payload: dict, status_code: int = 200) -> None:
-        self._payload = payload
-        self.status_code = status_code
-        self.text = "error"
-
-    def json(self):
-        return self._payload
-
-    def raise_for_status(self) -> None:
-        if int(self.status_code) >= 400:
-            request = httpx.Request("POST", "http://test")
-            response = httpx.Response(status_code=int(self.status_code), request=request)
-            raise httpx.HTTPStatusError("error", request=request, response=response)
-
-
-class _FakeClient:
-    def __init__(self, response: _FakeResponse) -> None:
-        self.response = response
-        self.calls: list[dict] = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):  # noqa: ANN001
-        return None
-
-    async def post(self, url: str, json: dict):  # noqa: A002
-        self.calls.append({"url": url, "json": json})
-        return self.response
 
 
 @pytest.mark.asyncio
@@ -92,21 +60,27 @@ def test_generate_schema_suggestion_handles_confidence() -> None:
 async def test_process_google_sheets_preview_success(monkeypatch: pytest.MonkeyPatch) -> None:
     processor = FunnelDataProcessor()
 
-    payload = {
-        "sheet_id": "sheet-1",
-        "sheet_title": "Demo",
-        "worksheet_title": "Sheet1",
-        "columns": ["id", "name"],
-        "sample_rows": [["1", "Alice"]],
-        "total_rows": 1,
-        "total_columns": 2,
-    }
+    class _FakeGoogleSheetsService:
+        def __init__(self, api_key=None):  # noqa: ANN001
+            self.api_key = api_key
 
-    def _fake_client(*args, **kwargs):  # noqa: ANN002, ANN003
-        return _FakeClient(_FakeResponse(payload))
+        async def preview_sheet(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return SimpleNamespace(
+                sheet_id="sheet-1",
+                sheet_title="Demo",
+                worksheet_title="Sheet1",
+                columns=["id", "name"],
+                sample_rows=[["1", "Alice"]],
+                total_rows=1,
+                total_columns=2,
+            )
 
-    monkeypatch.setattr("funnel.services.data_processor.httpx.AsyncClient", _fake_client)
-    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
+    async def _fake_resolve_optional_access_token(*, connection_id):  # noqa: ANN001
+        assert connection_id is None
+        return None
+
+    monkeypatch.setattr("funnel.services.data_processor.GoogleSheetsService", _FakeGoogleSheetsService)
+    monkeypatch.setattr(processor, "resolve_optional_access_token", _fake_resolve_optional_access_token)
 
     response = await processor.process_google_sheets_preview(
         sheet_url="https://docs.google.com/spreadsheets/d/1abc123XYZ456def789GHI012jklMNOP3456789/edit",
@@ -121,11 +95,19 @@ async def test_process_google_sheets_preview_success(monkeypatch: pytest.MonkeyP
 async def test_process_google_sheets_preview_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     processor = FunnelDataProcessor()
 
-    def _fake_client(*args, **kwargs):  # noqa: ANN002, ANN003
-        return _FakeClient(_FakeResponse({}, status_code=500))
+    class _FailingGoogleSheetsService:
+        def __init__(self, api_key=None):  # noqa: ANN001
+            self.api_key = api_key
 
-    monkeypatch.setattr("funnel.services.data_processor.httpx.AsyncClient", _fake_client)
-    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
+        async def preview_sheet(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError("preview failure")
+
+    async def _fake_resolve_optional_access_token(*, connection_id):  # noqa: ANN001
+        assert connection_id is None
+        return None
+
+    monkeypatch.setattr("funnel.services.data_processor.GoogleSheetsService", _FailingGoogleSheetsService)
+    monkeypatch.setattr(processor, "resolve_optional_access_token", _fake_resolve_optional_access_token)
 
     with pytest.raises(Exception):
         await processor.process_google_sheets_preview(

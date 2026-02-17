@@ -45,7 +45,6 @@ _STEP_OUTPUT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "ingest_request_id": ("ingest_request_id", "ingestRequestId"),
     "mapping_spec_id": ("mapping_spec_id", "mappingSpecId"),
     "action_log_id": ("action_log_id", "actionLogId"),
-    "simulation_id": ("simulation_id", "simulationId"),
     "command_id": ("command_id", "commandId"),
     "deployed_commit_id": ("deployed_commit_id", "deployedCommitId", "merge_commit_id", "mergeCommitId"),
 }
@@ -688,7 +687,7 @@ def _extract_action_simulation_signals(payload: Any) -> dict[str, Any]:
     results = data.get("results")
     if not isinstance(results, list):
         return {}
-    if "simulation_id" not in data and "preview_action_log_id" not in data:
+    if "preview_action_log_id" not in data:
         return {}
 
     scenario_summaries: list[dict[str, Any]] = []
@@ -714,8 +713,6 @@ def _extract_action_simulation_signals(payload: Any) -> dict[str, Any]:
 
     effective_status = str((effective or {}).get("status") or "").strip().upper() or None
     signals: dict[str, Any] = {
-        "action_simulation_id": str(data.get("simulation_id") or "").strip() or None,
-        "action_simulation_version": data.get("version"),
         "action_simulation_preview_action_log_id": str(data.get("preview_action_log_id") or "").strip() or None,
         "action_simulation_effective_status": effective_status,
         "action_simulation_scenarios": scenario_summaries[:20] if scenario_summaries else None,

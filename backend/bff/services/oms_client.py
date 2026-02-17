@@ -190,26 +190,6 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"온톨로지 생성 실패 ({db_name}): {e}")
             raise
 
-    async def validate_ontology_create(
-        self,
-        db_name: str,
-        ontology_data: Dict[str, Any],
-        *,
-        branch: str = "main",
-    ) -> Dict[str, Any]:
-        """온톨로지 생성 검증 (no write)."""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/validate",
-                params={"branch": branch},
-                json=ontology_data,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"온톨로지 생성 검증 실패 ({db_name}): {e}")
-            raise
-
     async def get_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> Dict[str, Any]:
         """온톨로지 조회"""
         try:
@@ -404,78 +384,6 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"Ontology resource delete failed ({db_name}): {e}")
             raise
 
-    async def list_ontology_proposals(
-        self, db_name: str, *, status_filter: Optional[str] = None, limit: int = 100
-    ) -> Dict[str, Any]:
-        """온톨로지 제안 목록 조회"""
-        try:
-            params: Dict[str, Any] = {"limit": limit}
-            if status_filter:
-                params["status"] = status_filter
-            response = await self.client.get(
-                f"/api/v1/database/{db_name}/ontology/proposals",
-                params=params,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology proposal list failed ({db_name}): {e}")
-            raise
-
-    async def create_ontology_proposal(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """온톨로지 제안 생성"""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/proposals",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology proposal create failed ({db_name}): {e}")
-            raise
-
-    async def approve_ontology_proposal(
-        self, db_name: str, proposal_id: str, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """온톨로지 제안 승인"""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/proposals/{proposal_id}/approve",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology proposal approve failed ({db_name}): {e}")
-            raise
-
-    async def deploy_ontology(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """온톨로지 배포(승격)"""
-        try:
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/deploy",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology deploy failed ({db_name}): {e}")
-            raise
-
-    async def get_ontology_health(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
-        """온톨로지 헬스 체크"""
-        try:
-            response = await self.client.get(
-                f"/api/v1/database/{db_name}/ontology/health",
-                params={"branch": branch},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology health failed ({db_name}): {e}")
-            raise
-
     async def update_ontology(
         self,
         db_name: str,
@@ -567,7 +475,7 @@ class OMSClient(ManagedAsyncClient):
                 body["snapshot"] = bool(snapshot)
 
             response = await self.client.post(
-                f"/api/v1/objects/{db_name}/{object_type}/search",
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
                 params={"branch": branch},
                 json=body,
             )

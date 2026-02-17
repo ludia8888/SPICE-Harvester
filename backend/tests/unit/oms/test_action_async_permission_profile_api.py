@@ -134,25 +134,6 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
 
     monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
 
-    class _FakeSimulationRegistry:
-        async def connect(self) -> None:
-            return None
-
-        async def close(self) -> None:
-            return None
-
-        async def get_simulation(self, *, simulation_id: str):  # noqa: ARG002
-            return None
-
-        async def create_simulation(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
-            return None
-
-        async def next_version(self, *, simulation_id: str) -> int:  # noqa: ARG002
-            return 1
-
-        async def create_version(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
-            return None
-
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
             return None
@@ -169,7 +150,6 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
             status_code=503,
         )
 
-    monkeypatch.setattr(action_async, "ActionSimulationRegistry", _FakeSimulationRegistry)
     monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
     monkeypatch.setattr(action_async, "create_storage_service", lambda _settings: object())
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())
@@ -308,25 +288,6 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
     async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
         return "DataEngineer"
 
-    class _FakeSimulationRegistry:
-        async def connect(self) -> None:
-            return None
-
-        async def close(self) -> None:
-            return None
-
-        async def get_simulation(self, *, simulation_id: str):  # noqa: ARG002
-            return None
-
-        async def create_simulation(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
-            return None
-
-        async def next_version(self, *, simulation_id: str) -> int:  # noqa: ARG002
-            return 1
-
-        async def create_version(self, **kwargs: Any) -> None:  # noqa: ANN401, ARG002
-            return None
-
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
             return None
@@ -344,7 +305,6 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
         )
 
     monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
-    monkeypatch.setattr(action_async, "ActionSimulationRegistry", _FakeSimulationRegistry)
     monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
     monkeypatch.setattr(action_async, "create_storage_service", lambda _settings: object())
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())

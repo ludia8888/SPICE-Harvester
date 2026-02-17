@@ -1,13 +1,14 @@
 ---
-title: v1 API Reference (Auto-Generated)
-sidebar_label: v1 Complete Reference
+title: v1 Internal API Reference (Auto-Generated)
+sidebar_label: v1 Internal Reference
 sidebar_position: 11
 ---
 
-# Legacy v1 API Reference
+# Internal v1 API Reference
 
 :::warning Deprecated
-The v1 API is deprecated. Migrate to the [Foundry v2 API](./auto-v2-reference) for all new integrations.
+The v1 API surface is internal/legacy compatibility scope and is not Foundry public ontology API.
+Use the [Foundry-aligned v2 API](./auto-v2-reference) for new external integrations.
 :::
 
 :::info Auto-Generated
@@ -15,9 +16,9 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 228**
+**Total v1 endpoints: 159**
 
-### Object Types & Schema (71 endpoints)
+### Object Types & Schema (15 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -25,19 +26,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/databases` | Create Database | No |
 | `GET` | `/api/v1/databases/{db_name}` | Get Database | No |
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/logs` | List Action Logs | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}` | Get Action Log | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations` | List Action Simulations | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | Get Action Simulation | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | List Action Simulation Versions | No |
-| `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | Get Action Simulation Version | No |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/sample-values` | Get Class Sample Values | No |
-| `POST` | `/api/v1/databases/{db_name}/classes` | Create Class | No |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | No |
-| `POST` | `/api/v1/databases/{db_name}/import-from-excel/commit` | Commit Import From Excel | No |
-| `POST` | `/api/v1/databases/{db_name}/import-from-excel/dry-run` | Dry Run Import From Excel | No |
-| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/commit` | Commit Import From Google Sheets | No |
-| `POST` | `/api/v1/databases/{db_name}/import-from-google-sheets/dry-run` | Dry Run Import From Google Sheets | No |
 | `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/bulk-create` | Bulk Create Instances Async | No |
 | `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/create` | Create Instance Async | No |
 | `DELETE` | `/api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/delete` | Delete Instance Async | No |
@@ -48,60 +37,6 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/databases/{db_name}/mappings/import` | Import Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/mappings/validate` | Validate Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/action-types` | Create Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Delete Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/deploy` | Deploy Ontology | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/functions` | List Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/functions` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Get Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/functions/{resource_id}` | Delete Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/groups` | List Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/groups` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Get Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Delete Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/health` | Ontology Health | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/interfaces` | Create Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Delete Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types` | Create Link Type | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Update Link Type | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex` | Reindex Link Type | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/object-types` | Create Object Type Contract | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/object-types/{class_id}` | Update Object Type Contract | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/proposals` | List Ontology Proposals | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/proposals` | Create Ontology Proposal | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | Approve Ontology Proposal | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/shared-properties` | Create Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Delete Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/validate` | Validate Ontology Create Bff | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/value-types` | Create Route | No |
-| `PUT` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Update Route | No |
-| `DELETE` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Delete Route | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` | Save Mapping Metadata | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/{class_id}/schema` | Get Ontology Schema | No |
-| `GET` | `/api/v1/databases/{db_name}/query/builder` | Query Builder Info | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings` | Suggest Mappings | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-excel` | Suggest Mappings From Excel | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets` | Suggest Mappings From Google Sheets | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-data` | Suggest Schema From Data | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-excel` | Suggest Schema From Excel | No |
-| `POST` | `/api/v1/databases/{db_name}/suggest-schema-from-google-sheets` | Suggest Schema From Google Sheets | No |
-
-### Pipeline (5 endpoints)
-
-| Method | Path | Summary | Auth |
-|--------|------|---------|------|
-| `POST` | `/api/v1/pipeline-plans/compile` | Compile Plan | No |
-| `GET` | `/api/v1/pipeline-plans/{plan_id}` | Get Plan | No |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/evaluate-joins` | Evaluate Joins | No |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/inspect-preview` | Inspect Plan Preview | No |
-| `POST` | `/api/v1/pipeline-plans/{plan_id}/preview` | Preview Plan | No |
 
 ### Objectify (7 endpoints)
 
@@ -224,7 +159,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 |--------|------|---------|------|
 | `GET` | `/api/v1/ops/status` | Ops Status | No |
 
-### Other (71 endpoints)
+### Other (63 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -241,10 +176,8 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/data-connectors/google-sheets/connections` | List Google Sheets connections | No |
 | `DELETE` | `/api/v1/data-connectors/google-sheets/connections/{connection_id}` | Remove Google Sheets connection | No |
 | `GET` | `/api/v1/data-connectors/google-sheets/drive/spreadsheets` | List Google Sheets spreadsheets | No |
-| `POST` | `/api/v1/data-connectors/google-sheets/grid` | Extract Google Sheets grid + merges | No |
 | `GET` | `/api/v1/data-connectors/google-sheets/oauth/callback` | Google Sheets OAuth callback | No |
 | `POST` | `/api/v1/data-connectors/google-sheets/oauth/start` | Start Google Sheets OAuth flow | No |
-| `POST` | `/api/v1/data-connectors/google-sheets/preview` | Preview Google Sheet data (for Funnel) | No |
 | `POST` | `/api/v1/data-connectors/google-sheets/register` | Register Google Sheet for data monitoring | No |
 | `GET` | `/api/v1/data-connectors/google-sheets/registered` | List registered Google Sheets | No |
 | `GET` | `/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets` | List worksheets for a spreadsheet | No |
@@ -265,9 +198,6 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/key-specs/{key_spec_id}` | Get Key Spec | No |
 | `GET` | `/api/v1/pipelines` | List Pipelines | No |
 | `POST` | `/api/v1/pipelines` | Create Pipeline | No |
-| `GET` | `/api/v1/pipelines/branches` | List Pipeline Branches | No |
-| `POST` | `/api/v1/pipelines/branches/{branch}/archive` | Archive Pipeline Branch | No |
-| `POST` | `/api/v1/pipelines/branches/{branch}/restore` | Restore Pipeline Branch | No |
 | `GET` | `/api/v1/pipelines/datasets` | List Datasets | No |
 | `POST` | `/api/v1/pipelines/datasets` | Create Dataset | No |
 | `POST` | `/api/v1/pipelines/datasets/csv-upload` | Upload Csv Dataset | No |
@@ -277,9 +207,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | No |
 | `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | No |
 | `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | No |
-| `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis` | Reanalyze Dataset Version | No |
 | `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | No |
-| `POST` | `/api/v1/pipelines/simulate-definition` | Simulate Pipeline Definition | No |
 | `GET` | `/api/v1/pipelines/udfs` | List Udfs | No |
 | `POST` | `/api/v1/pipelines/udfs` | Create Udf | No |
 | `GET` | `/api/v1/pipelines/udfs/{udf_id}` | Get Udf | No |
@@ -289,7 +217,6 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `PUT` | `/api/v1/pipelines/{pipeline_id}` | Update Pipeline | No |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts` | List Pipeline Artifacts | No |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}` | Get Pipeline Artifact | No |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/branches` | Create Pipeline Branch | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build Pipeline | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy Pipeline | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview Pipeline | No |

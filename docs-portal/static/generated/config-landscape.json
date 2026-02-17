@@ -962,18 +962,8 @@
     {
       "name": "FeatureFlagsSettings",
       "docstring": "Feature flags / opt-in endpoints.",
-      "field_count": 4,
+      "field_count": 3,
       "fields": [
-        {
-          "name": "enable_pull_requests",
-          "type": "bool",
-          "default": "False",
-          "description": "Enable pull request endpoints (ENABLE_PULL_REQUESTS)",
-          "env_vars": [
-            "ENABLE_PULL_REQUESTS"
-          ],
-          "required": false
-        },
         {
           "name": "enable_pipeline_control_plane_events",
           "type": "bool",
@@ -5558,5 +5548,5 @@
       ]
     }
   ],
-  "total_fields": 517
+  "total_fields": 516
 }

@@ -1,27 +1,5 @@
 [
   {
-    "tool_id": "actions.get_log",
-    "method": "GET",
-    "path": "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": false,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
-  },
-  {
-    "tool_id": "actions.list_logs",
-    "method": "GET",
-    "path": "/api/v1/databases/{db_name}/actions/logs",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": false,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
-  },
-  {
     "tool_id": "actions.apply",
     "method": "POST",
     "path": "/api/v2/ontologies/{ontology}/actions/{action}/apply",
@@ -152,17 +130,6 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipelines.datasets.funnel_analysis",
-    "method": "POST",
-    "path": "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
   },
   {
     "tool_id": "pipelines.datasets.get_ingest_request",
@@ -319,17 +286,6 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "pipelines.simulate_definition",
-    "method": "POST",
-    "path": "/api/v1/pipelines/simulate-definition",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
     "tool_id": "pipelines.update",
     "method": "PUT",
     "path": "/api/v1/pipelines/{pipeline_id}",
@@ -339,49 +295,5 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.compile",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/compile",
-    "risk_level": "write",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.preview",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/preview",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 500000
-  },
-  {
-    "tool_id": "pipeline_plans.evaluate_joins",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
-  },
-  {
-    "tool_id": "pipeline_plans.inspect_preview",
-    "method": "POST",
-    "path": "/api/v1/pipeline-plans/{plan_id}/inspect-preview",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": true,
-    "status": "ACTIVE",
-    "roles": [],
-    "max_payload_bytes": 200000
   }
 ]

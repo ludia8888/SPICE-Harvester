@@ -79,7 +79,6 @@ from bff.routers import (
     admin,
     ai,
     audit,
-    actions,
     ci_webhooks,
     command_status,
     context7,
@@ -93,19 +92,14 @@ from bff.routers import (
     health,
     foundry_ontology_v2,
     instance_async,
-    instances,
     lineage,
-    link_types,
     mapping,
-    object_types,
     objectify,
     ontology,
     ontology_agent,
     ontology_extensions,
     ops,
     pipeline,
-    pipeline_plans,
-    query,
     schema_changes,
     summary,
     tasks,
@@ -1014,16 +1008,11 @@ app.include_router(database.router, prefix="/api/v1")
 # NOTE: Ontology fixed-subpath routers must be registered before generic ontology routes because
 # `/ontology/{class_id}` can greedily capture subpaths like `/ontology/object-types`.
 app.include_router(ontology_extensions.router, prefix="/api/v1")
-app.include_router(object_types.router, prefix="/api/v1")
-app.include_router(link_types.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
 app.include_router(foundry_ontology_v2.router, prefix="/api")
-app.include_router(query.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
-app.include_router(instances.router, prefix="/api/v1")
 app.include_router(instance_async.router, prefix="/api/v1")
-app.include_router(actions.router, prefix="/api/v1")
 app.include_router(command_status.router, prefix="/api/v1")
 app.include_router(websocket.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
@@ -1039,7 +1028,6 @@ app.include_router(document_bundles.router, prefix="/api/v1")
 app.include_router(agent_proxy.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
-app.include_router(pipeline_plans.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
 app.include_router(ontology_agent.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")

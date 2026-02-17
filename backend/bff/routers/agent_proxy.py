@@ -16,16 +16,11 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from fastapi.responses import StreamingResponse
 
 from shared.models.pipeline_agent import PipelineAgentRunRequest
-from bff.routers.pipeline_plans import (
-    PipelinePlanPreviewRequest,
-    get_dataset_registry,
-    get_pipeline_plan_registry,
-    get_pipeline_registry,
-    preview_plan,
-    _resolve_actor,
-    _resolve_tenant_id,
-    _resolve_tenant_policy,
-)
+from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
+from bff.routers.pipeline_plans_deps import get_pipeline_plan_registry
+from bff.routers.pipeline_plans_ops import _resolve_actor, _resolve_tenant_id, _resolve_tenant_policy
+from bff.schemas.pipeline_plans_requests import PipelinePlanPreviewRequest
+from bff.services import pipeline_plan_preview_service
 from bff.services.pipeline_agent_autonomous_loop import (
     run_pipeline_agent_mcp_autonomous,
     run_pipeline_agent_streaming,
@@ -105,7 +100,7 @@ async def create_pipeline_run(
         preview_node_id = str(getattr(body, "preview_node_id", None) or "").strip() or None
         limit = max(1, min(int(getattr(body, "preview_limit", 200) or 200), 200))
         try:
-            preview_resp = await preview_plan(
+            preview_resp = await pipeline_plan_preview_service.preview_plan(
                 plan_id=plan_id,
                 body=PipelinePlanPreviewRequest(
                     node_id=preview_node_id,

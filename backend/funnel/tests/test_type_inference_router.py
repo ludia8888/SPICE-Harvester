@@ -9,13 +9,13 @@ from starlette.datastructures import UploadFile
 
 from funnel.routers import type_inference_router as router
 from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest, SheetGrid
-from shared.models.structure_analysis import SheetStructureAnalysisRequest, SheetStructureAnalysisResponse
+from shared.models.structure_analysis import SheetStructureAnalysisRequest
 from shared.models.structure_patch import SheetStructurePatch, SheetStructurePatchOp
 from shared.models.type_inference import (
     ColumnAnalysisResult,
     DatasetAnalysisRequest,
     DatasetAnalysisResponse,
-    FunnelPreviewResponse,
+    TabularPreviewResponse,
     TypeInferenceResult,
 )
 
@@ -35,8 +35,8 @@ class _FakeProcessor:
         )
         return DatasetAnalysisResponse(columns=[result], analysis_metadata={"total_columns": len(request.columns)})
 
-    async def process_google_sheets_preview(self, **kwargs) -> FunnelPreviewResponse:  # noqa: ANN003
-        return FunnelPreviewResponse(
+    async def process_google_sheets_preview(self, **kwargs) -> TabularPreviewResponse:  # noqa: ANN003
+        return TabularPreviewResponse(
             source_metadata={"type": "google_sheets"},
             columns=["id"],
             sample_data=[[1]],
@@ -44,6 +44,10 @@ class _FakeProcessor:
             total_rows=1,
             preview_rows=1,
         )
+
+    async def resolve_optional_access_token(self, *, connection_id):  # noqa: ANN001
+        _ = connection_id
+        return None
 
     def generate_schema_suggestion(self, analysis_results, class_name=None):  # noqa: ANN001, ANN002
         return {"id": class_name or "Default", "properties": [], "relationships": []}
@@ -54,6 +58,9 @@ class _FailingProcessor:
         raise RuntimeError("boom")
 
     async def process_google_sheets_preview(self, **kwargs):  # noqa: ANN003
+        raise RuntimeError("boom")
+
+    async def resolve_optional_access_token(self, *, connection_id):  # noqa: ANN001
         raise RuntimeError("boom")
 
     def generate_schema_suggestion(self, analysis_results, class_name=None):  # noqa: ANN001, ANN002
@@ -136,41 +143,24 @@ async def test_analyze_google_sheets_structure(monkeypatch: pytest.MonkeyPatch) 
     sheet_grid = SheetGrid(grid=[["id"], ["1"]], merged_cells=[], metadata={}, warnings=[])
     analysis = SimpleNamespace(tables=[], key_values=[], metadata={}, warnings=[])
 
-    class _FakeResponse:
-        def __init__(self, payload: dict) -> None:
-            self._payload = payload
+    class _FakeMetadata:
+        title = "Demo"
 
-        def raise_for_status(self) -> None:
-            return None
+        def model_dump(self):  # noqa: D401
+            return {}
 
-        def json(self):
-            return self._payload
+    class _FakeGoogleSheetsService:
+        def __init__(self, api_key=None):  # noqa: ANN001
+            self.api_key = api_key
 
-    class _FakeClient:
-        async def __aenter__(self):
-            return self
+        async def fetch_sheet_values(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return "sheet-1", _FakeMetadata(), "Sheet1", 0, [["id"], ["1"]]
 
-        async def __aexit__(self, exc_type, exc, tb):  # noqa: ANN001
-            return None
-
-        async def post(self, url: str, json: dict):  # noqa: A002
-            return _FakeResponse(sheet_grid.model_dump())
-
-    import sys
-
-    class _FakeHTTPStatusError(Exception):
-        pass
-
-    fake_httpx = SimpleNamespace(
-        AsyncClient=lambda *args, **kwargs: _FakeClient(),
-        HTTPStatusError=_FakeHTTPStatusError,
-    )
-
-    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    monkeypatch.setattr(router, "SheetGrid", SheetGrid)
+    monkeypatch.setattr(router, "GoogleSheetsService", _FakeGoogleSheetsService)
+    monkeypatch.setattr(router.SheetGridParser, "from_google_sheets_values", lambda *args, **kwargs: sheet_grid)
+    monkeypatch.setattr(router.SheetGridParser, "merged_cells_from_google_metadata", lambda *args, **kwargs: [])
     monkeypatch.setattr(router, "get_patch", lambda sig: None)  # noqa: ARG005
     monkeypatch.setattr(router.FunnelStructureAnalyzer, "analyze", lambda *args, **kwargs: analysis)
-    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     request = GoogleSheetStructureAnalysisRequest(
         sheet_url="https://docs.google.com/spreadsheets/d/1abc123XYZ456def789GHI012jklMNOP3456789/edit",
@@ -184,7 +174,7 @@ async def test_analyze_google_sheets_structure(monkeypatch: pytest.MonkeyPatch) 
         max_tables=5,
         options={},
     )
-    response = await router.analyze_google_sheets_structure(request)
+    response = await router.analyze_google_sheets_structure(request, processor=_FakeProcessor())
     assert response.metadata["source"] == "google_sheets"
 
 

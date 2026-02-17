@@ -186,9 +186,9 @@ class InProcessTypeInferenceAdapter(TypeInferenceInterface):
             return [self._convert_funnel_column_result(col) for col in response.get("columns", [])]
         except Exception as e:
             logger.error(f"Funnel 서비스 분석 실패: {e}")
-            from shared.services.pipeline.pipeline_funnel_fallback import build_funnel_analysis_fallback
+            from shared.services.pipeline.pipeline_funnel_fallback import build_tabular_analysis_fallback
 
-            fallback = build_funnel_analysis_fallback(
+            fallback = build_tabular_analysis_fallback(
                 columns=headers,
                 rows=data,
                 include_complex_types=include_complex_types,

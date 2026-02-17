@@ -8,13 +8,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from oms.dependencies import ValidatedDatabaseName
-from oms.routers.query import router
+from oms.routers.query import foundry_router
 from shared.dependencies.providers import get_elasticsearch_service
 from shared.utils.foundry_page_token import encode_offset_page_token
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(foundry_router)
 
 
 @pytest.fixture
@@ -38,13 +37,9 @@ def mock_es():
 
 @pytest.fixture(autouse=True)
 def override_deps(mock_es):
-    def fake_db_name():
-        return "test_db"
-
     async def fake_es():
         return mock_es
 
-    app.dependency_overrides[ValidatedDatabaseName] = fake_db_name
     app.dependency_overrides[get_elasticsearch_service] = fake_es
     yield
     app.dependency_overrides.clear()
@@ -58,7 +53,7 @@ async def test_search_objects_v2_returns_foundry_shape(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -78,7 +73,7 @@ async def test_search_objects_v2_allows_missing_where_with_match_all_fallback(mo
     payload = {"pageSize": 5}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     search_call = mock_es.search.call_args
@@ -98,7 +93,7 @@ async def test_search_objects_v2_supports_select_and_order_by_pushdown(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     body = resp.json()
@@ -119,7 +114,7 @@ async def test_search_objects_v2_rejects_select_and_select_v2_together():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -134,7 +129,7 @@ async def test_search_objects_v2_invalid_page_token_returns_foundry_error():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -152,7 +147,7 @@ async def test_search_objects_v2_expired_page_token_returns_foundry_error():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -168,7 +163,7 @@ async def test_search_objects_v2_rejects_page_token_scope_mismatch():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -184,14 +179,14 @@ async def test_search_objects_v2_accepts_scope_matched_page_token(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/objects/test_db/Customer/search", json=payload)
+        first = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
         assert first.status_code == 200
         token = first.json().get("nextPageToken")
         assert isinstance(token, str) and token
 
         second_payload = dict(payload)
         second_payload["pageToken"] = token
-        second = await client.post("/objects/test_db/Customer/search", json=second_payload)
+        second = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=second_payload)
 
     assert second.status_code == 200
     search_call = mock_es.search.call_args
@@ -206,7 +201,7 @@ async def test_search_objects_v2_rejects_page_token_when_page_size_changes():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/objects/test_db/Customer/search", json=initial_payload)
+        first = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=initial_payload)
         assert first.status_code == 200
         token = first.json().get("nextPageToken")
         assert isinstance(token, str) and token
@@ -216,7 +211,7 @@ async def test_search_objects_v2_rejects_page_token_when_page_size_changes():
             "pageSize": 2,
             "pageToken": token,
         }
-        second = await client.post("/objects/test_db/Customer/search", json=changed_page_size_payload)
+        second = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=changed_page_size_payload)
 
     assert second.status_code == 400
     body = second.json()
@@ -232,7 +227,7 @@ async def test_search_objects_v2_accepts_deprecated_startswith_alias(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     search_call = mock_es.search.call_args
@@ -249,7 +244,7 @@ async def test_search_objects_v2_accepts_contains_any_term_operator(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     search_call = mock_es.search.call_args
@@ -272,7 +267,7 @@ async def test_search_objects_v2_rejects_non_foundry_in_operator():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -287,7 +282,7 @@ async def test_search_objects_v2_is_null_false_maps_to_exists_clause(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     search_call = mock_es.search.call_args
@@ -303,7 +298,7 @@ async def test_search_objects_v2_rejects_is_null_with_non_boolean_value():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -322,7 +317,7 @@ async def test_search_objects_v2_accepts_non_deprecated_operator(mock_es):
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 200
     search_call = mock_es.search.call_args
@@ -338,7 +333,7 @@ async def test_search_objects_v2_rejects_non_foundry_anyterm_alias():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -371,7 +366,7 @@ async def test_search_objects_v2_rejects_excessive_nesting_depth():
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/objects/test_db/Customer/search", json=payload)
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
     assert resp.status_code == 400
     body = resp.json()
@@ -388,7 +383,7 @@ async def test_search_objects_v2_accepts_foundry_branch_rid(mock_es):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(
-            f"/objects/test_db/Customer/search?branch={branch_rid}",
+            f"/v2/ontologies/test_db/objects/Customer/search?branch={branch_rid}",
             json=payload,
         )
 

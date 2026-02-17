@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **639**, functions **5753**, classes **877**, internal cross-imports **1571**
+- Population: files **612**, functions **5598**, classes **855**, internal cross-imports **1465**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1571 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1465 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/91 (3.30%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 49/639 (7.67%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 54/639 (8.45%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 301/5753 (5.23%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/877 (1.71%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 667/5753 (11.59%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 385/5753 (6.69%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 49/612 (8.01%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 52/612 (8.50%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 295/5598 (5.27%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/855 (1.75%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 659/5598 (11.77%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 370/5598 (6.61%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -291,7 +291,6 @@ flowchart LR
 | --- | --- |
 | Add/modify Foundry v2 ontology API | `backend/bff/routers/foundry_ontology_v2.py` |
 | Add/modify OMS Object Search DSL | `backend/oms/routers/query.py` |
-| BFF query-builder contract/examples | `backend/bff/routers/query.py` |
 | Service startup wiring (BFF) | `backend/bff/main.py` |
 | Service startup wiring (OMS) | `backend/oms/main.py` |
 | Async action execution | `backend/action_worker/main.py` |
@@ -320,14 +319,13 @@ flowchart LR
 
 ## Router Inventory (BFF)
 
-- Routers detected: **36**
+- Routers detected: **30**
 - Distinct prefixes: **5**
 - Routers with explicit tags: **0**
-- Routers with resolved source files: **36**
+- Routers with resolved source files: **30**
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
-| `actions.router` | `/api/v1` | - | `backend/bff/routers/actions.py` |
 | `admin.router` | `/api/v1` | - | `backend/bff/routers/admin.py` |
 | `agent_proxy.router` | `/api/v1` | - | `backend/bff/routers/agent_proxy.py` |
 | `ai.router` | `/api/v1` | - | `backend/bff/routers/ai.py` |
@@ -345,20 +343,15 @@ flowchart LR
 | `graph.router` | `router-defined` | - | `backend/bff/routers/graph.py` |
 | `health.router` | `/api/v1` | - | `backend/bff/routers/health.py` |
 | `instance_async.router` | `/api/v1` | - | `backend/bff/routers/instance_async.py` |
-| `instances.router` | `/api/v1` | - | `backend/bff/routers/instances.py` |
 | `lineage.router` | `/api/v1` | - | `backend/bff/routers/lineage.py` |
-| `link_types.router` | `/api/v1` | - | `backend/bff/routers/link_types.py` |
 | `mapping.router` | `/api/v1` | - | `backend/bff/routers/mapping.py` |
 | `monitoring.router` | `/api/v1/monitoring` | - | `backend/shared/routers/monitoring.py` |
-| `object_types.router` | `/api/v1` | - | `backend/bff/routers/object_types.py` |
 | `objectify.router` | `/api/v1` | - | `backend/bff/routers/objectify.py` |
 | `ontology.router` | `/api/v1` | - | `backend/bff/routers/ontology.py` |
 | `ontology_agent.router` | `/api/v1` | - | `backend/bff/routers/ontology_agent.py` |
 | `ontology_extensions.router` | `/api/v1` | - | `backend/bff/routers/ontology_extensions.py` |
 | `ops.router` | `/api/v1` | - | `backend/bff/routers/ops.py` |
 | `pipeline.router` | `/api/v1` | - | `backend/bff/routers/pipeline.py` |
-| `pipeline_plans.router` | `/api/v1` | - | `backend/bff/routers/pipeline_plans.py` |
-| `query.router` | `/api/v1` | - | `backend/bff/routers/query.py` |
 | `schema_changes.router` | `/api/v1` | - | `backend/bff/routers/schema_changes.py` |
 | `summary.router` | `/api/v1` | - | `backend/bff/routers/summary.py` |
 | `tasks.router` | `/api/v1` | - | `backend/bff/routers/tasks.py` |
@@ -366,10 +359,10 @@ flowchart LR
 
 ## Router Inventory (OMS)
 
-- Routers detected: **11**
+- Routers detected: **10**
 - Distinct prefixes: **4**
-- Routers with explicit tags: **11**
-- Routers with resolved source files: **11**
+- Routers with explicit tags: **10**
+- Routers with resolved source files: **10**
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
@@ -382,8 +375,7 @@ flowchart LR
 | `monitoring.router` | `/api/v1/monitoring` | monitoring | `backend/shared/routers/monitoring.py` |
 | `ontology.router` | `/api/v1` | ontology | `backend/oms/routers/ontology.py` |
 | `ontology_extensions.router` | `/api/v1` | ontology | `backend/oms/routers/ontology_extensions.py` |
-| `pull_request.router` | `/api/v1` | pull-requests | `backend/oms/routers/pull_request.py` |
-| `query.router` | `/api/v1` | object-search | `backend/oms/routers/query.py` |
+| `query.foundry_router` | `/api` | foundry-object-search-v2 | `backend/oms/routers/query.py` |
 
 ## Router Inventory (Funnel)
 
@@ -394,4 +386,4 @@ flowchart LR
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
-| `type_inference_router` | `/api/v1` | - | `backend/funnel/routers/type_inference_router.py` |
+| `type_inference_router` | `/internal` | - | `backend/funnel/routers/type_inference_router.py` |

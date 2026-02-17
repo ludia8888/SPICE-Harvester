@@ -14,7 +14,6 @@ from bff.routers import (
     data_connector_oauth,
     data_connector_pipelining,
     data_connector_registration,
-    data_connector_sheet_tools,
 )
 from bff.routers.data_connector_deps import (
     get_connector_registry,
@@ -32,7 +31,6 @@ _GOOGLE_SHEETS_PREFIX = "/data-connectors/google-sheets"
 router.include_router(data_connector_oauth.router, prefix=_GOOGLE_SHEETS_PREFIX)
 router.include_router(data_connector_connections.router, prefix=_GOOGLE_SHEETS_PREFIX)
 router.include_router(data_connector_browse.router, prefix=_GOOGLE_SHEETS_PREFIX)
-router.include_router(data_connector_sheet_tools.router, prefix=_GOOGLE_SHEETS_PREFIX)
 router.include_router(data_connector_registration.router, prefix=_GOOGLE_SHEETS_PREFIX)
 router.include_router(data_connector_pipelining.router, prefix=_GOOGLE_SHEETS_PREFIX)
 
@@ -46,4 +44,3 @@ __all__ = [
     "get_objectify_registry",
     "get_objectify_job_queue",
 ]
-
