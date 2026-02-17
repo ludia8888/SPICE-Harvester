@@ -27,7 +27,6 @@ from bff.routers.object_types import (
     _to_foundry_object_type,
 )
 from bff.services.oms_client import OMSClient
-from shared.config.settings import get_settings
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
@@ -1599,6 +1598,36 @@ def _materialize_query_execution_value(value: Any, *, parameters: Dict[str, Any]
     return parameters[placeholder]
 
 
+_QUERY_OBJECT_TYPE_CANONICAL_FIELDS: tuple[str, ...] = ("objectTypeApiName",)
+_QUERY_OBJECT_TYPE_FALLBACK_FIELDS: tuple[str, ...] = (
+    "objectType",
+    "targetObjectType",
+    "target_object_type",
+)
+
+
+def _resolve_query_execution_object_type(
+    *,
+    execution: dict[str, Any],
+    search: dict[str, Any],
+    spec: dict[str, Any],
+    metadata: dict[str, Any],
+) -> str | None:
+    sources = (execution, search, spec, metadata)
+    for field in _QUERY_OBJECT_TYPE_CANONICAL_FIELDS:
+        for source in sources:
+            normalized = str(source.get(field) or "").strip()
+            if normalized:
+                return normalized
+
+    for field in _QUERY_OBJECT_TYPE_FALLBACK_FIELDS:
+        for source in sources:
+            normalized = str(source.get(field) or "").strip()
+            if normalized:
+                return normalized
+    return None
+
+
 def _extract_query_execution_plan(resource: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
     metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
@@ -1618,29 +1647,12 @@ def _extract_query_execution_plan(resource: dict[str, Any]) -> tuple[str | None,
 
     search = execution.get("search") if isinstance(execution.get("search"), dict) else {}
 
-    object_type: str | None = None
-    for candidate in (
-        execution.get("objectType"),
-        execution.get("objectTypeApiName"),
-        execution.get("targetObjectType"),
-        execution.get("target_object_type"),
-        search.get("objectType"),
-        search.get("objectTypeApiName"),
-        search.get("targetObjectType"),
-        search.get("target_object_type"),
-        spec.get("objectType"),
-        spec.get("objectTypeApiName"),
-        spec.get("targetObjectType"),
-        spec.get("target_object_type"),
-        metadata.get("objectType"),
-        metadata.get("objectTypeApiName"),
-        metadata.get("targetObjectType"),
-        metadata.get("target_object_type"),
-    ):
-        normalized = str(candidate or "").strip()
-        if normalized:
-            object_type = normalized
-            break
+    object_type = _resolve_query_execution_object_type(
+        execution=execution,
+        search=search,
+        spec=spec,
+        metadata=metadata,
+    )
 
     payload: dict[str, Any] = {}
     for source in (search, execution):
@@ -2537,9 +2549,8 @@ def _foundry_valid_action_validation_payload() -> Dict[str, Any]:
     return {
         "validation": {
             "result": "VALID",
-            "submissionCriteria": [],
-            "parameters": {},
-        }
+        },
+        "parameters": {},
     }
 
 

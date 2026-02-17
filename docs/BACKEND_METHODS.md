@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-17T12:29:30+09:00
+> Generated: 2026-02-17T20:42:19+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -497,156 +497,157 @@
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 98): no docstring
-  - `_passthrough_upstream_error_payload(exc)` (line 116): no docstring
-  - `_named_not_found(error_name, parameters)` (line 130): no docstring
-  - `_error_parameters(ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 139): no docstring
-  - `_not_found_error(error_name, ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 162): no docstring
-  - `_permission_denied(ontology, message, parameters)` (line 185): no docstring
-  - `_preflight_error_response(exc, ontology, parameters)` (line 202): no docstring
-  - `_decode_page_token(page_token, scope)` (line 253): no docstring
-  - `_encode_page_token(offset, scope)` (line 257): no docstring
-  - `_parse_order_by(order_by)` (line 261): no docstring
-  - `_temporary_object_set_rid()` (line 294): no docstring
-  - `_prune_expired_temporary_object_sets(now_epoch)` (line 298): no docstring
-  - `async _store_temporary_object_set(object_set)` (line 304): no docstring
-  - `async _load_temporary_object_set(rid)` (line 313): no docstring
-  - `_collect_object_set_object_types(object_set)` (line 330): no docstring
-  - `_resolve_object_set_object_type(object_set)` (line 359): no docstring
-  - `async _resolve_object_set_definition(object_set)` (line 364): no docstring
-  - `_extract_object_set_where(object_set)` (line 372): no docstring
-  - `_normalize_object_set_order_by(order_by)` (line 392): no docstring
-  - `_normalize_select_values(payload)` (line 402): no docstring
-  - `_to_int_or_none(value)` (line 421): no docstring
-  - `_build_object_set_search_payload(object_set, payload, default_page_size, require_select)` (line 428): no docstring
-  - `_get_result_rows(result)` (line 469): no docstring
-  - `_get_total_count(result)` (line 476): no docstring
-  - `async _search_object_type_rows(oms_client, db_name, branch, object_type, search_payload)` (line 484): no docstring
-  - `_derive_page_size(search_payload)` (line 499): no docstring
-  - `async _load_rows_for_single_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 506): no docstring
-  - `async _load_rows_for_multi_object_types(oms_client, db_name, branch, object_types, search_payload, page_token, pagination_scope)` (line 529): no docstring
-  - `_normalize_link_type_values(payload)` (line 565): no docstring
-  - `_resolve_source_object_type_from_row(row, fallback_object_type)` (line 588): no docstring
-  - `_resolve_source_primary_key_from_row(row, primary_key_field)` (line 602): no docstring
-  - `_build_object_locator(object_type, primary_key)` (line 619): no docstring
-  - `_build_linked_object_locator(link_type, target_object_type, target_primary_key)` (line 623): no docstring
-  - `_collect_load_links_rows(rows, requested_links, link_sides_by_source_type, source_primary_key_fields, default_object_type)` (line 635): no docstring
-  - `_value_by_field(row, field)` (line 693): no docstring
-  - `_metric_name(clause, index)` (line 711): no docstring
-  - `_to_float(value)` (line 719): no docstring
-  - `_compute_aggregation_metric(rows, clause)` (line 735): no docstring
-  - `_group_rows_for_aggregation(rows, group_by)` (line 782): no docstring
-  - `_build_aggregate_objects_response(rows, aggregation, group_by, accuracy_request, include_compute_usage)` (line 811): no docstring
-  - `_pagination_scope(*parts)` (line 839): no docstring
-  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 844): no docstring
-  - `_rid_component(value, fallback)` (line 849): no docstring
-  - `_default_object_type_rid(db_name, object_type)` (line 858): no docstring
-  - `_default_property_rid(db_name, object_type, property_name)` (line 862): no docstring
-  - `_default_link_type_rid(db_name, source_object_type, link_type)` (line 869): no docstring
-  - `_default_property_contract(db_name, object_type, property_name)` (line 876): no docstring
-  - `_strictify_foundry_object_type(object_type, db_name, object_type_hint)` (line 883): no docstring
-  - `_strictify_outgoing_link_type(link_type_payload, db_name, source_object_type)` (line 999): no docstring
-  - `_strictify_object_type_full_metadata(payload, db_name, object_type_hint)` (line 1041): no docstring
-  - `_log_strict_compat_summary(route, db_name, branch, fixes, dropped)` (line 1082): no docstring
-  - `_full_metadata_branch_contract(branch)` (line 1102): no docstring
-  - `_require_preview_true_for_strict_compat(preview, strict_compat, endpoint)` (line 1106): no docstring
-  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 1116): no docstring
-  - `_iter_primary_key_values(value)` (line 1133): no docstring
-  - `_coerce_primary_key_values(value)` (line 1154): no docstring
-  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1158): no docstring
-  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1178): no docstring
-  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 1195): Extract a deduplicated page without materializing every linked PK.
-  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 1235): no docstring
-  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 1259): no docstring
-  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 1273): no docstring
-  - `async _require_domain_role(request, db_name)` (line 1309): no docstring
-  - `_validate_ontology_db_name(ontology)` (line 1318): no docstring
-  - `_validate_branch(branch)` (line 1322): no docstring
-  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 1326): no docstring
-  - `_extract_databases(payload)` (line 1357): no docstring
-  - `_extract_ontology_resource_rows(payload)` (line 1373): no docstring
-  - `_extract_ontology_resource(payload)` (line 1384): no docstring
-  - `_localized_text(value)` (line 1394): no docstring
-  - `_to_foundry_named_metadata(resource)` (line 1409): no docstring
-  - `_to_foundry_named_metadata_map(resources)` (line 1447): no docstring
-  - `_dict_or_none(value)` (line 1459): no docstring
-  - `_list_or_none(value)` (line 1463): no docstring
-  - `_to_foundry_action_type(resource)` (line 1467): no docstring
-  - `_to_foundry_action_type_map(resources)` (line 1497): no docstring
-  - `_to_foundry_query_type(resource)` (line 1509): no docstring
-  - `_to_foundry_query_type_map_key(resource)` (line 1539): no docstring
-  - `_to_foundry_query_type_metadata_map(resources)` (line 1552): no docstring
-  - `_resolve_query_placeholder_key(value)` (line 1564): no docstring
-  - `_materialize_query_execution_value(value, parameters)` (line 1585): no docstring
-  - `_extract_query_execution_plan(resource)` (line 1602): no docstring
-  - `_apply_query_execute_options(base_payload, options)` (line 1666): no docstring
-  - `_scoped_error_parameters(ontology, parameters)` (line 1689): no docstring
-  - `_upstream_status_error_response(exc, ontology, parameters, not_found_response, passthrough_payload)` (line 1700): no docstring
-  - `_upstream_transport_error_response(ontology, parameters)` (line 1723): no docstring
-  - `_internal_error_response(log_message, exc, ontology, parameters)` (line 1736): no docstring
-  - `async _find_resource_by_rid(db_name, branch, resource_type, rid, oms_client, page_size)` (line 1752): no docstring
-  - `_group_outgoing_link_types_by_source(resources)` (line 1778): no docstring
-  - `_strip_prefix(text, prefixes)` (line 1820): no docstring
-  - `_normalize_interface_ref(value)` (line 1831): no docstring
-  - `_normalize_shared_property_ref(value)` (line 1838): no docstring
-  - `_coerce_string_list(value)` (line 1854): no docstring
-  - `_ordered_unique(values)` (line 1881): no docstring
-  - `_extract_interface_implementations(resource)` (line 1893): no docstring
-  - `_extract_interface_names(resource)` (line 1912): no docstring
-  - `_extract_ontology_properties_payload(payload)` (line 1926): no docstring
-  - `_extract_shared_property_type_mapping(resource, ontology_payload)` (line 1936): no docstring
-  - `_to_foundry_object_type_full_metadata(resource, ontology_payload, link_types)` (line 1972): no docstring
-  - `async _list_all_resources_for_type(db_name, branch, resource_type, oms_client, page_size)` (line 1992): no docstring
-  - `async _list_resources_best_effort(db_name, branch, resource_type, oms_client)` (line 2021): no docstring
-  - `async _get_ontology_payload_best_effort(db_name, branch, object_type, oms_client)` (line 2046): no docstring
-  - `_to_foundry_ontology(row)` (line 2066): no docstring
-  - `async list_ontologies_v2(request, oms_client)` (line 2088): no docstring
-  - `async get_ontology_v2(ontology, request, oms_client)` (line 2122): no docstring
-  - `async get_full_metadata_v2(ontology, request, preview, branch, oms_client)` (line 2166): no docstring
-  - `async list_action_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 2338): no docstring
-  - `async get_action_type_v2(ontology, actionType, request, branch, oms_client)` (line 2389): no docstring
-  - `async get_action_type_by_rid_v2(ontology, actionTypeRid, request, branch, oms_client)` (line 2459): no docstring
-  - `_resolve_apply_action_mode(explicit_mode)` (line 2527): no docstring
-  - `_foundry_valid_action_validation_payload()` (line 2536): no docstring
-  - `async apply_action_v2(ontology, action, body, request, branch, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 2548): no docstring
-  - `async apply_action_batch_v2(ontology, action, body, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 2630): no docstring
-  - `async list_query_types_v2(ontology, request, page_size, page_token, oms_client)` (line 2705): no docstring
-  - `async get_query_type_v2(ontology, queryApiName, request, version, sdk_package_rid, sdk_version, oms_client)` (line 2754): no docstring
-  - `async execute_query_v2(ontology, queryApiName, body, request, version, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 2835): no docstring
-  - `async list_interface_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 2961): no docstring
-  - `async get_interface_type_v2(ontology, interfaceType, request, preview, branch, sdk_package_rid, sdk_version, oms_client)` (line 3024): no docstring
-  - `async list_shared_property_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 3105): no docstring
-  - `async get_shared_property_type_v2(ontology, sharedPropertyType, request, preview, branch, oms_client)` (line 3168): no docstring
-  - `async list_value_types_v2(ontology, request, preview, oms_client)` (line 3246): no docstring
-  - `async get_value_type_v2(ontology, valueType, request, preview, oms_client)` (line 3300): no docstring
-  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 3376): no docstring
-  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 3462): no docstring
-  - `async get_object_type_full_metadata_v2(ontology, objectType, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 3534): no docstring
-  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 3638): no docstring
-  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 3750): no docstring
-  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 3848): no docstring
-  - `async load_object_set_objects_v2(ontology, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 3912): no docstring
-  - `async load_object_set_links_v2(ontology, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 3988): no docstring
-  - `async load_object_set_multiple_object_types_v2(ontology, payload, request, branch, preview, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 4189): no docstring
-  - `async load_object_set_objects_or_interfaces_v2(ontology, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 4296): no docstring
-  - `async aggregate_object_set_v2(ontology, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 4397): no docstring
-  - `async create_temporary_object_set_v2(ontology, payload, request, sdk_package_rid, sdk_version, oms_client)` (line 4468): no docstring
-  - `async get_object_set_v2(ontology, objectSetRid, request, oms_client)` (line 4493): no docstring
-  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 4513): no docstring
-  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 4595): no docstring
-  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 4731): no docstring
-  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 4991): no docstring
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 97): no docstring
+  - `_passthrough_upstream_error_payload(exc)` (line 115): no docstring
+  - `_named_not_found(error_name, parameters)` (line 129): no docstring
+  - `_error_parameters(ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 138): no docstring
+  - `_not_found_error(error_name, ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 161): no docstring
+  - `_permission_denied(ontology, message, parameters)` (line 184): no docstring
+  - `_preflight_error_response(exc, ontology, parameters)` (line 201): no docstring
+  - `_decode_page_token(page_token, scope)` (line 252): no docstring
+  - `_encode_page_token(offset, scope)` (line 256): no docstring
+  - `_parse_order_by(order_by)` (line 260): no docstring
+  - `_temporary_object_set_rid()` (line 293): no docstring
+  - `_prune_expired_temporary_object_sets(now_epoch)` (line 297): no docstring
+  - `async _store_temporary_object_set(object_set)` (line 303): no docstring
+  - `async _load_temporary_object_set(rid)` (line 312): no docstring
+  - `_collect_object_set_object_types(object_set)` (line 329): no docstring
+  - `_resolve_object_set_object_type(object_set)` (line 358): no docstring
+  - `async _resolve_object_set_definition(object_set)` (line 363): no docstring
+  - `_extract_object_set_where(object_set)` (line 371): no docstring
+  - `_normalize_object_set_order_by(order_by)` (line 391): no docstring
+  - `_normalize_select_values(payload)` (line 401): no docstring
+  - `_to_int_or_none(value)` (line 420): no docstring
+  - `_build_object_set_search_payload(object_set, payload, default_page_size, require_select)` (line 427): no docstring
+  - `_get_result_rows(result)` (line 468): no docstring
+  - `_get_total_count(result)` (line 475): no docstring
+  - `async _search_object_type_rows(oms_client, db_name, branch, object_type, search_payload)` (line 483): no docstring
+  - `_derive_page_size(search_payload)` (line 498): no docstring
+  - `async _load_rows_for_single_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 505): no docstring
+  - `async _load_rows_for_multi_object_types(oms_client, db_name, branch, object_types, search_payload, page_token, pagination_scope)` (line 528): no docstring
+  - `_normalize_link_type_values(payload)` (line 564): no docstring
+  - `_resolve_source_object_type_from_row(row, fallback_object_type)` (line 587): no docstring
+  - `_resolve_source_primary_key_from_row(row, primary_key_field)` (line 601): no docstring
+  - `_build_object_locator(object_type, primary_key)` (line 618): no docstring
+  - `_build_linked_object_locator(link_type, target_object_type, target_primary_key)` (line 622): no docstring
+  - `_collect_load_links_rows(rows, requested_links, link_sides_by_source_type, source_primary_key_fields, default_object_type)` (line 634): no docstring
+  - `_value_by_field(row, field)` (line 692): no docstring
+  - `_metric_name(clause, index)` (line 710): no docstring
+  - `_to_float(value)` (line 718): no docstring
+  - `_compute_aggregation_metric(rows, clause)` (line 734): no docstring
+  - `_group_rows_for_aggregation(rows, group_by)` (line 781): no docstring
+  - `_build_aggregate_objects_response(rows, aggregation, group_by, accuracy_request, include_compute_usage)` (line 810): no docstring
+  - `_pagination_scope(*parts)` (line 838): no docstring
+  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 843): no docstring
+  - `_rid_component(value, fallback)` (line 848): no docstring
+  - `_default_object_type_rid(db_name, object_type)` (line 857): no docstring
+  - `_default_property_rid(db_name, object_type, property_name)` (line 861): no docstring
+  - `_default_link_type_rid(db_name, source_object_type, link_type)` (line 868): no docstring
+  - `_default_property_contract(db_name, object_type, property_name)` (line 875): no docstring
+  - `_strictify_foundry_object_type(object_type, db_name, object_type_hint)` (line 882): no docstring
+  - `_strictify_outgoing_link_type(link_type_payload, db_name, source_object_type)` (line 998): no docstring
+  - `_strictify_object_type_full_metadata(payload, db_name, object_type_hint)` (line 1040): no docstring
+  - `_log_strict_compat_summary(route, db_name, branch, fixes, dropped)` (line 1081): no docstring
+  - `_full_metadata_branch_contract(branch)` (line 1101): no docstring
+  - `_require_preview_true_for_strict_compat(preview, strict_compat, endpoint)` (line 1105): no docstring
+  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 1115): no docstring
+  - `_iter_primary_key_values(value)` (line 1132): no docstring
+  - `_coerce_primary_key_values(value)` (line 1153): no docstring
+  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1157): no docstring
+  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1177): no docstring
+  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 1194): Extract a deduplicated page without materializing every linked PK.
+  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 1234): no docstring
+  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 1258): no docstring
+  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 1272): no docstring
+  - `async _require_domain_role(request, db_name)` (line 1308): no docstring
+  - `_validate_ontology_db_name(ontology)` (line 1317): no docstring
+  - `_validate_branch(branch)` (line 1321): no docstring
+  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 1325): no docstring
+  - `_extract_databases(payload)` (line 1356): no docstring
+  - `_extract_ontology_resource_rows(payload)` (line 1372): no docstring
+  - `_extract_ontology_resource(payload)` (line 1383): no docstring
+  - `_localized_text(value)` (line 1393): no docstring
+  - `_to_foundry_named_metadata(resource)` (line 1408): no docstring
+  - `_to_foundry_named_metadata_map(resources)` (line 1446): no docstring
+  - `_dict_or_none(value)` (line 1458): no docstring
+  - `_list_or_none(value)` (line 1462): no docstring
+  - `_to_foundry_action_type(resource)` (line 1466): no docstring
+  - `_to_foundry_action_type_map(resources)` (line 1496): no docstring
+  - `_to_foundry_query_type(resource)` (line 1508): no docstring
+  - `_to_foundry_query_type_map_key(resource)` (line 1538): no docstring
+  - `_to_foundry_query_type_metadata_map(resources)` (line 1551): no docstring
+  - `_resolve_query_placeholder_key(value)` (line 1563): no docstring
+  - `_materialize_query_execution_value(value, parameters)` (line 1584): no docstring
+  - `_resolve_query_execution_object_type(execution, search, spec, metadata)` (line 1609): no docstring
+  - `_extract_query_execution_plan(resource)` (line 1631): no docstring
+  - `_apply_query_execute_options(base_payload, options)` (line 1678): no docstring
+  - `_scoped_error_parameters(ontology, parameters)` (line 1701): no docstring
+  - `_upstream_status_error_response(exc, ontology, parameters, not_found_response, passthrough_payload)` (line 1712): no docstring
+  - `_upstream_transport_error_response(ontology, parameters)` (line 1735): no docstring
+  - `_internal_error_response(log_message, exc, ontology, parameters)` (line 1748): no docstring
+  - `async _find_resource_by_rid(db_name, branch, resource_type, rid, oms_client, page_size)` (line 1764): no docstring
+  - `_group_outgoing_link_types_by_source(resources)` (line 1790): no docstring
+  - `_strip_prefix(text, prefixes)` (line 1832): no docstring
+  - `_normalize_interface_ref(value)` (line 1843): no docstring
+  - `_normalize_shared_property_ref(value)` (line 1850): no docstring
+  - `_coerce_string_list(value)` (line 1866): no docstring
+  - `_ordered_unique(values)` (line 1893): no docstring
+  - `_extract_interface_implementations(resource)` (line 1905): no docstring
+  - `_extract_interface_names(resource)` (line 1924): no docstring
+  - `_extract_ontology_properties_payload(payload)` (line 1938): no docstring
+  - `_extract_shared_property_type_mapping(resource, ontology_payload)` (line 1948): no docstring
+  - `_to_foundry_object_type_full_metadata(resource, ontology_payload, link_types)` (line 1984): no docstring
+  - `async _list_all_resources_for_type(db_name, branch, resource_type, oms_client, page_size)` (line 2004): no docstring
+  - `async _list_resources_best_effort(db_name, branch, resource_type, oms_client)` (line 2033): no docstring
+  - `async _get_ontology_payload_best_effort(db_name, branch, object_type, oms_client)` (line 2058): no docstring
+  - `_to_foundry_ontology(row)` (line 2078): no docstring
+  - `async list_ontologies_v2(request, oms_client)` (line 2100): no docstring
+  - `async get_ontology_v2(ontology, request, oms_client)` (line 2134): no docstring
+  - `async get_full_metadata_v2(ontology, request, preview, branch, oms_client)` (line 2178): no docstring
+  - `async list_action_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 2350): no docstring
+  - `async get_action_type_v2(ontology, actionType, request, branch, oms_client)` (line 2401): no docstring
+  - `async get_action_type_by_rid_v2(ontology, actionTypeRid, request, branch, oms_client)` (line 2471): no docstring
+  - `_resolve_apply_action_mode(explicit_mode)` (line 2539): no docstring
+  - `_foundry_valid_action_validation_payload()` (line 2548): no docstring
+  - `async apply_action_v2(ontology, action, body, request, branch, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 2559): no docstring
+  - `async apply_action_batch_v2(ontology, action, body, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 2641): no docstring
+  - `async list_query_types_v2(ontology, request, page_size, page_token, oms_client)` (line 2716): no docstring
+  - `async get_query_type_v2(ontology, queryApiName, request, version, sdk_package_rid, sdk_version, oms_client)` (line 2765): no docstring
+  - `async execute_query_v2(ontology, queryApiName, body, request, version, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 2846): no docstring
+  - `async list_interface_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 2972): no docstring
+  - `async get_interface_type_v2(ontology, interfaceType, request, preview, branch, sdk_package_rid, sdk_version, oms_client)` (line 3035): no docstring
+  - `async list_shared_property_types_v2(ontology, request, preview, page_size, page_token, branch, oms_client)` (line 3116): no docstring
+  - `async get_shared_property_type_v2(ontology, sharedPropertyType, request, preview, branch, oms_client)` (line 3179): no docstring
+  - `async list_value_types_v2(ontology, request, preview, oms_client)` (line 3257): no docstring
+  - `async get_value_type_v2(ontology, valueType, request, preview, oms_client)` (line 3311): no docstring
+  - `async list_object_types_v2(ontology, request, page_size, page_token, branch, oms_client)` (line 3387): no docstring
+  - `async get_object_type_v2(ontology, objectType, request, branch, oms_client)` (line 3473): no docstring
+  - `async get_object_type_full_metadata_v2(ontology, objectType, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 3545): no docstring
+  - `async list_outgoing_link_types_v2(ontology, objectType, request, page_size, page_token, branch, oms_client)` (line 3649): no docstring
+  - `async get_outgoing_link_type_v2(ontology, objectType, linkType, request, branch, oms_client)` (line 3761): no docstring
+  - `async search_objects_v2(ontology, objectType, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 3859): no docstring
+  - `async load_object_set_objects_v2(ontology, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 3923): no docstring
+  - `async load_object_set_links_v2(ontology, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 3999): no docstring
+  - `async load_object_set_multiple_object_types_v2(ontology, payload, request, branch, preview, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 4200): no docstring
+  - `async load_object_set_objects_or_interfaces_v2(ontology, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 4307): no docstring
+  - `async aggregate_object_set_v2(ontology, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 4408): no docstring
+  - `async create_temporary_object_set_v2(ontology, payload, request, sdk_package_rid, sdk_version, oms_client)` (line 4479): no docstring
+  - `async get_object_set_v2(ontology, objectSetRid, request, oms_client)` (line 4504): no docstring
+  - `async list_objects_v2(ontology, objectType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 4524): no docstring
+  - `async get_object_v2(ontology, objectType, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 4606): no docstring
+  - `async list_linked_objects_v2(ontology, objectType, primaryKey, linkType, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 4742): no docstring
+  - `async get_linked_object_v2(ontology, objectType, primaryKey, linkType, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 5002): no docstring
 - **Classes**
-  - `OntologyNotFoundError` (line 54): no docstring
-  - `PermissionDeniedError` (line 58): no docstring
-  - `ApiFeaturePreviewUsageOnlyError` (line 62): no docstring
-  - `ObjectSetNotFoundError` (line 66): no docstring
-  - `ApplyActionRequestOptionsV2` (line 70): no docstring
-  - `ApplyActionRequestV2` (line 75): no docstring
-  - `BatchApplyActionRequestItemV2` (line 80): no docstring
-  - `BatchApplyActionRequestOptionsV2` (line 84): no docstring
-  - `BatchApplyActionRequestV2` (line 88): no docstring
-  - `ExecuteQueryRequestV2` (line 93): no docstring
+  - `OntologyNotFoundError` (line 53): no docstring
+  - `PermissionDeniedError` (line 57): no docstring
+  - `ApiFeaturePreviewUsageOnlyError` (line 61): no docstring
+  - `ObjectSetNotFoundError` (line 65): no docstring
+  - `ApplyActionRequestOptionsV2` (line 69): no docstring
+  - `ApplyActionRequestV2` (line 74): no docstring
+  - `BatchApplyActionRequestItemV2` (line 79): no docstring
+  - `BatchApplyActionRequestOptionsV2` (line 83): no docstring
+  - `BatchApplyActionRequestV2` (line 87): no docstring
+  - `ExecuteQueryRequestV2` (line 92): no docstring
 
 ### `backend/bff/routers/governance.py`
 - **Functions**
@@ -2177,65 +2178,66 @@
 
 ### `backend/bff/tests/test_foundry_ontology_v2_router.py`
 - **Functions**
-  - `async _noop_require_domain_role(request, db_name)` (line 572): no docstring
-  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 578): no docstring
-  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 602): no docstring
-  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 616): no docstring
-  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 628): no docstring
-  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 648): no docstring
-  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 666): no docstring
-  - `async test_get_ontology_v2_permission_denied_returns_foundry_403()` (line 687): no docstring
-  - `async test_get_ontology_v2_non_permission_role_error_returns_invalid_argument()` (line 713): no docstring
-  - `async test_get_ontology_v2_preflight_upstream_error_returns_upstream_contract()` (line 739): no docstring
-  - `async test_get_full_metadata_v2_returns_foundry_full_metadata_shape()` (line 755): no docstring
-  - `async test_get_full_metadata_v2_requires_preview_true()` (line 793): no docstring
-  - `async test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable()` (line 816): no docstring
-  - `async test_list_action_types_v2_returns_foundry_raw_shape()` (line 838): no docstring
-  - `async test_get_action_type_v2_returns_foundry_raw_shape()` (line 861): no docstring
-  - `async test_get_action_type_by_rid_v2_returns_foundry_raw_shape()` (line 882): no docstring
-  - `async test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path()` (line 903): no docstring
-  - `async test_apply_action_v2_validate_only_maps_to_oms_v2_apply()` (line 947): no docstring
-  - `async test_apply_action_batch_v2_forwards_requests_to_submit_batch()` (line 988): no docstring
-  - `async test_list_query_types_v2_returns_foundry_raw_shape()` (line 1033): no docstring
-  - `async test_get_query_type_v2_returns_foundry_raw_shape()` (line 1055): no docstring
-  - `async test_get_query_type_v2_mismatched_version_returns_not_found()` (line 1077): no docstring
-  - `async test_execute_query_v2_runs_function_query_and_returns_value_envelope()` (line 1100): no docstring
-  - `async test_execute_query_v2_missing_required_parameter_returns_invalid_argument()` (line 1129): no docstring
-  - `async test_execute_query_v2_without_execution_spec_returns_invalid_argument()` (line 1156): no docstring
-  - `async test_list_interface_types_v2_requires_preview_true()` (line 1183): no docstring
-  - `async test_list_interface_types_v2_returns_foundry_raw_shape_with_preview()` (line 1208): no docstring
-  - `async test_list_shared_property_types_v2_requires_preview_true()` (line 1231): no docstring
-  - `async test_list_shared_property_types_v2_returns_foundry_raw_shape_with_preview()` (line 1256): no docstring
-  - `async test_get_shared_property_type_v2_returns_foundry_raw_shape_with_preview()` (line 1280): no docstring
-  - `async test_get_shared_property_type_v2_missing_returns_not_found()` (line 1302): no docstring
-  - `async test_list_value_types_v2_requires_preview_true()` (line 1326): no docstring
-  - `async test_get_value_type_v2_returns_foundry_raw_shape_with_preview()` (line 1348): no docstring
-  - `async test_list_value_types_v2_returns_foundry_raw_shape_without_pagination_token()` (line 1369): no docstring
-  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 1389): no docstring
-  - `async test_get_object_type_full_metadata_v2_returns_foundry_shape()` (line 1411): no docstring
-  - `async test_get_object_type_full_metadata_v2_missing_returns_object_type_not_found()` (line 1436): no docstring
-  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 1460): no docstring
-  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 1483): no docstring
-  - `async test_list_outgoing_link_types_v2_filters_before_pagination()` (line 1507): no docstring
-  - `async test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_changes()` (line 1541): no docstring
-  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 1575): no docstring
-  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 1598): no docstring
-  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 1622): no docstring
-  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 1644): no docstring
-  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 1687): no docstring
-  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 1711): no docstring
-  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 1738): no docstring
-  - `async test_list_linked_objects_v2_paginates_after_dedup_link_filter()` (line 1771): no docstring
-  - `async test_list_linked_objects_v2_rejects_page_token_when_page_size_changes()` (line 1834): no docstring
-  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 1880): no docstring
-  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 1911): no docstring
-  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 1937): no docstring
-  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 1969): no docstring
-  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 1990): no docstring
-  - `async test_list_objects_v2_rejects_invalid_branch()` (line 2018): no docstring
-  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 2048): no docstring
-  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 2069): no docstring
-  - `async test_list_object_types_v2_rejects_page_token_when_page_size_changes()` (line 2089): no docstring
+  - `async _noop_require_domain_role(request, db_name)` (line 621): no docstring
+  - `async test_list_object_types_v2_returns_foundry_raw_shape()` (line 627): no docstring
+  - `async test_list_ontologies_v2_returns_foundry_raw_shape()` (line 651): no docstring
+  - `async test_list_ontologies_v2_accepts_apiname_source_rows()` (line 665): no docstring
+  - `async test_get_ontology_v2_returns_foundry_raw_shape()` (line 677): no docstring
+  - `async test_get_ontology_v2_resolves_rid_identifier()` (line 697): no docstring
+  - `async test_get_ontology_v2_unknown_returns_ontology_not_found()` (line 715): no docstring
+  - `async test_get_ontology_v2_permission_denied_returns_foundry_403()` (line 736): no docstring
+  - `async test_get_ontology_v2_non_permission_role_error_returns_invalid_argument()` (line 762): no docstring
+  - `async test_get_ontology_v2_preflight_upstream_error_returns_upstream_contract()` (line 788): no docstring
+  - `async test_get_full_metadata_v2_returns_foundry_full_metadata_shape()` (line 804): no docstring
+  - `async test_get_full_metadata_v2_requires_preview_true()` (line 842): no docstring
+  - `async test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable()` (line 865): no docstring
+  - `async test_list_action_types_v2_returns_foundry_raw_shape()` (line 887): no docstring
+  - `async test_get_action_type_v2_returns_foundry_raw_shape()` (line 910): no docstring
+  - `async test_get_action_type_by_rid_v2_returns_foundry_raw_shape()` (line 931): no docstring
+  - `async test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path()` (line 952): no docstring
+  - `async test_apply_action_v2_validate_only_maps_to_oms_v2_apply()` (line 996): no docstring
+  - `async test_apply_action_batch_v2_forwards_requests_to_submit_batch()` (line 1039): no docstring
+  - `async test_list_query_types_v2_returns_foundry_raw_shape()` (line 1084): no docstring
+  - `async test_get_query_type_v2_returns_foundry_raw_shape()` (line 1106): no docstring
+  - `async test_get_query_type_v2_mismatched_version_returns_not_found()` (line 1128): no docstring
+  - `async test_execute_query_v2_runs_function_query_and_returns_value_envelope()` (line 1151): no docstring
+  - `async test_execute_query_v2_missing_required_parameter_returns_invalid_argument()` (line 1180): no docstring
+  - `async test_execute_query_v2_without_execution_spec_returns_invalid_argument()` (line 1207): no docstring
+  - `async test_execute_query_v2_prefers_canonical_object_type_field_over_fallback()` (line 1234): no docstring
+  - `async test_list_interface_types_v2_requires_preview_true()` (line 1261): no docstring
+  - `async test_list_interface_types_v2_returns_foundry_raw_shape_with_preview()` (line 1286): no docstring
+  - `async test_list_shared_property_types_v2_requires_preview_true()` (line 1309): no docstring
+  - `async test_list_shared_property_types_v2_returns_foundry_raw_shape_with_preview()` (line 1334): no docstring
+  - `async test_get_shared_property_type_v2_returns_foundry_raw_shape_with_preview()` (line 1358): no docstring
+  - `async test_get_shared_property_type_v2_missing_returns_not_found()` (line 1380): no docstring
+  - `async test_list_value_types_v2_requires_preview_true()` (line 1404): no docstring
+  - `async test_get_value_type_v2_returns_foundry_raw_shape_with_preview()` (line 1426): no docstring
+  - `async test_list_value_types_v2_returns_foundry_raw_shape_without_pagination_token()` (line 1447): no docstring
+  - `async test_get_object_type_v2_returns_foundry_raw_shape()` (line 1467): no docstring
+  - `async test_get_object_type_full_metadata_v2_returns_foundry_shape()` (line 1489): no docstring
+  - `async test_get_object_type_full_metadata_v2_missing_returns_object_type_not_found()` (line 1514): no docstring
+  - `async test_get_object_type_v2_missing_returns_object_type_not_found()` (line 1538): no docstring
+  - `async test_list_outgoing_link_types_v2_returns_foundry_raw_shape()` (line 1561): no docstring
+  - `async test_list_outgoing_link_types_v2_filters_before_pagination()` (line 1585): no docstring
+  - `async test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_changes()` (line 1619): no docstring
+  - `async test_get_outgoing_link_type_v2_returns_foundry_raw_shape()` (line 1653): no docstring
+  - `async test_get_outgoing_link_type_v2_missing_returns_link_type_not_found()` (line 1676): no docstring
+  - `async test_search_objects_v2_passthrough_foundry_shape()` (line 1700): no docstring
+  - `async test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse()` (line 1722): no docstring
+  - `async test_get_object_v2_returns_foundry_raw_shape()` (line 1765): no docstring
+  - `async test_get_object_v2_not_found_returns_foundry_error()` (line 1789): no docstring
+  - `async test_list_linked_objects_v2_returns_foundry_raw_shape()` (line 1816): no docstring
+  - `async test_list_linked_objects_v2_paginates_after_dedup_link_filter()` (line 1849): no docstring
+  - `async test_list_linked_objects_v2_rejects_page_token_when_page_size_changes()` (line 1912): no docstring
+  - `async test_list_linked_objects_v2_missing_link_type_returns_link_type_not_found()` (line 1958): no docstring
+  - `async test_get_linked_object_v2_returns_foundry_raw_shape()` (line 1989): no docstring
+  - `async test_get_linked_object_v2_not_found_returns_foundry_error()` (line 2015): no docstring
+  - `async test_v2_invalid_ontology_returns_foundry_error_envelope()` (line 2047): no docstring
+  - `async test_list_objects_v2_rejects_invalid_orderby_expression()` (line 2068): no docstring
+  - `async test_list_objects_v2_rejects_invalid_branch()` (line 2096): no docstring
+  - `async test_list_object_types_v2_rejects_expired_page_token()` (line 2126): no docstring
+  - `async test_list_object_types_v2_rejects_page_token_scope_mismatch()` (line 2147): no docstring
+  - `async test_list_object_types_v2_rejects_page_token_when_page_size_changes()` (line 2167): no docstring
 - **Classes**
   - `_FakeOMSClient` (line 14): no docstring
     - `__init__(self)` (line 15): no docstring
@@ -2253,15 +2255,17 @@
     - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 390): no docstring
   - `_MissingQueryExecutionSpecOMSClient` (line 409): no docstring
     - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 410): no docstring
-  - `_ListDatabasesStatusErrorOMSClient` (line 441): no docstring
-    - `async list_databases(self)` (line 442): no docstring
-  - `_FullMetadataPartialFailureOMSClient` (line 452): no docstring
-    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 453): no docstring
-  - `_PagedLinkTypesOMSClient` (line 474): no docstring
-    - `__init__(self)` (line 475): no docstring
-    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 503): no docstring
-  - `_LinkedPaginationOMSClient` (line 525): no docstring
-    - `async post(self, path, **kwargs)` (line 526): no docstring
+  - `_CanonicalQueryObjectTypeOMSClient` (line 441): no docstring
+    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 442): no docstring
+  - `_ListDatabasesStatusErrorOMSClient` (line 490): no docstring
+    - `async list_databases(self)` (line 491): no docstring
+  - `_FullMetadataPartialFailureOMSClient` (line 501): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 502): no docstring
+  - `_PagedLinkTypesOMSClient` (line 523): no docstring
+    - `__init__(self)` (line 524): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 552): no docstring
+  - `_LinkedPaginationOMSClient` (line 574): no docstring
+    - `async post(self, path, **kwargs)` (line 575): no docstring
 
 ### `backend/bff/tests/test_funnel_client_runtime_mode.py`
 - **Functions**
@@ -2927,34 +2931,37 @@
 
 ### `backend/funnel/routers/type_inference_router.py`
 - **Functions**
-  - `get_data_processor()` (line 35): 데이터 프로세서 의존성
-  - `async analyze_dataset(request, processor)` (line 41): 데이터셋을 분석하여 각 컬럼의 타입을 추론합니다.
-  - `async analyze_sheet_structure(request)` (line 72): Raw sheet grid(엑셀/스프레드시트)의 구조를 분석합니다.
-  - `async analyze_excel_structure(file, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options_json)` (line 121): Excel(.xlsx/.xlsm) 파일을 업로드 받아 grid + merged_cells로 파싱한 뒤,
-  - `async analyze_google_sheets_structure(request, processor)` (line 235): Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
-  - `async upsert_structure_patch(patch)` (line 334): Store/update a structure-analysis patch for a given sheet_signature.
-  - `async get_structure_patch(sheet_signature)` (line 346): no docstring
-  - `async delete_structure_patch(sheet_signature)` (line 358): no docstring
-  - `async preview_google_sheets_with_inference(sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types, processor)` (line 364): Google Sheets 데이터를 미리보기하고 타입을 추론합니다.
-  - `async suggest_schema(analysis_results, class_name, processor)` (line 407): 분석 결과를 기반으로 OMS 스키마를 제안합니다.
-  - `async health_check()` (line 438): Funnel 서비스 상태 확인
+  - `async get_data_processor()` (line 35): 데이터 프로세서 의존성.
+  - `async analyze_dataset(request, processor)` (line 46): 데이터셋을 분석하여 각 컬럼의 타입을 추론합니다.
+  - `async analyze_sheet_structure(request)` (line 77): Raw sheet grid(엑셀/스프레드시트)의 구조를 분석합니다.
+  - `async analyze_excel_structure(file, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options_json)` (line 126): Excel(.xlsx/.xlsm) 파일을 업로드 받아 grid + merged_cells로 파싱한 뒤,
+  - `async analyze_google_sheets_structure(request, processor)` (line 240): Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
+  - `async upsert_structure_patch(patch)` (line 339): Store/update a structure-analysis patch for a given sheet_signature.
+  - `async get_structure_patch(sheet_signature)` (line 351): no docstring
+  - `async delete_structure_patch(sheet_signature)` (line 363): no docstring
+  - `async preview_google_sheets_with_inference(sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types, processor)` (line 369): Google Sheets 데이터를 미리보기하고 타입을 추론합니다.
+  - `async suggest_schema(analysis_results, class_name, processor)` (line 412): 분석 결과를 기반으로 OMS 스키마를 제안합니다.
+  - `async health_check()` (line 443): Funnel 서비스 상태 확인
 
 ### `backend/funnel/services/__init__.py`
 
 ### `backend/funnel/services/data_processor.py`
 - **Functions**
-  - `_attach_risks_and_profiles(results, column_risks, column_profiles)` (line 335): no docstring
-  - `_copy_model(model, update)` (line 354): no docstring
+  - `_attach_risks_and_profiles(results, column_risks, column_profiles)` (line 352): no docstring
+  - `_copy_model(model, update)` (line 371): no docstring
 - **Classes**
   - `FunnelDataProcessor` (line 25): 🔥 THINK ULTRA! 데이터 처리 파이프라인
-    - `__init__(self)` (line 35): no docstring
-    - `async resolve_optional_access_token(self, connection_id)` (line 38): no docstring
-    - `_normalize_preview_response(preview)` (line 93): no docstring
-    - `async process_google_sheets_preview(self, sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types)` (line 110): Google Sheets 데이터를 처리하고 타입을 추론합니다.
-    - `async analyze_dataset(self, request)` (line 185): 데이터셋을 분석하고 타입을 추론합니다.
-    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 225): 분석 결과를 기반으로 스키마를 제안합니다.
-    - `_normalize_property_name(self, column_name)` (line 324): 컬럼 이름을 속성 이름으로 정규화
-    - `_generate_class_id(self, class_name)` (line 328): 클래스 ID 생성
+    - `__init__(self, connector_registry)` (line 35): no docstring
+    - `async initialize(self)` (line 41): no docstring
+    - `async close(self)` (line 49): no docstring
+    - `async _get_connector_registry(self)` (line 54): no docstring
+    - `async resolve_optional_access_token(self, connection_id)` (line 59): no docstring
+    - `_normalize_preview_response(preview)` (line 110): no docstring
+    - `async process_google_sheets_preview(self, sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types)` (line 127): Google Sheets 데이터를 처리하고 타입을 추론합니다.
+    - `async analyze_dataset(self, request)` (line 202): 데이터셋을 분석하고 타입을 추론합니다.
+    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 242): 분석 결과를 기반으로 스키마를 제안합니다.
+    - `_normalize_property_name(self, column_name)` (line 341): 컬럼 이름을 속성 이름으로 정규화
+    - `_generate_class_id(self, class_name)` (line 345): 클래스 ID 생성
 
 ### `backend/funnel/services/risk_assessor.py`
 - **Functions**
@@ -3238,7 +3245,7 @@
 
 ### `backend/instance_worker/main.py`
 - **Functions**
-  - `async main()` (line 2627): Main entry point
+  - `async main()` (line 2581): Main entry point
 - **Classes**
   - `_InstanceCommandPayload` (line 88): no docstring
   - `_InstanceCommandParseError` (line 93): no docstring
@@ -3268,24 +3275,24 @@
     - `async _record_instance_edit(self, db_name, class_id, instance_id, edit_type, fields, metadata)` (line 1983): no docstring
     - `async _resolve_instance_payload(self, db_name, branch, class_id, instance_id)` (line 2007): no docstring
     - `async _enqueue_link_reindex(self, db_name, link_type_id)` (line 2077): no docstring
-    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2153): no docstring
-    - `async set_command_status(self, command_id, status, result)` (line 2227): Set command status using CommandStatusService (preserves history + pubsub).
-    - `_is_retryable_error_impl(exc)` (line 2296): no docstring
-    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 2306): no docstring
-    - `_parse_payload(self, payload)` (line 2335): no docstring
-    - `_fallback_metadata(self, payload)` (line 2384): no docstring
-    - `_registry_key(self, payload)` (line 2387): no docstring
-    - `async _process_payload(self, payload)` (line 2415): no docstring
-    - `_span_name(self, payload)` (line 2466): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 2469): no docstring
-    - `_metric_event_name(self, payload)` (line 2492): no docstring
-    - `_is_retryable_error(exc, payload)` (line 2499): no docstring
-    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 2504): no docstring
-    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 2512): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 2527): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 2560): no docstring
-    - `async run(self)` (line 2587): Main processing loop
-    - `async shutdown(self)` (line 2599): Graceful shutdown
+    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2107): no docstring
+    - `async set_command_status(self, command_id, status, result)` (line 2181): Set command status using CommandStatusService (preserves history + pubsub).
+    - `_is_retryable_error_impl(exc)` (line 2250): no docstring
+    - `async _publish_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 2260): no docstring
+    - `_parse_payload(self, payload)` (line 2289): no docstring
+    - `_fallback_metadata(self, payload)` (line 2338): no docstring
+    - `_registry_key(self, payload)` (line 2341): no docstring
+    - `async _process_payload(self, payload)` (line 2369): no docstring
+    - `_span_name(self, payload)` (line 2420): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 2423): no docstring
+    - `_metric_event_name(self, payload)` (line 2446): no docstring
+    - `_is_retryable_error(exc, payload)` (line 2453): no docstring
+    - `_max_retries_for_error(self, exc, payload, error, retryable)` (line 2458): no docstring
+    - `_backoff_seconds_for_error(self, exc, payload, error, attempt_count, retryable)` (line 2466): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 2481): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 2514): no docstring
+    - `async run(self)` (line 2541): Main processing loop
+    - `async shutdown(self)` (line 2553): Graceful shutdown
 
 ## mcp_servers
 
@@ -6285,6 +6292,12 @@
   - `RebuildClassResult` (line 42): no docstring
   - `RebuildIndexResult` (line 49): no docstring
 
+### `backend/shared/services/core/link_index_job_builder.py`
+- **Functions**
+  - `async build_link_index_objectify_job(db_name, link_type_id, dataset_registry, objectify_registry, job_id)` (line 25): no docstring
+- **Classes**
+  - `LinkIndexObjectifyJobBuildResult` (line 19): no docstring
+
 ### `backend/shared/services/core/object_type_meta_resolver.py`
 - **Functions**
   - `build_object_type_meta_resolver(resources, db_name, branch)` (line 17): no docstring
@@ -9213,18 +9226,18 @@
   - `async _upsert_object_type_contract(oms_session, db_name, class_id, contract_payload, branch)` (line 281): no docstring
   - `async _upsert_link_type_contract(oms_session, dataset_registry, objectify_registry, db_name, branch, link_type_id, source_class, target_class, predicate, cardinality, join_dataset_id, join_dataset_version_id, source_key_column, target_key_column)` (line 363): no docstring
   - `async _enqueue_link_index_job(dataset_registry, objectify_registry, link_type_id, db_name)` (line 487): no docstring
-  - `async _wait_for_instance_count(session, db_name, class_id, expected_count, timeout_seconds, poll_interval_seconds)` (line 555): no docstring
-  - `async _create_instance(session, db_name, class_id, payload, branch)` (line 580): no docstring
-  - `_render_csv(headers, rows)` (line 600): no docstring
-  - `async _create_dataset_with_artifact(dataset_registry, db_name, name, columns, rows, branch)` (line 610): no docstring
-  - `async _wait_for_link_index_status(dataset_registry, link_type_id, expected_status, timeout_seconds, poll_interval_seconds)` (line 654): no docstring
-  - `async _wait_for_relationship(session, db_name, class_id, pk_field, pk_value, predicate, branch, timeout_seconds, poll_interval_seconds)` (line 676): no docstring
-  - `async _wait_for_instance_edits(dataset_registry, db_name, class_id, min_count, timeout_seconds, poll_interval_seconds)` (line 712): no docstring
-  - `async _get_write_side_last_sequence(aggregate_type, aggregate_id)` (line 730): no docstring
-  - `async _delete_db_best_effort(session, db_name)` (line 785): no docstring
-  - `async test_access_policy_filters_and_masks_query_results()` (line 805): no docstring
-  - `async test_link_indexing_updates_relationships_and_status()` (line 901): no docstring
-  - `async test_object_type_migration_requires_edit_reset()` (line 1106): no docstring
+  - `async _wait_for_instance_count(session, db_name, class_id, expected_count, timeout_seconds, poll_interval_seconds)` (line 508): no docstring
+  - `async _create_instance(session, db_name, class_id, payload, branch)` (line 533): no docstring
+  - `_render_csv(headers, rows)` (line 553): no docstring
+  - `async _create_dataset_with_artifact(dataset_registry, db_name, name, columns, rows, branch)` (line 563): no docstring
+  - `async _wait_for_link_index_status(dataset_registry, link_type_id, expected_status, timeout_seconds, poll_interval_seconds)` (line 607): no docstring
+  - `async _wait_for_relationship(session, db_name, class_id, pk_field, pk_value, predicate, branch, timeout_seconds, poll_interval_seconds)` (line 629): no docstring
+  - `async _wait_for_instance_edits(dataset_registry, db_name, class_id, min_count, timeout_seconds, poll_interval_seconds)` (line 665): no docstring
+  - `async _get_write_side_last_sequence(aggregate_type, aggregate_id)` (line 683): no docstring
+  - `async _delete_db_best_effort(session, db_name)` (line 738): no docstring
+  - `async test_access_policy_filters_and_masks_query_results()` (line 758): no docstring
+  - `async test_link_indexing_updates_relationships_and_status()` (line 854): no docstring
+  - `async test_object_type_migration_requires_edit_reset()` (line 1059): no docstring
 
 ### `backend/tests/test_action_writeback_e2e_smoke.py`
 - **Functions**
@@ -10120,7 +10133,7 @@
   - `async test_submit_batch_registers_dependencies_and_defers_children(app_with_router, monkeypatch)` (line 42): no docstring
   - `async test_foundry_apply_batch_v2_uses_submit_batch_pipeline(app_with_router, monkeypatch)` (line 112): no docstring
   - `async test_foundry_apply_v2_validate_only_returns_validation_payload(app_with_router, monkeypatch)` (line 160): no docstring
-  - `async test_foundry_apply_v2_validate_and_execute_returns_validation_payload(app_with_router, monkeypatch)` (line 199): no docstring
+  - `async test_foundry_apply_v2_validate_and_execute_returns_validation_payload(app_with_router, monkeypatch)` (line 201): no docstring
 - **Classes**
   - `_FakeEventStore` (line 13): no docstring
     - `__init__(self)` (line 14): no docstring
@@ -10864,6 +10877,7 @@
 ### `backend/tests/unit/services/test_funnel_data_processor.py`
 - **Functions**
   - `async test_process_google_sheets_preview_uses_direct_google_sheets_service(monkeypatch)` (line 8): no docstring
+  - `async test_resolve_optional_access_token_reuses_registry_connection(monkeypatch)` (line 56): no docstring
 
 ### `backend/tests/unit/services/test_graph_federation_service_es.py`
 - **Functions**

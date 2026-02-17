@@ -33,9 +33,9 @@ from shared.services.core.command_status_service import (
     CommandStatusService as CommandStatusTracker,
     CommandStatus as CommandStatusEnum,
 )
+from shared.services.core.link_index_job_builder import build_link_index_objectify_job
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
-from shared.models.objectify_job import ObjectifyJob
 from shared.models.lineage_edge_types import (
     EDGE_EVENT_DELETED_ES_DOCUMENT,
     EDGE_EVENT_MATERIALIZED_ES_DOCUMENT,
@@ -2078,75 +2078,29 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         if not self.dataset_registry or not self.objectify_registry:
             return
         try:
-            relationship = await self.dataset_registry.get_relationship_spec(link_type_id=link_type_id)
-            if not relationship:
-                logger.debug("Link reindex skipped: relationship spec missing for %s", link_type_id)
-                return
-
-            dataset = await self.dataset_registry.get_dataset(dataset_id=relationship.dataset_id)
-            if not dataset:
-                logger.debug("Link reindex skipped: dataset missing for link_type=%s", link_type_id)
-                return
-
-            version = None
-            if relationship.dataset_version_id:
-                version = await self.dataset_registry.get_version(version_id=relationship.dataset_version_id)
-                if version and getattr(version, "dataset_id", None) != relationship.dataset_id:
-                    version = None
-            if not version:
-                version = await self.dataset_registry.get_latest_version(dataset_id=relationship.dataset_id)
-            if not version or not version.artifact_key:
-                logger.debug("Link reindex skipped: dataset version/artifact missing for link_type=%s", link_type_id)
-                return
-
-            mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=relationship.mapping_spec_id)
-            if not mapping_spec:
-                logger.debug("Link reindex skipped: mapping spec missing for link_type=%s", link_type_id)
-                return
-
-            mapping_spec_version = int(relationship.mapping_spec_version or mapping_spec.version or 0)
-            if mapping_spec_version <= 0:
-                logger.debug("Link reindex skipped: invalid mapping spec version for link_type=%s", link_type_id)
-                return
-
-            dedupe_key = self.objectify_registry.build_dedupe_key(
-                dataset_id=dataset.dataset_id,
-                dataset_branch=dataset.branch,
-                mapping_spec_id=relationship.mapping_spec_id,
-                mapping_spec_version=mapping_spec_version,
-                dataset_version_id=version.version_id,
-                artifact_id=None,
-                artifact_output_name=dataset.name,
-            )
-            existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-            if existing:
-                return
-
-            options = dict(mapping_spec.options or {})
-            options.setdefault("mode", "link_index")
-            options.setdefault("relationship_spec_id", relationship.relationship_spec_id)
-            options.setdefault("link_type_id", link_type_id)
-
-            job = ObjectifyJob(
-                job_id=str(uuid4()),
+            build_result = await build_link_index_objectify_job(
                 db_name=db_name,
-                dataset_id=dataset.dataset_id,
-                dataset_version_id=version.version_id,
-                artifact_output_name=dataset.name,
-                dedupe_key=dedupe_key,
-                dataset_branch=dataset.branch,
-                artifact_key=version.artifact_key,
-                mapping_spec_id=relationship.mapping_spec_id,
-                mapping_spec_version=mapping_spec_version,
-                target_class_id=mapping_spec.target_class_id,
-                ontology_branch=options.get("ontology_branch"),
-                max_rows=options.get("max_rows"),
-                batch_size=options.get("batch_size"),
-                allow_partial=bool(options.get("allow_partial")),
-                options=options,
-                execution_mode="full",
+                link_type_id=link_type_id,
+                dataset_registry=self.dataset_registry,
+                objectify_registry=self.objectify_registry,
             )
-            await self.objectify_registry.enqueue_objectify_job(job=job)
+            if build_result.existing_job_id:
+                logger.debug(
+                    "Link reindex skipped: dedupe hit for link_type=%s existing_job_id=%s",
+                    link_type_id,
+                    build_result.existing_job_id,
+                )
+                return
+            if not build_result.job:
+                if build_result.skip_reason:
+                    logger.debug(
+                        "Link reindex skipped: %s for link_type=%s",
+                        build_result.skip_reason,
+                        link_type_id,
+                    )
+                return
+
+            await self.objectify_registry.enqueue_objectify_job(job=build_result.job)
         except Exception as exc:
             logger.warning("Failed to enqueue link reindex for %s: %s", link_type_id, exc)
 

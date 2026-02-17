@@ -3,7 +3,7 @@
 타입 추론 및 스키마 제안 API 엔드포인트
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 
@@ -32,9 +32,14 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/funnel", tags=["funnel"])
 
 
-def get_data_processor() -> FunnelDataProcessor:
-    """데이터 프로세서 의존성"""
-    return FunnelDataProcessor()
+async def get_data_processor() -> AsyncIterator[FunnelDataProcessor]:
+    """데이터 프로세서 의존성."""
+    processor = FunnelDataProcessor()
+    await processor.initialize()
+    try:
+        yield processor
+    finally:
+        await processor.close()
 
 
 @router.post("/analyze", response_model=DatasetAnalysisResponse)

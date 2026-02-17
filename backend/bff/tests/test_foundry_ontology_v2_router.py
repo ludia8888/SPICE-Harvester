@@ -438,6 +438,55 @@ class _MissingQueryExecutionSpecOMSClient(_FakeOMSClient):
         return {"data": {**data, "spec": mutated}}
 
 
+class _CanonicalQueryObjectTypeOMSClient(_FakeOMSClient):
+    async def get_ontology_resource(  # noqa: ANN001, ANN003
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):
+        response = await super().get_ontology_resource(
+            db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+        if resource_type != "function" or resource_id != "findAccounts":
+            return response
+
+        if not isinstance(response, dict):
+            return response
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return response
+        spec = data.get("spec")
+        if not isinstance(spec, dict):
+            return response
+
+        mutated = dict(spec)
+        mutated["execution"] = {
+            "objectTypeApiName": "CanonicalAccount",
+            "search": {
+                "where": {
+                    "type": "eq",
+                    "field": "account_id",
+                    "value": "${accountId}",
+                }
+            },
+        }
+        mutated["query"] = {
+            "objectType": "LegacyAccount",
+            "where": {
+                "type": "eq",
+                "field": "account_id",
+                "value": "${accountId}",
+            },
+        }
+        return {"data": {**data, "spec": mutated}}
+
+
 class _ListDatabasesStatusErrorOMSClient(_FakeOMSClient):
     async def list_databases(self):  # noqa: ANN201
         request = httpx.Request("GET", "http://oms/api/v1/database/list")
@@ -976,6 +1025,8 @@ async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
         router_v2._require_domain_role = original_require
 
     assert response["validation"]["result"] == "VALID"
+    assert response["parameters"] == {}
+    assert "submissionCriteria" not in response["validation"]
     assert fake_client.last_post is not None
     assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
     simulate_payload = fake_client.last_post[1]["json"]
@@ -1177,6 +1228,33 @@ async def test_execute_query_v2_without_execution_spec_returns_invalid_argument(
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "INVALID_ARGUMENT"
     assert payload["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
+async def test_execute_query_v2_prefers_canonical_object_type_field_over_fallback():
+    request = Request({"type": "http", "headers": []})
+    fake_client = _CanonicalQueryObjectTypeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.execute_query_v2(
+            ontology="test_db",
+            queryApiName="findAccounts",
+            body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
+            request=request,
+            version="1.0.0",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["value"]["data"][0]["account_id"] == "acc-1"
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/objects/CanonicalAccount/search"
 
 
 @pytest.mark.asyncio

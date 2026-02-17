@@ -32,8 +32,29 @@ class FunnelDataProcessor:
     3. OMS/BFF → Schema Generation & Storage
     """
 
-    def __init__(self):
+    def __init__(self, *, connector_registry: Optional[ConnectorRegistry] = None):
         self.type_inference_service = FunnelTypeInferenceService
+        self._connector_registry = connector_registry
+        self._owns_connector_registry = connector_registry is None
+        self._connector_registry_connected = False
+
+    async def initialize(self) -> None:
+        if self._connector_registry is None:
+            self._connector_registry = ConnectorRegistry()
+            self._owns_connector_registry = True
+        if self._owns_connector_registry and not self._connector_registry_connected:
+            await self._connector_registry.connect()
+            self._connector_registry_connected = True
+
+    async def close(self) -> None:
+        if self._owns_connector_registry and self._connector_registry and self._connector_registry_connected:
+            await self._connector_registry.close()
+            self._connector_registry_connected = False
+
+    async def _get_connector_registry(self) -> ConnectorRegistry:
+        await self.initialize()
+        assert self._connector_registry is not None
+        return self._connector_registry
 
     async def resolve_optional_access_token(
         self,
@@ -44,50 +65,46 @@ class FunnelDataProcessor:
         if not resolved_connection_id:
             return None
 
-        connector_registry = ConnectorRegistry()
-        await connector_registry.connect()
-        try:
-            source = await connector_registry.get_source(
-                source_type="google_sheets_connection",
-                source_id=resolved_connection_id,
+        connector_registry = await self._get_connector_registry()
+        source = await connector_registry.get_source(
+            source_type="google_sheets_connection",
+            source_id=resolved_connection_id,
+        )
+        if not source or not source.enabled:
+            raise ValueError("Connection not found")
+
+        config = dict(source.config_json or {})
+        token = str(config.get("access_token") or "").strip() or None
+        expires_at = config.get("expires_at")
+        refresh_token = config.get("refresh_token")
+        oauth_client = GoogleOAuth2Client()
+
+        if token and expires_at:
+            try:
+                expires_at_float = float(expires_at)
+            except (TypeError, ValueError):
+                expires_at_float = None
+            if expires_at_float and oauth_client.is_token_expired(expires_at_float):
+                token = None
+
+        if not token and refresh_token:
+            refreshed = await oauth_client.refresh_access_token(str(refresh_token))
+            config.update(
+                {
+                    "access_token": refreshed.get("access_token"),
+                    "expires_at": refreshed.get("expires_at"),
+                    "refresh_token": refreshed.get("refresh_token", refresh_token),
+                }
             )
-            if not source or not source.enabled:
-                raise ValueError("Connection not found")
-
-            config = dict(source.config_json or {})
+            await connector_registry.upsert_source(
+                source_type=source.source_type,
+                source_id=source.source_id,
+                enabled=True,
+                config_json=config,
+            )
             token = str(config.get("access_token") or "").strip() or None
-            expires_at = config.get("expires_at")
-            refresh_token = config.get("refresh_token")
-            oauth_client = GoogleOAuth2Client()
 
-            if token and expires_at:
-                try:
-                    expires_at_float = float(expires_at)
-                except (TypeError, ValueError):
-                    expires_at_float = None
-                if expires_at_float and oauth_client.is_token_expired(expires_at_float):
-                    token = None
-
-            if not token and refresh_token:
-                refreshed = await oauth_client.refresh_access_token(str(refresh_token))
-                config.update(
-                    {
-                        "access_token": refreshed.get("access_token"),
-                        "expires_at": refreshed.get("expires_at"),
-                        "refresh_token": refreshed.get("refresh_token", refresh_token),
-                    }
-                )
-                await connector_registry.upsert_source(
-                    source_type=source.source_type,
-                    source_id=source.source_id,
-                    enabled=True,
-                    config_json=config,
-                )
-                token = str(config.get("access_token") or "").strip() or None
-
-            return token
-        finally:
-            await connector_registry.close()
+        return token
 
     @staticmethod
     def _normalize_preview_response(preview: Any) -> GoogleSheetPreviewResponse:

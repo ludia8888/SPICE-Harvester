@@ -22,7 +22,7 @@ import pytest_asyncio
 
 from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
-from shared.models.objectify_job import ObjectifyJob
+from shared.services.core.link_index_job_builder import build_link_index_objectify_job
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
@@ -491,65 +491,18 @@ async def _enqueue_link_index_job(
     link_type_id: str,
     db_name: str,
 ) -> Optional[str]:
-    relationship = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
-    if not relationship:
-        return None
-    dataset = await dataset_registry.get_dataset(dataset_id=relationship.dataset_id)
-    if not dataset:
-        return None
-    version = None
-    if relationship.dataset_version_id:
-        version = await dataset_registry.get_version(version_id=relationship.dataset_version_id)
-    if not version:
-        version = await dataset_registry.get_latest_version(dataset_id=relationship.dataset_id)
-    if not version or not version.artifact_key:
-        return None
-    mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=relationship.mapping_spec_id)
-    if not mapping_spec:
-        return None
-
-    mapping_spec_version = int(relationship.mapping_spec_version or mapping_spec.version or 0)
-    if mapping_spec_version <= 0:
-        return None
-    dedupe_key = objectify_registry.build_dedupe_key(
-        dataset_id=dataset.dataset_id,
-        dataset_branch=dataset.branch,
-        mapping_spec_id=relationship.mapping_spec_id,
-        mapping_spec_version=mapping_spec_version,
-        dataset_version_id=version.version_id,
-        artifact_id=None,
-        artifact_output_name=dataset.name,
-    )
-    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-    if existing:
-        return existing.job_id
-
-    options = dict(mapping_spec.options or {})
-    options.setdefault("mode", "link_index")
-    options.setdefault("relationship_spec_id", relationship.relationship_spec_id)
-    options.setdefault("link_type_id", link_type_id)
-
-    job = ObjectifyJob(
-        job_id=str(uuid.uuid4()),
+    build_result = await build_link_index_objectify_job(
         db_name=db_name,
-        dataset_id=dataset.dataset_id,
-        dataset_version_id=version.version_id,
-        artifact_output_name=dataset.name,
-        dedupe_key=dedupe_key,
-        dataset_branch=dataset.branch,
-        artifact_key=version.artifact_key,
-        mapping_spec_id=relationship.mapping_spec_id,
-        mapping_spec_version=mapping_spec_version,
-        target_class_id=mapping_spec.target_class_id,
-        ontology_branch=options.get("ontology_branch"),
-        max_rows=options.get("max_rows"),
-        batch_size=options.get("batch_size"),
-        allow_partial=bool(options.get("allow_partial")),
-        options=options,
-        execution_mode="full",
+        link_type_id=link_type_id,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
     )
-    await objectify_registry.enqueue_objectify_job(job=job)
-    return job.job_id
+    if build_result.existing_job_id:
+        return build_result.existing_job_id
+    if not build_result.job:
+        return None
+    await objectify_registry.enqueue_objectify_job(job=build_result.job)
+    return build_result.job.job_id
 
 
 async def _wait_for_instance_count(

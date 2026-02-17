@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-17T12:29:30+09:00
+> Generated: 2026-02-17T20:42:19+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **961**
-- Modules with module docstring: **537/961**
+- Modules scanned: **962**
+- Modules with module docstring: **538/962**
 - Modules with broad `except Exception`: **267**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **225246**
+- Total code lines (non-empty, non-comment): **225418**
 
 ## Package Scoreboard
 
@@ -21,15 +21,15 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 225 | 172/225 (76%) | 78 | 409 | 981 | 674 | 48846 |
+| `bff` | 225 | 172/225 (76%) | 78 | 409 | 983 | 675 | 48923 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
 | `data_connector` | 6 | 4/6 (66%) | 1 | 1 | 12 | 22 | 710 |
 | `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
-| `funnel` | 23 | 17/23 (73%) | 4 | 35 | 49 | 49 | 6390 |
+| `funnel` | 23 | 17/23 (73%) | 4 | 35 | 53 | 49 | 6409 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
-| `instance_worker` | 2 | 2/2 (100%) | 1 | 36 | 27 | 2 | 2343 |
+| `instance_worker` | 2 | 2/2 (100%) | 1 | 36 | 27 | 2 | 2303 |
 | `mcp_servers` | 18 | 6/18 (33%) | 10 | 50 | 125 | 31 | 6792 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
@@ -41,18 +41,18 @@
 | `pipeline_worker` | 5 | 5/5 (100%) | 3 | 50 | 79 | 3 | 7555 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
-| `shared` | 299 | 203/299 (67%) | 104 | 380 | 849 | 1127 | 78945 |
-| `tests` | 277 | 45/277 (16%) | 20 | 51 | 1234 | 1291 | 42381 |
+| `shared` | 300 | 204/300 (68%) | 104 | 380 | 850 | 1129 | 79055 |
+| `tests` | 277 | 45/277 (16%) | 20 | 51 | 1239 | 1292 | 42387 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
 
 | Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend/bff/routers/foundry_ontology_v2.py` | 376 | 72 | 0 | 0 | 83 | 67 | 4800 |
+| `backend/bff/routers/foundry_ontology_v2.py` | 376 | 72 | 0 | 0 | 83 | 67 | 4806 |
 | `backend/pipeline_worker/main.py` | 235 | 47 | 0 | 0 | 64 | 83 | 6352 |
 | `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 820 |
-| `backend/instance_worker/main.py` | 180 | 36 | 0 | 0 | 43 | 69 | 2339 |
+| `backend/instance_worker/main.py` | 180 | 36 | 0 | 0 | 43 | 69 | 2299 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 516 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2644 |
 | `backend/ontology_worker/main.py` | 142 | 28 | 0 | 0 | 30 | 28 | 1190 |
@@ -77,7 +77,7 @@
 | `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 304 |
 | `backend/funnel/main.py` | 3 | 1 | 1 | 1 | 59 |
 | `backend/ingest_reconciler_worker/main.py` | 5 | 3 | 5 | 1 | 215 |
-| `backend/instance_worker/main.py` | 27 | 36 | 43 | 69 | 2339 |
+| `backend/instance_worker/main.py` | 27 | 36 | 43 | 69 | 2299 |
 | `backend/message_relay/main.py` | 10 | 13 | 22 | 10 | 664 |
 | `backend/objectify_worker/main.py` | 42 | 24 | 32 | 36 | 3914 |
 | `backend/oms/main.py` | 15 | 13 | 13 | 5 | 453 |
@@ -869,11 +869,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=5274 | code_lines=4800 | risk_score=376
-- API surface: public=44 | top-level functions=139 | classes=10 | methods=0
+- Source footprint: total_lines=5285 | code_lines=4806 | risk_score=376
+- API surface: public=44 | top-level functions=140 | classes=10 | methods=0
 - Runtime signals: async_functions=47 | try=83 | raise=67 | broad_except=72 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/139 (0%) | classes=0/10 (0%) | methods=0/0 (n/a)
-- Internal imports (9): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.config.settings; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer (+1 more)
+- Doc coverage: module=yes | top-level functions=1/140 (0%) | classes=0/10 (0%) | methods=0/0 (n/a)
+- Internal imports (8): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer; shared.utils.foundry_page_token
 - External imports (8): asyncio; fastapi; httpx; logging; pydantic; time; typing; uuid
 - Public API names: ApiFeaturePreviewUsageOnlyError; ApplyActionRequestOptionsV2; ApplyActionRequestV2; BatchApplyActionRequestItemV2; BatchApplyActionRequestOptionsV2; BatchApplyActionRequestV2; ExecuteQueryRequestV2; ObjectSetNotFoundError; OntologyNotFoundError; PermissionDeniedError; aggregate_object_set_v2; apply_action_batch_v2 (+32 more)
 
@@ -3397,13 +3397,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=2116 | code_lines=1899 | risk_score=47
-- API surface: public=58 | top-level functions=59 | classes=9 | methods=16
-- Runtime signals: async_functions=75 | try=52 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/59 (0%) | classes=0/9 (0%) | methods=0/16 (0%)
+- Source footprint: total_lines=2194 | code_lines=1970 | risk_score=48
+- API surface: public=59 | top-level functions=60 | classes=10 | methods=17
+- Runtime signals: async_functions=77 | try=53 | raise=5 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/60 (0%) | classes=0/10 (0%) | methods=0/17 (0%)
 - Internal imports (2): bff.routers; shared.utils.foundry_page_token
 - External imports (6): __future__; fastapi; httpx; json; pytest; starlette
-- Public API names: test_apply_action_batch_v2_forwards_requests_to_submit_batch; test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path; test_apply_action_v2_validate_only_maps_to_oms_v2_apply; test_execute_query_v2_missing_required_parameter_returns_invalid_argument; test_execute_query_v2_runs_function_query_and_returns_value_envelope; test_execute_query_v2_without_execution_spec_returns_invalid_argument; test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_requires_preview_true; test_get_full_metadata_v2_returns_foundry_full_metadata_shape; test_get_linked_object_v2_not_found_returns_foundry_error (+46 more)
+- Public API names: test_apply_action_batch_v2_forwards_requests_to_submit_batch; test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path; test_apply_action_v2_validate_only_maps_to_oms_v2_apply; test_execute_query_v2_missing_required_parameter_returns_invalid_argument; test_execute_query_v2_prefers_canonical_object_type_field_over_fallback; test_execute_query_v2_runs_function_query_and_returns_value_envelope; test_execute_query_v2_without_execution_spec_returns_invalid_argument; test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_requires_preview_true; test_get_full_metadata_v2_returns_foundry_full_metadata_shape (+47 more)
 
 ### `backend/bff/tests/test_funnel_client_runtime_mode.py`
 - Module summary: no docstring
@@ -4225,9 +4225,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=440 | code_lines=384 | risk_score=45
+- Source footprint: total_lines=445 | code_lines=389 | risk_score=45
 - API surface: public=11 | top-level functions=11 | classes=0 | methods=0
-- Runtime signals: async_functions=10 | try=9 | raise=16 | broad_except=9 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=11 | try=10 | raise=16 | broad_except=9 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=9/11 (81%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (12): data_connector.google_sheets.service; funnel.services.data_processor; funnel.services.structure_analysis; funnel.services.structure_patch; funnel.services.structure_patch_store; shared.errors.error_types; shared.models.sheet_grid; shared.models.structure_analysis (+4 more)
 - External imports (2): fastapi; typing
@@ -4257,10 +4257,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=357 | code_lines=301 | risk_score=2
-- API surface: public=1 | top-level functions=2 | classes=1 | methods=8
-- Runtime signals: async_functions=3 | try=3 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=1/1 (100%) | methods=5/8 (62%)
+- Source footprint: total_lines=374 | code_lines=315 | risk_score=1
+- API surface: public=1 | top-level functions=2 | classes=1 | methods=11
+- Runtime signals: async_functions=6 | try=2 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=1/1 (100%) | methods=5/11 (45%)
 - Internal imports (8): data_connector.google_sheets.auth; data_connector.google_sheets.service; funnel.services.risk_assessor; funnel.services.schema_utils; funnel.services.type_inference; shared.models.google_sheets; shared.models.type_inference; shared.services.registries.connector_registry
 - External imports (2): datetime; typing
 - Public API names: FunnelDataProcessor
@@ -4597,7 +4597,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=2641 | code_lines=2339 | risk_score=180
+- Source footprint: total_lines=2595 | code_lines=2299 | risk_score=180
 - API surface: public=2 | top-level functions=1 | classes=3 | methods=43
 - Runtime signals: async_functions=27 | try=43 | raise=69 | broad_except=36 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=1/3 (33%) | methods=18/43 (41%)
@@ -7796,6 +7796,22 @@
 - Internal imports (3): shared.config.instances_index_mapping; shared.config.search_config; shared.services.storage.elasticsearch_service
 - External imports (6): __future__; dataclasses; datetime; logging; typing; uuid
 - Public API names: RebuildClassResult; RebuildIndexRequest; RebuildIndexResult; rebuild_instance_index
+
+### `backend/shared/services/core/link_index_job_builder.py`
+- Module summary: Build objectify link-index jobs from relationship specs.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=125 | code_lines=110 | risk_score=0
+- API surface: public=2 | top-level functions=1 | classes=1 | methods=0
+- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Internal imports (3): shared.models.objectify_job; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry
+- External imports (4): __future__; dataclasses; typing; uuid
+- Public API names: LinkIndexObjectifyJobBuildResult; build_link_index_objectify_job
 
 ### `backend/shared/services/core/object_type_meta_resolver.py`
 - Module summary: no docstring
@@ -11167,11 +11183,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1251 | code_lines=1140 | risk_score=5
+- Source footprint: total_lines=1204 | code_lines=1096 | risk_score=5
 - API surface: public=3 | top-level functions=27 | classes=0 | methods=0
 - Runtime signals: async_functions=23 | try=7 | raise=23 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/27 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (9): shared.config.service_config; shared.config.settings; shared.models.objectify_job; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry; shared.services.storage.lakefs_storage_service; shared.utils.s3_uri; shared.utils.schema_hash (+1 more)
+- Internal imports (9): shared.config.service_config; shared.config.settings; shared.services.core.link_index_job_builder; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry; shared.services.storage.lakefs_storage_service; shared.utils.s3_uri; shared.utils.schema_hash (+1 more)
 - External imports (12): __future__; aiohttp; asyncio; asyncpg; csv; io; os; pytest (+4 more)
 - Public API names: test_access_policy_filters_and_masks_query_results; test_link_indexing_updates_relationships_and_status; test_object_type_migration_requires_edit_reset
 
@@ -12095,7 +12111,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=236 | code_lines=194 | risk_score=0
+- Source footprint: total_lines=240 | code_lines=198 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=1 | methods=2
 - Runtime signals: async_functions=17 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
@@ -13199,13 +13215,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=51 | code_lines=41 | risk_score=0
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=108 | code_lines=87 | risk_score=0
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=8 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
 - External imports (2): pytest; types
-- Public API names: test_process_google_sheets_preview_uses_direct_google_sheets_service
+- Public API names: test_process_google_sheets_preview_uses_direct_google_sheets_service; test_resolve_optional_access_token_reuses_registry_connection
 
 ### `backend/tests/unit/services/test_graph_federation_service_es.py`
 - Module summary: Tests for GraphFederationServiceES — ES-native Search Arounds.
