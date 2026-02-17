@@ -21,7 +21,7 @@ sequenceDiagram
     participant Client
     participant BFF as Backend for Frontend (8002)
     participant OMS as Ontology Management Service (8000)
-    participant Funnel as Funnel Service (8003)
+    participant Funnel as Type Inference Runtime (internal)
     participant PG as Ontology Registry (Postgres)
     participant Search as Object Read Model (Elasticsearch)
     participant Cache as Cache Layer
@@ -47,7 +47,7 @@ sequenceDiagram
             Search-->>OMS: Result
             OMS-->>BFF: Response
         else Type Inference Operation
-            BFF->>Funnel: Request Schema Inference
+            BFF->>Funnel: Execute Schema Inference (in-process)
             Funnel->>ExtData: Fetch Sample Data
             ExtData-->>Funnel: Raw Data
             Funnel->>Funnel: Analyze & Infer Types
@@ -69,7 +69,7 @@ sequenceDiagram
     %% Schema Suggestion Flow
     note over Client,ExtData: Schema Suggestion from Google Sheets
     Client->>BFF: Request Schema from Sheet URL
-    BFF->>Funnel: Forward to Type Inference
+    BFF->>Funnel: Execute Type Inference (in-process)
     Funnel->>ExtData: Fetch Google Sheet Data
     ExtData-->>Funnel: Sheet Data
     Funnel->>Funnel: Analyze Column Types

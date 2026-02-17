@@ -45,8 +45,8 @@ async def test_agent_blocks_write_when_overlay_degraded() -> None:
     tool_call = AgentToolCall(
         service="bff",
         method="POST",
-        path="/api/v1/databases/demo/actions/demo_action/submit",
-        body={"input": {}},
+        path="/api/v2/ontologies/demo/actions/demo_action/applyBatch",
+        body={"requests": [{"parameters": {}}]},
     )
 
     context = {"overlay_status": "DEGRADED"}

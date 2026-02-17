@@ -17,9 +17,17 @@ _RECIPE_GUARD_OPERATIONS: list[tuple[str, str]] = [
     ("GET", "/api/v2/ontologies/{ontology}/valueTypes/{valueType}"),
     ("GET", "/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}"),
     ("GET", "/api/v2/ontologies/{ontology}/actionTypes/{actionType}"),
+    ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/apply"),
+    ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjects"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadLinks"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/aggregate"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/createTemporary"),
+    ("GET", "/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}"),
     ("GET", "/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}"),
-    ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch"),
-    ("POST", "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo"),
+    ("POST", "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo"),
     ("GET", "/api/v1/lineage/column-lineage"),
 ]
 
@@ -31,6 +39,9 @@ _PREVIEW_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}"),
     ("GET", "/api/v2/ontologies/{ontology}/valueTypes"),
     ("GET", "/api/v2/ontologies/{ontology}/valueTypes/{valueType}"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadLinks"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes"),
+    ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces"),
 }
 
 

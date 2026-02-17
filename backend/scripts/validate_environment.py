@@ -80,7 +80,7 @@ class EnvironmentValidator:
         print("\n  📋 Endpoints (redacted):")
         self.check_result("OMS Base URL", True, services.oms_base_url)
         self.check_result("BFF Base URL", True, services.bff_base_url)
-        self.check_result("Funnel Base URL", True, services.funnel_base_url)
+        self.check_result("Funnel Runtime", True, "internal (in-process)")
         self.check_result("Agent Base URL", True, services.agent_base_url)
 
         self.check_result("Postgres URL", True, _redact_url(db.postgres_url))
@@ -214,9 +214,9 @@ class EnvironmentValidator:
         targets = [
             ("OMS", f"{services.oms_base_url}/health"),
             ("BFF", f"{services.bff_base_url}/api/v1/health"),
-            ("Funnel", f"{services.funnel_base_url}/health"),
             ("Agent", f"{services.agent_base_url}/health"),
         ]
+        self.check_result("Funnel Service", True, "Skipped (internal runtime)")
 
         async with aiohttp.ClientSession() as session:
             for name, url in targets:

@@ -9,118 +9,14 @@ from shared.observability.tracing import trace_endpoint
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 
-from bff.dependencies import get_action_log_registry, get_oms_client
-from bff.schemas.actions_requests import (
-    ActionSimulateRequest,
-    ActionSubmitBatchRequest,
-    ActionSubmitRequest,
-    ActionUndoRequest,
-)
+from bff.dependencies import get_action_log_registry
 from bff.services import actions_service
-from bff.services.oms_client import OMSClient
 from shared.security.database_access import enforce_database_role
 from shared.services.registries.action_log_registry import ActionLogRegistry
 
 router = APIRouter(prefix="/databases/{db_name}/actions", tags=["Actions"])
-
-
-@router.post(
-    "/{action_type_id}/submit",
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("bff.actions.submit_action")
-async def submit_action(
-    db_name: str,
-    action_type_id: str,
-    request: ActionSubmitRequest,
-    http_request: Request,
-    base_branch: str = Query("main", description="Base branch for authoritative reads"),
-    overlay_branch: Optional[str] = Query(default=None, description="Overlay branch override (ES)"),
-    oms_client: OMSClient = Depends(get_oms_client),
-) -> Dict[str, Any]:
-    return await actions_service.submit_action(
-        db_name=db_name,
-        action_type_id=action_type_id,
-        body=request,
-        http_request=http_request,
-        base_branch=base_branch,
-        overlay_branch=overlay_branch,
-        oms_client=oms_client,
-        enforce_role=enforce_database_role,
-    )
-
-
-@router.post(
-    "/{action_type_id}/submit-batch",
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("bff.actions.submit_action_batch")
-async def submit_action_batch(
-    db_name: str,
-    action_type_id: str,
-    request: ActionSubmitBatchRequest,
-    http_request: Request,
-    oms_client: OMSClient = Depends(get_oms_client),
-) -> Dict[str, Any]:
-    return await actions_service.submit_action_batch(
-        db_name=db_name,
-        action_type_id=action_type_id,
-        body=request,
-        http_request=http_request,
-        oms_client=oms_client,
-        enforce_role=enforce_database_role,
-    )
-
-
-@router.post(
-    "/{action_type_id}/simulate",
-    status_code=status.HTTP_200_OK,
-)
-@trace_endpoint("bff.actions.simulate_action")
-async def simulate_action(
-    db_name: str,
-    action_type_id: str,
-    request: ActionSimulateRequest,
-    http_request: Request,
-    oms_client: OMSClient = Depends(get_oms_client),
-) -> Dict[str, Any]:
-    """
-    Action writeback simulation (dry-run) surface.
-
-    Enforces user/database access and forwards intent-only simulation requests to OMS.
-    """
-    return await actions_service.simulate_action(
-        db_name=db_name,
-        action_type_id=action_type_id,
-        body=request,
-        http_request=http_request,
-        oms_client=oms_client,
-        enforce_role=enforce_database_role,
-    )
-
-
-@router.post(
-    "/logs/{action_log_id}/undo",
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("bff.actions.undo_action")
-async def undo_action(
-    db_name: str,
-    action_log_id: str,
-    request: ActionUndoRequest,
-    http_request: Request,
-    oms_client: OMSClient = Depends(get_oms_client),
-) -> Dict[str, Any]:
-    return await actions_service.undo_action(
-        db_name=db_name,
-        action_log_id=action_log_id,
-        body=request,
-        http_request=http_request,
-        oms_client=oms_client,
-        enforce_role=enforce_database_role,
-    )
 
 
 @router.get("/logs/{action_log_id}")

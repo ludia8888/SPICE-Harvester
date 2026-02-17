@@ -27,8 +27,8 @@ graph TB
 
     subgraph Services["Service Layer"]
         OMS["Ontology Management<br/>Service (OMS)<br/>:8000"]
-        Funnel["Funnel Ingestion<br/>Service<br/>:8003"]
-        Admin["Admin Service<br/>:8004"]
+        Funnel["Type Inference Runtime<br/>(Internal)"]
+        Agent["Agent Service<br/>:8004"]
         Workers["Workers<br/>(13 services)"]
     end
 
@@ -48,23 +48,20 @@ graph TB
     BFF --> Auth
     BFF --> OMS
     BFF --> Funnel
-    BFF --> Admin
+    BFF --> Agent
 
     OMS --> PG
     OMS --> ES
     OMS --> Redis
     OMS --> Kafka
 
-    Funnel --> Kafka
-    Funnel --> MinIO
-
     Workers --> Kafka
     Workers --> PG
     Workers --> ES
     Workers --> MinIO
 
-    Admin --> PG
-    Admin --> Redis
+    Agent --> PG
+    Agent --> MinIO
 ```
 
 ## Layer Responsibilities
@@ -95,8 +92,8 @@ The **Backend-for-Frontend (BFF)** service on port 8002 is the single entry poin
 The service layer contains the core business logic:
 
 - **Ontology Management Service (OMS)** -- the primary service for ontology CRUD, object management, search, actions, and lineage. Runs on port 8000.
-- **Funnel Ingestion Service** -- handles bulk data imports, file uploads, and streaming ingestion. Runs on port 8003.
-- **Admin Service** -- platform administration, user management, and configuration. Runs on port 8004.
+- **Funnel Runtime (internal)** -- BFF-embedded tabular type inference and sheet structure analysis component (not exposed as a public service).
+- **Agent Service** -- tool-runner runtime for orchestrated workflow steps. Runs on port 8004.
 - **Workers** -- 13 background services that process events, build projections, run pipelines, and maintain consistency.
 
 ### Data Layer
@@ -154,7 +151,7 @@ The platform consists of 33+ Docker services organized into four categories:
 
 | Category | Count | Examples |
 |----------|-------|---------|
-| API Servers | 4 | OMS, BFF, Funnel, Admin |
+| API Servers | 3 | OMS, BFF, Agent |
 | Workers | 13 | Event Processor, Projection Builder, Pipeline Runner, Lineage Worker, Schema Validator, Action Executor, Notification Worker, Retry Handler, Dead Letter Processor, Metric Aggregator, Cache Warmer, Index Syncer, Snapshot Worker |
 | Data Stores | 8 | PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, Schema Registry, Kafka Connect |
 | Observability | 6 | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki |

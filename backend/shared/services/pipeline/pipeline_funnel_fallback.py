@@ -336,9 +336,9 @@ def build_funnel_analysis_fallback(
     if error:
         risk_summary.append(
             {
-                "code": ExternalErrorCode.FUNNEL_UNAVAILABLE.value,
+                "code": ExternalErrorCode.TABULAR_ANALYSIS_UNAVAILABLE.value,
                 "severity": "warning",
-                "message": "Funnel service unavailable; used local fallback type inference.",
+                "message": "Tabular analysis runtime unavailable; used local fallback type inference.",
                 "column": None,
                 "evidence": {
                     "error": str(error),
@@ -346,7 +346,7 @@ def build_funnel_analysis_fallback(
                     "sample_cols": len(safe_columns),
                 },
                 "suggested_actions": [
-                    "Retry Funnel analysis when the service is healthy.",
+                    "Retry tabular analysis when the runtime is healthy.",
                     "Verify inferred types before running production objectify/pipelines.",
                 ],
                 "is_suggestion": True,

@@ -204,7 +204,7 @@
     {
       "name": "ServiceSettings",
       "docstring": "Service configuration settings",
-      "field_count": 22,
+      "field_count": 19,
       "fields": [
         {
           "name": "oms_host",
@@ -263,36 +263,6 @@
           "description": "BFF base URL override (BFF_BASE_URL)",
           "env_vars": [
             "BFF_BASE_URL_OVERRIDE"
-          ],
-          "required": true
-        },
-        {
-          "name": "funnel_host",
-          "type": "str",
-          "default": "<env-dependent>",
-          "description": "Funnel service host",
-          "env_vars": [
-            "FUNNEL_HOST"
-          ],
-          "required": false
-        },
-        {
-          "name": "funnel_port",
-          "type": "int",
-          "default": "8003",
-          "description": "Funnel service port",
-          "env_vars": [
-            "FUNNEL_PORT"
-          ],
-          "required": false
-        },
-        {
-          "name": "funnel_base_url_override",
-          "type": "Optional[str]",
-          "default": null,
-          "description": "Funnel base URL override (FUNNEL_BASE_URL)",
-          "env_vars": [
-            "FUNNEL_BASE_URL_OVERRIDE"
           ],
           "required": true
         },
@@ -992,7 +962,7 @@
     {
       "name": "FeatureFlagsSettings",
       "docstring": "Feature flags / opt-in endpoints.",
-      "field_count": 6,
+      "field_count": 4,
       "fields": [
         {
           "name": "enable_pull_requests",
@@ -1031,26 +1001,6 @@
           "description": "Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
           "env_vars": [
             "ENABLE_OMS_ROLLBACK"
-          ],
-          "required": false
-        },
-        {
-          "name": "enable_foundry_v2_strict_compat",
-          "type": "bool",
-          "default": "True",
-          "description": "Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT)",
-          "env_vars": [
-            "ENABLE_FOUNDRY_V2_STRICT_COMPAT"
-          ],
-          "required": false
-        },
-        {
-          "name": "foundry_v2_strict_compat_db_allowlist",
-          "type": "str",
-          "default": "",
-          "description": "Comma-separated db allowlist for strict Foundry v2 compatibility (FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST)",
-          "env_vars": [
-            "FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST"
           ],
           "required": false
         }
@@ -5608,5 +5558,5 @@
       ]
     }
   ],
-  "total_fields": 522
+  "total_fields": 517
 }

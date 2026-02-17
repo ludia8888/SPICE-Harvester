@@ -16,6 +16,10 @@ def test_oms_legacy_routes_removed_from_openapi() -> None:
         "/api/v1/version/{db_name}/history",
         "/api/v1/version/{db_name}/diff",
         "/api/v1/database/{db_name}/ontology/branches",
+        "/api/v1/actions/{db_name}/async/{action_type_id}/submit",
+        "/api/v1/actions/{db_name}/async/{action_type_id}/submit-batch",
+        "/api/v1/actions/{db_name}/async/{action_type_id}/simulate",
+        "/api/v1/actions/{db_name}/async/logs/{action_log_id}/undo",
     }
 
     for path in removed_legacy_paths:

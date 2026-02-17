@@ -25,7 +25,7 @@ class _FakeEventStore:
 @pytest.fixture
 def app_with_router() -> FastAPI:
     app = FastAPI()
-    app.include_router(action_async.router)
+    app.include_router(action_async.foundry_router)
 
     async def _fake_db_name(db_name: str) -> str:
         return db_name
@@ -81,31 +81,29 @@ async def test_submit_batch_registers_dependencies_and_defers_children(
 
     monkeypatch.setattr(action_async, "submit_action_async", _fake_submit_action_async)
     monkeypatch.setattr(action_async, "ActionLogRegistry", _FakeRegistry)
+    response = await action_async.submit_action_batch_async(
+        db_name="demo",
+        action_type_id="ApproveTicket",
+        request=action_async.ActionSubmitBatchRequest(
+            items=[
+                action_async.ActionSubmitBatchItemRequest(
+                    request_id="root",
+                    input={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                    metadata={"user_id": "alice", "user_type": "user"},
+                ),
+                action_async.ActionSubmitBatchItemRequest(
+                    request_id="child",
+                    input={"ticket": {"class_id": "Ticket", "instance_id": "t2"}},
+                    metadata={"user_id": "alice", "user_type": "user"},
+                    depends_on=["root"],
+                ),
+            ],
+            base_branch="main",
+        ),
+        event_store=app_with_router.state.fake_event_store,
+    )
 
-    transport = ASGITransport(app=app_with_router)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/actions/demo/async/ApproveTicket/submit-batch",
-            json={
-                "items": [
-                    {
-                        "request_id": "root",
-                        "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
-                        "metadata": {"user_id": "alice", "user_type": "user"},
-                    },
-                    {
-                        "request_id": "child",
-                        "input": {"ticket": {"class_id": "Ticket", "instance_id": "t2"}},
-                        "metadata": {"user_id": "alice", "user_type": "user"},
-                        "depends_on": ["root"],
-                    },
-                ],
-                "base_branch": "main",
-            },
-        )
-
-    assert response.status_code == 202, response.text
-    payload = response.json()
+    payload = response.model_dump()
     assert payload["items"][0]["status"] == "PENDING"
     assert payload["items"][1]["status"] == "WAITING_DEPENDENCY"
     assert calls and calls[0]["trigger_on"] == "SUCCEEDED"
@@ -177,13 +175,17 @@ async def test_undo_action_creates_pending_undo_command(
                 ]
             }
 
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
     monkeypatch.setattr(action_async, "ActionLogRegistry", _FakeRegistry)
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: _FakeLakeFSStorage())
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
 
     transport = ASGITransport(app=app_with_router)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            f"/actions/demo/async/logs/{source_action_log_id}/undo",
+            f"/v2/ontologies/demo/actions/logs/{source_action_log_id}/undo",
             json={"metadata": {"user_id": "alice", "user_type": "user"}, "reason": "rollback"},
         )
 
@@ -193,3 +195,90 @@ async def test_undo_action_creates_pending_undo_command(
     assert body["status"] == "PENDING"
     assert created_logs, "undo should create a new action log"
     assert len(app_with_router.state.fake_event_store.events) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_apply_batch_v2_uses_submit_batch_pipeline(
+    app_with_router: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Dict[str, Any] = {}
+
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    async def _fake_submit_action_batch_async(**kwargs: Any) -> action_async.ActionSubmitBatchResponse:  # noqa: ANN401
+        captured.update(kwargs)
+        return action_async.ActionSubmitBatchResponse(
+            batch_id="batch-1",
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            items=[],
+        )
+
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
+    monkeypatch.setattr(action_async, "submit_action_batch_async", _fake_submit_action_batch_async)
+
+    transport = ASGITransport(app=app_with_router)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v2/ontologies/demo/actions/ApproveTicket/applyBatch?branch=main",
+            json={
+                "requests": [
+                    {"parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}}},
+                    {"parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t2"}}},
+                ],
+                "metadata": {"user_id": "alice", "user_type": "service"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload == {}
+    submit_request = captured.get("request")
+    assert isinstance(submit_request, action_async.ActionSubmitBatchRequest)
+    assert submit_request.base_branch == "main"
+    assert len(submit_request.items) == 2
+    assert submit_request.items[0].input["ticket"]["instance_id"] == "t1"
+    assert submit_request.items[0].metadata["user_id"] == "alice"
+    assert submit_request.items[0].metadata["user_type"] == "service"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_apply_v2_validate_only_returns_validation_payload(
+    app_with_router: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Dict[str, Any] = {}
+
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    async def _fake_simulate_action_async(**kwargs: Any) -> Dict[str, Any]:  # noqa: ANN401
+        captured.update(kwargs)
+        return {"status": "success", "data": {"results": []}}
+
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
+    monkeypatch.setattr(action_async, "simulate_action_async", _fake_simulate_action_async)
+
+    transport = ASGITransport(app=app_with_router)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v2/ontologies/demo/actions/ApproveTicket/apply?branch=main",
+            json={
+                "options": {"mode": "VALIDATE_ONLY"},
+                "parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "metadata": {"user_id": "alice", "user_type": "service"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["validation"]["result"] == "VALID"
+    sim_request = captured.get("request")
+    assert isinstance(sim_request, action_async.ActionSimulateRequest)
+    assert sim_request.base_branch == "main"
+    assert sim_request.include_effects is False
+    assert sim_request.metadata["user_id"] == "alice"

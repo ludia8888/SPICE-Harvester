@@ -133,9 +133,9 @@ The OMS translates `SearchJsonQueryV2` operators (eq, gt, containsAnyTerm, etc.)
 
 Pipelines are long-running data transformation jobs:
 
-1. A pipeline definition is submitted to the **Funnel** service.
-2. Funnel validates the pipeline configuration and stores it in PostgreSQL.
-3. Funnel publishes a `pipeline.submitted` event to Kafka.
+1. A pipeline definition is submitted through **BFF** to the pipeline orchestration services.
+2. The orchestrator validates the pipeline configuration and stores it in PostgreSQL.
+3. The orchestrator publishes a `pipeline.submitted` event to Kafka.
 4. A **Pipeline Runner** worker picks up the event and begins execution.
 5. The runner processes transforms sequentially: reading from sources, applying transformations, and writing results.
 6. Output transforms (e.g., `upsertObjects`) submit actions to OMS, which follow the normal write path.

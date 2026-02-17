@@ -3,9 +3,8 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from bff.main import app
-from bff.dependencies import get_elasticsearch_service, get_oms_client
-from bff.routers import instances as instances_router
-from elasticsearch.exceptions import ConnectionError as ESConnectionError
+from bff.dependencies import get_oms_client
+from bff.routers import foundry_ontology_v2 as router_v2
 
 
 def test_bff_health_message_localizes_by_lang_param():
@@ -27,31 +26,31 @@ def test_bff_health_message_localizes_by_lang_param():
     assert en.json()["message"] == "Service is healthy"
 
 
-def test_bff_http_exception_detail_localizes_by_lang_param():
-    # Force ES + OMS failures so BFF returns 404 with a safe message.
-    mock_es = AsyncMock()
-    mock_es.search.side_effect = ESConnectionError("Connection failed")
-
+def test_foundry_v2_error_envelope_stable_with_lang_param():
     mock_oms = AsyncMock()
-    mock_oms.get_instance.side_effect = Exception("OMS connection failed")
+    mock_oms.list_databases.return_value = {"data": {"databases": [{"name": "test_db"}]}}
+    mock_oms.get_ontology_resource.return_value = {"data": {"id": "TestClass", "spec": {"pk_spec": {"primary_key": ["instance_id"]}}}}
+    mock_oms.get_ontology.return_value = {"data": {"properties": [{"name": "instance_id", "type": "string"}]}}
+    mock_oms.post.return_value = {"data": [], "nextPageToken": None, "totalCount": "0"}
 
-    class _StubDatasetRegistry:
-        async def get_access_policy(self, *, db_name, scope, subject_type, subject_id):  # noqa: ANN003
-            return None
+    async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
+        _ = request, db_name
+        return None
 
-    app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-    app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
     app.dependency_overrides[get_oms_client] = lambda: mock_oms
 
     client = TestClient(app)
     try:
-        ko = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent")
-        en = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent?lang=en")
+        ko = client.get("/api/v2/ontologies/test_db/objects/TestClass/nonexistent")
+        en = client.get("/api/v2/ontologies/test_db/objects/TestClass/nonexistent?lang=en")
     finally:
+        router_v2._require_domain_role = original_require
         app.dependency_overrides.clear()
 
     assert ko.status_code == 404
-    assert "찾을 수 없습니다" in ko.json()["detail"]
+    assert ko.json()["errorName"] == "ObjectNotFound"
 
     assert en.status_code == 404
-    assert "was not found" in en.json()["detail"]
+    assert en.json()["errorName"] == "ObjectNotFound"

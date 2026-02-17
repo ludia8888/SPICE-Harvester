@@ -38,7 +38,6 @@ truthy() {
 
 OMS_URL="$(trim_trailing_slash "${OMS_BASE_URL:-http://127.0.0.1:8000}")"
 BFF_URL="$(trim_trailing_slash "${BFF_BASE_URL:-http://127.0.0.1:8002}")"
-FUNNEL_URL="$(trim_trailing_slash "${FUNNEL_BASE_URL:-http://127.0.0.1:8003}")"
 AGENT_URL="$(trim_trailing_slash "${AGENT_BASE_URL:-http://127.0.0.1:8004}")"
 
 load_dotenv_defaults() {
@@ -548,7 +547,6 @@ if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   wait_for_elasticsearch_ready "${ELASTICSEARCH_URL}" "$TIMEOUT_SECONDS"
   wait_for_url "OMS" "${OMS_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "BFF" "${BFF_URL}/api/v1/health" "$TIMEOUT_SECONDS"
-  wait_for_url "Funnel" "${FUNNEL_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "Agent" "${AGENT_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "Ingest Reconciler" "${INGEST_RECONCILER_URL}/health" "$TIMEOUT_SECONDS"
 

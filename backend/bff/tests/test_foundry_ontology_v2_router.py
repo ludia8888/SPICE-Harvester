@@ -849,6 +849,136 @@ async def test_get_action_type_by_rid_v2_returns_foundry_raw_shape():
 
 
 @pytest.mark.asyncio
+async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"service"),
+            ],
+        }
+    )
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.ApplyActionRequestV2(
+                parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+            ),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert response == {}
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
+    submit_payload = fake_client.last_post[1]["json"]
+    assert submit_payload["parameters"]["ticket"]["instance_id"] == "t1"
+    assert submit_payload["options"]["mode"] == "VALIDATE_AND_EXECUTE"
+    assert submit_payload["metadata"]["user_id"] == "alice"
+    assert submit_payload["metadata"]["user_type"] == "service"
+    assert fake_client.last_post[1]["params"]["branch"] == "main"
+    assert "preview" not in fake_client.last_post[1]["params"]
+    assert "validate" not in fake_client.last_post[1]["params"]
+
+
+@pytest.mark.asyncio
+async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"user"),
+            ],
+        }
+    )
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.ApplyActionRequestV2(
+                options=router_v2.ApplyActionRequestOptionsV2(mode="VALIDATE_ONLY"),
+                parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+            ),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert response["validation"]["result"] == "VALID"
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
+    simulate_payload = fake_client.last_post[1]["json"]
+    assert simulate_payload["options"]["mode"] == "VALIDATE_ONLY"
+    assert simulate_payload["metadata"]["user_id"] == "alice"
+    assert "validate" not in fake_client.last_post[1]["params"]
+
+
+@pytest.mark.asyncio
+async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"service"),
+            ],
+        }
+    )
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_batch_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.BatchApplyActionRequestV2(
+                requests=[
+                    router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}}),
+                    router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t2"}}),
+                ]
+            ),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert response == {}
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/applyBatch"
+    submit_payload = fake_client.last_post[1]["json"]
+    assert len(submit_payload["requests"]) == 2
+    assert submit_payload["requests"][0]["parameters"]["ticket"]["instance_id"] == "t1"
+    assert submit_payload["requests"][1]["parameters"]["ticket"]["instance_id"] == "t2"
+    assert submit_payload["metadata"]["user_id"] == "alice"
+    assert fake_client.last_post[1]["params"]["branch"] == "main"
+    assert "preview" not in fake_client.last_post[1]["params"]
+
+
+@pytest.mark.asyncio
 async def test_list_query_types_v2_returns_foundry_raw_shape():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role

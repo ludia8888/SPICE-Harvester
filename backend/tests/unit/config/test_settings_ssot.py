@@ -9,6 +9,7 @@ from shared.config.settings import (
     FeatureFlagsSettings,
     ObjectifySettings,
     PipelineSettings,
+    ServiceSettings,
     StorageSettings,
 )
 
@@ -116,12 +117,17 @@ def test_objectify_dataset_primary_chunk_size_clamps_lower_bound(monkeypatch: py
     assert settings.dataset_primary_index_chunk_size == 1
 
 
-def test_feature_flags_strict_compat_defaults_on_and_can_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_feature_flags_no_strict_compat_toggles(monkeypatch: pytest.MonkeyPatch) -> None:
     _disable_env_file(monkeypatch)
-    monkeypatch.delenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", raising=False)
-    defaults = FeatureFlagsSettings()
-    assert defaults.enable_foundry_v2_strict_compat is True
+    flags = FeatureFlagsSettings()
+    assert not hasattr(flags, "enable_foundry_v2_strict_compat")
+    assert not hasattr(flags, "foundry_v2_strict_compat_db_allowlist")
 
-    monkeypatch.setenv("ENABLE_FOUNDRY_V2_STRICT_COMPAT", "false")
-    explicit_off = FeatureFlagsSettings()
-    assert explicit_off.enable_foundry_v2_strict_compat is False
+
+def test_service_settings_no_external_funnel_address_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    services = ServiceSettings()
+    assert not hasattr(services, "funnel_host")
+    assert not hasattr(services, "funnel_port")
+    assert not hasattr(services, "funnel_base_url_override")
+    assert not hasattr(services, "funnel_base_url")

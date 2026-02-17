@@ -45,7 +45,7 @@ The default configuration works out of the box for local development. Key defaul
 # Core service ports
 OMS_PORT=8000           # Ontology Management Service
 BFF_PORT=8002           # Backend-for-Frontend gateway
-FUNNEL_PORT=8003        # Funnel ingestion service
+AGENT_PORT=8004         # Agent tool runner service
 
 # Data stores
 POSTGRES_PORT=5432
@@ -64,7 +64,7 @@ docker compose up -d
 ```
 
 This starts the full stack including:
-- **4 API servers** (OMS, BFF, Funnel, Admin)
+- **3 API servers** (OMS, BFF, Agent)
 - **13 workers** (event processors, projection builders, pipeline runners)
 - **8 data stores** (PostgreSQL, Elasticsearch, Redis, Kafka, MinIO, and more)
 - **6 observability services** (Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki)
@@ -93,8 +93,8 @@ curl http://localhost:8000/health
 # BFF health check
 curl http://localhost:8002/health
 
-# Funnel health check
-curl http://localhost:8003/health
+# Agent health check
+curl http://localhost:8004/health
 ```
 
 Each should return:

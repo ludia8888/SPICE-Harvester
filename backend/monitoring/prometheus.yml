@@ -28,5 +28,4 @@ scrape_configs:
       - targets:
           - "bff:8002"
           - "oms:8000"
-          - "funnel:8003"
           - "agent:8004"

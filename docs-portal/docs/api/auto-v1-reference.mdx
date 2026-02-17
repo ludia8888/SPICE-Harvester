@@ -15,9 +15,9 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 246**
+**Total v1 endpoints: 228**
 
-### Object Types & Schema (89 endpoints)
+### Object Types & Schema (71 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -27,20 +27,12 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/logs` | List Action Logs | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}` | Get Action Log | No |
-| `POST` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` | Undo Action | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations` | List Action Simulations | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | Get Action Simulation | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | List Action Simulation Versions | No |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | Get Action Simulation Version | No |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/simulate` | Simulate Action | No |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit` | Submit Action | No |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch` | Submit Action Batch | No |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}` | Get Instance | No |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instances` | Get Class Instances | No |
 | `GET` | `/api/v1/databases/{db_name}/class/{class_id}/sample-values` | Get Class Sample Values | No |
-| `GET` | `/api/v1/databases/{db_name}/classes` | List Classes | No |
 | `POST` | `/api/v1/databases/{db_name}/classes` | Create Class | No |
-| `GET` | `/api/v1/databases/{db_name}/classes/{class_id}` | Get Class | No |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | No |
 | `POST` | `/api/v1/databases/{db_name}/import-from-excel/commit` | Commit Import From Excel | No |
 | `POST` | `/api/v1/databases/{db_name}/import-from-excel/dry-run` | Dry Run Import From Excel | No |
@@ -56,9 +48,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/databases/{db_name}/mappings/import` | Import Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/mappings/validate` | Validate Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/action-types` | List Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/action-types` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Get Route | No |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Update Route | No |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Delete Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/deploy` | Deploy Ontology | No |
@@ -73,14 +63,10 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `PUT` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Update Route | No |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Delete Route | No |
 | `GET` | `/api/v1/databases/{db_name}/ontology/health` | Ontology Health | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces` | List Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/interfaces` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Get Route | No |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Update Route | No |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Delete Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types` | List Link Types | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types` | Create Link Type | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Get Link Type | No |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Update Link Type | No |
 | `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | No |
@@ -90,15 +76,11 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/databases/{db_name}/ontology/proposals` | List Ontology Proposals | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/proposals` | Create Ontology Proposal | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | Approve Ontology Proposal | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties` | List Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/shared-properties` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Get Route | No |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Update Route | No |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Delete Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/validate` | Validate Ontology Create Bff | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/value-types` | List Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/value-types` | Create Route | No |
-| `GET` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Get Route | No |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Update Route | No |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Delete Route | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` | Save Mapping Metadata | No |

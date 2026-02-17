@@ -17,9 +17,8 @@ docker compose exec oms python -m spice.cli health --all
 
 # Individual service health
 curl http://localhost:8000/health   # OMS
-curl http://localhost:8002/health   # BFF
-curl http://localhost:8003/health   # Funnel
-curl http://localhost:8004/health   # Admin
+curl http://localhost:8002/api/v1/health   # BFF
+curl http://localhost:8004/health   # Agent
 
 # Docker service status
 docker compose ps
@@ -250,9 +249,8 @@ curl -X POST http://localhost:9200/_forcemerge?max_num_segments=1
 | Service | Endpoint | Expected Response |
 |---------|----------|-------------------|
 | OMS | `GET /health` | `{"status": "healthy", "checks": {...}}` |
-| BFF | `GET /health` | `{"status": "healthy", "checks": {...}}` |
-| Funnel | `GET /health` | `{"status": "healthy", "checks": {...}}` |
-| Admin | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| BFF | `GET /api/v1/health` | `{"status": "healthy", "checks": {...}}` |
+| Agent | `GET /health` | `{"status": "healthy", "checks": {...}}` |
 | Elasticsearch | `GET /_cluster/health` | `{"status": "green", ...}` |
 | Redis | `redis-cli ping` | `PONG` |
 
@@ -267,7 +265,7 @@ docker compose restart <service-name>
 ### Restart All API Servers
 
 ```bash
-docker compose restart oms bff funnel admin
+docker compose restart oms bff agent
 ```
 
 ### Restart All Workers

@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **522 settings** total.
+SPICE Harvester uses **45 configuration classes** with **517 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -94,7 +94,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Service configuration settings
 
-**22 settings**
+**19 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -104,9 +104,6 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `bff_host` | `str` | `<env-dependent>` | `BFF_HOST` | BFF service host |
 | `bff_port` | `int` | `8002` | `BFF_PORT` | BFF service port |
 | `bff_base_url_override` | `Optional[str]` | **required** | `BFF_BASE_URL_OVERRIDE` | BFF base URL override (BFF_BASE_URL) |
-| `funnel_host` | `str` | `<env-dependent>` | `FUNNEL_HOST` | Funnel service host |
-| `funnel_port` | `int` | `8003` | `FUNNEL_PORT` | Funnel service port |
-| `funnel_base_url_override` | `Optional[str]` | **required** | `FUNNEL_BASE_URL_OVERRIDE` | Funnel base URL override (FUNNEL_BASE_URL) |
 | `agent_host` | `str` | `<env-dependent>` | `AGENT_HOST` | Agent service host |
 | `agent_port` | `int` | `8004` | `AGENT_PORT` | Agent service port |
 | `agent_base_url_override` | `Optional[str]` | **required** | `AGENT_BASE_URL_OVERRIDE` | Agent base URL override (AGENT_BASE_URL) |
@@ -206,7 +203,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Feature flags / opt-in endpoints.
 
-**6 settings**
+**4 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -214,8 +211,6 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `enable_pipeline_control_plane_events` | `bool` | `True` | `ENABLE_PIPELINE_CONTROL_PLANE_EVENTS` | Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS) |
 | `enable_sync_database_create_fallback` | `bool` | `True` | `ENABLE_SYNC_DATABASE_CREATE_FALLBACK` | Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK) |
 | `enable_oms_rollback` | `bool` | `False` | `ENABLE_OMS_ROLLBACK` | Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK) |
-| `enable_foundry_v2_strict_compat` | `bool` | `True` | `ENABLE_FOUNDRY_V2_STRICT_COMPAT` | Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT) |
-| `foundry_v2_strict_compat_db_allowlist` | `str` | `` | `FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST` | Comma-separated db allowlist for strict Foundry v2 compatibility (FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST) |
 
 ## PipelineSettings
 

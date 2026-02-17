@@ -39,7 +39,6 @@ _settings = get_settings()
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or _settings.services.bff_base_url).rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or _settings.services.oms_base_url).rstrip("/")
-FUNNEL_URL = (os.getenv("FUNNEL_BASE_URL") or os.getenv("FUNNEL_URL") or _settings.services.funnel_base_url).rstrip("/")
 AGENT_URL = (os.getenv("AGENT_BASE_URL") or os.getenv("AGENT_URL") or _settings.services.agent_base_url).rstrip("/")
 INGEST_RECONCILER_PORT = (
     os.getenv("INGEST_RECONCILER_PORT_HOST")
@@ -545,13 +544,6 @@ class TestMSAServiceHealth:
     async def test_oms_health_endpoint(self) -> None:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{OMS_URL}/health") as resp:
-                assert resp.status == 200
-
-    @pytest.mark.asyncio
-    @pytest.mark.requires_infra
-    async def test_funnel_health_endpoint(self) -> None:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{FUNNEL_URL}/health") as resp:
                 assert resp.status == 200
 
     @pytest.mark.asyncio

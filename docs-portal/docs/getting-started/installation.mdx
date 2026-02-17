@@ -62,7 +62,7 @@ Available profiles:
 
 | Profile | Services | Ports |
 |---------|----------|-------|
-| `core` | OMS, BFF, Funnel, Admin, PostgreSQL, Elasticsearch, Redis, Kafka, MinIO | 8000-8003, 5432, 9200, 6379, 9092, 9000 |
+| `core` | OMS, BFF, Agent, PostgreSQL, Elasticsearch, Redis, Kafka, MinIO | 8000, 8002, 8004, 5432, 9200, 6379, 9092, 9000 |
 | `workers` | Event Processor, Projection Builder, Pipeline Runner, Lineage Worker, and 9 more | Internal only |
 | `observability` | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki | 13000, 19090, 16686 |
 
@@ -76,8 +76,7 @@ Create a `.env` file in the project root. The following variables control essent
 # ─── Service Ports ───────────────────────────────────────
 OMS_PORT=8000
 BFF_PORT=8002
-FUNNEL_PORT=8003
-ADMIN_PORT=8004
+AGENT_PORT=8004
 
 # ─── PostgreSQL ──────────────────────────────────────────
 POSTGRES_HOST=postgres
@@ -136,7 +135,6 @@ CORS_ORIGINS=https://app.your-domain.com
 # Performance tuning
 OMS_WORKERS=4
 BFF_WORKERS=4
-FUNNEL_WORKERS=2
 POSTGRES_MAX_CONNECTIONS=100
 ELASTICSEARCH_SHARDS=3
 ELASTICSEARCH_REPLICAS=1
@@ -202,9 +200,8 @@ Individual service health checks:
 | Service | URL | Expected Status |
 |---------|-----|----------------|
 | OMS | `http://localhost:8000/health` | `{"status": "healthy"}` |
-| BFF | `http://localhost:8002/health` | `{"status": "healthy"}` |
-| Funnel | `http://localhost:8003/health` | `{"status": "healthy"}` |
-| Admin | `http://localhost:8004/health` | `{"status": "healthy"}` |
+| BFF | `http://localhost:8002/api/v1/health` | `{"status": "healthy"}` |
+| Agent | `http://localhost:8004/health` | `{"status": "healthy"}` |
 | PostgreSQL | `docker compose exec postgres pg_isready` | `accepting connections` |
 | Elasticsearch | `http://localhost:9200/_cluster/health` | `"status": "green"` |
 | Redis | `docker compose exec redis redis-cli ping` | `PONG` |

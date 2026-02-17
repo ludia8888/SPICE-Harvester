@@ -22,9 +22,9 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "actions.simulate",
+    "tool_id": "actions.apply",
     "method": "POST",
-    "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate",
+    "path": "/api/v2/ontologies/{ontology}/actions/{action}/apply",
     "risk_level": "write",
     "requires_approval": true,
     "requires_idempotency_key": true,
@@ -33,9 +33,9 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "actions.submit",
+    "tool_id": "actions.apply_batch",
     "method": "POST",
-    "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/submit",
+    "path": "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch",
     "risk_level": "write",
     "requires_approval": true,
     "requires_idempotency_key": true,

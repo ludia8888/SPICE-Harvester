@@ -23,15 +23,15 @@ python scripts/check_docs.py
 
 ## Runtime Topology Summary
 
-- Total runtime services: **33**
-- API services: **4**
+- Total runtime services: **32**
+- API services: **3**
 - Background/worker services: **12**
 - Data platform services: **7**
 - Observability services: **6**
 
 | Role | Count | Services |
 | --- | --- | --- |
-| `api` | 4 | agent<br/>bff<br/>funnel<br/>oms |
+| `api` | 3 | agent<br/>bff<br/>oms |
 | `workers` | 12 | action-outbox-worker<br/>action-worker<br/>connector-sync-worker<br/>connector-trigger-service<br/>ingest-reconciler-worker<br/>instance-worker<br/>objectify-worker<br/>ontology-worker<br/>pipeline-scheduler<br/>pipeline-worker<br/>projection-worker<br/>writeback-materializer-worker |
 | `data` | 7 | elasticsearch<br/>kafka<br/>lakefs<br/>minio<br/>postgres<br/>redis<br/>zookeeper |
 | `observability` | 6 | alertmanager<br/>grafana<br/>jaeger<br/>kafka-ui<br/>otel-collector<br/>prometheus |
@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **639**, functions **5732**, classes **877**, internal cross-imports **1578**
+- Population: files **639**, functions **5753**, classes **877**, internal cross-imports **1571**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1578 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1571 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/91 (3.30%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
-| 4 | 모듈 결합도 과다 | 3/22 (13.64%) | <= 15.00% | **PASS** | `high_coupling_modules / modules` |
+| 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
 | 5 | 파일 응집도 저하 | 49/639 (7.67%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
 | 6 | 파일 단일 책임 위반 | 54/639 (8.45%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 300/5732 (5.23%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 7 | 함수 단일 책임 위반 | 301/5753 (5.23%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
 | 8 | 연속 상속 깊이(>=3) | 15/877 (1.71%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 662/5732 (11.55%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 382/5732 (6.66%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 9 | 복잡도 과다(CC>=15) | 667/5753 (11.59%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 385/5753 (6.69%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -72,7 +72,6 @@ python scripts/check_docs.py
 | `alertmanager` | 19093:9093 |
 | `bff` | 8002:8002 |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 |
-| `funnel` | ${FUNNEL_PORT_HOST:-8003}:8003 |
 | `grafana` | 13000:3000 |
 | `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 |
 | `jaeger` | 16686:16686 |
@@ -97,12 +96,11 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `action-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
 | `agent` | ${AGENT_PORT_HOST:-8004}:8004 | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `alertmanager` | 19093:9093 | - |
-| `bff` | 8002:8002 | db-migrations<br/>oms<br/>postgres<br/>redis<br/>elasticsearch<br/>kafka<br/>minio<br/>lakefs<br/>funnel<br/>otel-collector |
+| `bff` | 8002:8002 | db-migrations<br/>oms<br/>postgres<br/>redis<br/>elasticsearch<br/>kafka<br/>minio<br/>lakefs<br/>otel-collector |
 | `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
 | `connector-trigger-service` | - | kafka<br/>postgres<br/>otel-collector |
 | `db-migrations` | - | postgres |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 | - |
-| `funnel` | ${FUNNEL_PORT_HOST:-8003}:8003 | otel-collector |
 | `grafana` | 13000:3000 | prometheus |
 | `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
 | `instance-worker` | - | kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
@@ -140,7 +138,6 @@ graph TD
   svc_connector_trigger_service["connector-trigger-service"]
   svc_db_migrations["db-migrations"]
   svc_elasticsearch["elasticsearch"]
-  svc_funnel["funnel"]
   svc_grafana["grafana"]
   svc_ingest_reconciler_worker["ingest-reconciler-worker"]
   svc_instance_worker["instance-worker"]
@@ -187,7 +184,6 @@ graph TD
   svc_bff --> svc_kafka
   svc_bff --> svc_minio
   svc_bff --> svc_lakefs
-  svc_bff --> svc_funnel
   svc_bff --> svc_otel_collector
   svc_connector_sync_worker --> svc_bff
   svc_connector_sync_worker --> svc_kafka
@@ -197,7 +193,6 @@ graph TD
   svc_connector_trigger_service --> svc_postgres
   svc_connector_trigger_service --> svc_otel_collector
   svc_db_migrations --> svc_postgres
-  svc_funnel --> svc_otel_collector
   svc_grafana --> svc_prometheus
   svc_ingest_reconciler_worker --> svc_postgres
   svc_ingest_reconciler_worker --> svc_otel_collector
@@ -372,13 +367,13 @@ flowchart LR
 ## Router Inventory (OMS)
 
 - Routers detected: **11**
-- Distinct prefixes: **3**
+- Distinct prefixes: **4**
 - Routers with explicit tags: **11**
 - Routers with resolved source files: **11**
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
-| `action_async.router` | `/api/v1` | async-actions | `backend/oms/routers/action_async.py` |
+| `action_async.foundry_router` | `/api` | foundry-actions-v2 | `backend/oms/routers/action_async.py` |
 | `command_status.router` | `/api/v1` | command-status | `backend/oms/routers/command_status.py` |
 | `config_monitoring.router` | `/api/v1/config` | config-monitoring | `backend/shared/routers/config_monitoring.py` |
 | `database.router` | `/api/v1` | database | `backend/oms/routers/database.py` |

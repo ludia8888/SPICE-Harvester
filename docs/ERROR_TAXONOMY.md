@@ -110,7 +110,6 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | EMPTY_LABEL | SHV-{SUBSYS}-ONT-VAL-1112 | ontology | validation | warning | Relationship label empty | false | none | 1 | 0 | 0 | none | false | true | EMPTY_LABEL | request_human | 400 |
 | EXTERNAL_CLASS_REFERENCE | SHV-{SUBSYS}-ONT-VAL-1120 | ontology | validation | warning | External class reference | false | none | 1 | 0 | 0 | none | false | true | EXTERNAL_CLASS_REFERENCE | request_human | 400 |
 | FULL_SYNC_FAILED | SHV-{SUBSYS}-OBJ-INT-3001 | objectify | internal | error | Full sync failed | false | none | 1 | 0 | 0 | none | false | true | FULL_SYNC_FAILED | request_human | 500 |
-| FUNNEL_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-2101 | upstream | unavailable | error | Funnel service unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | FUNNEL_UNAVAILABLE | retry_backoff | 503 |
 | GLOBAL_PREDICATE_CONFLICT | SHV-{SUBSYS}-ONT-VAL-1121 | ontology | validation | warning | Global predicate conflict | false | none | 1 | 0 | 0 | none | false | true | GLOBAL_PREDICATE_CONFLICT | request_human | 400 |
 | IFACE_MISSING_PROPERTY | SHV-{SUBSYS}-ONT-VAL-1001 | ontology | validation | error | Interface missing property | false | none | 1 | 0 | 0 | none | false | true | IFACE_MISSING_PROPERTY | request_human | 400 |
 | IFACE_MISSING_RELATIONSHIP | SHV-{SUBSYS}-ONT-VAL-1003 | ontology | validation | error | Interface missing relationship | false | none | 1 | 0 | 0 | none | false | true | IFACE_MISSING_RELATIONSHIP | request_human | 400 |
@@ -254,6 +253,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | SHEET_NOT_ACCESSIBLE | SHV-{SUBSYS}-UPS-UNA-2001 | upstream | unavailable | error | Google Sheet not accessible | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | SHEET_NOT_ACCESSIBLE | retry_backoff | 503 |
 | SOURCE_FIELD_MISSING | SHV-{SUBSYS}-DAT-VAL-3004 | data | validation | error | Source field missing | false | none | 1 | 0 | 0 | none | false | true | SOURCE_FIELD_MISSING | request_human | 400 |
 | SOURCE_FIELD_UNKNOWN | SHV-{SUBSYS}-DAT-VAL-3005 | data | validation | error | Source field unknown | false | none | 1 | 0 | 0 | none | false | true | SOURCE_FIELD_UNKNOWN | request_human | 400 |
+| TABULAR_ANALYSIS_UNAVAILABLE | SHV-{SUBSYS}-UPS-UNA-2101 | upstream | unavailable | error | Tabular analysis runtime unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | TABULAR_ANALYSIS_UNAVAILABLE | retry_backoff | 503 |
 | TARGET_FIELD_UNKNOWN | SHV-{SUBSYS}-DAT-VAL-3006 | data | validation | error | Target field unknown | false | none | 1 | 0 | 0 | none | false | true | TARGET_FIELD_UNKNOWN | request_human | 400 |
 | TARGET_MISMATCH | SHV-{SUBSYS}-ONT-VAL-1116 | ontology | validation | error | Relationship target mismatch | false | none | 1 | 0 | 0 | none | false | true | TARGET_MISMATCH | request_human | 400 |
 | UNIQUE_KEY_DUPLICATE | SHV-{SUBSYS}-DAT-CON-3003 | data | conflict | error | Unique key duplicate | false | none | 1 | 0 | 0 | none | false | true | UNIQUE_KEY_DUPLICATE | request_human | 409 |

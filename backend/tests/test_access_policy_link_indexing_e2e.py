@@ -443,11 +443,9 @@ async def _create_dataset_with_artifact(
 
 
 async def _wait_for_link_index_status(
-    session: aiohttp.ClientSession,
+    dataset_registry: DatasetRegistry,
     *,
-    db_name: str,
     link_type_id: str,
-    branch: str = "main",
     expected_status: str = "PASS",
     timeout_seconds: float = DEFAULT_TIMEOUT,
     poll_interval_seconds: float = 2.0,
@@ -456,18 +454,12 @@ async def _wait_for_link_index_status(
     last: Optional[dict] = None
     expected_status = expected_status.upper()
     while time.monotonic() < deadline:
-        async with session.get(
-            f"{BFF_URL}/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}",
-            params={"branch": branch},
-        ) as resp:
-            if resp.status != 200:
-                await asyncio.sleep(poll_interval_seconds)
-                continue
-            last = await resp.json()
-            relationship_spec = ((last.get("data") or {}).get("relationship_spec") or {}) if isinstance(last, dict) else {}
-            status_value = str(relationship_spec.get("last_index_status") or "").upper()
-            if status_value == expected_status:
-                return relationship_spec
+        relationship_spec_record = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
+        relationship_spec = relationship_spec_record.__dict__ if relationship_spec_record else {}
+        last = relationship_spec
+        status_value = str(relationship_spec.get("last_index_status") or "").upper()
+        if status_value == expected_status:
+            return relationship_spec
         await asyncio.sleep(poll_interval_seconds)
     raise AssertionError(f"Timed out waiting for link index status {expected_status} (last={last})")
 
@@ -882,23 +874,13 @@ async def test_link_indexing_updates_relationships_and_status() -> None:
 
             try:
                 await _wait_for_link_index_status(
-                    bff_session,
-                    db_name=db_name,
+                    dataset_registry,
                     link_type_id=link_type_id,
-                    branch=branch,
                     expected_status="PASS",
                 )
             except AssertionError:
-                async with bff_session.get(
-                    f"{BFF_URL}/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}",
-                    params={"branch": branch},
-                ) as status_resp:
-                    status_payload = await status_resp.json() if status_resp.status == 200 else {}
-                relationship_spec = (
-                    ((status_payload.get("data") or {}).get("relationship_spec") or {})
-                    if isinstance(status_payload, dict)
-                    else {}
-                )
+                relationship_spec_record = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
+                relationship_spec = relationship_spec_record.__dict__ if relationship_spec_record else {}
                 last_index_status = str(relationship_spec.get("last_index_status") or "").upper()
                 if not last_index_status:
                     pytest.skip("link index worker is not progressing in this environment")

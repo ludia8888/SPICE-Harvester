@@ -232,7 +232,8 @@ class ConfigurationMonitor:
         config_dict["services"] = {
             "oms_base_url": getattr(service_settings, "oms_base_url", None),
             "bff_base_url": getattr(service_settings, "bff_base_url", None),
-            "funnel_base_url": getattr(service_settings, "funnel_base_url", None),
+            "agent_base_url": getattr(service_settings, "agent_base_url", None),
+            "funnel_runtime": "internal",
             "redis_host": getattr(self.settings.database, "redis_host", None),
             "redis_port": getattr(self.settings.database, "redis_port", None),
             "redis_db": getattr(self.settings.database, "redis_db", None),
@@ -488,7 +489,7 @@ class ConfigurationMonitor:
         
         if self.settings.is_production:
             services_cfg = config.get("services", {})
-            for key in ("oms_base_url", "bff_base_url", "funnel_base_url"):
+            for key in ("oms_base_url", "bff_base_url", "agent_base_url"):
                 service_url = services_cfg.get(key, "")
                 if service_url and not str(service_url).startswith("https://"):
                     issues.append({

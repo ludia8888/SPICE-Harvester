@@ -6,86 +6,24 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.dependencies import BFFDependencyProvider, get_elasticsearch_service
+from bff.dependencies import get_elasticsearch_service
 from bff.routers.registry_deps import get_dataset_registry
 from bff.services.instances_service import (
     get_class_sample_values as get_class_sample_values_service,
-    get_instance_detail as get_instance_detail_service,
-    list_class_instances as list_class_instances_service,
 )
-from shared.dependencies import get_container
-from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases/{db_name}", tags=["Instance Management"])
-
-
-async def _maybe_get_action_log_registry(
-    class_id: str,
-) -> Optional[ActionLogRegistry]:
-    if str(class_id or "").strip().lower() != "actionlog":
-        return None
-    try:
-        container = await get_container()
-    except RuntimeError:
-        return None
-    return await BFFDependencyProvider.get_action_log_registry(container)
-
-
-@router.get("/class/{class_id}/instances")
-@trace_endpoint("bff.instances.get_class_instances")
-async def get_class_instances(
-    db_name: str,
-    class_id: str,
-    http_request: Request,
-    base_branch: str = Query(default="main", description="Base branch (ES base index)"),
-    overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
-    limit: int = Query(default=100, le=1000),
-    offset: int = Query(default=0, ge=0),
-    search: Optional[str] = Query(default=None, description="Search query for filtering instances"),
-    status_filter: Optional[List[str]] = Query(default=None, alias="status"),
-    action_type_id: Optional[str] = Query(default=None),
-    submitted_by: Optional[str] = Query(default=None),
-    elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    action_logs: Optional[ActionLogRegistry] = Depends(_maybe_get_action_log_registry),
-) -> Dict[str, Any]:
-    try:
-        return await list_class_instances_service(
-            db_name=db_name,
-            class_id=class_id,
-            request_headers=http_request.headers,
-            base_branch=base_branch,
-            overlay_branch=overlay_branch,
-            limit=limit,
-            offset=offset,
-            search=search,
-            status_filter=status_filter,
-            action_type_id=action_type_id,
-            submitted_by=submitted_by,
-            elasticsearch_service=elasticsearch_service,
-            dataset_registry=dataset_registry,
-            action_logs=action_logs,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Failed to get class instances: %s", exc)
-        raise classified_http_exception(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"인스턴스 조회 실패: {str(exc)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        ) from exc
 
 
 @router.get("/class/{class_id}/sample-values")
@@ -116,41 +54,5 @@ async def get_class_sample_values(
         raise classified_http_exception(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"샘플 값 조회 실패: {str(exc)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        ) from exc
-
-
-@router.get("/class/{class_id}/instance/{instance_id}")
-@trace_endpoint("bff.instances.get_instance")
-async def get_instance(
-    db_name: str,
-    class_id: str,
-    instance_id: str,
-    http_request: Request,
-    base_branch: str = Query(default="main", description="Base branch (ES base index)"),
-    overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
-    elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    action_logs: Optional[ActionLogRegistry] = Depends(_maybe_get_action_log_registry),
-) -> Dict[str, Any]:
-    try:
-        return await get_instance_detail_service(
-            db_name=db_name,
-            class_id=class_id,
-            instance_id=instance_id,
-            request_headers=http_request.headers,
-            base_branch=base_branch,
-            overlay_branch=overlay_branch,
-            elasticsearch_service=elasticsearch_service,
-            dataset_registry=dataset_registry,
-            action_logs=action_logs,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Failed to get instance %s: %s", instance_id, exc)
-        raise classified_http_exception(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"인스턴스 조회 실패: {str(exc)}",
             code=ErrorCode.INTERNAL_ERROR,
         ) from exc

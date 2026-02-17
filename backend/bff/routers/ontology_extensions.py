@@ -25,6 +25,21 @@ from bff.services.oms_client import OMSClient
 
 router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Extensions"])
 
+# Foundry v2 has canonical read surfaces for these resource families:
+# - /api/v2/ontologies/{ontology}/actionTypes*
+# - /api/v2/ontologies/{ontology}/interfaceTypes*
+# - /api/v2/ontologies/{ontology}/sharedPropertyTypes*
+# - /api/v2/ontologies/{ontology}/valueTypes*
+# Keep v1 write routes only and remove v1 read compatibility routes.
+_V1_READ_REMOVED_RESOURCE_TYPES = frozenset(
+    {
+        "action-types",
+        "interfaces",
+        "shared-properties",
+        "value-types",
+    }
+)
+
 
 def _resource_routes(resource_type: str):
     async def list_route(
@@ -128,9 +143,11 @@ for _resource_type in (
     "action-types",
 ):
     _list, _create, _get, _update, _delete = _resource_routes(_resource_type)
-    router.add_api_route(f"/{_resource_type}", _list, methods=["GET"])
+    if _resource_type not in _V1_READ_REMOVED_RESOURCE_TYPES:
+        router.add_api_route(f"/{_resource_type}", _list, methods=["GET"])
     router.add_api_route(f"/{_resource_type}", _create, methods=["POST"], status_code=status.HTTP_201_CREATED)
-    router.add_api_route(f"/{_resource_type}/{{resource_id}}", _get, methods=["GET"])
+    if _resource_type not in _V1_READ_REMOVED_RESOURCE_TYPES:
+        router.add_api_route(f"/{_resource_type}/{{resource_id}}", _get, methods=["GET"])
     router.add_api_route(f"/{_resource_type}/{{resource_id}}", _update, methods=["PUT"])
     router.add_api_route(f"/{_resource_type}/{{resource_id}}", _delete, methods=["DELETE"])
 

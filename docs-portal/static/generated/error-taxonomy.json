@@ -3253,12 +3253,12 @@
       "subsystem": "{SUBSYS}"
     },
     {
-      "code": "FUNNEL_UNAVAILABLE",
+      "code": "TABULAR_ANALYSIS_UNAVAILABLE",
       "enterprise_code": "SHV-{SUBSYS}-UPS-UNA-2101",
       "domain": "upstream",
       "error_class": "unavailable",
       "severity": "error",
-      "title": "Funnel service unavailable",
+      "title": "Tabular analysis runtime unavailable",
       "http_status": 503,
       "retryable": true,
       "retry_policy": "backoff",

@@ -2340,11 +2340,11 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         title="LLM request failed",
         severity=EnterpriseSeverity.ERROR,
     ),
-    "FUNNEL_UNAVAILABLE": EnterpriseErrorSpec(
+    "TABULAR_ANALYSIS_UNAVAILABLE": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-UPS-UNA-2101",
         domain=EnterpriseDomain.UPSTREAM,
         error_class=EnterpriseClass.UNAVAILABLE,
-        title="Funnel service unavailable",
+        title="Tabular analysis runtime unavailable",
         severity=EnterpriseSeverity.ERROR,
         retryable=True,
         default_retry_policy=EnterpriseRetryPolicy.BACKOFF,

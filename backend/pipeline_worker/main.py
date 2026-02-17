@@ -441,10 +441,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         # MappingSpecResolver: OMS-first, PostgreSQL-fallback
         if self.http:
-            oms_base = os.getenv("OMS_BASE_URL", "http://oms:8000").rstrip("/")
+            oms_base = os.environ.get("OMS_BASE_URL", "http://oms:8000").rstrip("/")
             oms_token = ""
             for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-                oms_token = (os.getenv(key) or "").strip()
+                oms_token = (os.environ.get(key) or "").strip()
                 if oms_token:
                     break
             self.mapping_resolver = MappingSpecResolver(

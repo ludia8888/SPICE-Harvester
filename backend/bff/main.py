@@ -70,7 +70,7 @@ from shared.services.core.schema_drift_detector import SchemaDriftDetector
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
 
 # BFF specific imports
-from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
+from bff.services.funnel_type_inference_adapter import InProcessTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
 
 # Data connector imports
@@ -228,7 +228,7 @@ class BFFServiceContainer:
         """Initialize type inference service"""
         try:
             logger.info("Configuring type inference service...")
-            type_inference_adapter = FunnelHTTPTypeInferenceAdapter()
+            type_inference_adapter = InProcessTypeInferenceAdapter()
             configure_type_inference_service(type_inference_adapter)
             
             self._bff_services['type_inference_adapter'] = type_inference_adapter

@@ -34,7 +34,6 @@ services:
     container_name: spice_bff
     environment:
       - OMS_BASE_URL=${OMS_BASE_URL:-https://oms:8000}
-      - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-https://funnel:8003}
       - AGENT_BASE_URL=${AGENT_BASE_URL:-https://agent:8004}
       - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -51,8 +50,6 @@ services:
     depends_on:
       oms:
         condition: service_healthy
-      funnel:
-        condition: service_healthy
     networks:
       - spice_network
     volumes:
@@ -60,29 +57,6 @@ services:
       - ./ssl:/ssl:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "-k", "https://localhost:8002/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # Funnel (Type Inference Service)
-  funnel:
-    build:
-      context: .
-      dockerfile: ./funnel/Dockerfile
-    container_name: spice_funnel
-    environment:
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - USE_HTTPS=${USE_HTTPS:-true}
-      - SSL_CERT_PATH=/ssl/funnel/server.crt
-      - SSL_KEY_PATH=/ssl/funnel/server.key
-      - SSL_CA_PATH=/ssl/ca.crt
-      - VERIFY_SSL=${VERIFY_SSL:-false}
-    networks:
-      - spice_network
-    volumes:
-      - ./ssl:/ssl:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:8003/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -100,7 +74,6 @@ services:
     depends_on:
       - bff
       - oms
-      - funnel
     networks:
       - spice_network
 

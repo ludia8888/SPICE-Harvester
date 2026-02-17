@@ -17,15 +17,13 @@ These are the externally accessible services that handle client requests.
 |---------|------|----------|-------------|
 | **OMS** (Ontology Management Service) | 8000 | HTTP/REST | Primary API for ontology CRUD, object management, search, actions, and lineage |
 | **BFF** (Backend-for-Frontend) | 8002 | HTTP/REST | API gateway handling authentication, routing, rate limiting, and response transformation |
-| **Funnel** | 8003 | HTTP/REST | Bulk data ingestion, file uploads, streaming imports, and pipeline management |
-| **Admin** | 8004 | HTTP/REST | Platform administration, user management, configuration, and health monitoring |
+| **Agent** | 8004 | HTTP/REST | Tool-runner runtime for orchestrated actions and workflow execution |
 
 ### Dependencies
 
 ```
 BFF  ──▶  OMS  ──▶  PostgreSQL, Elasticsearch, Redis, Kafka
-     ──▶  Funnel ──▶  Kafka, MinIO
-     ──▶  Admin  ──▶  PostgreSQL, Redis
+     ──▶  Agent ──▶  PostgreSQL, MinIO
      ──▶  Auth (internal)
 ```
 
@@ -150,8 +148,8 @@ Services must start in a specific order due to dependencies. Docker Compose hand
 
 1. **Data stores**: PostgreSQL, Elasticsearch, Redis, ZooKeeper, MinIO
 2. **Kafka ecosystem**: Kafka (depends on ZooKeeper), Schema Registry, Kafka Connect
-3. **Core services**: OMS (depends on PostgreSQL, Elasticsearch, Redis, Kafka), Funnel, Admin
-4. **Gateway**: BFF (depends on OMS, Funnel, Admin)
+3. **Core services**: OMS (depends on PostgreSQL, Elasticsearch, Redis, Kafka), Agent
+4. **Gateway**: BFF (depends on OMS, Agent)
 5. **Workers**: All workers (depend on Kafka and relevant data stores)
 6. **Observability**: OTEL Collector, Prometheus, Jaeger, Loki, AlertManager, Grafana
 

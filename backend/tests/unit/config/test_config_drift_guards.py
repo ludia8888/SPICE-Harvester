@@ -127,3 +127,55 @@ def test_no_import_global_settings_symbol_outside_settings_module() -> None:
     assert not offenders, "Import `get_settings` (not the global `settings`) to avoid drift:\n" + "\n".join(
         sorted(offenders)
     )
+
+
+def test_no_foundry_strict_opt_out_env_keys_reintroduced() -> None:
+    repo_backend = Path(__file__).resolve().parents[3]
+    repo_root = repo_backend.parent
+    forbidden = (
+        "ENABLE_FOUNDRY_V2_STRICT_COMPAT",
+        "FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST",
+    )
+
+    offenders: list[str] = []
+    files_to_scan = _iter_runtime_python_files(repo_backend) + [
+        repo_backend / ".env.example",
+        repo_root / ".env.example",
+    ]
+    for path in files_to_scan:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in text:
+                offenders.append(f"{path.relative_to(repo_root)} contains {token}")
+
+    assert not offenders, "Strict compat opt-out keys must not be reintroduced:\n" + "\n".join(sorted(offenders))
+
+
+def test_no_external_funnel_address_env_keys_reintroduced() -> None:
+    repo_backend = Path(__file__).resolve().parents[3]
+    repo_root = repo_backend.parent
+    forbidden = (
+        "FUNNEL_BASE_URL",
+        "FUNNEL_URL",
+        "FUNNEL_RUNTIME_MODE",
+        "FUNNEL_PORT",
+    )
+
+    offenders: list[str] = []
+    files_to_scan = _iter_runtime_python_files(repo_backend) + [
+        repo_backend / ".env.example",
+        repo_root / ".env.example",
+    ]
+    for path in files_to_scan:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in text:
+                offenders.append(f"{path.relative_to(repo_root)} contains {token}")
+
+    assert not offenders, "External Funnel address/env mode keys must not be reintroduced:\n" + "\n".join(
+        sorted(offenders)
+    )

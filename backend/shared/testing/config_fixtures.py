@@ -63,8 +63,6 @@ class TestApplicationSettings(ApplicationSettings):
                 oms_port=8001,
                 bff_host="localhost",
                 bff_port=8000,
-                funnel_host="localhost",
-                funnel_port=8003,
                 agent_host="localhost",
                 agent_port=8004,
             )
@@ -362,8 +360,8 @@ def setup_test_service_config(**overrides) -> TestApplicationSettings:
             oms_port=oms_port,
             bff_host=overrides.get("bff_host", "localhost"),
             bff_port=overrides.get("bff_port", 8002),
-            funnel_host=overrides.get("funnel_host", "localhost"),
-            funnel_port=overrides.get("funnel_port", 8003)
+            agent_host=overrides.get("agent_host", "localhost"),
+            agent_port=overrides.get("agent_port", 8004),
         )
     }
     return TestApplicationSettings(**service_overrides)

@@ -44,7 +44,6 @@ class ServiceConfig:
     # Default ports - these match the expected values in tests and documentation
     DEFAULT_OMS_PORT = 8000
     DEFAULT_BFF_PORT = 8002
-    DEFAULT_FUNNEL_PORT = 8003
     DEFAULT_AGENT_PORT = 8004
     DEFAULT_ELASTICSEARCH_PORT = 9200
     DEFAULT_LAKEFS_PORT = 8000
@@ -60,11 +59,6 @@ class ServiceConfig:
         return app_settings.services.bff_port
 
     @staticmethod
-    def get_funnel_port() -> int:
-        """Get Funnel service port from environment or default."""
-        return app_settings.services.funnel_port
-
-    @staticmethod
     def get_agent_port() -> int:
         """Get Agent service port from environment or default."""
         return app_settings.services.agent_port
@@ -78,11 +72,6 @@ class ServiceConfig:
     def get_bff_host() -> str:
         """Get BFF host from environment or default."""
         return app_settings.services.bff_host
-
-    @staticmethod
-    def get_funnel_host() -> str:
-        """Get Funnel host from environment or default."""
-        return app_settings.services.funnel_host
 
     @staticmethod
     def get_agent_host() -> str:
@@ -112,18 +101,6 @@ class ServiceConfig:
         3. Default: http://localhost:8002
         """
         return app_settings.services.bff_base_url
-
-    @staticmethod
-    def get_funnel_url() -> str:
-        """
-        Get complete Funnel URL from environment or construct from host/port.
-
-        Priority:
-        1. FUNNEL_BASE_URL environment variable (if set)
-        2. Constructed from FUNNEL_HOST and FUNNEL_PORT
-        3. Default: http://localhost:8003
-        """
-        return app_settings.services.funnel_base_url
 
     @staticmethod
     def get_agent_url() -> str:
@@ -232,7 +209,7 @@ class ServiceConfig:
         Get URL for a specific service by name.
 
         Args:
-            service_name: Name of the service (oms, bff, funnel, agent)
+            service_name: Name of the service (oms, bff, agent)
 
         Returns:
             Service URL
@@ -243,7 +220,6 @@ class ServiceConfig:
         service_map = {
             "oms": ServiceConfig.get_oms_url,
             "bff": ServiceConfig.get_bff_url,
-            "funnel": ServiceConfig.get_funnel_url,
             "agent": ServiceConfig.get_agent_url,
         }
 
@@ -258,7 +234,6 @@ class ServiceConfig:
         return {
             "oms": ServiceConfig.get_oms_url(),
             "bff": ServiceConfig.get_bff_url(),
-            "funnel": ServiceConfig.get_funnel_url(),
             "agent": ServiceConfig.get_agent_url(),
         }
 
@@ -485,11 +460,6 @@ def get_bff_url() -> str:
     return ServiceConfig.get_bff_url()
 
 
-def get_funnel_url() -> str:
-    """Get Funnel URL - convenience function."""
-    return ServiceConfig.get_funnel_url()
-
-
 def get_agent_url() -> str:
     """Get Agent URL - convenience function."""
     return ServiceConfig.get_agent_url()
@@ -508,8 +478,6 @@ if __name__ == "__main__":
     print(f"OMS URL: {ServiceConfig.get_oms_url()}")
     print(f"BFF Port: {ServiceConfig.get_bff_port()}")
     print(f"BFF URL: {ServiceConfig.get_bff_url()}")
-    print(f"Funnel Port: {ServiceConfig.get_funnel_port()}")
-    print(f"Funnel URL: {ServiceConfig.get_funnel_url()}")
     print(f"Agent Port: {ServiceConfig.get_agent_port()}")
     print(f"Agent URL: {ServiceConfig.get_agent_url()}")
     print(f"Docker Environment: {ServiceConfig.is_docker_environment()}")

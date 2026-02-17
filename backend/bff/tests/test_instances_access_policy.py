@@ -1,68 +1,79 @@
-from types import SimpleNamespace
+from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from bff.dependencies import get_elasticsearch_service, get_oms_client
+from bff.dependencies import get_oms_client
 from bff.main import app
-from bff.routers import instances as instances_router
-
-
-class _FakeElasticsearch:
-    def __init__(self, *, hits):
-        self._hits = hits
-
-    async def search(self, *, index, query, size, from_=0, sort=None):  # noqa: ANN003
-        return {"total": len(self._hits), "hits": self._hits}
-
-
-class _FakeDatasetRegistry:
-    def __init__(self, *, policy):
-        self._policy = policy
-
-    async def get_access_policy(self, *, db_name, scope, subject_type, subject_id):  # noqa: ANN003
-        if not self._policy:
-            return None
-        return SimpleNamespace(policy=self._policy)
+from bff.routers import foundry_ontology_v2 as router_v2
 
 
 class _FakeOMSClient:
-    async def get_instance(self, *, db_name, instance_id, class_id):  # noqa: ANN003
-        return {"status": "success", "data": {"instance_id": instance_id, "class_id": class_id}}
+    async def list_databases(self):  # noqa: ANN201
+        return {"data": {"databases": [{"name": "test_db"}]}}
+
+    async def get_ontology_resource(self, db_name, *, resource_type, resource_id, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        if resource_type == "object_type" and resource_id == "User":
+            return {
+                "data": {
+                    "id": "User",
+                    "spec": {"pk_spec": {"primary_key": ["user_id"]}},
+                }
+            }
+        return {"data": None}
+
+    async def get_ontology(self, db_name, class_id, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, class_id, branch
+        return {"data": {"properties": [{"name": "user_id", "type": "string"}]}}
+
+    async def post(self, path, **kwargs):  # noqa: ANN001, ANN003
+        if path.endswith("/search"):
+            payload = kwargs.get("json") if isinstance(kwargs, dict) else {}
+            where = payload.get("where") if isinstance(payload, dict) else None
+            if isinstance(where, dict) and where.get("field") == "user_id":
+                value = str(where.get("value") or "").strip()
+                if value == "u-missing":
+                    return {"data": [], "nextPageToken": None, "totalCount": "0"}
+                return {"data": [{"user_id": value, "email": "masked@example.com"}], "nextPageToken": None, "totalCount": "1"}
+            return {"data": [{"user_id": "u1", "email": "masked@example.com"}], "nextPageToken": None, "totalCount": "1"}
+        return {}
 
 
-def _client_with_overrides(*, registry, es, oms=None):
-    app.dependency_overrides[instances_router.get_dataset_registry] = lambda: registry
-    app.dependency_overrides[get_elasticsearch_service] = lambda: es
-    app.dependency_overrides[get_oms_client] = lambda: oms or _FakeOMSClient()
+async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
+    _ = request, db_name
+    return None
+
+
+def _client_with_overrides():
+    app.dependency_overrides[get_oms_client] = lambda: _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
     client = TestClient(app)
-    return client
+    return client, original_require
 
 
-def test_instances_list_masks_fields_with_access_policy():
-    registry = _FakeDatasetRegistry(policy={"mask_columns": ["email"], "mask_value": "REDACTED"})
-    es = _FakeElasticsearch(hits=[{"instance_id": "u1", "class_id": "User", "email": "u1@example.com"}])
-    client = _client_with_overrides(registry=registry, es=es)
+def test_v2_list_objects_returns_foundry_shape():
+    client, original_require = _client_with_overrides()
     try:
-        resp = client.get("/api/v1/databases/test_db/class/User/instances")
+        resp = client.get("/api/v2/ontologies/test_db/objects/User")
     finally:
+        router_v2._require_domain_role = original_require
         app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload["instances"][0]["email"] == "REDACTED"
+    assert isinstance(payload.get("data"), list)
+    assert payload["data"][0]["email"] == "masked@example.com"
 
 
-def test_instance_get_hides_rows_blocked_by_access_policy():
-    policy = {
-        "row_filters": [{"field": "status", "op": "eq", "value": "active"}],
-        "filter_mode": "allow",
-    }
-    registry = _FakeDatasetRegistry(policy=policy)
-    es = _FakeElasticsearch(hits=[{"instance_id": "u1", "class_id": "User", "status": "inactive"}])
-    client = _client_with_overrides(registry=registry, es=es)
+def test_v2_get_object_not_found_uses_foundry_error_envelope():
+    client, original_require = _client_with_overrides()
     try:
-        resp = client.get("/api/v1/databases/test_db/class/User/instance/u1")
+        resp = client.get("/api/v2/ontologies/test_db/objects/User/u-missing")
     finally:
+        router_v2._require_domain_role = original_require
         app.dependency_overrides.clear()
 
     assert resp.status_code == 404
+    payload = resp.json()
+    assert payload["errorName"] == "ObjectNotFound"

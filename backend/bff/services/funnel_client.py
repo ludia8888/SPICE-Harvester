@@ -1,6 +1,7 @@
-"""
-Funnel Service 클라이언트
-BFF에서 Funnel 마이크로서비스와 통신하기 위한 HTTP 클라이언트
+"""In-process Funnel runtime client.
+
+BFF에서 Funnel 분석 런타임을 in-process ASGI transport로 호출한다.
+외부 Funnel HTTP 서비스 주소/모드는 지원하지 않는다.
 """
 
 import hashlib
@@ -10,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from shared.config.settings import build_client_ssl_config, get_settings
+from shared.config.settings import get_settings
 from bff.services.base_http_client import ManagedAsyncClient
 
 logger = logging.getLogger(__name__)
@@ -19,21 +20,22 @@ logger = logging.getLogger(__name__)
 class FunnelClient(ManagedAsyncClient):
     """Funnel HTTP 클라이언트"""
 
-    def __init__(self, base_url: str = None):
-        settings = get_settings()
-        self.base_url = base_url or settings.services.funnel_base_url
-
-        ssl_config = build_client_ssl_config(settings)
+    def __init__(self):
+        self.runtime_mode = "internal"
         self.excel_timeout_seconds = self._resolve_excel_timeout_seconds()
+        self.client = self._build_internal_client()
+        logger.info("Funnel Client initialized in internal mode (in-process ASGI)")
 
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
+    def _build_internal_client(self) -> httpx.AsyncClient:
+        # Import lazily to avoid app import side effects unless internal mode is enabled.
+        from funnel.main import app as funnel_app
+
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=funnel_app),
+            base_url="http://funnel-internal",
             timeout=30.0,
             headers={"Accept": "application/json"},
-            verify=ssl_config.get("verify", True),
         )
-
-        logger.info(f"Funnel Client initialized with base URL: {self.base_url}")
 
     @staticmethod
     def _resolve_excel_timeout_seconds() -> float:

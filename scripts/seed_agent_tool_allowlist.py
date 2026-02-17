@@ -47,15 +47,6 @@ SEED_POLICIES = [
         "status": "ACTIVE",
     },
     {
-        "tool_id": "query.label",
-        "method": "POST",
-        "path": "/api/v1/databases/{db_name}/query",
-        "risk_level": "read",
-        "requires_approval": False,
-        "requires_idempotency_key": False,
-        "status": "ACTIVE",
-    },
-    {
         "tool_id": "graph.query",
         "method": "POST",
         "path": "/api/v1/graph-query/{db_name}",

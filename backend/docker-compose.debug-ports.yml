@@ -6,9 +6,6 @@ services:
   oms:
     ports:
       - "8000:8000"
-  funnel:
-    ports:
-      - "8003:8003"
   agent:
     ports:
       - "8004:8004"

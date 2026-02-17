@@ -22,7 +22,6 @@ from shared.config.search_config import get_ontologies_index_name
 # Real service endpoints
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-FUNNEL_URL = (os.getenv("FUNNEL_BASE_URL") or os.getenv("FUNNEL_URL") or "http://localhost:8003").rstrip("/")
 
 # Test configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://:spicepass123@localhost:6380/0")
@@ -870,16 +869,6 @@ class TestHealthEndpoints:
                 assert result.get("status") == "success"
                 assert (result.get("data") or {}).get("status") == "healthy"
                 
-    @pytest.mark.asyncio
-    async def test_funnel_health(self):
-        """Test Funnel health endpoint"""
-        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            async with session.get(f"{FUNNEL_URL}/health") as resp:
-                assert resp.status == 200
-                result = await resp.json()
-                assert result.get("status") == "success"
-                assert (result.get("data") or {}).get("status") == "healthy"
-
 
 if __name__ == "__main__":
     # Run all tests

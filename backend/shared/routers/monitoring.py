@@ -312,7 +312,8 @@ async def get_configuration_overview(
         "services": {
             "oms_base_url": settings.services.oms_base_url,
             "bff_base_url": settings.services.bff_base_url,
-            "funnel_base_url": settings.services.funnel_base_url,
+            "agent_base_url": settings.services.agent_base_url,
+            "funnel_runtime": "internal",
         },
         "storage": {
             "minio_endpoint_url": settings.storage.minio_endpoint_url,

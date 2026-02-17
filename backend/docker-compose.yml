@@ -372,7 +372,6 @@ services:
     environment:
       - OMS_BASE_URL=http://oms:8000
       - OMS_CLIENT_TIMEOUT_SECONDS=${OMS_CLIENT_TIMEOUT_SECONDS:-60}
-      - FUNNEL_BASE_URL=http://funnel:8003
       - AGENT_BASE_URL=http://agent:8004
       - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-300}
       - BFF_AGENT_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
@@ -739,29 +738,6 @@ services:
     networks:
       - spice_network
     restart: unless-stopped
-
-  # Funnel
-  funnel:
-    build:
-      context: .
-      dockerfile: ./funnel/Dockerfile
-    container_name: spice_funnel
-    environment:
-      # Infra (rate limiting)
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
-      - LOG_LEVEL=INFO
-      - DOCKER_CONTAINER=true
-    networks:
-      - spice_network
-    ports:
-      - "${FUNNEL_PORT_HOST:-8003}:8003"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   # Message Relay - 표준화된 인증 정보
   message-relay:

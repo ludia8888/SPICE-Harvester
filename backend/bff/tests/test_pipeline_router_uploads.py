@@ -489,7 +489,7 @@ async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
         for item in (funnel_analysis.get("risk_summary") or [])
         if isinstance(item, dict)
     }
-    assert "FUNNEL_UNAVAILABLE" in codes
+    assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
 
 
 @pytest.mark.asyncio
@@ -661,7 +661,7 @@ async def test_get_ingest_request_funnel_failure_uses_fallback(monkeypatch):
         for item in (funnel_analysis.get("risk_summary") or [])
         if isinstance(item, dict)
     }
-    assert "FUNNEL_UNAVAILABLE" in codes
+    assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
 
 
 @pytest.mark.asyncio

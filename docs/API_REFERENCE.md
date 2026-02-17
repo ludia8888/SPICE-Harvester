@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **270**
+- Total documented endpoints: **262**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 246 |
-| `v2` | 24 |
+| `v1` | 228 |
+| `v2` | 34 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `databases` | 89 |
+| `databases` | 71 |
 | `pipelines` | 35 |
-| `ontologies` | 24 |
+| `ontologies` | 34 |
 | `admin` | 13 |
 | `data-connectors` | 13 |
 | `lineage` | 10 |
@@ -57,14 +57,10 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/databases/{db_name}/actions/logs` | List Action Logs | `v1` | no | no | `list_action_logs_api_v1_databases__db_name__actions_logs_get` |
 | `GET` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}` | Get Action Log | `v1` | no | no | `get_action_log_api_v1_databases__db_name__actions_logs__action_log_id__get` |
-| `POST` | `/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo` | Undo Action | `v1` | no | no | `undo_action_api_v1_databases__db_name__actions_logs__action_log_id__undo_post` |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations` | List Action Simulations | `v1` | no | no | `list_action_simulations_api_v1_databases__db_name__actions_simulations_get` |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}` | Get Action Simulation | `v1` | no | no | `get_action_simulation_api_v1_databases__db_name__actions_simulations__simulation_id__get` |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions` | List Action Simulation Versions | `v1` | no | no | `list_action_simulation_versions_api_v1_databases__db_name__actions_simulations__simulation_id__versions_get` |
 | `GET` | `/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}` | Get Action Simulation Version | `v1` | no | no | `get_action_simulation_version_api_v1_databases__db_name__actions_simulations__simulation_id__versions__version__get` |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/simulate` | Simulate Action | `v1` | no | no | `simulate_action_api_v1_databases__db_name__actions__action_type_id__simulate_post` |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit` | Submit Action | `v1` | no | no | `submit_action_api_v1_databases__db_name__actions__action_type_id__submit_post` |
-| `POST` | `/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch` | Submit Action Batch | `v1` | no | no | `submit_action_batch_api_v1_databases__db_name__actions__action_type_id__submit_batch_post` |
 
 ### Admin
 
@@ -195,9 +191,7 @@
 | `POST` | `/api/v1/databases` | Create Database | `v1` | no | no | `create_database_api_v1_databases_post` |
 | `GET` | `/api/v1/databases/{db_name}` | Get Database | `v1` | no | no | `get_database_api_v1_databases__db_name__get` |
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | `v1` | no | no | `delete_database_api_v1_databases__db_name__delete` |
-| `GET` | `/api/v1/databases/{db_name}/classes` | List Classes | `v1` | no | no | `list_classes_api_v1_databases__db_name__classes_get` |
 | `POST` | `/api/v1/databases/{db_name}/classes` | Create Class | `v1` | no | no | `create_class_api_v1_databases__db_name__classes_post` |
-| `GET` | `/api/v1/databases/{db_name}/classes/{class_id}` | Get Class | `v1` | no | no | `get_class_api_v1_databases__db_name__classes__class_id__get` |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | `v1` | no | no | `get_database_expected_seq_api_v1_databases__db_name__expected_seq_get` |
 
 ### Document Bundles
@@ -215,9 +209,19 @@
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes` | List Action Types V2 | `v2` | no | no | `list_action_types_v2_api_v2_ontologies__ontology__actionTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` | Get Action Type By Rid V2 | `v2` | no | no | `get_action_type_by_rid_v2_api_v2_ontologies__ontology__actionTypes_byRid__actionTypeRid__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/{actionType}` | Get Action Type V2 | `v2` | no | no | `get_action_type_v2_api_v2_ontologies__ontology__actionTypes__actionType__get` |
+| `POST` | `/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo` | Undo Action V2 | `v2` | no | no | `undo_action_v2_api_v2_ontologies__ontology__actions_logs__actionLogId__undo_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/apply` | Apply Action V2 | `v2` | no | no | `apply_action_v2_api_v2_ontologies__ontology__actions__action__apply_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/applyBatch` | Apply Action Batch V2 | `v2` | no | no | `apply_action_batch_v2_api_v2_ontologies__ontology__actions__action__applyBatch_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/fullMetadata` | Get Full Metadata V2 | `v2` | no | no | `get_full_metadata_v2_api_v2_ontologies__ontology__fullMetadata_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/interfaceTypes` | List Interface Types V2 | `v2` | no | no | `list_interface_types_v2_api_v2_ontologies__ontology__interfaceTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}` | Get Interface Type V2 | `v2` | no | no | `get_interface_type_v2_api_v2_ontologies__ontology__interfaceTypes__interfaceType__get` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/aggregate` | Aggregate Object Set V2 | `v2` | no | no | `aggregate_object_set_v2_api_v2_ontologies__ontology__objectSets_aggregate_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/createTemporary` | Create Temporary Object Set V2 | `v2` | no | no | `create_temporary_object_set_v2_api_v2_ontologies__ontology__objectSets_createTemporary_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadLinks` | Load Object Set Links V2 | `v2` | no | no | `load_object_set_links_v2_api_v2_ontologies__ontology__objectSets_loadLinks_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjects` | Load Object Set Objects V2 | `v2` | no | no | `load_object_set_objects_v2_api_v2_ontologies__ontology__objectSets_loadObjects_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes` | Load Object Set Multiple Object Types V2 | `v2` | no | no | `load_object_set_multiple_object_types_v2_api_v2_ontologies__ontology__objectSets_loadObjectsMultipleObjectTypes_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces` | Load Object Set Objects Or Interfaces V2 | `v2` | no | no | `load_object_set_objects_or_interfaces_v2_api_v2_ontologies__ontology__objectSets_loadObjectsOrInterfaces_post` |
+| `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | `v2` | no | no | `get_object_set_v2_api_v2_ontologies__ontology__objectSets__objectSetRid__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes` | List Object Types V2 | `v2` | no | no | `list_object_types_v2_api_v2_ontologies__ontology__objectTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | `v2` | no | no | `get_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | `v2` | no | no | `get_object_type_full_metadata_v2_api_v2_ontologies__ontology__objectTypes__objectType__fullMetadata_get` |
@@ -276,8 +280,6 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}` | Get Instance | `v1` | no | no | `get_instance_api_v1_databases__db_name__class__class_id__instance__instance_id__get` |
-| `GET` | `/api/v1/databases/{db_name}/class/{class_id}/instances` | Get Class Instances | `v1` | no | no | `get_class_instances_api_v1_databases__db_name__class__class_id__instances_get` |
 | `GET` | `/api/v1/databases/{db_name}/class/{class_id}/sample-values` | Get Class Sample Values | `v1` | no | no | `get_class_sample_values_api_v1_databases__db_name__class__class_id__sample_values_get` |
 
 ### Label Mappings
@@ -342,9 +344,7 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/ontology/action-types` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_action_types_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/action-types` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_action_types_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_action_types__resource_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_action_types__resource_id__put` |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/action-types/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_action_types__resource_id__delete` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/deploy` | Deploy Ontology | `v1` | no | no | `deploy_ontology_api_v1_databases__db_name__ontology_deploy_post` |
@@ -359,22 +359,16 @@
 | `PUT` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_groups__resource_id__put` |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/groups/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_groups__resource_id__delete` |
 | `GET` | `/api/v1/databases/{db_name}/ontology/health` | Ontology Health | `v1` | no | no | `ontology_health_api_v1_databases__db_name__ontology_health_get` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_interfaces_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/interfaces` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_interfaces_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_interfaces__resource_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_interfaces__resource_id__put` |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_interfaces__resource_id__delete` |
 | `GET` | `/api/v1/databases/{db_name}/ontology/proposals` | List Ontology Proposals | `v1` | no | no | `list_ontology_proposals_api_v1_databases__db_name__ontology_proposals_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/proposals` | Create Ontology Proposal | `v1` | no | no | `create_ontology_proposal_api_v1_databases__db_name__ontology_proposals_post` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve` | Approve Ontology Proposal | `v1` | no | no | `approve_ontology_proposal_api_v1_databases__db_name__ontology_proposals__proposal_id__approve_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_shared_properties_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/shared-properties` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_shared_properties_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__put` |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__delete` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/value-types` | List Route | `v1` | no | no | `list_route_api_v1_databases__db_name__ontology_value_types_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/value-types` | Create Route | `v1` | no | no | `create_route_api_v1_databases__db_name__ontology_value_types_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Get Route | `v1` | no | no | `get_route_api_v1_databases__db_name__ontology_value_types__resource_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Update Route | `v1` | no | no | `update_route_api_v1_databases__db_name__ontology_value_types__resource_id__put` |
 | `DELETE` | `/api/v1/databases/{db_name}/ontology/value-types/{resource_id}` | Delete Route | `v1` | no | no | `delete_route_api_v1_databases__db_name__ontology_value_types__resource_id__delete` |
 
@@ -382,9 +376,7 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types` | List Link Types | `v1` | no | no | `list_link_types_api_v1_databases__db_name__ontology_link_types_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types` | Create Link Type | `v1` | no | no | `create_link_type_api_v1_databases__db_name__ontology_link_types_post` |
-| `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Get Link Type | `v1` | no | no | `get_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__get` |
 | `PUT` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}` | Update Link Type | `v1` | no | no | `update_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__put` |
 | `GET` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | List Link Edits | `v1` | no | no | `list_link_edits_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_get` |
 | `POST` | `/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits` | Create Link Edit | `v1` | no | no | `create_link_edit_api_v1_databases__db_name__ontology_link_types__link_type_id__edits_post` |

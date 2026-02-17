@@ -358,101 +358,6 @@
       }
     },
     "/api/v1/databases/{db_name}/classes": {
-      "get": {
-        "tags": [
-          "Database Management"
-        ],
-        "summary": "List Classes",
-        "description": "데이터베이스의 클래스 목록 조회",
-        "operationId": "list_classes_api_v1_databases__db_name__classes_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": "Class",
-              "title": "Type"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Database Management"
@@ -528,176 +433,7 @@
         }
       }
     },
-    "/api/v1/databases/{db_name}/classes/{class_id}": {
-      "get": {
-        "tags": [
-          "Database Management"
-        ],
-        "summary": "Get Class",
-        "description": "특정 클래스 조회",
-        "operationId": "get_class_api_v1_databases__db_name__classes__class_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/databases/{db_name}/ontology/shared-properties": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "List Route",
-        "operationId": "list_route_api_v1_databases__db_name__ontology_shared_properties_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 200,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Ontology Extensions"
@@ -800,88 +536,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/shared-properties/{resource_id}": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "Get Route",
-        "operationId": "get_route_api_v1_databases__db_name__ontology_shared_properties__resource_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Resource Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "put": {
         "tags": [
           "Ontology Extensions"
@@ -1092,102 +746,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/value-types": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "List Route",
-        "operationId": "list_route_api_v1_databases__db_name__ontology_value_types_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 200,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Ontology Extensions"
@@ -1290,88 +848,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/value-types/{resource_id}": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "Get Route",
-        "operationId": "get_route_api_v1_databases__db_name__ontology_value_types__resource_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Resource Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "put": {
         "tags": [
           "Ontology Extensions"
@@ -1582,102 +1058,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/interfaces": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "List Route",
-        "operationId": "list_route_api_v1_databases__db_name__ontology_interfaces_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 200,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Ontology Extensions"
@@ -1780,88 +1160,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/interfaces/{resource_id}": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "Get Route",
-        "operationId": "get_route_api_v1_databases__db_name__ontology_interfaces__resource_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Resource Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "put": {
         "tags": [
           "Ontology Extensions"
@@ -3052,102 +2350,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/action-types": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "List Route",
-        "operationId": "list_route_api_v1_databases__db_name__ontology_action_types_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "minimum": 1,
-              "default": 200,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Ontology Extensions"
@@ -3250,88 +2452,6 @@
       }
     },
     "/api/v1/databases/{db_name}/ontology/action-types/{resource_id}": {
-      "get": {
-        "tags": [
-          "Ontology Extensions"
-        ],
-        "summary": "Get Route",
-        "operationId": "get_route_api_v1_databases__db_name__ontology_action_types__resource_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Resource Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
       "put": {
         "tags": [
           "Ontology Extensions"
@@ -4152,387 +3272,6 @@
         }
       }
     },
-    "/api/v1/databases/{db_name}/ontology/link-types": {
-      "get": {
-        "tags": [
-          "Ontology Link Types",
-          "Ontology Link Types"
-        ],
-        "summary": "List Link Types",
-        "operationId": "list_link_types_api_v1_databases__db_name__ontology_link_types_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Ontology Link Types",
-          "Ontology Link Types"
-        ],
-        "summary": "Create Link Type",
-        "operationId": "create_link_type_api_v1_databases__db_name__ontology_link_types_post",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "expected_head_commit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optimistic concurrency guard (defaults to branch head)",
-              "title": "Expected Head Commit"
-            },
-            "description": "Optimistic concurrency guard (defaults to branch head)"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinkTypeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}": {
-      "get": {
-        "tags": [
-          "Ontology Link Types",
-          "Ontology Link Types"
-        ],
-        "summary": "Get Link Type",
-        "operationId": "get_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "link_type_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Link Type Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "default": "main",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Ontology Link Types",
-          "Ontology Link Types"
-        ],
-        "summary": "Update Link Type",
-        "operationId": "update_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__put",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "link_type_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Link Type Id"
-            }
-          },
-          {
-            "name": "branch",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Target branch",
-              "title": "Branch"
-            },
-            "description": "Target branch"
-          },
-          {
-            "name": "expected_head_commit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optimistic concurrency guard (defaults to branch head)",
-              "title": "Expected Head Commit"
-            },
-            "description": "Optimistic concurrency guard (defaults to branch head)"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinkTypeUpdateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits": {
       "get": {
         "tags": [
@@ -4675,6 +3414,226 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LinkEditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{db_name}/ontology/link-types": {
+      "post": {
+        "tags": [
+          "Ontology Link Types",
+          "Ontology Link Types"
+        ],
+        "summary": "Create Link Type",
+        "operationId": "create_link_type_api_v1_databases__db_name__ontology_link_types_post",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "expected_head_commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optimistic concurrency guard (defaults to branch head)",
+              "title": "Expected Head Commit"
+            },
+            "description": "Optimistic concurrency guard (defaults to branch head)"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTypeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}": {
+      "put": {
+        "tags": [
+          "Ontology Link Types",
+          "Ontology Link Types"
+        ],
+        "summary": "Update Link Type",
+        "operationId": "update_link_type_api_v1_databases__db_name__ontology_link_types__link_type_id__put",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "link_type_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Link Type Id"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "expected_head_commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optimistic concurrency guard (defaults to branch head)",
+              "title": "Expected Head Commit"
+            },
+            "description": "Optimistic concurrency guard (defaults to branch head)"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTypeUpdateRequest"
               }
             }
           }
@@ -6368,6 +5327,18 @@
             }
           },
           {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Must be true for preview endpoints",
+              "default": false,
+              "title": "Preview"
+            },
+            "description": "Must be true for preview endpoints"
+          },
+          {
             "name": "branch",
             "in": "query",
             "required": false,
@@ -6676,6 +5647,356 @@
         ],
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/actions/{action}/apply": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Apply Action V2",
+        "operationId": "apply_action_v2_api_v2_ontologies__ontology__actions__action__apply_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "transactionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transactionid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyActionRequestV2"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Apply Action Batch V2",
+        "operationId": "apply_action_batch_v2_api_v2_ontologies__ontology__actions__action__applyBatch_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchApplyActionRequestV2"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Undo Action V2",
+        "operationId": "undo_action_v2_api_v2_ontologies__ontology__actions_logs__actionLogId__undo_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "actionLogId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Actionlogid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionUndoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -8154,6 +7475,858 @@
         }
       }
     },
+    "/api/v2/ontologies/{ontology}/objectSets/loadObjects": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Load Object Set Objects V2",
+        "operationId": "load_object_set_objects_v2_api_v2_ontologies__ontology__objectSets_loadObjects_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "transactionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transactionid"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/loadLinks": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Load Object Set Links V2",
+        "operationId": "load_object_set_links_v2_api_v2_ontologies__ontology__objectSets_loadLinks_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Load Object Set Multiple Object Types V2",
+        "operationId": "load_object_set_multiple_object_types_v2_api_v2_ontologies__ontology__objectSets_loadObjectsMultipleObjectTypes_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "transactionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transactionid"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Load Object Set Objects Or Interfaces V2",
+        "operationId": "load_object_set_objects_or_interfaces_v2_api_v2_ontologies__ontology__objectSets_loadObjectsOrInterfaces_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/aggregate": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Aggregate Object Set V2",
+        "operationId": "aggregate_object_set_v2_api_v2_ontologies__ontology__objectSets_aggregate_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "transactionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transactionid"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/createTemporary": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Create Temporary Object Set V2",
+        "operationId": "create_temporary_object_set_v2_api_v2_ontologies__ontology__objectSets_createTemporary_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Object Set V2",
+        "operationId": "get_object_set_v2_api_v2_ontologies__ontology__objectSets__objectSetRid__get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectSetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objectsetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/ontologies/{ontology}/objects/{objectType}": {
       "get": {
         "tags": [
@@ -9404,203 +9577,6 @@
         ]
       }
     },
-    "/api/v1/databases/{db_name}/class/{class_id}/instances": {
-      "get": {
-        "tags": [
-          "Instance Management"
-        ],
-        "summary": "Get Class Instances",
-        "operationId": "get_class_instances_api_v1_databases__db_name__class__class_id__instances_get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          },
-          {
-            "name": "base_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Base branch (ES base index)",
-              "default": "main",
-              "title": "Base Branch"
-            },
-            "description": "Base branch (ES base index)"
-          },
-          {
-            "name": "overlay_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "ES overlay branch (writeback)",
-              "title": "Overlay Branch"
-            },
-            "description": "ES overlay branch (writeback)"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1000,
-              "default": 100,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Search query for filtering instances",
-              "title": "Search"
-            },
-            "description": "Search query for filtering instances"
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "name": "action_type_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action Type Id"
-            }
-          },
-          {
-            "name": "submitted_by",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Submitted By"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Class Instances Api V1 Databases  Db Name  Class  Class Id  Instances Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/databases/{db_name}/class/{class_id}/sample-values": {
       "get": {
         "tags": [
@@ -9699,121 +9675,6 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Get Class Sample Values Api V1 Databases  Db Name  Class  Class Id  Sample Values Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}": {
-      "get": {
-        "tags": [
-          "Instance Management"
-        ],
-        "summary": "Get Instance",
-        "operationId": "get_instance_api_v1_databases__db_name__class__class_id__instance__instance_id__get",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Id"
-            }
-          },
-          {
-            "name": "instance_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Instance Id"
-            }
-          },
-          {
-            "name": "base_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Base branch (ES base index)",
-              "default": "main",
-              "title": "Base Branch"
-            },
-            "description": "Base branch (ES base index)"
-          },
-          {
-            "name": "overlay_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "ES overlay branch (writeback)",
-              "title": "Overlay Branch"
-            },
-            "description": "ES overlay branch (writeback)"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Instance Api V1 Databases  Db Name  Class  Class Id  Instance  Instance Id  Get"
                 }
               }
             }
@@ -10298,381 +10159,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CommandResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/actions/{action_type_id}/submit": {
-      "post": {
-        "tags": [
-          "Actions"
-        ],
-        "summary": "Submit Action",
-        "operationId": "submit_action_api_v1_databases__db_name__actions__action_type_id__submit_post",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "action_type_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Type Id"
-            }
-          },
-          {
-            "name": "base_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Base branch for authoritative reads",
-              "default": "main",
-              "title": "Base Branch"
-            },
-            "description": "Base branch for authoritative reads"
-          },
-          {
-            "name": "overlay_branch",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Overlay branch override (ES)",
-              "title": "Overlay Branch"
-            },
-            "description": "Overlay branch override (ES)"
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionSubmitRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Submit Action Api V1 Databases  Db Name  Actions  Action Type Id  Submit Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch": {
-      "post": {
-        "tags": [
-          "Actions"
-        ],
-        "summary": "Submit Action Batch",
-        "operationId": "submit_action_batch_api_v1_databases__db_name__actions__action_type_id__submit_batch_post",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "action_type_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Type Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionSubmitBatchRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Submit Action Batch Api V1 Databases  Db Name  Actions  Action Type Id  Submit Batch Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate": {
-      "post": {
-        "tags": [
-          "Actions"
-        ],
-        "summary": "Simulate Action",
-        "description": "Action writeback simulation (dry-run) surface.\n\nEnforces user/database access and forwards intent-only simulation requests to OMS.",
-        "operationId": "simulate_action_api_v1_databases__db_name__actions__action_type_id__simulate_post",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "action_type_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Type Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionSimulateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Simulate Action Api V1 Databases  Db Name  Actions  Action Type Id  Simulate Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo": {
-      "post": {
-        "tags": [
-          "Actions"
-        ],
-        "summary": "Undo Action",
-        "operationId": "undo_action_api_v1_databases__db_name__actions_logs__action_log_id__undo_post",
-        "parameters": [
-          {
-            "name": "db_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Db Name"
-            }
-          },
-          {
-            "name": "action_log_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Action Log Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionUndoRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Undo Action Api V1 Databases  Db Name  Actions Logs  Action Log Id  Undo Post"
                 }
               }
             }
@@ -24719,416 +24205,6 @@
         ],
         "title": "AcknowledgeRequest"
       },
-      "ActionSimulateAssumptions": {
-        "properties": {
-          "targets": {
-            "items": {
-              "$ref": "#/components/schemas/ActionSimulateTargetAssumption"
-            },
-            "type": "array",
-            "title": "Targets",
-            "description": "Per-target state injections (Level 2 what-if base state assumptions)."
-          }
-        },
-        "type": "object",
-        "title": "ActionSimulateAssumptions"
-      },
-      "ActionSimulateObservedBaseOverrides": {
-        "properties": {
-          "fields": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Fields"
-          },
-          "links": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Links"
-          }
-        },
-        "type": "object",
-        "title": "ActionSimulateObservedBaseOverrides",
-        "description": "Override observed_base snapshot fields/links to simulate stale reads."
-      },
-      "ActionSimulateRequest": {
-        "properties": {
-          "input": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Input",
-            "description": "Intent-only action input payload"
-          },
-          "correlation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Correlation Id",
-            "description": "Correlation id for trace/audit"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata",
-            "description": "Optional metadata"
-          },
-          "base_branch": {
-            "type": "string",
-            "title": "Base Branch",
-            "description": "Base branch for authoritative reads (default: main)",
-            "default": "main"
-          },
-          "overlay_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Overlay Branch",
-            "description": "Optional overlay branch override (default derived from writeback_target)"
-          },
-          "simulation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Simulation Id",
-            "description": "Optional simulation id for versioned reruns"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "scenarios": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ActionSimulateScenarioRequest"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scenarios",
-            "description": "Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only."
-          },
-          "include_effects": {
-            "type": "boolean",
-            "title": "Include Effects",
-            "description": "If true, compute downstream lakeFS/ES overlay effects",
-            "default": true
-          },
-          "assumptions": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ActionSimulateAssumptions"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional decision simulation assumptions (Level 2 state injection)."
-          }
-        },
-        "type": "object",
-        "title": "ActionSimulateRequest"
-      },
-      "ActionSimulateScenarioRequest": {
-        "properties": {
-          "scenario_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scenario Id",
-            "description": "Optional client-provided scenario identifier"
-          },
-          "conflict_policy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conflict Policy",
-            "description": "Optional conflict_policy override for this scenario (WRITEBACK_WINS|BASE_WINS|FAIL|MANUAL_REVIEW)"
-          }
-        },
-        "type": "object",
-        "title": "ActionSimulateScenarioRequest"
-      },
-      "ActionSimulateStatePatch": {
-        "properties": {
-          "set": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Set"
-          },
-          "unset": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Unset"
-          },
-          "link_add": {
-            "items": {},
-            "type": "array",
-            "title": "Link Add"
-          },
-          "link_remove": {
-            "items": {},
-            "type": "array",
-            "title": "Link Remove"
-          },
-          "delete": {
-            "type": "boolean",
-            "title": "Delete",
-            "description": "delete is not supported for simulation assumptions",
-            "default": false
-          }
-        },
-        "type": "object",
-        "title": "ActionSimulateStatePatch",
-        "description": "Patch-like state override for decision simulation (what-if)."
-      },
-      "ActionSimulateTargetAssumption": {
-        "properties": {
-          "class_id": {
-            "type": "string",
-            "title": "Class Id"
-          },
-          "instance_id": {
-            "type": "string",
-            "title": "Instance Id"
-          },
-          "base_overrides": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ActionSimulateStatePatch"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "observed_base_overrides": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ActionSimulateObservedBaseOverrides"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "class_id",
-          "instance_id"
-        ],
-        "title": "ActionSimulateTargetAssumption"
-      },
-      "ActionSubmitBatchDependencyRequest": {
-        "properties": {
-          "on": {
-            "type": "string",
-            "title": "On",
-            "description": "Dependency request_id in the same batch"
-          },
-          "trigger_on": {
-            "type": "string",
-            "title": "Trigger On",
-            "description": "SUCCEEDED|FAILED|COMPLETED",
-            "default": "SUCCEEDED"
-          }
-        },
-        "type": "object",
-        "required": [
-          "on"
-        ],
-        "title": "ActionSubmitBatchDependencyRequest"
-      },
-      "ActionSubmitBatchItemRequest": {
-        "properties": {
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Request Id"
-          },
-          "input": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Input"
-          },
-          "correlation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Correlation Id"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata"
-          },
-          "base_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Branch"
-          },
-          "overlay_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Overlay Branch"
-          },
-          "depends_on": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Depends On"
-          },
-          "trigger_on": {
-            "type": "string",
-            "title": "Trigger On",
-            "default": "SUCCEEDED"
-          },
-          "dependencies": {
-            "items": {
-              "$ref": "#/components/schemas/ActionSubmitBatchDependencyRequest"
-            },
-            "type": "array",
-            "title": "Dependencies"
-          }
-        },
-        "type": "object",
-        "title": "ActionSubmitBatchItemRequest"
-      },
-      "ActionSubmitBatchRequest": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ActionSubmitBatchItemRequest"
-            },
-            "type": "array",
-            "maxItems": 500,
-            "minItems": 1,
-            "title": "Items"
-          },
-          "base_branch": {
-            "type": "string",
-            "title": "Base Branch",
-            "default": "main"
-          },
-          "overlay_branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Overlay Branch"
-          }
-        },
-        "type": "object",
-        "title": "ActionSubmitBatchRequest"
-      },
-      "ActionSubmitRequest": {
-        "properties": {
-          "input": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Input",
-            "description": "Intent-only action input payload"
-          },
-          "correlation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Correlation Id",
-            "description": "Correlation id for trace/audit"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata",
-            "description": "Optional metadata"
-          }
-        },
-        "type": "object",
-        "title": "ActionSubmitRequest"
-      },
       "ActionUndoRequest": {
         "properties": {
           "reason": {
@@ -25357,6 +24433,108 @@
           "message"
         ],
         "title": "ApiResponse"
+      },
+      "ApplyActionRequestOptionsV2": {
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "returnEdits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returnedits"
+          }
+        },
+        "type": "object",
+        "title": "ApplyActionRequestOptionsV2"
+      },
+      "ApplyActionRequestV2": {
+        "properties": {
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplyActionRequestOptionsV2"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          }
+        },
+        "type": "object",
+        "title": "ApplyActionRequestV2"
+      },
+      "BatchApplyActionRequestItemV2": {
+        "properties": {
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          }
+        },
+        "type": "object",
+        "title": "BatchApplyActionRequestItemV2"
+      },
+      "BatchApplyActionRequestOptionsV2": {
+        "properties": {
+          "returnEdits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returnedits"
+          }
+        },
+        "type": "object",
+        "title": "BatchApplyActionRequestOptionsV2"
+      },
+      "BatchApplyActionRequestV2": {
+        "properties": {
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BatchApplyActionRequestOptionsV2"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/BatchApplyActionRequestItemV2"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Requests"
+          }
+        },
+        "type": "object",
+        "title": "BatchApplyActionRequestV2"
       },
       "Body_commit_import_from_excel_api_v1_databases__db_name__import_from_excel_commit_post": {
         "properties": {

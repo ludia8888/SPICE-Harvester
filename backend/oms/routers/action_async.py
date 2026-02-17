@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from oms.dependencies import EventStoreDep, ensure_database_exists
@@ -25,7 +25,8 @@ from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.request_context import get_correlation_id
-from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
+from shared.security.database_access import has_database_access_config
+from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.services.registries.action_log_registry import ActionLogRegistry, ActionLogStatus
 from shared.services.registries.action_simulation_registry import ActionSimulationRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -75,7 +76,7 @@ from oms.services.action_submit_service import submit_action_request
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/actions/{db_name}/async", tags=["Async Actions"])
+foundry_router = APIRouter(prefix="/v2/ontologies/{ontology}/actions", tags=["Foundry Actions v2"])
 
 
 class ActionSubmitRequest(BaseModel):
@@ -223,6 +224,62 @@ class ActionSimulateRequest(BaseModel):
         description="Optional decision simulation assumptions (Level 2 state injection).",
     )
 
+
+class ApplyActionRequestOptionsV2(BaseModel):
+    mode: Optional[str] = None
+
+
+class ApplyActionRequestV2(BaseModel):
+    options: Optional[ApplyActionRequestOptionsV2] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    correlation_id: Optional[str] = Field(default=None, alias="correlationId")
+
+
+class ApplyActionBatchRequestItemV2(BaseModel):
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ApplyActionBatchRequestV2(BaseModel):
+    requests: List[ApplyActionBatchRequestItemV2] = Field(default_factory=list, min_length=1, max_length=500)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    correlation_id: Optional[str] = Field(default=None, alias="correlationId")
+
+
+async def _ensure_ontology_database_exists(ontology: str) -> str:
+    db_name = validate_db_name(ontology)
+    if await has_database_access_config(db_name=db_name):
+        return db_name
+    raise classified_http_exception(
+        status.HTTP_404_NOT_FOUND,
+        f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다",
+        code=ErrorCode.RESOURCE_NOT_FOUND,
+    )
+
+
+def _resolve_v2_apply_mode(*, explicit_mode: Optional[str]) -> str:
+    mode = str(explicit_mode or "").strip().upper()
+    if not mode:
+        return "VALIDATE_AND_EXECUTE"
+    if mode not in {"VALIDATE_ONLY", "VALIDATE_AND_EXECUTE"}:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "options.mode must be VALIDATE_ONLY or VALIDATE_AND_EXECUTE",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    return mode
+
+
+def _foundry_valid_action_validation_payload() -> Dict[str, Any]:
+    return {
+        "validation": {
+            "result": "VALID",
+            "submissionCriteria": [],
+            "parameters": {},
+        }
+    }
+
+
 def _resolve_writeback_target(
     *,
     db_name: str,
@@ -341,22 +398,16 @@ def _build_undo_inverse_changes(target: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@router.post(
-    "/{action_type_id}/submit",
-    response_model=ActionSubmitResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-@trace_endpoint("oms.action.submit")
 async def submit_action_async(
-    db_name: str = Depends(ensure_database_exists),
-    action_type_id: str = Path(..., description="Action type identifier"),
+    db_name: str,
+    action_type_id: str,
     *,
     request: ActionSubmitRequest,
-    base_branch: Optional[str] = Query(default=None, description="Deprecated alias; use base_branch in body"),
-    event_store=EventStoreDep,
+    base_branch: Optional[str] = None,
+    event_store: Any,
 ) -> ActionSubmitResponse:
     """
-    Submit an Action for async execution.
+    Internal helper that submits one Action for async execution.
 
     The action worker is responsible for:
     - permission checks
@@ -381,11 +432,6 @@ async def submit_action_async(
     return ActionSubmitResponse(**payload)
 
 
-@router.post(
-    "/{action_type_id}/submit-batch",
-    response_model=ActionSubmitBatchResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
 @trace_endpoint("oms.action.submit_batch")
 async def submit_action_batch_async(
     db_name: str = Depends(ensure_database_exists),
@@ -540,11 +586,6 @@ async def submit_action_batch_async(
     )
 
 
-@router.post(
-    "/logs/{action_log_id}/undo",
-    response_model=ActionSubmitResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
 @trace_endpoint("oms.action.undo")
 async def undo_action_async(
     db_name: str = Depends(ensure_database_exists),
@@ -730,10 +771,6 @@ async def undo_action_async(
         await action_logs.close()
 
 
-@router.post(
-    "/{action_type_id}/simulate",
-    status_code=status.HTTP_200_OK,
-)
 @trace_endpoint("oms.action.simulate")
 async def simulate_action_async(
     db_name: str = Depends(ensure_database_exists),
@@ -1252,9 +1289,162 @@ async def simulate_action_async(
             await simulation_registry.close()
 
 
+@foundry_router.post(
+    "/{action}/apply",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("oms.action.v2.apply")
+async def apply_action_v2_oms(
+    ontology: str,
+    action: str,
+    *,
+    body: ApplyActionRequestV2,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
+    transaction_id: Optional[str] = Query(default=None, alias="transactionId"),
+    event_store=EventStoreDep,
+) -> Dict[str, Any]:
+    _ = sdk_package_rid, sdk_version, transaction_id
+    db_name = await _ensure_ontology_database_exists(ontology)
+    action_type_id = str(action or "").strip()
+    if not action_type_id:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "action is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+
+    metadata = dict(body.metadata or {})
+    metadata.setdefault("user_id", "system")
+    metadata.setdefault("user_type", "user")
+    mode = _resolve_v2_apply_mode(
+        explicit_mode=body.options.mode if body.options else None,
+    )
+    resolved_branch = str(branch or "").strip() or "main"
+
+    if mode == "VALIDATE_ONLY":
+        await simulate_action_async(
+            db_name=db_name,
+            action_type_id=action_type_id,
+            request=ActionSimulateRequest(
+                input=dict(body.parameters or {}),
+                correlation_id=body.correlation_id,
+                metadata=metadata,
+                base_branch=resolved_branch,
+                include_effects=False,
+            ),
+        )
+        return _foundry_valid_action_validation_payload()
+
+    await submit_action_batch_async(
+        db_name=db_name,
+        action_type_id=action_type_id,
+        request=ActionSubmitBatchRequest(
+            items=[
+                ActionSubmitBatchItemRequest(
+                    input=dict(body.parameters or {}),
+                    correlation_id=body.correlation_id,
+                    metadata=metadata,
+                )
+            ],
+            base_branch=resolved_branch,
+        ),
+        event_store=event_store,
+    )
+    return {}
+
+
+@foundry_router.post(
+    "/{action}/applyBatch",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("oms.action.v2.apply_batch")
+async def apply_action_batch_v2_oms(
+    ontology: str,
+    action: str,
+    *,
+    body: ApplyActionBatchRequestV2,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
+    event_store=EventStoreDep,
+) -> Dict[str, Any]:
+    _ = sdk_package_rid, sdk_version
+    db_name = await _ensure_ontology_database_exists(ontology)
+    action_type_id = str(action or "").strip()
+    if not action_type_id:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "action is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    if not body.requests:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "requests must not be empty",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+
+    base_metadata = dict(body.metadata or {})
+    base_metadata.setdefault("user_id", "system")
+    base_metadata.setdefault("user_type", "user")
+    resolved_branch = str(branch or "").strip() or "main"
+
+    items: List[ActionSubmitBatchItemRequest] = []
+    for item in body.requests:
+        items.append(
+            ActionSubmitBatchItemRequest(
+                input=dict(item.parameters or {}),
+                correlation_id=body.correlation_id,
+                metadata=dict(base_metadata),
+            )
+        )
+
+    await submit_action_batch_async(
+        db_name=db_name,
+        action_type_id=action_type_id,
+        request=ActionSubmitBatchRequest(
+            items=items,
+            base_branch=resolved_branch,
+        ),
+        event_store=event_store,
+    )
+    return {}
+
+
+@foundry_router.post(
+    "/logs/{actionLogId}/undo",
+    response_model=ActionSubmitResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+@trace_endpoint("oms.action.v2.undo")
+async def undo_action_v2_oms(
+    ontology: str,
+    actionLogId: str,
+    *,
+    request: ActionUndoRequest,
+    preview: bool = Query(False),
+    sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
+    event_store=EventStoreDep,
+) -> ActionSubmitResponse:
+    _ = preview, sdk_package_rid, sdk_version
+    db_name = await _ensure_ontology_database_exists(ontology)
+    return await undo_action_async(
+        db_name=db_name,
+        action_log_id=actionLogId,
+        request=request,
+        event_store=event_store,
+    )
+
+
 # FastAPI + postponed annotations safety:
 # Keep request parameter annotations concrete so they are always treated as body models.
 submit_action_async.__annotations__["request"] = ActionSubmitRequest
 submit_action_batch_async.__annotations__["request"] = ActionSubmitBatchRequest
 undo_action_async.__annotations__["request"] = ActionUndoRequest
 simulate_action_async.__annotations__["request"] = ActionSimulateRequest
+apply_action_v2_oms.__annotations__["body"] = ApplyActionRequestV2
+apply_action_batch_v2_oms.__annotations__["body"] = ApplyActionBatchRequestV2
+undo_action_v2_oms.__annotations__["request"] = ActionUndoRequest

@@ -597,7 +597,7 @@ app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(query.router, prefix="/api/v1", tags=["object-search"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
-app.include_router(action_async.router, prefix="/api/v1", tags=["async-actions"])
+app.include_router(action_async.foundry_router, prefix="/api", tags=["foundry-actions-v2"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 logger.info("Deprecated /branch and /version routers are permanently disabled (Foundry-style profile)")
 

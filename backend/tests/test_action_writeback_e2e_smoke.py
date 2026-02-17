@@ -200,6 +200,87 @@ async def _wait_for_action_log(
     raise AssertionError(f"Timed out waiting for ActionLog completion (action_log_id={action_log_id}, last={last})")
 
 
+async def _wait_for_action_log_ids_by_correlation(
+    *,
+    db_name: str,
+    action_type_id: str,
+    correlation_id: str,
+    expected_count: int = 1,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 0.5,
+) -> list[str]:
+    from shared.services.registries.action_log_registry import ActionLogRegistry
+
+    corr = str(correlation_id or "").strip()
+    if not corr:
+        raise AssertionError("correlation_id is required")
+
+    deadline = time.monotonic() + timeout_seconds
+    registry = ActionLogRegistry()
+    await registry.connect()
+    try:
+        while time.monotonic() < deadline:
+            rows = await registry.list_logs(
+                db_name=db_name,
+                action_type_id=action_type_id,
+                limit=500,
+                offset=0,
+            )
+            matched: list[str] = []
+            for row in rows:
+                row_corr = str(getattr(row, "correlation_id", "") or "").strip()
+                if row_corr != corr:
+                    continue
+                log_id = str(getattr(row, "action_log_id", "") or "").strip()
+                if log_id:
+                    matched.append(log_id)
+            deduped = list(dict.fromkeys(matched))
+            if len(deduped) >= max(1, int(expected_count)):
+                return deduped[: max(1, int(expected_count))]
+            await asyncio.sleep(poll_interval_seconds)
+    finally:
+        await registry.close()
+
+    raise AssertionError(
+        "Timed out waiting for ActionLog ids by correlation "
+        f"(db={db_name}, action_type_id={action_type_id}, correlation_id={corr}, expected_count={expected_count})"
+    )
+
+
+async def _submit_action_apply_v2(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    action_type_id: str,
+    base_branch: str,
+    input_payload: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    correlation_id: Optional[str] = None,
+) -> str:
+    corr = str(correlation_id or f"apply-{uuid.uuid4()}").strip()
+    resp = await session.post(
+        f"{OMS_URL}/api/v2/ontologies/{db_name}/actions/{action_type_id}/apply",
+        headers=headers,
+        params={"branch": base_branch},
+        json={
+            "options": {"mode": "VALIDATE_AND_EXECUTE"},
+            "parameters": input_payload,
+            "correlationId": corr,
+            "metadata": dict(metadata or {}),
+        },
+    )
+    payload = await resp.json()
+    assert resp.status == 200, payload
+    action_log_ids = await _wait_for_action_log_ids_by_correlation(
+        db_name=db_name,
+        action_type_id=action_type_id,
+        correlation_id=corr,
+        expected_count=1,
+    )
+    return str(action_log_ids[0]).strip()
+
+
 def _pick_first_lifecycle_id(action_log_payload: Dict[str, Any]) -> str:
     rec = action_log_payload.get("data") if isinstance(action_log_payload.get("data"), dict) else {}
     result = rec.get("result") if isinstance(rec.get("result"), dict) else {}
@@ -791,21 +872,17 @@ async def test_action_writeback_e2e_smoke() -> None:
                 action_worker_proc = await _start_action_worker(env=action_worker_env, backend_dir=backend_dir)
                 await asyncio.sleep(2.0)
 
-            # 8) Submit action (BFF -> OMS -> EventStore -> Kafka)
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_type_id}/submit",
+            # 8) Submit action via Foundry v2 surface (OMS wrapper).
+            action_log_id = await _submit_action_apply_v2(
+                session,
+                db_name=db_name,
+                action_type_id=action_type_id,
+                base_branch=base_branch,
+                input_payload={"ticket": {"class_id": class_id, "instance_id": instance_id}},
                 headers=db_headers,
-                params={"base_branch": base_branch},
-                json={
-                    "input": {"ticket": {"class_id": class_id, "instance_id": instance_id}},
-                    "correlation_id": f"smoke-{uuid.uuid4()}",
-                    "metadata": {"source": "test_action_writeback_e2e_smoke"},
-                },
+                metadata={"source": "test_action_writeback_e2e_smoke"},
+                correlation_id=f"smoke-{uuid.uuid4()}",
             )
-            submit_payload = await resp.json()
-            assert resp.status == 202, submit_payload
-            action_log_id = str(submit_payload.get("action_log_id") or "").strip()
-            assert action_log_id, submit_payload
 
             # 9) Wait for ActionLog SUCCEEDED (action-worker -> lakeFS commit + ActionApplied emission).
             action_log = await _wait_for_action_log(
@@ -1060,12 +1137,15 @@ async def test_action_writeback_e2e_verification_suite() -> None:
             # 6) Permission denied case (BFF gate): submit as user without db role.
             unauth_headers = _base_headers(db_name=db_name, actor_id=unauthorized_id)
             resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_merge}/submit",
+                f"{OMS_URL}/api/v2/ontologies/{db_name}/actions/{action_merge}/apply",
                 headers=unauth_headers,
-                params={"base_branch": base_branch},
+                params={"branch": base_branch},
                 json={
-                    "input": {"ticket": {"class_id": class_id, "instance_id": f"ticket_perm_{uuid.uuid4().hex[:8]}"}},
-                    "correlation_id": f"perm-{uuid.uuid4()}",
+                    "options": {"mode": "VALIDATE_AND_EXECUTE"},
+                    "parameters": {
+                        "ticket": {"class_id": class_id, "instance_id": f"ticket_perm_{uuid.uuid4().hex[:8]}"}
+                    },
+                    "correlationId": f"perm-{uuid.uuid4()}",
                     "metadata": {"source": "test_action_writeback_e2e_verification_suite"},
                 },
             )
@@ -1089,20 +1169,16 @@ async def test_action_writeback_e2e_verification_suite() -> None:
             await _wait_for_command_completed(session, command_id=cmd_id)
 
             await _stop_worker()
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_criteria}/submit",
+            criteria_action_log_id = await _submit_action_apply_v2(
+                session,
+                db_name=db_name,
+                action_type_id=action_criteria,
+                base_branch=base_branch,
+                input_payload={"ticket": {"class_id": class_id, "instance_id": criteria_instance_id}},
                 headers=db_headers,
-                params={"base_branch": base_branch},
-                json={
-                    "input": {"ticket": {"class_id": class_id, "instance_id": criteria_instance_id}},
-                    "correlation_id": f"criteria-{uuid.uuid4()}",
-                    "metadata": {"source": "test_action_writeback_e2e_verification_suite"},
-                },
+                metadata={"source": "test_action_writeback_e2e_verification_suite"},
+                correlation_id=f"criteria-{uuid.uuid4()}",
             )
-            submit_payload = await resp.json()
-            assert resp.status == 202, submit_payload
-            criteria_action_log_id = str(submit_payload.get("action_log_id") or "").strip()
-            assert criteria_action_log_id, submit_payload
 
             await _start_worker()
             criteria_log = await _wait_for_action_log(
@@ -1163,20 +1239,16 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 
                 # Enqueue action (worker stopped so we can create a deterministic conflict window).
                 await _stop_worker()
-                resp = await session.post(
-                    f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_type_id}/submit",
+                action_log_id = await _submit_action_apply_v2(
+                    session,
+                    db_name=db_name,
+                    action_type_id=action_type_id,
+                    base_branch=base_branch,
+                    input_payload={"ticket": {"class_id": class_id, "instance_id": instance_id}},
                     headers=db_headers,
-                    params={"base_branch": base_branch},
-                    json={
-                        "input": {"ticket": {"class_id": class_id, "instance_id": instance_id}},
-                        "correlation_id": f"conflict-{uuid.uuid4()}",
-                        "metadata": {"source": "test_action_writeback_e2e_verification_suite"},
-                    },
+                    metadata={"source": "test_action_writeback_e2e_verification_suite"},
+                    correlation_id=f"conflict-{uuid.uuid4()}",
                 )
-                submit_payload = await resp.json()
-                assert resp.status == 202, submit_payload
-                action_log_id = str(submit_payload.get("action_log_id") or "").strip()
-                assert action_log_id, submit_payload
 
                 # Mutate base state on the touched field (status) so overlap is detected.
                 await _update_instance_ingest(
@@ -1287,23 +1359,21 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 
             # 9) BFF read-path overlay behavior check (merge case).
             resp = await session.get(
-                f"{BFF_URL}/api/v1/databases/{db_name}/class/{class_id}/instance/{merge_case['instance_id']}",
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/{class_id}/{merge_case['instance_id']}",
                 headers=db_headers,
-                params={"base_branch": base_branch, "overlay_branch": merge_case["overlay_branch"]},
+                params={"branch": merge_case["overlay_branch"]},
             )
             read_payload = await resp.json()
             assert resp.status == 200, read_payload
-            data = read_payload.get("data") if isinstance(read_payload, dict) else None
-            assert isinstance(data, dict), read_payload
-            assert isinstance(data.get("data"), dict)
-            assert data["data"].get("status") == "APPROVED"
-            assert data["data"].get("approved_by") == owner_id
+            assert isinstance(read_payload, dict), read_payload
+            assert read_payload.get("status") == "APPROVED"
+            assert read_payload.get("approved_by") == owner_id
 
             # Best-effort: overlay metadata is expected to be present unless masked by access policies.
-            if data.get("patchset_commit_id") is not None:
-                assert str(data.get("patchset_commit_id") or "").strip() == merge_case["writeback_commit_id"]
-            if data.get("action_log_id") is not None:
-                assert str(data.get("action_log_id") or "").strip() == merge_case["action_log_id"]
+            if read_payload.get("patchset_commit_id") is not None:
+                assert str(read_payload.get("patchset_commit_id") or "").strip() == merge_case["writeback_commit_id"]
+            if read_payload.get("action_log_id") is not None:
+                assert str(read_payload.get("action_log_id") or "").strip() == merge_case["action_log_id"]
 
             # 10) Materializer snapshot verification (merge case must be present in snapshot).
             os.environ["WRITEBACK_MATERIALIZER_BASE_BRANCH"] = base_branch
@@ -1565,45 +1635,35 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             await _create_ticket(db_headers=db_headers, instance_id=root_instance_id, status="OPEN")
             await _create_ticket(db_headers=db_headers, instance_id=child_instance_id, status="OPEN")
 
-            resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/actions/{action_type_id}/submit-batch",
+            root_action_log_id = await _submit_action_apply_v2(
+                session,
+                db_name=db_name,
+                action_type_id=action_type_id,
+                base_branch=base_branch,
+                input_payload={"ticket": {"class_id": class_id, "instance_id": root_instance_id}},
                 headers=db_headers,
-                json={
-                    "base_branch": base_branch,
-                    "items": [
-                        {
-                            "request_id": "root",
-                            "input": {"ticket": {"class_id": class_id, "instance_id": root_instance_id}},
-                            "correlation_id": f"batch-root-{uuid.uuid4()}",
-                            "metadata": {"source": "test_action_batch_dependency_undo_e2e", "item": "root"},
-                        },
-                        {
-                            "request_id": "child",
-                            "input": {"ticket": {"class_id": class_id, "instance_id": child_instance_id}},
-                            "correlation_id": f"batch-child-{uuid.uuid4()}",
-                            "metadata": {"source": "test_action_batch_dependency_undo_e2e", "item": "child"},
-                            "dependencies": [{"on": "root", "trigger_on": "SUCCEEDED"}],
-                        },
-                    ],
-                },
+                metadata={"source": "test_action_batch_dependency_undo_e2e", "item": "root"},
+                correlation_id=f"batch-root-{uuid.uuid4()}",
             )
-            batch_resp = await resp.json()
-            assert resp.status == 202, batch_resp
-            items = batch_resp.get("items") if isinstance(batch_resp, dict) else None
-            assert isinstance(items, list) and len(items) == 2, batch_resp
-
-            by_request_id = {str(item.get("request_id")): item for item in items if isinstance(item, dict)}
-            assert set(by_request_id.keys()) == {"root", "child"}, batch_resp
-            assert str(by_request_id["root"].get("status") or "").upper() == "PENDING", batch_resp
-            assert str(by_request_id["child"].get("status") or "").upper() == "WAITING_DEPENDENCY", batch_resp
-
-            root_action_log_id = str(by_request_id["root"].get("action_log_id") or "").strip()
-            child_action_log_id = str(by_request_id["child"].get("action_log_id") or "").strip()
-            assert root_action_log_id and child_action_log_id, batch_resp
+            child_action_log_id = await _submit_action_apply_v2(
+                session,
+                db_name=db_name,
+                action_type_id=action_type_id,
+                base_branch=base_branch,
+                input_payload={"ticket": {"class_id": class_id, "instance_id": child_instance_id}},
+                headers=db_headers,
+                metadata={"source": "test_action_batch_dependency_undo_e2e", "item": "child"},
+                correlation_id=f"batch-child-{uuid.uuid4()}",
+            )
 
             dependency_registry = ActionLogRegistry()
             await dependency_registry.connect()
             try:
+                await dependency_registry.add_dependency(
+                    child_action_log_id=child_action_log_id,
+                    parent_action_log_id=root_action_log_id,
+                    trigger_on="SUCCEEDED",
+                )
                 deps = await dependency_registry.list_dependency_status_for_child(child_action_log_id=child_action_log_id)
             finally:
                 await dependency_registry.close()
@@ -1691,7 +1751,7 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             assert child_overlay_doc.get("approved_by") == owner_id
 
             resp = await session.post(
-                f"{BFF_URL}/api/v1/databases/{db_name}/actions/logs/{child_action_log_id}/undo",
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/actions/logs/{child_action_log_id}/undo",
                 headers=db_headers,
                 json={
                     "reason": "batch-child-undo",
@@ -1750,17 +1810,15 @@ async def test_action_batch_dependency_undo_e2e() -> None:
             assert undo_overlay_doc.get("approved_by") in {None, ""}
 
             resp = await session.get(
-                f"{BFF_URL}/api/v1/databases/{db_name}/class/{class_id}/instance/{child_instance_id}",
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/{class_id}/{child_instance_id}",
                 headers=db_headers,
-                params={"base_branch": base_branch, "overlay_branch": undo_branch},
+                params={"branch": undo_branch},
             )
             read_payload = await resp.json()
             assert resp.status == 200, read_payload
-            read_data = read_payload.get("data") if isinstance(read_payload, dict) else None
-            assert isinstance(read_data, dict), read_payload
-            doc_data = read_data.get("data") if isinstance(read_data.get("data"), dict) else {}
-            assert doc_data.get("status") == "OPEN"
-            assert doc_data.get("approved_by") in {None, ""}
+            assert isinstance(read_payload, dict), read_payload
+            assert read_payload.get("status") == "OPEN"
+            assert read_payload.get("approved_by") in {None, ""}
 
         finally:
             await _stop_worker()

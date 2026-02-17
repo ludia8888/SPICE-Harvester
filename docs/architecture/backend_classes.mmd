@@ -183,7 +183,7 @@ classDiagram
     %% Relationships
     FastAPIApplication --> OntologyManagementService : uses
     FastAPIApplication --> BackendForFrontend : uses (Port 8002)
-    FastAPIApplication --> FunnelService : uses (Port 8003)
+    FastAPIApplication --> FunnelService : uses (internal runtime)
     FastAPIApplication --> OntologyManagementService : uses (Port 8000)
     OntologyManagementService --> OntologyRegistryService : uses
     OntologyManagementService --> RelationshipManager : uses

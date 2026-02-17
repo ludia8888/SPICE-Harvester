@@ -40,7 +40,7 @@ A persistence pattern where state is derived from a sequence of immutable events
 The durable, append-only log of all events, stored in S3/MinIO. The event store is the canonical source of truth; all other data stores are projections of it.
 
 **Funnel**
-The ingestion service that handles bulk data imports, file uploads, and streaming data. Runs on port 8003. Named for its role in funneling external data into the platform.
+The internal tabular type-inference and sheet-structure analysis runtime used by BFF data-connector flows. In Foundry-aligned topology it is not exposed as a standalone public service.
 
 **Instance**
 A concrete record (row) of a particular object type. Each instance has a globally unique RID, a primary key, and a set of property values conforming to the object type schema.
@@ -107,8 +107,7 @@ A single step in a pipeline that processes data. Each transform has a type (e.g.
 |---------|------|
 | OMS | 8000 |
 | BFF | 8002 |
-| Funnel | 8003 |
-| Admin | 8004 |
+| Agent | 8004 |
 | PostgreSQL | 5432 |
 | Elasticsearch | 9200 |
 | Redis | 6379 |

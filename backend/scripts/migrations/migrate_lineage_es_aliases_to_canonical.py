@@ -105,7 +105,7 @@ async def _run(*, dsn: str, schema: str) -> None:
 
 def main() -> None:
     args = _build_parser().parse_args()
-    dsn = args.dsn or os.getenv("POSTGRES_URL")
+    dsn = args.dsn or os.environ.get("POSTGRES_URL")
     if not dsn:
         raise RuntimeError("Postgres DSN is required (use --dsn or POSTGRES_URL env)")
     asyncio.run(_run(dsn=dsn, schema=args.schema))

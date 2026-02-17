@@ -294,18 +294,6 @@ class ServiceSettings(BaseSettings):
         default=None,
         description="BFF base URL override (BFF_BASE_URL)"
     )
-    funnel_host: str = Field(
-        default_factory=lambda: ("funnel" if _is_docker_environment() else "127.0.0.1"),
-        description="Funnel service host",
-    )
-    funnel_port: int = Field(
-        default=8003,
-        description="Funnel service port"
-    )
-    funnel_base_url_override: Optional[str] = Field(
-        default=None,
-        description="Funnel base URL override (FUNNEL_BASE_URL)"
-    )
     agent_host: str = Field(
         default_factory=lambda: ("agent" if _is_docker_environment() else "127.0.0.1"),
         description="Agent service host",
@@ -379,14 +367,6 @@ class ServiceSettings(BaseSettings):
         fallback = (os.getenv("BFF_URL") or "").strip()
         return fallback or v
 
-    @field_validator("funnel_base_url_override", mode="before")
-    @classmethod
-    def get_funnel_base_url_override(cls, v):
-        if os.getenv("FUNNEL_BASE_URL") not in (None, ""):
-            return os.getenv("FUNNEL_BASE_URL")
-        fallback = (os.getenv("FUNNEL_URL") or "").strip()
-        return fallback or v
-
     @field_validator("agent_base_url_override", mode="before")
     @classmethod
     def get_agent_base_url_override(cls, v):
@@ -445,14 +425,6 @@ class ServiceSettings(BaseSettings):
         protocol = "https" if self.use_https else "http"
         return f"{protocol}://{self.bff_host}:{self.bff_port}"
     
-    @property
-    def funnel_base_url(self) -> str:
-        """Construct Funnel base URL"""
-        if self.funnel_base_url_override:
-            return self.funnel_base_url_override.rstrip("/")
-        protocol = "https" if self.use_https else "http"
-        return f"{protocol}://{self.funnel_host}:{self.funnel_port}"
-
     @property
     def agent_base_url(self) -> str:
         """Construct Agent base URL"""
@@ -949,19 +921,6 @@ class FeatureFlagsSettings(BaseSettings):
         default=False,
         description="Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
     )
-    enable_foundry_v2_strict_compat: bool = Field(
-        default=True,
-        description="Enable strict Foundry v2 wire compatibility mode (ENABLE_FOUNDRY_V2_STRICT_COMPAT)",
-    )
-    foundry_v2_strict_compat_db_allowlist: str = Field(
-        default="",
-        description=(
-            "Comma-separated db allowlist for strict Foundry v2 compatibility "
-            "(FOUNDRY_V2_STRICT_COMPAT_DB_ALLOWLIST)"
-        ),
-    )
-
-
 class PipelineSettings(BaseSettings):
     """Pipeline Builder + pipeline worker settings."""
 

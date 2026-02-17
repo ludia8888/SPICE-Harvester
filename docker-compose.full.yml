@@ -1,12 +1,12 @@
 # 전체 서비스 통합 구성 - Command/Event Sourcing + Redis + WebSocket 통합
-# 포함 서비스: PostgreSQL, Redis, Kafka, OMS, BFF, Funnel, Worker, Message Relay
+# 포함 서비스: PostgreSQL, Redis, Kafka, OMS, BFF, Worker, Message Relay
 # WebSocket 실시간 업데이트 완전 지원
 # 실행: docker-compose -f docker-compose.full.yml up -d
 
 # 서비스 실행 순서:
 # 1. 데이터베이스 (PostgreSQL, Redis)
 # 2. 메시지 브로커 (Zookeeper, Kafka)
-# 3. 핵심 서비스 (OMS, BFF, Funnel) - WebSocket 자동 시작
+# 3. 핵심 서비스 (OMS, BFF) - WebSocket 자동 시작
 # 4. 백그라운드 서비스 (Message Relay, Ontology Worker)
 
 services:
@@ -56,7 +56,6 @@ services:
       - OTEL_ENABLE_METRICS=true
     depends_on:
       - oms
-      - funnel
       - postgres
       - lakefs
       - otel-collector
@@ -74,18 +73,6 @@ services:
       - bff
       - postgres
       - minio
-      - otel-collector
-      
-  funnel:
-    extends:
-      file: backend/docker-compose.yml
-      service: funnel
-    environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_EXPORT_OTLP=true
-      - OTEL_ENABLE_TRACING=true
-      - OTEL_ENABLE_METRICS=true
-    depends_on:
       - otel-collector
       
   message-relay:

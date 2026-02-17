@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any, Dict
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
 import oms.routers.action_async as action_async
@@ -76,7 +76,7 @@ class _FakeEventStore:
 @pytest.fixture
 def action_async_app() -> FastAPI:
     app = FastAPI()
-    app.include_router(action_async.router)
+    app.include_router(action_async.foundry_router)
 
     async def _fake_db_name(db_name: str) -> str:
         return db_name
@@ -91,10 +91,14 @@ def action_async_app() -> FastAPI:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_submit_returns_403_for_datasource_derived_without_data_engineer_role(
+async def test_submit_batch_returns_403_for_datasource_derived_without_data_engineer_role(
     action_async_app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
     monkeypatch.setattr(action_async, "compile_action_change_shape", lambda _impl, input_payload: [])
 
@@ -106,11 +110,11 @@ async def test_submit_returns_403_for_datasource_derived_without_data_engineer_r
     transport = ASGITransport(app=action_async_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/actions/demo/async/ApproveTicket/submit",
+            "/v2/ontologies/demo/actions/ApproveTicket/apply?branch=main",
             json={
-                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "options": {"mode": "VALIDATE_AND_EXECUTE"},
+                "parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
                 "metadata": {"user_id": "alice", "user_type": "user"},
-                "base_branch": "main",
             },
         )
 
@@ -171,28 +175,32 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())
     monkeypatch.setattr(action_async, "preflight_action_writeback", _fake_preflight)
 
-    transport = ASGITransport(app=action_async_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/actions/demo/async/ApproveTicket/simulate",
-            json={
-                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
-                "metadata": {"user_id": "alice", "user_type": "user"},
-                "base_branch": "main",
-                "include_effects": False,
-            },
+    with pytest.raises(HTTPException) as exc_info:
+        await action_async.simulate_action_async(
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            request=action_async.ActionSimulateRequest(
+                input={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                metadata={"user_id": "alice", "user_type": "user"},
+                base_branch="main",
+                include_effects=False,
+            ),
         )
 
-    assert response.status_code == 503, response.text
-    assert "data_access_unverifiable" in response.text
+    assert exc_info.value.status_code == 503
+    assert "data_access_unverifiable" in str(exc_info.value.detail)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_submit_returns_403_when_target_class_misses_required_interface(
+async def test_submit_batch_returns_403_when_target_class_misses_required_interface(
     action_async_app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
     action_spec = _build_action_spec()
     action_spec["target_interfaces"] = ["IApproval"]
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=action_spec)
@@ -217,11 +225,11 @@ async def test_submit_returns_403_when_target_class_misses_required_interface(
     transport = ASGITransport(app=action_async_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/actions/demo/async/ApproveTicket/submit",
+            "/v2/ontologies/demo/actions/ApproveTicket/apply?branch=main",
             json={
-                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "options": {"mode": "VALIDATE_AND_EXECUTE"},
+                "parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
                 "metadata": {"user_id": "alice", "user_type": "user"},
-                "base_branch": "main",
             },
         )
 
@@ -231,10 +239,14 @@ async def test_submit_returns_403_when_target_class_misses_required_interface(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_submit_returns_503_when_target_edit_access_is_unverifiable(
+async def test_submit_batch_returns_503_when_target_edit_access_is_unverifiable(
     action_async_app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
 
     monkeypatch.setattr(
@@ -274,11 +286,11 @@ async def test_submit_returns_503_when_target_edit_access_is_unverifiable(
     transport = ASGITransport(app=action_async_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/actions/demo/async/ApproveTicket/submit",
+            "/v2/ontologies/demo/actions/ApproveTicket/apply?branch=main",
             json={
-                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                "options": {"mode": "VALIDATE_AND_EXECUTE"},
+                "parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
                 "metadata": {"user_id": "alice", "user_type": "user"},
-                "base_branch": "main",
             },
         )
 
@@ -338,18 +350,18 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())
     monkeypatch.setattr(action_async, "preflight_action_writeback", _fake_preflight)
 
-    transport = ASGITransport(app=action_async_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.post(
-            "/actions/demo/async/ApproveTicket/simulate",
-            json={
-                "input": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
-                "metadata": {"user_id": "alice", "user_type": "user"},
-                "base_branch": "main",
-                "use_branch_head": True,
-                "include_effects": False,
-            },
+    with pytest.raises(HTTPException) as exc_info:
+        await action_async.simulate_action_async(
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            request=action_async.ActionSimulateRequest(
+                input={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                metadata={"user_id": "alice", "user_type": "user"},
+                base_branch="main",
+                use_branch_head=True,
+                include_effects=False,
+            ),
         )
 
-    assert response.status_code == 503, response.text
-    assert "branch:main" in response.text
+    assert exc_info.value.status_code == 503
+    assert "branch:main" in str(exc_info.value.detail)

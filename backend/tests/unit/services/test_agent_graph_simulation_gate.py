@@ -47,8 +47,18 @@ class _StubRuntime:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_simulation_rejection_stops_before_submit() -> None:
-    simulate = AgentToolCall(service="bff", method="POST", path="/api/v1/databases/demo/actions/A/simulate", body={})
-    submit = AgentToolCall(service="bff", method="POST", path="/api/v1/databases/demo/actions/A/submit", body={})
+    simulate = AgentToolCall(
+        service="bff",
+        method="POST",
+        path="/api/v2/ontologies/demo/actions/A/apply",
+        body={"options": {"mode": "VALIDATE_ONLY"}, "parameters": {}},
+    )
+    submit = AgentToolCall(
+        service="bff",
+        method="POST",
+        path="/api/v2/ontologies/demo/actions/A/applyBatch",
+        body={"requests": [{"parameters": {}}]},
+    )
 
     runtime = _StubRuntime(
         results=[

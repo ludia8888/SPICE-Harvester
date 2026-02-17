@@ -55,12 +55,6 @@
       "port": null
     },
     {
-      "id": "funnel",
-      "label": "funnel",
-      "category": "api",
-      "port": null
-    },
-    {
       "id": "grafana",
       "label": "grafana",
       "category": "observability",
@@ -294,10 +288,6 @@
     },
     {
       "source": "bff",
-      "target": "funnel"
-    },
-    {
-      "source": "bff",
       "target": "otel-collector"
     },
     {
@@ -331,10 +321,6 @@
     {
       "source": "db-migrations",
       "target": "postgres"
-    },
-    {
-      "source": "funnel",
-      "target": "otel-collector"
     },
     {
       "source": "grafana",

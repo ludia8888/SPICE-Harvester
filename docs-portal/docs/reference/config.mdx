@@ -26,8 +26,8 @@ Configuration values are resolved in the following precedence order (highest to 
 |-------|-----------|-------------|
 | `OmsConfig` | `OMS_` | OMS server settings (host, port, workers, timeouts) |
 | `BffConfig` | `BFF_` | BFF gateway settings (host, port, CORS, rate limits) |
-| `FunnelConfig` | `FUNNEL_` | Funnel ingestion settings (host, port, upload limits) |
-| `AdminConfig` | `ADMIN_` | Admin service settings |
+| `ServiceSettings (type inference)` | `FUNNEL_` | Internal type-inference runtime timeout settings (no standalone host/port) |
+| `AgentConfig` | `AGENT_` | Agent service settings |
 | `AuthConfig` | `AUTH_` | Authentication settings (secret key, token expiry, issuer) |
 
 ### Data Store Configuration

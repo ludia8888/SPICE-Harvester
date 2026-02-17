@@ -73,7 +73,6 @@ KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-39092}"
 
 OMS_URL="${OMS_BASE_URL:-http://localhost:8000}"
 BFF_URL="${BFF_BASE_URL:-http://localhost:8002}"
-FUNNEL_URL="${FUNNEL_BASE_URL:-http://localhost:8003}"
 MINIO_URL="${MINIO_ENDPOINT_URL:-http://localhost:${MINIO_PORT_HOST}}"
 
 # Compose file selection:
@@ -130,7 +129,6 @@ start_services() {
     wait_for_url "MinIO" "${MINIO_URL%/}/minio/health/live" 90
     wait_for_url "OMS" "${OMS_URL%/}/health" 120
     wait_for_url "BFF" "${BFF_URL%/}/api/v1/health" 120
-    wait_for_url "Funnel" "${FUNNEL_URL%/}/health" 120
     wait_for_url "Elasticsearch" "http://localhost:${ELASTICSEARCH_PORT_HOST}/_cluster/health" 120 || true
     
     echo "✅ All services are running!"
@@ -138,7 +136,7 @@ start_services() {
     echo "📍 Service URLs:"
     echo "   - OMS API: ${OMS_URL%/}"
     echo "   - BFF API: ${BFF_URL%/}"
-    echo "   - Funnel API: ${FUNNEL_URL%/}"
+    echo "   - Funnel Runtime: internal (in-process)"
     echo "   - MinIO: ${MINIO_URL%/}"
     echo "   - MinIO Console: http://localhost:${MINIO_CONSOLE_PORT_HOST}"
     echo ""

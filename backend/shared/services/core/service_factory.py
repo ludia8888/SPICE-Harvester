@@ -565,14 +565,13 @@ def get_oms_service_info() -> ServiceInfo:
 
 
 def get_funnel_service_info() -> ServiceInfo:
-    settings = get_settings()
     return ServiceInfo(
         name="Funnel",
-        title="Funnel Service",
-        description="타입 추론 및 스키마 제안 전용 마이크로서비스",
+        title="Funnel Runtime",
+        description="타입 추론 및 시트 구조 분석 내부 런타임 컴포넌트",
         version="0.1.0",
-        port=int(settings.services.funnel_port),
-        host=str(settings.services.funnel_host),
+        port=0,
+        host="internal-runtime",
         tags=[
             {"name": "Type Inference", "description": "Data type inference operations"},
             {"name": "Schema Suggestion", "description": "Schema generation operations"},

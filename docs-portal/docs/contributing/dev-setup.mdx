@@ -70,8 +70,8 @@ python -m uvicorn spice.oms.app:app --reload --port 8000
 # Terminal 2: BFF
 python -m uvicorn spice.bff.app:app --reload --port 8002
 
-# Terminal 3: Funnel
-python -m uvicorn spice.funnel.app:app --reload --port 8003
+# Terminal 3: Agent
+python -m uvicorn spice.agent.app:app --reload --port 8004
 ```
 
 The `--reload` flag enables auto-restart on code changes.

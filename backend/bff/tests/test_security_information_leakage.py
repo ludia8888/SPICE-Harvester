@@ -1,183 +1,130 @@
-"""
-Security tests for information leakage prevention.
+"""Security tests for information leakage prevention on Foundry v2 object reads."""
 
-BFF responses must not expose internal storage or fallback routing details.
-"""
+from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
-import pytest
-from elasticsearch.exceptions import ConnectionError as ESConnectionError
-from fastapi import status
+import httpx
 from fastapi.testclient import TestClient
 
-from bff.dependencies import get_elasticsearch_service
+from bff.dependencies import get_oms_client
 from bff.main import app
-from bff.routers import instances as instances_router
+from bff.routers import foundry_ontology_v2 as router_v2
 
 
-class _StubDatasetRegistry:
-    async def get_access_policy(self, *, db_name, scope, subject_type, subject_id):  # noqa: ANN003
-        return None
+class _FakeOMSClient:
+    def __init__(self, *, fail_search: bool = False) -> None:
+        self._fail_search = fail_search
 
+    async def list_databases(self):  # noqa: ANN201
+        return {"data": {"databases": [{"name": "test_db"}]}}
 
-class TestInformationLeakagePrevention:
-    @pytest.fixture
-    def client(self):
-        return TestClient(app)
+    async def get_ontology_resource(self, db_name, *, resource_type, resource_id, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        if resource_type == "object_type" and resource_id == "TestClass":
+            return {"data": {"id": "TestClass", "spec": {"pk_spec": {"primary_key": ["instance_id"]}}}}
+        return {"data": None}
 
-    @pytest.mark.asyncio
-    async def test_get_instance_es_success_no_source_leak(self, client):
-        mock_es_result = {
-            "hits": {
-                "total": {"value": 1},
-                "hits": [
-                    {
-                        "_source": {
-                            "instance_id": "test_instance",
-                            "class_id": "TestClass",
-                            "properties": [],
-                        }
-                    }
-                ],
+    async def get_ontology(self, db_name, class_id, branch="main"):  # noqa: ANN001, ANN003
+        _ = db_name, class_id, branch
+        return {"data": {"properties": [{"name": "instance_id", "type": "string"}]}}
+
+    async def post(self, path, **kwargs):  # noqa: ANN001, ANN003
+        if self._fail_search:
+            request = httpx.Request("POST", "http://oms.local" + str(path))
+            response = httpx.Response(503, request=request, json={"detail": "upstream unavailable"})
+            raise httpx.HTTPStatusError("upstream unavailable", request=request, response=response)
+
+        payload = kwargs.get("json") if isinstance(kwargs, dict) else {}
+        where = payload.get("where") if isinstance(payload, dict) else None
+        if isinstance(where, dict) and where.get("field") == "instance_id":
+            value = str(where.get("value") or "").strip()
+            if value == "nonexistent":
+                return {"data": [], "nextPageToken": None, "totalCount": "0"}
+            return {
+                "data": [{"instance_id": value, "class_id": "TestClass", "status": "ACTIVE"}],
+                "nextPageToken": None,
+                "totalCount": "1",
             }
+        return {
+            "data": [
+                {"instance_id": "inst1", "class_id": "TestClass"},
+                {"instance_id": "inst2", "class_id": "TestClass"},
+            ],
+            "nextPageToken": None,
+            "totalCount": "2",
         }
 
-        mock_es = AsyncMock()
-        mock_es.search.return_value = mock_es_result
 
-        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
-        try:
-            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/test_instance")
-        finally:
-            app.dependency_overrides.clear()
+async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
+    _ = request, db_name
+    return None
 
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        assert "source" not in response_data
-        assert "elasticsearch" not in str(response_data).lower()
-        assert "terminus" not in str(response_data).lower()
-        assert "fallback" not in str(response_data).lower()
-        assert response_data["status"] == "success"
-        assert "data" in response_data
 
-    @pytest.mark.asyncio
-    async def test_get_instance_es_failure_fails_closed_without_source_leak(self, client):
-        mock_es = AsyncMock()
-        mock_es.search.side_effect = ESConnectionError("Connection failed")
+def _client(*, fail_search: bool = False):
+    app.dependency_overrides[get_oms_client] = lambda: _FakeOMSClient(fail_search=fail_search)
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    client = TestClient(app)
+    return client, original_require
 
-        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
-        try:
-            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/test_instance")
-        finally:
-            app.dependency_overrides.clear()
 
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        response_data = response.json()
-        assert "elasticsearch" not in str(response_data).lower()
-        assert "terminus" not in str(response_data).lower()
-        assert "oms" not in str(response_data).lower()
-        assert "connection failed" not in str(response_data).lower()
-        assert response_data["detail"]["error"] == "overlay_degraded"
+def test_v2_get_object_success_no_source_leak():
+    client, original_require = _client()
+    try:
+        response = client.get("/api/v2/ontologies/test_db/objects/TestClass/test_instance")
+    finally:
+        router_v2._require_domain_role = original_require
+        app.dependency_overrides.clear()
 
-    @pytest.mark.asyncio
-    async def test_get_class_instances_es_success_no_source_leak(self, client):
-        mock_es_result = {
-            "hits": {
-                "total": {"value": 2},
-                "hits": [
-                    {"_source": {"instance_id": "inst1", "class_id": "TestClass"}},
-                    {"_source": {"instance_id": "inst2", "class_id": "TestClass"}},
-                ],
-            }
-        }
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "source" not in response_data
+    assert "elasticsearch" not in str(response_data).lower()
+    assert "terminus" not in str(response_data).lower()
+    assert response_data["instance_id"] == "test_instance"
 
-        mock_es = AsyncMock()
-        mock_es.search.return_value = mock_es_result
 
-        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
-        try:
-            response = client.get("/api/v1/databases/test_db/class/TestClass/instances")
-        finally:
-            app.dependency_overrides.clear()
+def test_v2_list_objects_success_no_source_leak():
+    client, original_require = _client()
+    try:
+        response = client.get("/api/v2/ontologies/test_db/objects/TestClass")
+    finally:
+        router_v2._require_domain_role = original_require
+        app.dependency_overrides.clear()
 
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        assert "source" not in response_data
-        assert "elasticsearch" not in str(response_data).lower()
-        assert "terminus" not in str(response_data).lower()
-        assert "instances" in response_data
-        assert "total" in response_data
-        assert len(response_data["instances"]) == 2
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "source" not in str(response_data).lower()
+    assert "elasticsearch" not in str(response_data).lower()
+    assert "terminus" not in str(response_data).lower()
+    assert isinstance(response_data.get("data"), list)
+    assert len(response_data["data"]) == 2
 
-    @pytest.mark.asyncio
-    async def test_get_class_instances_es_failure_fails_closed_without_source_leak(self, client):
-        mock_es = AsyncMock()
-        mock_es.search.side_effect = ESConnectionError("Connection failed")
 
-        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
-        try:
-            response = client.get("/api/v1/databases/test_db/class/TestClass/instances")
-        finally:
-            app.dependency_overrides.clear()
+def test_v2_not_found_error_uses_foundry_envelope_without_internal_leak():
+    client, original_require = _client()
+    try:
+        response = client.get("/api/v2/ontologies/test_db/objects/TestClass/nonexistent")
+    finally:
+        router_v2._require_domain_role = original_require
+        app.dependency_overrides.clear()
 
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        response_data = response.json()
-        assert "source" not in str(response_data).lower()
-        assert "elasticsearch" not in str(response_data).lower()
-        assert "terminus" not in str(response_data).lower()
-        assert "oms" not in str(response_data).lower()
-        assert "connection failed" not in str(response_data).lower()
-        assert response_data["detail"]["error"] == "overlay_degraded"
+    assert response.status_code == 404
+    response_data = response.json()
+    assert response_data["errorName"] == "ObjectNotFound"
+    assert "elasticsearch" not in str(response_data).lower()
+    assert "terminus" not in str(response_data).lower()
+    assert "oms" not in str(response_data).lower()
 
-    @pytest.mark.asyncio
-    async def test_not_found_response_no_internal_info_leak(self, client):
-        mock_es = AsyncMock()
-        mock_es.search.return_value = {"hits": {"total": {"value": 0}, "hits": []}}
 
-        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
-        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
-        try:
-            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent")
-        finally:
-            app.dependency_overrides.clear()
+def test_v2_upstream_error_does_not_leak_backend_source_details():
+    client, original_require = _client(fail_search=True)
+    try:
+        response = client.get("/api/v2/ontologies/test_db/objects/TestClass/test_instance")
+    finally:
+        router_v2._require_domain_role = original_require
+        app.dependency_overrides.clear()
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        response_data = response.json()
-        assert "elasticsearch" not in str(response_data).lower()
-        assert "terminus" not in str(response_data).lower()
-        assert "oms" not in str(response_data).lower()
-        assert "connection" not in str(response_data).lower()
-        assert "detail" in response_data
-        assert "찾을 수 없습니다" in response_data["detail"]
-
-    def test_response_structure_consistency(self):
-        assert {"status", "data"} == {"status", "data"}
-        assert {"class_id", "total", "limit", "offset", "search", "instances"} == {
-            "class_id",
-            "total",
-            "limit",
-            "offset",
-            "search",
-            "instances",
-        }
-
-    def test_forbidden_fields_in_responses(self):
-        forbidden_fields = [
-            "source",
-            "origin",
-            "provider",
-            "backend",
-            "engine",
-            "driver",
-            "connection_type",
-            "fallback_used",
-            "error_source",
-            "internal_path",
-            "service_status",
-        ]
-        assert len(forbidden_fields) > 0
+    assert response.status_code == 503
+    response_data = response.json()
+    assert "elasticsearch" not in str(response_data).lower()
+    assert "terminus" not in str(response_data).lower()

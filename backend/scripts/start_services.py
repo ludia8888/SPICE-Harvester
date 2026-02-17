@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🔥 THINK ULTRA! SPICE HARVESTER 서비스 시작 스크립트
-모든 마이크로서비스 (OMS, BFF, Funnel)를 시작합니다.
+핵심 마이크로서비스 (OMS, BFF, Agent)를 시작합니다.
 """
 
 import subprocess
@@ -88,7 +88,7 @@ def main():
     processes = {}
 
     parser = argparse.ArgumentParser(
-        description="Start SPICE HARVESTER services locally (OMS/BFF/Funnel/Agent)."
+        description="Start SPICE HARVESTER services locally (OMS/BFF/Agent)."
     )
     parser.add_argument(
         "--env",
@@ -101,19 +101,19 @@ def main():
     # Ensure local-mode defaults unless explicitly overridden.
     if args.env == "development":
         os.environ.setdefault("DOCKER_CONTAINER", "false")
+
+    settings = get_settings()
     
     # Service paths
     base_path = Path(__file__).resolve().parent
     oms_path = str(base_path / "oms")
     bff_path = str(base_path / "bff")
-    funnel_path = str(base_path / "funnel")
     agent_path = str(base_path / "agent")
     
     # Verify all main.py files exist
     services_config = [
         ("OMS", oms_path, 8000),
         ("BFF", bff_path, 8002),
-        ("Funnel", funnel_path, 8003),
         ("Agent", agent_path, 8004),
     ]
     
@@ -122,8 +122,6 @@ def main():
             print(f"❌ {name} main.py not found at {path}")
             return 1
     
-    settings = get_settings()
-
     # Determine protocol
     use_https = bool(settings.services.use_https)
     protocol = "https" if use_https else "http"
@@ -151,23 +149,9 @@ def main():
             
         processes["OMS"] = oms_process
         
-        # Start Funnel service (type inference)
-        funnel_process = start_service(
-            "Funnel",
-            funnel_path,
-            f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8003",
-            8003,
-            protocol=protocol,
-            verify_ssl=verify_ssl,
-        )
-        
-        if not funnel_process:
-            stop_services(processes)
-            return 1
-            
-        processes["Funnel"] = funnel_process
-        
-        # Start BFF (depends on OMS and Funnel)
+        print("ℹ️ Funnel runtime is internal (in-process); no separate Funnel process is started.")
+
+        # Start BFF (depends on OMS and uses in-process Funnel by default)
         bff_process = start_service(
             "BFF", 
             bff_path,
@@ -205,12 +189,11 @@ def main():
         print("\n📋 Services running:")
         print(f"  - OMS (Ontology Management): {protocol}://localhost:8000")
         print(f"  - BFF (Backend for Frontend): {protocol}://localhost:8002")
-        print(f"  - Funnel (Type Inference): {protocol}://localhost:8003")
+        print("  - Funnel Runtime: internal (in-process)")
         print(f"  - Agent (tool runner): {protocol}://localhost:8004")
         print("\n🔍 API Documentation:")
         print(f"  - OMS Docs: {protocol}://localhost:8000/docs")
         print(f"  - BFF Docs: {protocol}://localhost:8002/docs")
-        print(f"  - Funnel Docs: {protocol}://localhost:8003/docs")
         print(f"  - Agent Docs: {protocol}://localhost:8004/docs")
         print("\n💡 Key APIs:")
         print("  - Database Management: POST /api/v1/databases")

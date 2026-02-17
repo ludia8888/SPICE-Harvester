@@ -147,11 +147,6 @@ class AppConfig:
         """BFF 서비스 URL"""
         return get_settings().services.bff_base_url
     
-    @staticmethod
-    def get_funnel_url() -> str:
-        """Funnel 서비스 URL"""
-        return get_settings().services.funnel_base_url
-    
     # ======================
     # Event Sourcing & CQRS
     # ======================

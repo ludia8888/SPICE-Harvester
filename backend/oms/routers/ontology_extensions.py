@@ -172,19 +172,9 @@ def _ensure_branch_writable(branch: str) -> None:
         )
 
 
-def _strict_compat_allowlist() -> set[str]:
-    raw = str(get_settings().features.foundry_v2_strict_compat_db_allowlist or "")
-    return {item.strip().lower() for item in raw.split(",") if item.strip()}
-
-
 def _is_foundry_v2_strict_compat_enabled(*, db_name: str) -> bool:
-    features = get_settings().features
-    if bool(features.enable_foundry_v2_strict_compat):
-        return True
-    normalized_db = str(db_name or "").strip().lower()
-    if not normalized_db:
-        return False
-    return normalized_db in _strict_compat_allowlist()
+    _ = db_name
+    return True
 
 
 def _normalize_occ_branch_token(branch: str) -> str:

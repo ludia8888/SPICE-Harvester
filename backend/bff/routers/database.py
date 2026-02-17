@@ -95,18 +95,6 @@ async def get_database_expected_seq(
     return await database_service.get_database_expected_seq(db_name=db_name)
 
 
-@router.get("/{db_name}/classes")
-@trace_endpoint("bff.database.list_classes")
-async def list_classes(
-    db_name: str,
-    type: Optional[str] = "Class",
-    limit: Optional[int] = None,
-    oms: OMSClient = OMSClientDep,
-):
-    """데이터베이스의 클래스 목록 조회"""
-    return await database_service.list_classes(db_name=db_name, type=type, limit=limit, oms=oms)
-
-
 @router.post("/{db_name}/classes")
 @trace_endpoint("bff.database.create_class")
 async def create_class(
@@ -115,12 +103,3 @@ async def create_class(
     """데이터베이스에 새 클래스 생성"""
     return await database_service.create_class(db_name=db_name, class_data=class_data, oms=oms)
 
-
-@router.get("/{db_name}/classes/{class_id}")
-@trace_endpoint("bff.database.get_class")
-async def get_class(
-    db_name: str, class_id: str, request: Request, oms: OMSClient = OMSClientDep
-):
-    """특정 클래스 조회"""
-    _ = request
-    return await database_service.get_class(db_name=db_name, class_id=class_id, oms=oms)

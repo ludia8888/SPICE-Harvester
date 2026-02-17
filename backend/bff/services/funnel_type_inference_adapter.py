@@ -1,7 +1,4 @@
-"""
-🔥 THINK ULTRA! Funnel HTTP Type Inference Service Adapter
-HTTP 기반 Funnel 마이크로서비스를 TypeInferenceInterface로 adapting
-"""
+"""Type inference adapter backed by the in-process Funnel runtime."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -15,13 +12,8 @@ from bff.services.funnel_client import FunnelClient
 logger = logging.getLogger(__name__)
 
 
-class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
-    """
-    HTTP 기반 Funnel 마이크로서비스를 TypeInferenceInterface로 adapting하는 클래스.
-
-    FunnelClient를 사용하여 Funnel 서비스와 HTTP 통신하며,
-    결과를 TypeInferenceInterface 형식으로 변환합니다.
-    """
+class InProcessTypeInferenceAdapter(TypeInferenceInterface):
+    """In-process Funnel 런타임을 TypeInferenceInterface로 어댑트한다."""
 
     def __init__(self, funnel_client: FunnelClient = None):
         self.funnel_client = funnel_client or FunnelClient()
@@ -40,7 +32,7 @@ class FunnelHTTPTypeInferenceAdapter(TypeInferenceInterface):
         if metadata:
             include_complex_types = metadata.get("include_complex_types", include_complex_types)
 
-        # HTTP 기반 분석을 위해 데이터를 dataset 형태로 변환
+        # 분석 요청을 dataset 형태로 구성한다.
         data = [[value] for value in column_data]
         headers = [column_name or "column_0"]
 
