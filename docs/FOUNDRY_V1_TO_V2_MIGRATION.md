@@ -9,6 +9,7 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - API v2 overview/index: `https://www.palantir.com/docs/foundry/api/v2`
 - `Get Ontology Full Metadata` canonical URL: `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontologies/get-ontology-full-metadata`
 - `Search Json Query` canonical reference: `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/search-objects` (request body contract)
+- `Aggregate Objects` canonical reference: `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/aggregate-objects`
 - `Outgoing Link Types` canonical references:
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/object-types/list-outgoing-link-types`
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/object-types/get-outgoing-link-type`
@@ -40,6 +41,13 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
   - Foundry platform Python SDK: `https://github.com/palantir/foundry-platform-python`
   - Foundry SDK object-set preview contract (`load_links`): `https://github.com/palantir/foundry-platform-python/blob/develop/foundry_sdk/v2/ontologies/ontology_object_set.py`
   - Palantir Developer Community: `https://community.palantir.com/`
+
+## P0 Parity Hardening Update (2026-02-17)
+- Object search/read payload alignment: object rows now include Foundry-required locator fields (`__apiName`, `__primaryKey`) and synthesize `__rid` when absent; null-valued fields are omitted from response payloads.
+- Object aggregate parity: `POST /api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` is now exposed and aligned with Foundry aggregate clause shapes.
+- ObjectSet aggregate correctness: `POST /api/v2/ontologies/{ontology}/objectSets/aggregate` now paginates through all result pages instead of aggregating only the first page.
+- Action error envelope alignment: non-Foundry upstream action validation errors (`code/category/message`) are normalized into Foundry error envelope (`errorCode/errorName/errorInstanceId/parameters`).
+- Pagination token compatibility: Foundry v2 page token acceptance window increased from 60 seconds to 24 hours on OMS/BFF v2 read surfaces.
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

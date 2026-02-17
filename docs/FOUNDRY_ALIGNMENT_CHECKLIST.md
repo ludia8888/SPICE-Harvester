@@ -10,6 +10,7 @@ Official references:
 - Search Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/search-objects
 - List Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/list-objects
 - Get Object (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/get-object
+- Aggregate Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/aggregate-objects
 - List Linked Objects (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/linked-objects/list-linked-objects
 - Get Linked Object (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/linked-objects/get-linked-object
 - Search JSON Query body (v2 Search Objects): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-objects/search-objects
@@ -52,12 +53,18 @@ Current status:
 - [x] SearchJsonQueryV2 operator mapping is implemented in OMS router.
 - [x] SearchJsonQueryV2 contract aligned with Foundry docs: undocumented `in` operator removed; `isNull` supports boolean null/not-null semantics.
 - [x] Search Objects branch parameter now accepts Foundry-style branch RID values (`ri.ontology.main.branch...`) in addition to branch names.
+- [x] OMS Search Objects responses now include Foundry-required object locator fields (`__apiName`, `__primaryKey`) and omit null-valued fields from serialized object payloads.
 - [x] BFF Foundry v2 read/search OpenAPI now exposes `branch` query params on branch-aware routes (`objectTypes`, `outgoingLinkTypes`, `objects/{objectType}/search`).
 - [x] BFF Foundry v2 object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` with Foundry-style query params/envelope.
+- [x] BFF Foundry v2 linked-object `GET` with `select` preserves required object locator fields (`__apiName`, `__primaryKey`) while still honoring selected property projection.
 - [x] BFF Foundry v2 object-set load surface includes `POST /v2/ontologies/{ontology}/objectSets/loadObjects` with Foundry-style query params (`branch`, `transactionId`, `sdkPackageRid`, `sdkVersion`) and body paging/select/order fields (`select/selectV2`, `pageSize/pageToken`, `orderBy`, `excludeRid`, `snapshot`).
 - [x] BFF Foundry v2 object-set extended surfaces include `POST /v2/ontologies/{ontology}/objectSets/loadLinks` (preview), `POST /v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes`, `POST /v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces`, `POST /v2/ontologies/{ontology}/objectSets/aggregate`, `POST /v2/ontologies/{ontology}/objectSets/createTemporary`, and `GET /v2/ontologies/{ontology}/objectSets/{objectSetRid}`.
+- [x] BFF Foundry v2 object aggregate surface includes `POST /v2/ontologies/{ontology}/objects/{objectType}/aggregate` with Foundry-style aggregation/groupBy clauses.
+- [x] BFF objectSet aggregate now scans all pages from OMS object search (no first-page-only truncation), preventing incorrect totals on datasets larger than one page.
 - [x] BFF Foundry v2 linked-object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`.
 - [x] Foundry-style API error envelope is implemented for object search and v2 read routers.
+- [x] BFF action apply/applyBatch now normalizes non-Foundry OMS validation error payloads (`code/category/message`) into Foundry error envelope shape.
+- [x] Foundry v2 page token TTL on OMS/BFF read surfaces is now 24 hours (up from 60 seconds) for SDK pagination compatibility.
 - [x] v1->v2 migration guide is documented (`docs/FOUNDRY_V1_TO_V2_MIGRATION.md`) and removed read/query compat operations are synchronized to `code deleted` status.
 - [x] Migration guide and alignment checklist are cross-synced for P0 strict compat semantics (preview required, fullMetadata branch `rid` shape, strict fixed-on policy).
 - [x] v2-successor가 존재하는 주요 v1 read/query compat endpoints are code-deleted (operation removed from runtime handlers and OpenAPI).

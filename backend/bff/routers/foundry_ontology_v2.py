@@ -45,6 +45,7 @@ _DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
     "name": "table",
     "color": "#4C6A9A",
 }
+_FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
 _TEMP_OBJECT_SET_TTL_SECONDS = 60 * 60
 _TEMP_OBJECT_SET_STORE: dict[str, tuple[float, dict[str, Any]]] = {}
 _TEMP_OBJECT_SET_LOCK = asyncio.Lock()
@@ -250,7 +251,11 @@ def _preflight_error_response(
 
 
 def _decode_page_token(page_token: str | None, *, scope: str | None = None) -> int:
-    return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
+    return decode_offset_page_token(
+        page_token,
+        ttl_seconds=_FOUNDRY_PAGE_TOKEN_TTL_SECONDS,
+        expected_scope=scope,
+    )
 
 
 def _encode_page_token(offset: int, *, scope: str | None = None) -> str:
@@ -480,6 +485,16 @@ def _get_total_count(result: Any) -> str:
     return "0"
 
 
+def _get_next_page_token(result: Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    next_page_token = result.get("nextPageToken")
+    if next_page_token is None:
+        return None
+    token = str(next_page_token).strip()
+    return token or None
+
+
 async def _search_object_type_rows(
     *,
     oms_client: OMSClient,
@@ -502,6 +517,71 @@ def _derive_page_size(search_payload: dict[str, Any]) -> int:
     return page_size
 
 
+def _project_row_with_required_fields(
+    row: dict[str, Any],
+    *,
+    select_fields: list[str] | None,
+    exclude_rid: bool,
+) -> dict[str, Any]:
+    if select_fields:
+        projected = {key: row.get(key) for key in select_fields if key in row}
+    else:
+        projected = dict(row)
+
+    for required_key in ("__apiName", "__primaryKey", "instance_id", "class_id"):
+        if required_key in row:
+            projected.setdefault(required_key, row.get(required_key))
+
+    if exclude_rid:
+        projected.pop("__rid", None)
+    elif "__rid" in row:
+        projected.setdefault("__rid", row.get("__rid"))
+
+    return projected
+
+
+async def _load_all_rows_for_object_type(
+    *,
+    oms_client: OMSClient,
+    db_name: str,
+    branch: str,
+    object_type: str,
+    search_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    payload = dict(search_payload)
+    payload["pageSize"] = max(1, min(1000, _derive_page_size(payload)))
+    payload.pop("pageToken", None)
+
+    rows: list[dict[str, Any]] = []
+    seen_page_tokens: set[str] = set()
+    next_page_token: str | None = None
+
+    while True:
+        if next_page_token:
+            payload["pageToken"] = next_page_token
+        else:
+            payload.pop("pageToken", None)
+
+        result = await _search_object_type_rows(
+            oms_client=oms_client,
+            db_name=db_name,
+            branch=branch,
+            object_type=object_type,
+            search_payload=payload,
+        )
+        rows.extend(_get_result_rows(result))
+
+        candidate = _get_next_page_token(result)
+        if candidate is None:
+            break
+        if candidate in seen_page_tokens:
+            raise ValueError("object search pagination token loop detected")
+        seen_page_tokens.add(candidate)
+        next_page_token = candidate
+
+    return rows
+
+
 async def _load_rows_for_single_object_type(
     *,
     oms_client: OMSClient,
@@ -519,9 +599,7 @@ async def _load_rows_for_single_object_type(
     )
     rows = _get_result_rows(result)
     total_count = _get_total_count(result)
-    next_page_token = result.get("nextPageToken") if isinstance(result, dict) else None
-    if next_page_token is not None:
-        next_page_token = str(next_page_token)
+    next_page_token = _get_next_page_token(result)
     return rows, total_count, next_page_token
 
 
@@ -589,7 +667,7 @@ def _resolve_source_object_type_from_row(
     *,
     fallback_object_type: str | None = None,
 ) -> str | None:
-    for key in ("__apiName", "objectTypeApiName", "__objectType", "objectType"):
+    for key in ("__apiName", "objectTypeApiName", "__objectType", "objectType", "class_id", "classId"):
         value = str(row.get(key) or "").strip()
         if value:
             return value
@@ -603,7 +681,7 @@ def _resolve_source_primary_key_from_row(
     *,
     primary_key_field: str | None = None,
 ) -> str | None:
-    for key in ("__primaryKey", "primaryKey", "instance_id"):
+    for key in ("__primaryKey", "primaryKey", "instance_id", "id"):
         value = str(row.get(key) or "").strip()
         if value:
             return value
@@ -833,6 +911,23 @@ def _build_aggregate_objects_response(
     if include_compute_usage:
         out["computeUsage"] = 0
     return out
+
+
+def _parse_aggregation_clauses(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    aggregation = payload.get("aggregation")
+    group_by = payload.get("groupBy")
+    if not isinstance(aggregation, list) or not aggregation:
+        raise ValueError("aggregation is required")
+    if not isinstance(group_by, list):
+        raise ValueError("groupBy is required")
+
+    aggregation_clauses = [clause for clause in aggregation if isinstance(clause, dict)]
+    group_by_clauses = [clause for clause in group_by if isinstance(clause, dict)]
+    if len(aggregation_clauses) != len(aggregation):
+        raise ValueError("aggregation must be an array of objects")
+    if len(group_by_clauses) != len(group_by):
+        raise ValueError("groupBy must be an array of objects")
+    return aggregation_clauses, group_by_clauses
 
 
 def _pagination_scope(*parts: Any) -> str:
@@ -1709,6 +1804,56 @@ def _scoped_error_parameters(
     return payload
 
 
+def _normalize_non_foundry_upstream_error(
+    exc: httpx.HTTPStatusError,
+    *,
+    ontology: str,
+    parameters: Dict[str, Any] | None = None,
+) -> JSONResponse | None:
+    response = exc.response
+    if response is None:
+        return None
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "errorCode" in payload and "errorName" in payload:
+        return None
+
+    status_code = int(response.status_code)
+    error_code = str(payload.get("code") or "").strip().upper()
+    message = str(payload.get("message") or "").strip()
+    merged_parameters = _scoped_error_parameters(ontology=ontology, parameters=parameters)
+    if message:
+        merged_parameters["message"] = message
+
+    if status_code in {status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY} or error_code == "REQUEST_VALIDATION_FAILED":
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters=merged_parameters,
+        )
+    if status_code == status.HTTP_403_FORBIDDEN:
+        return _foundry_error(
+            status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED",
+            error_name="PermissionDenied",
+            parameters=merged_parameters,
+        )
+    if status_code == status.HTTP_404_NOT_FOUND:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="NotFound",
+            parameters=merged_parameters,
+        )
+    return None
+
+
 def _upstream_status_error_response(
     exc: httpx.HTTPStatusError,
     *,
@@ -1716,8 +1861,17 @@ def _upstream_status_error_response(
     parameters: Dict[str, Any] | None = None,
     not_found_response: JSONResponse | None = None,
     passthrough_payload: bool = False,
+    normalize_non_foundry_payload: bool = False,
 ) -> JSONResponse:
     status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+    if normalize_non_foundry_payload:
+        normalized = _normalize_non_foundry_upstream_error(
+            exc,
+            ontology=ontology,
+            parameters=parameters,
+        )
+        if normalized is not None:
+            return normalized
     if passthrough_payload:
         passthrough = _passthrough_upstream_error_payload(exc)
         if passthrough is not None:
@@ -2621,6 +2775,7 @@ async def apply_action_v2(
                 parameters={"action": action_type},
             ),
             passthrough_payload=True,
+            normalize_non_foundry_payload=True,
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(
@@ -2696,6 +2851,7 @@ async def apply_action_batch_v2(
                 parameters={"action": action_type},
             ),
             passthrough_payload=True,
+            normalize_non_foundry_payload=True,
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(
@@ -3918,6 +4074,90 @@ async def search_objects_v2(
         )
 
 
+@router.post("/{ontology}/objects/{objectType}/aggregate")
+@trace_endpoint("bff.foundry_v2_ontology.aggregate_objects")
+async def aggregate_objects_v2(
+    ontology: str,
+    objectType: str,
+    payload: Dict[str, Any],
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    transaction_id: str | None = Query(default=None, alias="transactionId"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        object_type = str(objectType or "").strip()
+        _ = transaction_id, sdk_package_rid, sdk_version
+        if not object_type:
+            raise ValueError("objectType is required")
+        aggregation_clauses, group_by_clauses = _parse_aggregation_clauses(payload)
+        await _require_domain_role(request, db_name=db_name)
+
+        search_payload: dict[str, Any] = {"pageSize": 1000}
+        where_clause = payload.get("where")
+        if where_clause is not None:
+            if not isinstance(where_clause, dict):
+                raise ValueError("where must be an object")
+            search_payload["where"] = where_clause
+        filter_clause = payload.get("filter")
+        if "where" not in search_payload and filter_clause is not None:
+            if not isinstance(filter_clause, dict):
+                raise ValueError("filter must be an object")
+            search_payload["where"] = filter_clause
+        if "snapshot" in payload:
+            search_payload["snapshot"] = bool(payload.get("snapshot"))
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType)},
+        )
+
+    try:
+        rows = await _load_all_rows_for_object_type(
+            oms_client=oms_client,
+            db_name=db_name,
+            branch=branch,
+            object_type=object_type,
+            search_payload=search_payload,
+        )
+        return _build_aggregate_objects_response(
+            rows=rows,
+            aggregation=aggregation_clauses,
+            group_by=group_by_clauses,
+            accuracy_request=str(payload.get("accuracy") or "").strip() or None,
+            include_compute_usage=payload.get("includeComputeUsage"),
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
+            not_found_response=_not_found_error(
+                "ObjectTypeNotFound",
+                ontology=db_name,
+                object_type=object_type,
+            ),
+            passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"objectType": object_type},
+        )
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to aggregate objects (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
+        )
+
+
 @router.post("/{ontology}/objectSets/loadObjects")
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.load_objects")
 async def load_object_set_objects_v2(
@@ -4423,18 +4663,7 @@ async def aggregate_object_set_v2(
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
-        aggregation = payload.get("aggregation")
-        group_by = payload.get("groupBy")
-        if not isinstance(aggregation, list) or not aggregation:
-            raise ValueError("aggregation is required")
-        if not isinstance(group_by, list):
-            raise ValueError("groupBy is required")
-        aggregation_clauses = [clause for clause in aggregation if isinstance(clause, dict)]
-        group_by_clauses = [clause for clause in group_by if isinstance(clause, dict)]
-        if len(aggregation_clauses) != len(aggregation):
-            raise ValueError("aggregation must be an array of objects")
-        if len(group_by_clauses) != len(group_by):
-            raise ValueError("groupBy must be an array of objects")
+        aggregation_clauses, group_by_clauses = _parse_aggregation_clauses(payload)
         await _require_domain_role(request, db_name=db_name)
         search_payload = _build_object_set_search_payload(
             object_set=object_set,
@@ -4443,14 +4672,14 @@ async def aggregate_object_set_v2(
         )
         rows: list[dict[str, Any]] = []
         for object_type in object_types:
-            result = await _search_object_type_rows(
+            object_rows = await _load_all_rows_for_object_type(
                 oms_client=oms_client,
                 db_name=db_name,
                 branch=branch,
                 object_type=object_type,
                 search_payload=search_payload,
             )
-            rows.extend(_get_result_rows(result))
+            rows.extend(object_rows)
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -5253,10 +5482,11 @@ async def get_linked_object_v2(
                 link_type=link_type,
                 linked_primary_key=linked_primary_key_value,
             )
-        if normalized_select:
-            row = {k: row.get(k) for k in normalized_select if k in row}
-        if exclude_rid:
-            row.pop("__rid", None)
+        row = _project_row_with_required_fields(
+            row,
+            select_fields=normalized_select,
+            exclude_rid=bool(exclude_rid),
+        )
         return row
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY

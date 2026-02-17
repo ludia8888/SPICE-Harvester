@@ -64,6 +64,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "event_timestamp",
     }
 )
+_FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
 
 
 class SearchJsonQueryV2(BaseModel):
@@ -201,7 +202,11 @@ def _resolve_field_path(field: str) -> str:
 
 
 def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
-    return decode_offset_page_token(page_token, ttl_seconds=60, expected_scope=scope)
+    return decode_offset_page_token(
+        page_token,
+        ttl_seconds=_FOUNDRY_PAGE_TOKEN_TTL_SECONDS,
+        expected_scope=scope,
+    )
 
 
 def _encode_page_token(offset: int, *, scope: Optional[str] = None) -> str:
@@ -401,6 +406,82 @@ def _flatten_source(source: Dict[str, Any]) -> Dict[str, Any]:
     return flat
 
 
+def _rid_component(value: Any, *, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    normalized = "".join(ch if (ch.isalnum() or ch in {"_", "-", "."}) else "_" for ch in text)
+    normalized = normalized.strip("._-")
+    return normalized or fallback
+
+
+def _default_object_rid(*, db_name: str, object_type: str, primary_key: str) -> str:
+    return (
+        "ri.spice.main.object."
+        f"{_rid_component(db_name, fallback='db')}."
+        f"{_rid_component(object_type, fallback='objectType')}."
+        f"{_rid_component(primary_key, fallback='primaryKey')}"
+    )
+
+
+def _prune_none_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, inner in value.items():
+            if inner is None:
+                continue
+            out[key] = _prune_none_values(inner)
+        return out
+    if isinstance(value, list):
+        return [_prune_none_values(item) for item in value if item is not None]
+    return value
+
+
+def _normalize_foundry_object_row(
+    *,
+    row: Dict[str, Any],
+    db_name: str,
+    object_type: str,
+    exclude_rid: bool,
+) -> Dict[str, Any]:
+    normalized = _prune_none_values(dict(row))
+    if not isinstance(normalized, dict):
+        normalized = {}
+
+    normalized_object_type = str(
+        normalized.get("__apiName")
+        or normalized.get("class_id")
+        or normalized.get("objectType")
+        or object_type
+        or ""
+    ).strip()
+    if normalized_object_type:
+        normalized["__apiName"] = normalized_object_type
+
+    primary_key = str(
+        normalized.get("__primaryKey")
+        or normalized.get("primaryKey")
+        or normalized.get("instance_id")
+        or normalized.get("id")
+        or ""
+    ).strip()
+    if primary_key:
+        normalized["__primaryKey"] = primary_key
+
+    if exclude_rid:
+        normalized.pop("__rid", None)
+    else:
+        rid = str(normalized.get("__rid") or "").strip()
+        if not rid and normalized_object_type and primary_key:
+            normalized["__rid"] = _default_object_rid(
+                db_name=db_name,
+                object_type=normalized_object_type,
+                primary_key=primary_key,
+            )
+
+    return normalized
+
+
 async def _search_objects_v2_impl(
     payload: Dict[str, Any],
     *,
@@ -455,13 +536,26 @@ async def _search_objects_v2_impl(
         if selected_fields is not None:
             projected: List[Dict[str, Any]] = []
             for row in flattened:
-                projected.append({key: row.get(key) for key in selected_fields if key in row})
+                projected_row = {key: row.get(key) for key in selected_fields if key in row}
+                for required_field in ("instance_id", "class_id"):
+                    if required_field in row:
+                        projected_row.setdefault(required_field, row.get(required_field))
+                projected.append(projected_row)
             flattened = projected
 
-        if bool(request.excludeRid):
-            for row in flattened:
-                if isinstance(row, dict):
-                    row.pop("__rid", None)
+        normalized_rows: List[Dict[str, Any]] = []
+        for row in flattened:
+            if not isinstance(row, dict):
+                continue
+            normalized_rows.append(
+                _normalize_foundry_object_row(
+                    row=row,
+                    db_name=db_name,
+                    object_type=object_type,
+                    exclude_rid=bool(request.excludeRid),
+                )
+            )
+        flattened = normalized_rows
 
         total = int(result.get("total") or 0)
 

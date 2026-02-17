@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 34**
+**Total v2 endpoints: 35**
 
 ### Ontologies (11 endpoints)
 
@@ -29,7 +29,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | No |
 
-### Object Types (6 endpoints)
+### Object Types (7 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -37,6 +37,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}` | List Objects V2 | No |
+| `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` | Aggregate Objects V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/search` | Search Objects V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | No |
 

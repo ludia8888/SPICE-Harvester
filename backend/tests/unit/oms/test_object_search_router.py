@@ -26,7 +26,7 @@ def mock_es():
                 {
                     "instance_id": "cust_1",
                     "class_id": "Customer",
-                    "data": {"customer_id": "cust_1", "status": "ACTIVE"},
+                    "data": {"customer_id": "cust_1", "status": "ACTIVE", "nickname": None},
                 }
             ],
             "aggregations": {},
@@ -61,6 +61,9 @@ async def test_search_objects_v2_returns_foundry_shape(mock_es):
     assert body["totalCount"] == "2"
     assert body["nextPageToken"]
     assert body["data"][0]["status"] == "ACTIVE"
+    assert body["data"][0]["__apiName"] == "Customer"
+    assert body["data"][0]["__primaryKey"] == "cust_1"
+    assert "nickname" not in body["data"][0]
 
     search_call = mock_es.search.call_args
     search_query = search_call.kwargs["query"]
@@ -97,7 +100,12 @@ async def test_search_objects_v2_supports_select_and_order_by_pushdown(mock_es):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["data"] == [{"customer_id": "cust_1", "status": "ACTIVE"}]
+    assert body["data"][0]["customer_id"] == "cust_1"
+    assert body["data"][0]["status"] == "ACTIVE"
+    assert body["data"][0]["__apiName"] == "Customer"
+    assert body["data"][0]["__primaryKey"] == "cust_1"
+    assert body["data"][0]["instance_id"] == "cust_1"
+    assert body["data"][0]["class_id"] == "Customer"
 
     search_call = mock_es.search.call_args
     sort = search_call.kwargs["sort"]

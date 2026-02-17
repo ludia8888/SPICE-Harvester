@@ -255,6 +255,21 @@ def test_foundry_v2_list_linked_objects_includes_foundry_query_params():
 
 
 @pytest.mark.unit
+def test_foundry_v2_aggregate_objects_keeps_foundry_query_params():
+    app = FastAPI()
+    app.include_router(foundry_ontology_v2.router, prefix="/api")
+    schema = app.openapi()
+
+    params = _param_names(
+        schema,
+        path="/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate",
+        method="post",
+    )
+
+    assert {"branch", "transactionId", "sdkPackageRid", "sdkVersion"} <= set(params)
+
+
+@pytest.mark.unit
 def test_foundry_v2_strict_compat_env_gate(monkeypatch: pytest.MonkeyPatch):
     assert foundry_ontology_v2._is_foundry_v2_strict_compat_enabled(db_name="any_db") is True
 
@@ -665,6 +680,110 @@ async def test_foundry_v2_aggregate_object_set_returns_metrics(
     assert groups["ACTIVE"]["metrics"][0]["value"] == 2
     assert groups["ACTIVE"]["metrics"][1]["name"] == "amountSum"
     assert groups["ACTIVE"]["metrics"][1]["value"] == 30.0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_v2_aggregate_object_set_reads_all_pages(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+
+    oms_client = AsyncMock()
+    oms_client.post = AsyncMock(
+        side_effect=[
+            {
+                "data": [{"id": "1", "status": "ACTIVE", "amount": 10}],
+                "nextPageToken": "token-2",
+                "totalCount": "2",
+            },
+            {
+                "data": [{"id": "2", "status": "ACTIVE", "amount": 20}],
+                "nextPageToken": None,
+                "totalCount": "2",
+            },
+        ]
+    )
+    app = _build_router_test_app(oms_client=oms_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=main",
+            json={
+                "objectSet": {"objectType": "Order"},
+                "aggregation": [
+                    {"type": "count", "name": "rowCount"},
+                    {"type": "sum", "field": "amount", "name": "amountSum"},
+                ],
+                "groupBy": [{"type": "exact", "field": "status"}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    groups = {item["group"]["status"]: item for item in body["data"]}
+    assert groups["ACTIVE"]["metrics"][0]["value"] == 2
+    assert groups["ACTIVE"]["metrics"][1]["value"] == 30.0
+    assert oms_client.post.await_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_v2_aggregate_objects_route_returns_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+
+    oms_client = AsyncMock()
+    oms_client.post = AsyncMock(
+        return_value={
+            "data": [
+                {"id": "1", "status": "ACTIVE", "amount": 10},
+                {"id": "2", "status": "ACTIVE", "amount": 20},
+            ],
+            "nextPageToken": None,
+            "totalCount": "2",
+        }
+    )
+    app = _build_router_test_app(oms_client=oms_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/ontologies/sales_db/objects/Order/aggregate?branch=main",
+            json={
+                "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+                "aggregation": [{"type": "sum", "field": "amount", "name": "amountSum"}],
+                "groupBy": [{"type": "exact", "field": "status"}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"][0]["metrics"][0]["name"] == "amountSum"
+    assert body["data"][0]["metrics"][0]["value"] == 30.0
+    oms_client.post.assert_awaited()
+    called_path = oms_client.post.await_args.args[0]
+    assert called_path == "/api/v2/ontologies/sales_db/objects/Order/search"
 
 
 @pytest.mark.unit

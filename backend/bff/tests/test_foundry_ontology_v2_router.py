@@ -1081,6 +1081,50 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
 
 
 @pytest.mark.asyncio
+async def test_apply_action_v2_normalizes_non_foundry_validation_error():
+    class _ValidationErrorOMSClient(_FakeOMSClient):
+        async def post(self, path, **kwargs):  # noqa: ANN003
+            self.last_post = (path, kwargs)
+            request = httpx.Request("POST", f"http://test{path}")
+            response = httpx.Response(
+                400,
+                request=request,
+                json={
+                    "code": "REQUEST_VALIDATION_FAILED",
+                    "category": "input",
+                    "message": "invalid parameters",
+                    "status": 400,
+                },
+            )
+            raise httpx.HTTPStatusError("validation failed", request=request, response=response)
+
+    request = Request({"type": "http", "headers": []})
+    fake_client = _ValidationErrorOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.asyncio
 async def test_list_query_types_v2_returns_foundry_raw_shape():
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
