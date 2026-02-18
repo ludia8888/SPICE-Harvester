@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-18T11:43:36+09:00
+> Generated: 2026-02-18T12:30:28+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -255,56 +255,56 @@
 
 ### `backend/bff/main.py`
 - **Functions**
-  - `async lifespan(app)` (line 634): Modern application lifecycle management
-  - `async get_oms_client()` (line 879): Get OMS client from BFF container
-  - `async get_label_mapper()` (line 890): Get label mapper from BFF container
-  - `async get_google_sheets_service()` (line 901): Get Google Sheets service from BFF container
-  - `async get_connector_registry()` (line 912): Get ConnectorRegistry from BFF container
-  - `async get_dataset_registry()` (line 923): Get DatasetRegistry from BFF container
-  - `async get_dataset_profile_registry()` (line 934): Get DatasetProfileRegistry from BFF container
-  - `async get_pipeline_registry()` (line 945): Get PipelineRegistry from BFF container
-  - `async get_pipeline_plan_registry()` (line 963): Get PipelinePlanRegistry from BFF container
-  - `async get_objectify_registry()` (line 974): no docstring
-  - `async get_agent_registry()` (line 979): no docstring
-  - `async get_agent_session_registry()` (line 985): no docstring
-  - `async get_agent_policy_registry()` (line 991): no docstring
-  - `async get_pipeline_executor()` (line 997): Get PipelineExecutor from BFF container
+  - `async lifespan(app)` (line 635): Modern application lifecycle management
+  - `async get_oms_client()` (line 880): Get OMS client from BFF container
+  - `async get_label_mapper()` (line 891): Get label mapper from BFF container
+  - `async get_google_sheets_service()` (line 902): Get Google Sheets service from BFF container
+  - `async get_connector_registry()` (line 913): Get ConnectorRegistry from BFF container
+  - `async get_dataset_registry()` (line 924): Get DatasetRegistry from BFF container
+  - `async get_dataset_profile_registry()` (line 935): Get DatasetProfileRegistry from BFF container
+  - `async get_pipeline_registry()` (line 946): Get PipelineRegistry from BFF container
+  - `async get_pipeline_plan_registry()` (line 964): Get PipelinePlanRegistry from BFF container
+  - `async get_objectify_registry()` (line 975): no docstring
+  - `async get_agent_registry()` (line 980): no docstring
+  - `async get_agent_session_registry()` (line 986): no docstring
+  - `async get_agent_policy_registry()` (line 992): no docstring
+  - `async get_pipeline_executor()` (line 998): Get PipelineExecutor from BFF container
 - **Classes**
-  - `BFFServiceContainer` (line 126): BFF-specific service container to manage BFF services
-    - `__init__(self, container, settings)` (line 134): no docstring
-    - `async initialize_bff_services(self)` (line 139): Initialize BFF-specific services
-    - `async _initialize_oms_client(self)` (line 196): Initialize OMS client with health check
-    - `async _initialize_label_mapper(self)` (line 217): Initialize label mapper
-    - `async _initialize_type_inference(self)` (line 223): Initialize type inference service
-    - `async _initialize_websocket_service(self)` (line 237): Initialize WebSocket notification service
-    - `async _initialize_rate_limiter(self)` (line 259): Initialize rate limiting service
-    - `async _initialize_connector_registry(self)` (line 263): Initialize Postgres-backed connector registry.
-    - `async _initialize_dataset_registry(self)` (line 275): Initialize Postgres-backed dataset registry.
-    - `async _initialize_dataset_profile_registry(self)` (line 286): Initialize Postgres-backed dataset profile registry.
-    - `async _initialize_pipeline_registry(self)` (line 297): Initialize Postgres-backed pipeline registry.
-    - `async _initialize_pipeline_plan_registry(self)` (line 308): Initialize Postgres-backed pipeline plan registry.
-    - `async _initialize_objectify_registry(self)` (line 319): Initialize Postgres-backed objectify registry.
-    - `async _initialize_agent_registry(self)` (line 330): Initialize Postgres-backed agent registry.
-    - `async _initialize_agent_session_registry(self)` (line 341): Initialize Postgres-backed agent session registry.
-    - `async _initialize_agent_policy_registry(self)` (line 352): Initialize Postgres-backed agent policy registry.
-    - `async _initialize_agent_tool_registry(self)` (line 363): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
-    - `async _initialize_pipeline_executor(self)` (line 382): Initialize pipeline executor (preview/build engine).
-    - `async _initialize_google_sheets_service(self)` (line 400): Initialize Google Sheets service (connector library)
-    - `async shutdown_bff_services(self)` (line 419): Shutdown BFF-specific services
-    - `get_oms_client(self)` (line 544): Get OMS client instance
-    - `get_label_mapper(self)` (line 550): Get label mapper instance
-    - `get_google_sheets_service(self)` (line 556): Get Google Sheets service instance
-    - `get_connector_registry(self)` (line 562): Get connector registry instance
-    - `get_dataset_registry(self)` (line 568): Get dataset registry instance
-    - `get_dataset_profile_registry(self)` (line 574): Get dataset profile registry instance
-    - `get_pipeline_registry(self)` (line 580): Get pipeline registry instance
-    - `get_pipeline_plan_registry(self)` (line 586): Get pipeline plan registry instance
-    - `get_objectify_registry(self)` (line 592): Get objectify registry instance
-    - `get_agent_registry(self)` (line 598): Get agent registry instance
-    - `get_agent_session_registry(self)` (line 604): Get agent session registry instance
-    - `get_agent_policy_registry(self)` (line 610): Get agent policy registry instance
-    - `get_agent_tool_registry(self)` (line 616): Get agent tool registry instance
-    - `get_pipeline_executor(self)` (line 622): Get pipeline executor instance
+  - `BFFServiceContainer` (line 127): BFF-specific service container to manage BFF services
+    - `__init__(self, container, settings)` (line 135): no docstring
+    - `async initialize_bff_services(self)` (line 140): Initialize BFF-specific services
+    - `async _initialize_oms_client(self)` (line 197): Initialize OMS client with health check
+    - `async _initialize_label_mapper(self)` (line 218): Initialize label mapper
+    - `async _initialize_type_inference(self)` (line 224): Initialize type inference service
+    - `async _initialize_websocket_service(self)` (line 238): Initialize WebSocket notification service
+    - `async _initialize_rate_limiter(self)` (line 260): Initialize rate limiting service
+    - `async _initialize_connector_registry(self)` (line 264): Initialize Postgres-backed connector registry.
+    - `async _initialize_dataset_registry(self)` (line 276): Initialize Postgres-backed dataset registry.
+    - `async _initialize_dataset_profile_registry(self)` (line 287): Initialize Postgres-backed dataset profile registry.
+    - `async _initialize_pipeline_registry(self)` (line 298): Initialize Postgres-backed pipeline registry.
+    - `async _initialize_pipeline_plan_registry(self)` (line 309): Initialize Postgres-backed pipeline plan registry.
+    - `async _initialize_objectify_registry(self)` (line 320): Initialize Postgres-backed objectify registry.
+    - `async _initialize_agent_registry(self)` (line 331): Initialize Postgres-backed agent registry.
+    - `async _initialize_agent_session_registry(self)` (line 342): Initialize Postgres-backed agent session registry.
+    - `async _initialize_agent_policy_registry(self)` (line 353): Initialize Postgres-backed agent policy registry.
+    - `async _initialize_agent_tool_registry(self)` (line 364): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
+    - `async _initialize_pipeline_executor(self)` (line 383): Initialize pipeline executor (preview/build engine).
+    - `async _initialize_google_sheets_service(self)` (line 401): Initialize Google Sheets service (connector library)
+    - `async shutdown_bff_services(self)` (line 420): Shutdown BFF-specific services
+    - `get_oms_client(self)` (line 545): Get OMS client instance
+    - `get_label_mapper(self)` (line 551): Get label mapper instance
+    - `get_google_sheets_service(self)` (line 557): Get Google Sheets service instance
+    - `get_connector_registry(self)` (line 563): Get connector registry instance
+    - `get_dataset_registry(self)` (line 569): Get dataset registry instance
+    - `get_dataset_profile_registry(self)` (line 575): Get dataset profile registry instance
+    - `get_pipeline_registry(self)` (line 581): Get pipeline registry instance
+    - `get_pipeline_plan_registry(self)` (line 587): Get pipeline plan registry instance
+    - `get_objectify_registry(self)` (line 593): Get objectify registry instance
+    - `get_agent_registry(self)` (line 599): Get agent registry instance
+    - `get_agent_session_registry(self)` (line 605): Get agent session registry instance
+    - `get_agent_policy_registry(self)` (line 611): Get agent policy registry instance
+    - `get_agent_tool_registry(self)` (line 617): Get agent tool registry instance
+    - `get_pipeline_executor(self)` (line 623): Get pipeline executor instance
 
 ### `backend/bff/middleware/__init__.py`
 
@@ -520,6 +520,45 @@
   - `async replace_table_import_v2(connectionRid, tableImportRid, payload, connector_registry, dataset_registry)` (line 674): no docstring
   - `async delete_table_import_v2(connectionRid, tableImportRid, connector_registry)` (line 774): no docstring
   - `async execute_table_import_v2(connectionRid, tableImportRid, request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 820): no docstring
+  - `_connection_response(source)` (line 968): Build Foundry-shaped Connection response from a ConnectorSource.
+  - `_iso_timestamp(value)` (line 1010): no docstring
+  - `async create_connection_v2(payload, request, connector_registry)` (line 1020): POST /v2/connectivity/connections — Create a connection.
+  - `async get_connection_v2(connectionRid, connector_registry)` (line 1089): GET /v2/connectivity/connections/{connectionRid} — Get a connection.
+  - `async list_connections_v2(pageSize, pageToken, connector_registry)` (line 1119): GET /v2/connectivity/connections — List connections.
+  - `async delete_connection_v2(connectionRid, connector_registry)` (line 1161): DELETE /v2/connectivity/connections/{connectionRid} — Delete connection.
+  - `async test_connection_v2(connectionRid, connector_registry, google_sheets_service)` (line 1196): POST /v2/connectivity/connections/{connectionRid}/test — Test a connection.
+
+### `backend/bff/routers/foundry_datasets_v2.py`
+- **Functions**
+  - `_dataset_id_from_rid(dataset_rid)` (line 79): no docstring
+  - `_dataset_rid(dataset_id)` (line 91): no docstring
+  - `_folder_rid(db_name)` (line 95): no docstring
+  - `_db_name_from_folder_rid(folder_rid)` (line 99): no docstring
+  - `_transaction_rid(transaction_id)` (line 111): no docstring
+  - `_transaction_id_from_rid(txn_rid)` (line 115): no docstring
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 131): no docstring
+  - `_dataset_response(dataset)` (line 153): no docstring
+  - `_schema_response(schema_json)` (line 167): no docstring
+  - `_branch_response(branch_name, dataset_rid, commit_id)` (line 181): no docstring
+  - `_transaction_response(txn)` (line 195): no docstring
+  - `_map_txn_status(raw)` (line 208): no docstring
+  - `async create_dataset_v2(request, dataset_registry)` (line 226): POST /v2/datasets — Create a new dataset.
+  - `async list_datasets_v2(parentFolderRid, dbName, pageSize, pageToken, dataset_registry)` (line 270): GET /v2/datasets — List datasets.
+  - `async get_dataset_v2(datasetRid, dataset_registry)` (line 315): GET /v2/datasets/{datasetRid} — Get a dataset.
+  - `async get_schema_v2(datasetRid, branchName, dataset_registry)` (line 340): GET /v2/datasets/{datasetRid}/schema — Get dataset schema.
+  - `async update_schema_v2(datasetRid, request, dataset_registry)` (line 362): PUT /v2/datasets/{datasetRid}/schema — Update dataset schema.
+  - `async _get_lakefs_client(pipeline_registry, request)` (line 410): no docstring
+  - `async list_branches_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 420): GET /v2/datasets/{datasetRid}/branches — List branches.
+  - `async create_branch_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 461): POST /v2/datasets/{datasetRid}/branches — Create branch.
+  - `async get_branch_v2(datasetRid, branchName, request, dataset_registry, pipeline_registry)` (line 507): GET /v2/datasets/{datasetRid}/branches/{branchName} — Get branch.
+  - `async delete_branch_v2(datasetRid, branchName, request, dataset_registry, pipeline_registry)` (line 542): DELETE /v2/datasets/{datasetRid}/branches/{branchName} — Delete branch.
+  - `async create_transaction_v2(datasetRid, request, dataset_registry)` (line 582): POST /v2/datasets/{datasetRid}/transactions — Create a transaction.
+  - `async commit_transaction_v2(datasetRid, transactionRid, request, dataset_registry, pipeline_registry)` (line 629): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit.
+  - `async abort_transaction_v2(datasetRid, transactionRid, dataset_registry)` (line 692): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.
+  - `async list_files_v2(datasetRid, branchName, pageSize, request, dataset_registry, pipeline_registry)` (line 738): GET /v2/datasets/{datasetRid}/files — List files in dataset.
+  - `async get_file_content_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 789): GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.
+  - `async upload_file_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 827): POST /v2/datasets/{datasetRid}/files:upload — Upload file.
+  - `async read_table_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 879): POST /v2/datasets/{datasetRid}/readTable — Read table rows.
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
@@ -714,13 +753,23 @@
   - `_extract_job_outputs(run)` (line 176): no docstring
   - `_resolve_create_build_input(payload, request)` (line 219): no docstring
   - `_request_with_internal_idempotency(request)` (line 294): no docstring
-  - `_build_response(job_id, run, branch_name, created_by, fallback_branches, retry_count, retry_backoff_duration, abort_on_failure)` (line 302): no docstring
-  - `async _load_build_run(build_rid, pipeline_registry)` (line 328): no docstring
-  - `async create_build_v2(payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client)` (line 347): no docstring
-  - `async get_build_v2(buildRid, pipeline_registry)` (line 421): no docstring
-  - `async get_builds_batch_v2(payload, pipeline_registry)` (line 466): no docstring
-  - `async list_build_jobs_v2(buildRid, pageSize, pageToken, pipeline_registry)` (line 515): no docstring
-  - `async cancel_build_v2(buildRid, pipeline_registry)` (line 568): no docstring
+  - `_build_response(job_id, run, branch_name, created_by, fallback_branches, retry_count, retry_backoff_duration, abort_on_failure, pipeline)` (line 302): no docstring
+  - `async _load_build_run(build_rid, pipeline_registry)` (line 339): no docstring
+  - `async create_build_v2(payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client)` (line 358): no docstring
+  - `async get_build_v2(buildRid, pipeline_registry)` (line 433): no docstring
+  - `async get_builds_batch_v2(payload, pipeline_registry)` (line 479): no docstring
+  - `async list_build_jobs_v2(buildRid, pageSize, pageToken, pipeline_registry)` (line 529): no docstring
+  - `async cancel_build_v2(buildRid, pipeline_registry)` (line 582): no docstring
+  - `_schedule_rid(pipeline_id)` (line 643): no docstring
+  - `_pipeline_id_from_schedule_rid(schedule_rid)` (line 647): no docstring
+  - `_schedule_response(pipeline)` (line 661): no docstring
+  - `_has_schedule(pipeline)` (line 692): no docstring
+  - `async create_schedule_v2(payload, request, pipeline_registry)` (line 700): POST /v2/orchestration/schedules — Create a schedule.
+  - `async get_schedule_v2(scheduleRid, pipeline_registry)` (line 743): GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule.
+  - `async delete_schedule_v2(scheduleRid, pipeline_registry)` (line 764): DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule.
+  - `async pause_schedule_v2(scheduleRid, pipeline_registry)` (line 792): POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule.
+  - `async unpause_schedule_v2(scheduleRid, pipeline_registry)` (line 816): POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule.
+  - `async list_schedule_runs_v2(scheduleRid, pageSize, pageToken, pipeline_registry)` (line 840): GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs.
 - **Classes**
   - `_ResolvedCreateBuildInput` (line 207): no docstring
 
@@ -1341,7 +1390,12 @@
 
 ### `backend/bff/services/data_connector_pipelining_service.py`
 - **Functions**
-  - `async start_pipelining_google_sheet(sheet_id, payload, http_request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 37): no docstring
+  - `_row_hash(row)` (line 42): Deterministic hash of a row for deduplication.
+  - `_parse_csv_bytes(data)` (line 47): Parse CSV bytes into (columns, rows).
+  - `_apply_append_mode(existing_columns, existing_rows, new_columns, new_rows)` (line 61): APPEND mode: add only new rows (by hash) that don't exist in the current dataset.
+  - `_apply_update_mode(existing_columns, existing_rows, new_columns, new_rows, primary_key_column)` (line 84): UPDATE mode: merge/upsert rows by primary key column.
+  - `async _load_existing_csv(dataset, dataset_registry, lakefs_storage_service, repo)` (line 124): Load the latest version's CSV from lakeFS. Returns (columns, rows) or empty if none.
+  - `async start_pipelining_google_sheet(sheet_id, payload, http_request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 160): no docstring
 
 ### `backend/bff/services/data_connector_registration_service.py`
 - **Functions**
@@ -7980,72 +8034,73 @@
     - `async count_datasets_by_db_names(self, db_names, branch)` (line 1298): no docstring
     - `async get_dataset(self, dataset_id)` (line 1330): no docstring
     - `async get_dataset_by_name(self, db_name, name, branch)` (line 1358): no docstring
-    - `async get_dataset_by_source_ref(self, db_name, source_type, source_ref, branch)` (line 1394): no docstring
-    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 1432): no docstring
-    - `async get_latest_version(self, dataset_id)` (line 1526): no docstring
-    - `async get_version(self, version_id)` (line 1557): no docstring
-    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 1586): no docstring
-    - `async create_backing_datasource(self, dataset_id, db_name, name, branch, description, source_type, source_ref, backing_id)` (line 1619): no docstring
-    - `async get_backing_datasource(self, backing_id)` (line 1657): no docstring
-    - `async get_backing_datasource_by_dataset(self, dataset_id, branch)` (line 1674): no docstring
-    - `async list_backing_datasources(self, db_name, branch, limit)` (line 1700): no docstring
-    - `async get_or_create_backing_datasource(self, dataset, source_type, source_ref)` (line 1726): no docstring
-    - `async create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1749): no docstring
-    - `async get_backing_datasource_version(self, version_id)` (line 1795): no docstring
-    - `async get_backing_datasource_version_by_dataset_version(self, dataset_version_id)` (line 1816): no docstring
-    - `async list_backing_datasource_versions(self, backing_id, limit)` (line 1839): no docstring
-    - `async get_or_create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1862): no docstring
-    - `async create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 1882): no docstring
-    - `async get_key_spec(self, key_spec_id)` (line 1913): no docstring
-    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 1929): no docstring
-    - `async list_key_specs(self, dataset_id, limit)` (line 1970): no docstring
-    - `async upsert_gate_policy(self, scope, name, description, rules, status)` (line 1992): no docstring
-    - `async get_gate_policy(self, scope, name)` (line 2028): no docstring
-    - `async list_gate_policies(self, scope, limit)` (line 2050): no docstring
-    - `async record_gate_result(self, scope, subject_type, subject_id, status, details, policy_name)` (line 2072): no docstring
-    - `async list_gate_results(self, scope, subject_type, subject_id, limit)` (line 2114): no docstring
-    - `async upsert_access_policy(self, db_name, scope, subject_type, subject_id, policy, status)` (line 2142): no docstring
-    - `async get_access_policy(self, db_name, scope, subject_type, subject_id, status)` (line 2179): no docstring
-    - `async list_access_policies(self, db_name, scope, subject_type, subject_id, status, limit)` (line 2208): no docstring
-    - `async record_instance_edit(self, db_name, class_id, instance_id, edit_type, metadata, status, fields)` (line 2242): no docstring
-    - `async count_instance_edits(self, db_name, class_id, status)` (line 2282): no docstring
-    - `async list_instance_edits(self, db_name, class_id, instance_id, status, limit)` (line 2305): no docstring
-    - `async clear_instance_edits(self, db_name, class_id)` (line 2336): no docstring
-    - `async remap_instance_edits(self, db_name, class_id, id_map, status)` (line 2359): no docstring
-    - `async get_instance_edit_field_stats(self, db_name, class_id, fields, status)` (line 2397): no docstring
-    - `async apply_instance_edit_field_moves(self, db_name, class_id, field_moves, status)` (line 2471): no docstring
-    - `async update_instance_edit_status_by_fields(self, db_name, class_id, fields, new_status, status, metadata_note)` (line 2535): no docstring
-    - `async create_relationship_spec(self, link_type_id, db_name, source_object_type, target_object_type, predicate, spec_type, dataset_id, mapping_spec_id, mapping_spec_version, spec, dataset_version_id, status, auto_sync, relationship_spec_id)` (line 2592): no docstring
-    - `async update_relationship_spec(self, relationship_spec_id, status, spec, auto_sync, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version)` (line 2647): no docstring
-    - `async record_relationship_index_result(self, relationship_spec_id, status, stats, errors, dataset_version_id, mapping_spec_version, lineage, indexed_at)` (line 2705): no docstring
-    - `async get_relationship_spec(self, relationship_spec_id, link_type_id)` (line 2789): no docstring
-    - `async list_relationship_specs(self, db_name, dataset_id, status, limit)` (line 2820): no docstring
-    - `async list_relationship_specs_by_relationship_object_type(self, db_name, relationship_object_type, status, limit)` (line 2852): no docstring
-    - `async list_relationship_index_results(self, relationship_spec_id, link_type_id, db_name, status, limit)` (line 2885): no docstring
-    - `async record_link_edit(self, db_name, link_type_id, branch, source_object_type, target_object_type, predicate, source_instance_id, target_instance_id, edit_type, status, metadata, edit_id)` (line 2917): no docstring
-    - `async list_link_edits(self, db_name, link_type_id, branch, status, source_instance_id, target_instance_id, limit)` (line 2967): no docstring
-    - `async clear_link_edits(self, db_name, link_type_id, branch)` (line 3005): no docstring
-    - `async create_schema_migration_plan(self, db_name, subject_type, subject_id, plan, status, plan_id)` (line 3031): no docstring
-    - `async list_schema_migration_plans(self, db_name, subject_type, subject_id, status, limit)` (line 3064): no docstring
-    - `async get_ingest_request_by_key(self, idempotency_key)` (line 3095): no docstring
-    - `async get_ingest_request(self, ingest_request_id)` (line 3139): no docstring
-    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 3183): no docstring
-    - `async get_ingest_transaction(self, ingest_request_id)` (line 3258): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3290): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3329): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3370): no docstring
-    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3408): no docstring
-    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3473): no docstring
-    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3506): no docstring
-    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3538): no docstring
-    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 3648): no docstring
-    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 3917): no docstring
-    - `async mark_ingest_outbox_published(self, outbox_id)` (line 3994): no docstring
-    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4013): no docstring
-    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4040): no docstring
-    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4060): no docstring
-    - `async get_ingest_outbox_metrics(self)` (line 4090): no docstring
-    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4132): Best-effort reconciliation for ingest atomicity.
+    - `async update_schema(self, dataset_id, schema_json)` (line 1394): Update the schema_json of an existing dataset.
+    - `async get_dataset_by_source_ref(self, db_name, source_type, source_ref, branch)` (line 1416): no docstring
+    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 1454): no docstring
+    - `async get_latest_version(self, dataset_id)` (line 1548): no docstring
+    - `async get_version(self, version_id)` (line 1579): no docstring
+    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 1608): no docstring
+    - `async create_backing_datasource(self, dataset_id, db_name, name, branch, description, source_type, source_ref, backing_id)` (line 1641): no docstring
+    - `async get_backing_datasource(self, backing_id)` (line 1679): no docstring
+    - `async get_backing_datasource_by_dataset(self, dataset_id, branch)` (line 1696): no docstring
+    - `async list_backing_datasources(self, db_name, branch, limit)` (line 1722): no docstring
+    - `async get_or_create_backing_datasource(self, dataset, source_type, source_ref)` (line 1748): no docstring
+    - `async create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1771): no docstring
+    - `async get_backing_datasource_version(self, version_id)` (line 1817): no docstring
+    - `async get_backing_datasource_version_by_dataset_version(self, dataset_version_id)` (line 1838): no docstring
+    - `async list_backing_datasource_versions(self, backing_id, limit)` (line 1861): no docstring
+    - `async get_or_create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1884): no docstring
+    - `async create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 1904): no docstring
+    - `async get_key_spec(self, key_spec_id)` (line 1935): no docstring
+    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 1951): no docstring
+    - `async list_key_specs(self, dataset_id, limit)` (line 1992): no docstring
+    - `async upsert_gate_policy(self, scope, name, description, rules, status)` (line 2014): no docstring
+    - `async get_gate_policy(self, scope, name)` (line 2050): no docstring
+    - `async list_gate_policies(self, scope, limit)` (line 2072): no docstring
+    - `async record_gate_result(self, scope, subject_type, subject_id, status, details, policy_name)` (line 2094): no docstring
+    - `async list_gate_results(self, scope, subject_type, subject_id, limit)` (line 2136): no docstring
+    - `async upsert_access_policy(self, db_name, scope, subject_type, subject_id, policy, status)` (line 2164): no docstring
+    - `async get_access_policy(self, db_name, scope, subject_type, subject_id, status)` (line 2201): no docstring
+    - `async list_access_policies(self, db_name, scope, subject_type, subject_id, status, limit)` (line 2230): no docstring
+    - `async record_instance_edit(self, db_name, class_id, instance_id, edit_type, metadata, status, fields)` (line 2264): no docstring
+    - `async count_instance_edits(self, db_name, class_id, status)` (line 2304): no docstring
+    - `async list_instance_edits(self, db_name, class_id, instance_id, status, limit)` (line 2327): no docstring
+    - `async clear_instance_edits(self, db_name, class_id)` (line 2358): no docstring
+    - `async remap_instance_edits(self, db_name, class_id, id_map, status)` (line 2381): no docstring
+    - `async get_instance_edit_field_stats(self, db_name, class_id, fields, status)` (line 2419): no docstring
+    - `async apply_instance_edit_field_moves(self, db_name, class_id, field_moves, status)` (line 2493): no docstring
+    - `async update_instance_edit_status_by_fields(self, db_name, class_id, fields, new_status, status, metadata_note)` (line 2557): no docstring
+    - `async create_relationship_spec(self, link_type_id, db_name, source_object_type, target_object_type, predicate, spec_type, dataset_id, mapping_spec_id, mapping_spec_version, spec, dataset_version_id, status, auto_sync, relationship_spec_id)` (line 2614): no docstring
+    - `async update_relationship_spec(self, relationship_spec_id, status, spec, auto_sync, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version)` (line 2669): no docstring
+    - `async record_relationship_index_result(self, relationship_spec_id, status, stats, errors, dataset_version_id, mapping_spec_version, lineage, indexed_at)` (line 2727): no docstring
+    - `async get_relationship_spec(self, relationship_spec_id, link_type_id)` (line 2811): no docstring
+    - `async list_relationship_specs(self, db_name, dataset_id, status, limit)` (line 2842): no docstring
+    - `async list_relationship_specs_by_relationship_object_type(self, db_name, relationship_object_type, status, limit)` (line 2874): no docstring
+    - `async list_relationship_index_results(self, relationship_spec_id, link_type_id, db_name, status, limit)` (line 2907): no docstring
+    - `async record_link_edit(self, db_name, link_type_id, branch, source_object_type, target_object_type, predicate, source_instance_id, target_instance_id, edit_type, status, metadata, edit_id)` (line 2939): no docstring
+    - `async list_link_edits(self, db_name, link_type_id, branch, status, source_instance_id, target_instance_id, limit)` (line 2989): no docstring
+    - `async clear_link_edits(self, db_name, link_type_id, branch)` (line 3027): no docstring
+    - `async create_schema_migration_plan(self, db_name, subject_type, subject_id, plan, status, plan_id)` (line 3053): no docstring
+    - `async list_schema_migration_plans(self, db_name, subject_type, subject_id, status, limit)` (line 3086): no docstring
+    - `async get_ingest_request_by_key(self, idempotency_key)` (line 3117): no docstring
+    - `async get_ingest_request(self, ingest_request_id)` (line 3161): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 3205): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 3280): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3312): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3351): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3392): no docstring
+    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3430): no docstring
+    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3495): no docstring
+    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3528): no docstring
+    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3560): no docstring
+    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 3670): no docstring
+    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 3939): no docstring
+    - `async mark_ingest_outbox_published(self, outbox_id)` (line 4016): no docstring
+    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4035): no docstring
+    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4062): no docstring
+    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4082): no docstring
+    - `async get_ingest_outbox_metrics(self)` (line 4112): no docstring
+    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4154): Best-effort reconciliation for ingest atomicity.
 
 ### `backend/shared/services/registries/lineage_store.py`
 - **Functions**
@@ -8375,8 +8430,10 @@
     - `async delete_branch(self, repository, name)` (line 142): no docstring
     - `async commit(self, repository, branch, message, metadata)` (line 161): no docstring
     - `async get_branch_head_commit_id(self, repository, branch)` (line 195): no docstring
-    - `async list_diff_objects(self, repository, ref, since, prefix, amount)` (line 218): no docstring
-    - `async merge(self, repository, source_ref, destination_branch, message, metadata, allow_empty)` (line 294): no docstring
+    - `async list_branches(self, repository, prefix, amount)` (line 218): List branches in a repository.
+    - `async list_objects(self, repository, ref, prefix, amount)` (line 270): List objects under a ref (branch or commit) in a repository.
+    - `async list_diff_objects(self, repository, ref, since, prefix, amount)` (line 327): no docstring
+    - `async merge(self, repository, source_ref, destination_branch, message, metadata, allow_empty)` (line 403): no docstring
 
 ### `backend/shared/services/storage/lakefs_storage_service.py`
 - **Functions**
@@ -10476,6 +10533,50 @@
   - `_checklist_section(text)` (line 32): no docstring
   - `test_architecture_quality_checklist_is_auto_rendered_with_ratios(doc_path)` (line 47): no docstring
 
+### `backend/tests/unit/openapi/test_foundry_datasets_v2_contract.py`
+- **Functions**
+  - `_build_test_app()` (line 27): no docstring
+  - `_override_deps(app, dataset_registry, pipeline_registry)` (line 226): no docstring
+  - `test_foundry_datasets_v2_paths_exist_in_openapi()` (line 243): no docstring
+  - `async test_foundry_datasets_create_and_get(monkeypatch)` (line 288): no docstring
+  - `async test_foundry_datasets_list_with_pagination(monkeypatch)` (line 341): no docstring
+  - `async test_foundry_datasets_schema_get_and_update(monkeypatch)` (line 403): no docstring
+  - `async test_foundry_datasets_branch_operations(monkeypatch)` (line 466): no docstring
+  - `async test_foundry_datasets_transaction_lifecycle(monkeypatch)` (line 541): no docstring
+  - `async test_foundry_datasets_file_operations(monkeypatch)` (line 611): no docstring
+  - `async test_foundry_datasets_read_table(monkeypatch)` (line 683): no docstring
+  - `async test_foundry_datasets_read_table_with_column_selection(monkeypatch)` (line 739): readTable respects the ``columns`` request field to project columns.
+  - `async test_foundry_datasets_read_table_no_version_returns_empty(monkeypatch)` (line 794): readTable returns empty result when no version exists and lakeFS fallback fails.
+- **Classes**
+  - `_DatasetRegistry` (line 37): no docstring
+    - `__init__(self)` (line 38): no docstring
+    - `async create_dataset(self, **kwargs)` (line 43): no docstring
+    - `async get_dataset(self, dataset_id)` (line 60): no docstring
+    - `async list_datasets(self, db_name, **kwargs)` (line 63): no docstring
+    - `async update_schema(self, dataset_id, schema_json)` (line 83): no docstring
+    - `async get_latest_version(self, dataset_id)` (line 88): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, **kwargs)` (line 93): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 113): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 140): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 143): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 157): no docstring
+  - `_MockLakeFSClient` (line 171): no docstring
+    - `async list_branches(self, repository, **kwargs)` (line 172): no docstring
+    - `async create_branch(self, repository, name, source)` (line 178): no docstring
+    - `async get_branch_head_commit_id(self, repository, branch)` (line 181): no docstring
+    - `async delete_branch(self, repository, name)` (line 184): no docstring
+    - `async list_objects(self, repository, ref, prefix, amount)` (line 187): no docstring
+    - `async commit(self, repository, branch, message, metadata)` (line 192): no docstring
+  - `_MockLakeFSStorage` (line 196): no docstring
+    - `__init__(self)` (line 197): no docstring
+    - `async load_bytes(self, repo, path)` (line 200): no docstring
+    - `async save_bytes(self, repo, path, data, content_type)` (line 203): no docstring
+  - `_PipelineRegistry` (line 207): no docstring
+    - `__init__(self, lakefs_client, lakefs_storage)` (line 208): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 216): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 219): no docstring
+    - `async get_lakefs_storage(self, user_id)` (line 222): no docstring
+
 ### `backend/tests/unit/openapi/test_foundry_ontology_v2_contract.py`
 - **Functions**
   - `_param_names(schema, path, method)` (line 10): no docstring
@@ -10528,6 +10629,13 @@
   - `async test_foundry_orchestration_get_batch_jobs_and_cancel_flow()` (line 124): no docstring
   - `async test_foundry_connectivity_connection_scoped_table_import_create(monkeypatch)` (line 188): no docstring
   - `async test_foundry_connectivity_get_list_execute_and_delete_table_import(monkeypatch)` (line 307): no docstring
+  - `test_foundry_schedule_paths_exist_in_openapi()` (line 469): no docstring
+  - `async test_foundry_schedule_create_get_pause_unpause_delete()` (line 485): no docstring
+  - `async test_foundry_schedule_not_found_for_missing_pipeline()` (line 575): no docstring
+  - `test_foundry_connection_crud_paths_exist_in_openapi()` (line 596): no docstring
+  - `async test_foundry_connection_create_get_list_delete()` (line 610): no docstring
+  - `async test_foundry_connection_get_not_found()` (line 695): no docstring
+  - `async test_foundry_connection_test_endpoint()` (line 712): no docstring
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - **Functions**
@@ -12073,6 +12181,19 @@
   - `_FakeS3Client` (line 8): no docstring
     - `__init__(self, pages)` (line 9): no docstring
     - `list_objects_v2(self, **kwargs)` (line 12): no docstring
+
+### `backend/tests/unit/services/test_sync_mode_enforcement.py`
+- **Functions**
+  - `test_row_hash_deterministic()` (line 28): Same row produces the same hash; different rows produce different hashes.
+  - `test_parse_csv_bytes()` (line 54): Standard CSV bytes are parsed into (columns, rows).
+  - `test_parse_csv_bytes_empty()` (line 64): Empty bytes produce empty columns and empty rows.
+  - `test_append_mode_adds_only_new_rows()` (line 78): Rows that already exist (by hash) are not duplicated.
+  - `test_append_mode_empty_existing()` (line 101): When there are no existing rows, all new rows are added.
+  - `test_append_mode_no_new_rows()` (line 114): When all new rows already exist, nothing changes.
+  - `test_append_mode_preserves_column_names()` (line 129): Existing column names take precedence over new column names.
+  - `test_update_mode_updates_existing_rows_by_pk()` (line 150): Rows with a matching PK are updated; new PKs are appended.
+  - `test_update_mode_default_pk_first_column()` (line 172): When no primary_key_column is specified, the first column is used.
+  - `test_update_mode_empty_existing()` (line 193): When there is no existing data, the result is just the new data.
 
 ### `backend/tests/unit/services/test_sync_wrapper_service.py`
 - **Functions**

@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T11:43:36+09:00
+> Generated: 2026-02-18T12:30:28+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **969**
-- Modules with module docstring: **542/969**
-- Modules with broad `except Exception`: **270**
+- Modules scanned: **972**
+- Modules with module docstring: **545/972**
+- Modules with broad `except Exception`: **271**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **232023**
+- Total code lines (non-empty, non-comment): **234496**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 227 | 172/227 (75%) | 80 | 438 | 1054 | 720 | 52404 |
+| `bff` | 228 | 173/228 (75%) | 81 | 462 | 1083 | 747 | 53774 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
@@ -41,8 +41,8 @@
 | `pipeline_worker` | 5 | 5/5 (100%) | 3 | 50 | 79 | 3 | 7555 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
-| `shared` | 300 | 204/300 (68%) | 104 | 380 | 850 | 1129 | 79065 |
-| `tests` | 280 | 47/280 (16%) | 20 | 51 | 1314 | 1340 | 43556 |
+| `shared` | 300 | 204/300 (68%) | 104 | 380 | 853 | 1129 | 79191 |
+| `tests` | 282 | 49/282 (17%) | 20 | 51 | 1361 | 1367 | 44533 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -51,7 +51,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `backend/bff/routers/foundry_ontology_v2.py` | 468 | 88 | 0 | 0 | 100 | 72 | 5977 |
 | `backend/pipeline_worker/main.py` | 235 | 47 | 0 | 0 | 64 | 83 | 6352 |
-| `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 824 |
+| `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 826 |
 | `backend/instance_worker/main.py` | 180 | 36 | 0 | 0 | 43 | 69 | 2299 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 516 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2644 |
@@ -72,7 +72,7 @@
 | `backend/action_outbox_worker/main.py` | 9 | 7 | 9 | 9 | 377 |
 | `backend/action_worker/main.py` | 41 | 15 | 26 | 47 | 2404 |
 | `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
-| `backend/bff/main.py` | 33 | 40 | 42 | 28 | 824 |
+| `backend/bff/main.py` | 33 | 40 | 42 | 28 | 826 |
 | `backend/connector_sync_worker/main.py` | 13 | 5 | 5 | 11 | 455 |
 | `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 304 |
 | `backend/funnel/main.py` | 3 | 1 | 1 | 1 | 59 |
@@ -96,24 +96,24 @@
 | --- | --- | --- |
 | 1 | `backend/bff/routers/foundry_ontology_v2.py` | API contract surface, Foundry v2 compatibility, ontology model contract |
 | 2 | `backend/ontology_worker/main.py` | entrypoint lifecycle, ontology model contract |
-| 3 | `backend/bff/routers/foundry_connectivity_v2.py` | API contract surface, Foundry v2 compatibility |
-| 4 | `backend/bff/routers/foundry_orchestration_v2.py` | API contract surface, Foundry v2 compatibility |
-| 5 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
-| 6 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 7 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 8 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 9 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 10 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 11 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
-| 12 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
-| 13 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 14 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
-| 15 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
-| 16 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
-| 17 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
-| 18 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 19 | `backend/bff/main.py` | entrypoint lifecycle |
-| 20 | `backend/message_relay/main.py` | entrypoint lifecycle |
+| 3 | `backend/bff/routers/foundry_datasets_v2.py` | API contract surface, Foundry v2 compatibility |
+| 4 | `backend/bff/routers/foundry_connectivity_v2.py` | API contract surface, Foundry v2 compatibility |
+| 5 | `backend/bff/routers/foundry_orchestration_v2.py` | API contract surface, Foundry v2 compatibility |
+| 6 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
+| 7 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 8 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 9 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 10 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 11 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 12 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
+| 13 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
+| 14 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 15 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
+| 16 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
+| 17 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
+| 18 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
+| 19 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 20 | `backend/bff/main.py` | entrypoint lifecycle |
 
 ## action_outbox_worker
 
@@ -405,7 +405,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=1049 | code_lines=824 | risk_score=214
+- Source footprint: total_lines=1051 | code_lines=826 | risk_score=214
 - API surface: public=15 | top-level functions=14 | classes=1 | methods=34
 - Runtime signals: async_functions=33 | try=42 | raise=28 | broad_except=40 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=33/34 (97%)
@@ -869,13 +869,29 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=960 | code_lines=846 | risk_score=15
-- API surface: public=6 | top-level functions=23 | classes=0 | methods=0
-- Runtime signals: async_functions=11 | try=7 | raise=7 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/23 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=1284 | code_lines=1116 | risk_score=40
+- API surface: public=11 | top-level functions=30 | classes=0 | methods=0
+- Runtime signals: async_functions=16 | try=12 | raise=7 | broad_except=7 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=6/30 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (11): bff.routers.data_connector_deps; bff.services; data_connector.google_sheets.service; shared.dependencies.providers; shared.observability.tracing; shared.services.events.objectify_job_queue; shared.services.registries.connector_registry; shared.services.registries.dataset_registry (+3 more)
 - External imports (4): fastapi; logging; typing; uuid
-- Public API names: create_table_import_v2; delete_table_import_v2; execute_table_import_v2; get_table_import_v2; list_table_imports_v2; replace_table_import_v2
+- Public API names: create_connection_v2; create_table_import_v2; delete_connection_v2; delete_table_import_v2; execute_table_import_v2; get_connection_v2; get_table_import_v2; list_connections_v2; list_table_imports_v2; replace_table_import_v2; test_connection_v2
+
+### `backend/bff/routers/foundry_datasets_v2.py`
+- Module summary: Foundry Datasets API v2 — Palantir-compatible dataset lifecycle.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=965 | code_lines=772 | risk_score=88
+- API surface: public=16 | top-level functions=29 | classes=0 | methods=0
+- Runtime signals: async_functions=17 | try=18 | raise=0 | broad_except=14 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=16/29 (55%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (7): bff.routers.data_connector_deps; bff.routers.pipeline_datasets_ops_lakefs; shared.observability.tracing; shared.services.registries.dataset_registry; shared.services.registries.pipeline_registry; shared.services.storage.lakefs_client; shared.utils.time_utils
+- External imports (7): csv; fastapi; io; logging; mimetypes; typing; uuid
+- Public API names: abort_transaction_v2; commit_transaction_v2; create_branch_v2; create_dataset_v2; create_transaction_v2; delete_branch_v2; get_branch_v2; get_dataset_v2; get_file_content_v2; get_schema_v2; list_branches_v2; list_datasets_v2 (+4 more)
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - Module summary: Foundry Ontologies v2 read-compat router.
@@ -901,13 +917,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=616 | code_lines=538 | risk_score=6
-- API surface: public=5 | top-level functions=22 | classes=1 | methods=0
-- Runtime signals: async_functions=6 | try=9 | raise=8 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/22 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Source footprint: total_lines=876 | code_lines=744 | risk_score=38
+- API surface: public=11 | top-level functions=32 | classes=1 | methods=0
+- Runtime signals: async_functions=12 | try=16 | raise=8 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=6/32 (18%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (10): bff.dependencies; bff.routers.pipeline_deps; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.observability.tracing; shared.services.pipeline.pipeline_job_queue; shared.services.registries.dataset_registry (+2 more)
 - External imports (6): dataclasses; fastapi; logging; types; typing; uuid
-- Public API names: cancel_build_v2; create_build_v2; get_build_v2; get_builds_batch_v2; list_build_jobs_v2
+- Public API names: cancel_build_v2; create_build_v2; create_schedule_v2; delete_schedule_v2; get_build_v2; get_builds_batch_v2; get_schedule_v2; list_build_jobs_v2; list_schedule_runs_v2; pause_schedule_v2; unpause_schedule_v2
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -2325,12 +2341,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=278 | code_lines=253 | risk_score=25
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=5 | raise=5 | broad_except=5 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=439 | code_lines=373 | risk_score=31
+- API surface: public=1 | top-level functions=6 | classes=0 | methods=0
+- Runtime signals: async_functions=2 | try=6 | raise=5 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (16): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types; shared.observability.tracing; shared.security.input_sanitizer; shared.services.events.objectify_job_queue (+8 more)
-- External imports (6): __future__; csv; fastapi; io; logging; typing
+- External imports (7): __future__; csv; fastapi; hashlib; io; logging; typing
 - Public API names: start_pipelining_google_sheet
 
 ### `backend/bff/services/data_connector_registration_service.py`
@@ -9309,10 +9325,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=4392 | code_lines=4208 | risk_score=55
-- API surface: public=17 | top-level functions=1 | classes=17 | methods=84
-- Runtime signals: async_functions=72 | try=14 | raise=96 | broad_except=11 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=1/84 (1%)
+- Source footprint: total_lines=4414 | code_lines=4229 | risk_score=55
+- API surface: public=17 | top-level functions=1 | classes=17 | methods=85
+- Runtime signals: async_functions=73 | try=14 | raise=97 | broad_except=11 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=2/85 (2%)
 - Internal imports (7): shared.config.settings; shared.observability.context_propagation; shared.services.registries.postgres_schema_registry; shared.utils.json_utils; shared.utils.s3_uri; shared.utils.schema_hash; shared.utils.time_utils
 - External imports (7): __future__; asyncpg; dataclasses; datetime; logging; typing; uuid
 - Public API names: AccessPolicyRecord; BackingDatasourceRecord; BackingDatasourceVersionRecord; DatasetIngestOutboxItem; DatasetIngestRequestRecord; DatasetIngestTransactionRecord; DatasetRecord; DatasetRegistry; DatasetVersionRecord; GatePolicyRecord; GateResultRecord; InstanceEditRecord (+5 more)
@@ -9549,10 +9565,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=330 | code_lines=296 | risk_score=5
-- API surface: public=6 | top-level functions=2 | classes=6 | methods=9
-- Runtime signals: async_functions=6 | try=1 | raise=40 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/6 (16%) | methods=0/9 (0%)
+- Source footprint: total_lines=439 | code_lines=401 | risk_score=5
+- API surface: public=6 | top-level functions=2 | classes=6 | methods=11
+- Runtime signals: async_functions=8 | try=1 | raise=49 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/6 (16%) | methods=2/11 (18%)
 - Internal imports (2): shared.config.settings; shared.observability.tracing
 - External imports (6): __future__; dataclasses; httpx; json; logging; typing
 - Public API names: LakeFSAuthError; LakeFSClient; LakeFSConfig; LakeFSConflictError; LakeFSError; LakeFSNotFoundError
@@ -12423,6 +12439,22 @@
 - External imports (4): __future__; pathlib; pytest; re
 - Public API names: test_architecture_quality_checklist_is_auto_rendered_with_ratios
 
+### `backend/tests/unit/openapi/test_foundry_datasets_v2_contract.py`
+- Module summary: Contract tests for Foundry Datasets API v2 router.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=829 | code_lines=635 | risk_score=0
+- API surface: public=10 | top-level functions=12 | classes=4 | methods=24
+- Runtime signals: async_functions=31 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=2/12 (16%) | classes=0/4 (0%) | methods=0/24 (0%)
+- Internal imports (3): bff.routers; bff.routers.data_connector_deps; shared.utils.time_utils
+- External imports (6): fastapi; httpx; pytest; types; typing; uuid
+- Public API names: test_foundry_datasets_branch_operations; test_foundry_datasets_create_and_get; test_foundry_datasets_file_operations; test_foundry_datasets_list_with_pagination; test_foundry_datasets_read_table; test_foundry_datasets_read_table_no_version_returns_empty; test_foundry_datasets_read_table_with_column_selection; test_foundry_datasets_schema_get_and_update; test_foundry_datasets_transaction_lifecycle; test_foundry_datasets_v2_paths_exist_in_openapi
+
 ### `backend/tests/unit/openapi/test_foundry_ontology_v2_contract.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -12447,13 +12479,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=460 | code_lines=397 | risk_score=0
-- API surface: public=5 | top-level functions=7 | classes=0 | methods=0
-- Runtime signals: async_functions=30 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=742 | code_lines=614 | risk_score=0
+- API surface: public=12 | top-level functions=14 | classes=0 | methods=0
+- Runtime signals: async_functions=46 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (5): bff.dependencies; bff.routers; bff.routers.data_connector_deps; bff.routers.pipeline_deps; shared.dependencies.providers
 - External imports (6): fastapi; httpx; pytest; types; typing; uuid
-- Public API names: test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi
+- Public API names: test_foundry_connection_create_get_list_delete; test_foundry_connection_crud_paths_exist_in_openapi; test_foundry_connection_get_not_found; test_foundry_connection_test_endpoint; test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi; test_foundry_schedule_create_get_pause_unpause_delete; test_foundry_schedule_not_found_for_missing_pipeline; test_foundry_schedule_paths_exist_in_openapi
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - Module summary: no docstring
@@ -14534,6 +14566,22 @@
 - Internal imports (1): shared.services.storage.storage_service
 - External imports (2): datetime; pytest
 - Public API names: test_list_command_files_paginates_filters_and_sorts; test_storage_service_does_not_disable_tls_verify_by_default; test_storage_service_respects_explicit_tls_verify_flag; test_storage_service_supports_tls_ca_bundle_path
+
+### `backend/tests/unit/services/test_sync_mode_enforcement.py`
+- Module summary: Tests for sync-mode helpers in bff.services.data_connector_pipelining_service.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: service/domain orchestration
+- Source footprint: total_lines=204 | code_lines=125 | risk_score=0
+- API surface: public=10 | top-level functions=10 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=10/10 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.services.data_connector_pipelining_service
+- External imports (2): hashlib; pytest
+- Public API names: test_append_mode_adds_only_new_rows; test_append_mode_empty_existing; test_append_mode_no_new_rows; test_append_mode_preserves_column_names; test_parse_csv_bytes; test_parse_csv_bytes_empty; test_row_hash_deterministic; test_update_mode_default_pk_first_column; test_update_mode_empty_existing; test_update_mode_updates_existing_rows_by_pk
 
 ### `backend/tests/unit/services/test_sync_wrapper_service.py`
 - Module summary: no docstring

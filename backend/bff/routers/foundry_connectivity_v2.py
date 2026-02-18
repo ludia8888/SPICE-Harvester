@@ -958,3 +958,327 @@ async def execute_table_import_v2(
         )
 
     return f"ri.spice.main.build.{job_id}"
+
+
+# ---------------------------------------------------------------------------
+# Connection CRUD — Foundry Connectivity Connections API v2
+# ---------------------------------------------------------------------------
+
+
+def _connection_response(source: ConnectorSource) -> dict[str, Any]:
+    """Build Foundry-shaped Connection response from a ConnectorSource."""
+    cfg = source.config_json or {}
+
+    display_name = (
+        str(cfg.get("display_name") or "").strip()
+        or str(cfg.get("name") or "").strip()
+        or str(cfg.get("account_email") or "").strip()
+        or f"Connection {source.source_id}"
+    )
+
+    conn_status = "CONNECTED"
+    if not source.enabled:
+        conn_status = "DISCONNECTED"
+    elif cfg.get("status"):
+        text = str(cfg["status"]).strip().upper()
+        if text in {"ERROR", "FAILED"}:
+            conn_status = "ERROR"
+        elif text in {"DISCONNECTED", "DISABLED"}:
+            conn_status = "DISCONNECTED"
+
+    config_type = str(cfg.get("type") or "GoogleSheetsConnectionConfig").strip()
+
+    configuration: dict[str, Any] = {"type": config_type}
+    # Include non-sensitive config fields
+    if cfg.get("sheet_url"):
+        configuration["sheetUrl"] = str(cfg["sheet_url"])
+    if cfg.get("account_email"):
+        configuration["accountEmail"] = str(cfg["account_email"])
+    if cfg.get("scopes"):
+        configuration["scopes"] = cfg["scopes"]
+
+    return {
+        "rid": _connection_rid(source.source_id),
+        "displayName": display_name,
+        "configuration": configuration,
+        "status": conn_status,
+        "createdTime": _iso_timestamp(source.created_at) if source.created_at else utcnow().isoformat(),
+        "updatedTime": _iso_timestamp(source.updated_at) if source.updated_at else None,
+    }
+
+
+def _iso_timestamp(value: Any) -> str:
+    if value is None:
+        return utcnow().isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+@router.post("/connections")
+@trace_endpoint("bff.foundry_v2_connectivity.create_connection")
+async def create_connection_v2(
+    payload: Dict[str, Any],
+    request: Request,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> JSONResponse:
+    """POST /v2/connectivity/connections — Create a connection."""
+    _ = request
+    display_name = str(payload.get("displayName") or payload.get("name") or "").strip()
+    if not display_name:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "displayName is required"},
+        )
+
+    configuration = payload.get("configuration") if isinstance(payload.get("configuration"), dict) else {}
+    config_type = str(configuration.get("type") or "GoogleSheetsConnectionConfig").strip()
+
+    connection_id = str(uuid4())
+
+    config_json: dict[str, Any] = {
+        "display_name": display_name,
+        "type": config_type,
+        "status": "CONNECTED",
+    }
+    # Forward non-sensitive configuration fields
+    for key in ("accountEmail", "sheetUrl", "scopes", "serviceAccountJson"):
+        if configuration.get(key):
+            config_json[key.lower() if key == "accountEmail" else key] = configuration[key]
+
+    # OAuth credentials
+    if configuration.get("accessToken"):
+        config_json["access_token"] = configuration["accessToken"]
+    if configuration.get("refreshToken"):
+        config_json["refresh_token"] = configuration["refreshToken"]
+
+    try:
+        await connector_registry.upsert_source(
+            source_type="google_sheets_connection",
+            source_id=connection_id,
+            enabled=True,
+            config_json=config_json,
+        )
+    except Exception as exc:
+        logger.error("Failed to create connection: %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="ConnectionCreationFailed",
+            parameters={"message": "Failed to create connection"},
+        )
+
+    created = await connector_registry.get_source(
+        source_type="google_sheets_connection", source_id=connection_id,
+    )
+    if created is None:
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="ConnectionCreationFailed",
+            parameters={"message": "Connection created but could not be retrieved"},
+        )
+
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=_connection_response(created))
+
+
+@router.get("/connections/{connectionRid}")
+@trace_endpoint("bff.foundry_v2_connectivity.get_connection")
+async def get_connection_v2(
+    connectionRid: str,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+):
+    """GET /v2/connectivity/connections/{connectionRid} — Get a connection."""
+    connection_id = _connection_id_from_rid(connectionRid)
+    if not connection_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "connectionRid is invalid"},
+        )
+
+    connection = await connector_registry.get_source(
+        source_type="google_sheets_connection", source_id=connection_id,
+    )
+    if connection is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ConnectionNotFound",
+            parameters={"connectionRid": connectionRid},
+        )
+
+    return _connection_response(connection)
+
+
+@router.get("/connections")
+@trace_endpoint("bff.foundry_v2_connectivity.list_connections")
+async def list_connections_v2(
+    pageSize: int = Query(default=100, ge=1, le=500),
+    pageToken: str | None = Query(default=None),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+):
+    """GET /v2/connectivity/connections — List connections."""
+    offset = 0
+    if pageToken:
+        try:
+            offset = int(pageToken)
+        except (TypeError, ValueError):
+            return _foundry_error(
+                status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+        if offset < 0:
+            return _foundry_error(
+                status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+
+    all_connections = await connector_registry.list_sources(
+        source_type="google_sheets_connection", enabled=True, limit=5000,
+    )
+    all_connections.sort(key=lambda src: str(src.source_id))
+
+    page_items = all_connections[offset: offset + pageSize]
+    data = [_connection_response(conn) for conn in page_items]
+
+    next_token = offset + len(page_items)
+    return {
+        "data": data,
+        "nextPageToken": str(next_token) if next_token < len(all_connections) else None,
+    }
+
+
+@router.delete("/connections/{connectionRid}")
+@trace_endpoint("bff.foundry_v2_connectivity.delete_connection")
+async def delete_connection_v2(
+    connectionRid: str,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+):
+    """DELETE /v2/connectivity/connections/{connectionRid} — Delete connection."""
+    connection_id = _connection_id_from_rid(connectionRid)
+    if not connection_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "connectionRid is invalid"},
+        )
+
+    connection = await connector_registry.get_source(
+        source_type="google_sheets_connection", source_id=connection_id,
+    )
+    if connection is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ConnectionNotFound",
+            parameters={"connectionRid": connectionRid},
+        )
+
+    await connector_registry.set_source_enabled(
+        source_type="google_sheets_connection",
+        source_id=connection_id,
+        enabled=False,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/connections/{connectionRid}/test")
+@trace_endpoint("bff.foundry_v2_connectivity.test_connection")
+async def test_connection_v2(
+    connectionRid: str,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+):
+    """POST /v2/connectivity/connections/{connectionRid}/test — Test a connection."""
+    connection_id = _connection_id_from_rid(connectionRid)
+    if not connection_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "connectionRid is invalid"},
+        )
+
+    connection = await connector_registry.get_source(
+        source_type="google_sheets_connection", source_id=connection_id,
+    )
+    if connection is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ConnectionNotFound",
+            parameters={"connectionRid": connectionRid},
+        )
+
+    cfg = connection.config_json or {}
+    access_token = cfg.get("access_token")
+    api_key = cfg.get("api_key")
+
+    # If connection has an OAuth connection_id, try refreshing token
+    inner_connection_id = cfg.get("connection_id")
+    if inner_connection_id:
+        try:
+            from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
+            oauth_client = _build_google_oauth_client()
+            _, refreshed_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(inner_connection_id),
+            )
+            if refreshed_token:
+                access_token = refreshed_token
+        except Exception:
+            pass
+
+    test_result: dict[str, Any] = {
+        "connectionRid": _connection_rid(connection_id),
+        "status": "SUCCEEDED",
+        "message": "Connection is healthy",
+    }
+
+    try:
+        # Try to ping Google Sheets API with current credentials
+        if access_token or api_key:
+            # Simple metadata fetch to verify credentials work
+            sheet_url = cfg.get("sheetUrl") or cfg.get("sheet_url")
+            if sheet_url:
+                # Trigger metadata fetch via internal method to verify credentials
+                from data_connector.google_sheets.utils import extract_sheet_id as _extract_sid
+                await google_sheets_service._get_sheet_metadata(
+                    _extract_sid(str(sheet_url)),
+                    api_key=api_key,
+                    access_token=access_token,
+                )
+            else:
+                # No sheet URL to test against — credentials present but untestable
+                test_result["message"] = "Connection credentials present (no test URL configured)"
+        else:
+            test_result["status"] = "WARNING"
+            test_result["message"] = "No credentials configured"
+    except Exception as exc:
+        test_result["status"] = "FAILED"
+        test_result["message"] = f"Connection test failed: {str(exc)[:200]}"
+
+        # Update connection status in registry
+        try:
+            merged_cfg = dict(cfg)
+            merged_cfg["status"] = "ERROR"
+            await connector_registry.upsert_source(
+                source_type="google_sheets_connection",
+                source_id=connection_id,
+                enabled=connection.enabled,
+                config_json=merged_cfg,
+            )
+        except Exception:
+            pass
+
+    return test_result

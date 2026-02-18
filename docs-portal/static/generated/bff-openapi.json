@@ -2972,7 +2972,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3233,7 +3232,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3368,7 +3366,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3497,7 +3494,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3642,7 +3638,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3771,7 +3766,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3907,7 +3901,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -4014,7 +4007,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -5950,7 +5942,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object",
                 "title": "Payload"
               }
@@ -6080,7 +6071,6 @@
             "application/json": {
               "schema": {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array",
@@ -6295,6 +6285,397 @@
         }
       }
     },
+    "/api/v2/orchestration/schedules": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Create Schedule V2",
+        "description": "POST /v2/orchestration/schedules — Create a schedule.",
+        "operationId": "create_schedule_v2_api_v2_orchestration_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ]
+      }
+    },
+    "/api/v2/orchestration/schedules/{scheduleRid}": {
+      "get": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Get Schedule V2",
+        "description": "GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule.",
+        "operationId": "get_schedule_v2_api_v2_orchestration_schedules__scheduleRid__get",
+        "parameters": [
+          {
+            "name": "scheduleRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schedulerid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Delete Schedule V2",
+        "description": "DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule.",
+        "operationId": "delete_schedule_v2_api_v2_orchestration_schedules__scheduleRid__delete",
+        "parameters": [
+          {
+            "name": "scheduleRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schedulerid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/orchestration/schedules/{scheduleRid}/pause": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Pause Schedule V2",
+        "description": "POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule.",
+        "operationId": "pause_schedule_v2_api_v2_orchestration_schedules__scheduleRid__pause_post",
+        "parameters": [
+          {
+            "name": "scheduleRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schedulerid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/orchestration/schedules/{scheduleRid}/unpause": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Unpause Schedule V2",
+        "description": "POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule.",
+        "operationId": "unpause_schedule_v2_api_v2_orchestration_schedules__scheduleRid__unpause_post",
+        "parameters": [
+          {
+            "name": "scheduleRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schedulerid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/orchestration/schedules/{scheduleRid}/runs": {
+      "get": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "List Schedule Runs V2",
+        "description": "GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs.",
+        "operationId": "list_schedule_runs_v2_api_v2_orchestration_schedules__scheduleRid__runs_get",
+        "parameters": [
+          {
+            "name": "scheduleRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schedulerid"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/connectivity/connections/{connectionRid}/tableImports": {
       "post": {
         "tags": [
@@ -6342,7 +6723,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -6589,7 +6969,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -6711,6 +7090,1474 @@
             "schema": {
               "type": "string",
               "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Create Connection V2",
+        "description": "POST /v2/connectivity/connections — Create a connection.",
+        "operationId": "create_connection_v2_api_v2_connectivity_connections_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "List Connections V2",
+        "description": "GET /v2/connectivity/connections — List connections.",
+        "operationId": "list_connections_v2_api_v2_connectivity_connections_get",
+        "parameters": [
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}": {
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get Connection V2",
+        "description": "GET /v2/connectivity/connections/{connectionRid} — Get a connection.",
+        "operationId": "get_connection_v2_api_v2_connectivity_connections__connectionRid__get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Delete Connection V2",
+        "description": "DELETE /v2/connectivity/connections/{connectionRid} — Delete connection.",
+        "operationId": "delete_connection_v2_api_v2_connectivity_connections__connectionRid__delete",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/test": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Test Connection V2",
+        "description": "POST /v2/connectivity/connections/{connectionRid}/test — Test a connection.",
+        "operationId": "test_connection_v2_api_v2_connectivity_connections__connectionRid__test_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Create Dataset V2",
+        "description": "POST /v2/datasets — Create a new dataset.",
+        "operationId": "create_dataset_v2_api_v2_datasets_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "List Datasets V2",
+        "description": "GET /v2/datasets — List datasets.",
+        "operationId": "list_datasets_v2_api_v2_datasets_get",
+        "parameters": [
+          {
+            "name": "parentFolderRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Parentfolderrid"
+            }
+          },
+          {
+            "name": "dbName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Dbname"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Get Dataset V2",
+        "description": "GET /v2/datasets/{datasetRid} — Get a dataset.",
+        "operationId": "get_dataset_v2_api_v2_datasets__datasetRid__get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/schema": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Get Schema V2",
+        "description": "GET /v2/datasets/{datasetRid}/schema — Get dataset schema.",
+        "operationId": "get_schema_v2_api_v2_datasets__datasetRid__schema_get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Update Schema V2",
+        "description": "PUT /v2/datasets/{datasetRid}/schema — Update dataset schema.",
+        "operationId": "update_schema_v2_api_v2_datasets__datasetRid__schema_put",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/branches": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "List Branches V2",
+        "description": "GET /v2/datasets/{datasetRid}/branches — List branches.",
+        "operationId": "list_branches_v2_api_v2_datasets__datasetRid__branches_get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Create Branch V2",
+        "description": "POST /v2/datasets/{datasetRid}/branches — Create branch.",
+        "operationId": "create_branch_v2_api_v2_datasets__datasetRid__branches_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/branches/{branchName}": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Get Branch V2",
+        "description": "GET /v2/datasets/{datasetRid}/branches/{branchName} — Get branch.",
+        "operationId": "get_branch_v2_api_v2_datasets__datasetRid__branches__branchName__get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Delete Branch V2",
+        "description": "DELETE /v2/datasets/{datasetRid}/branches/{branchName} — Delete branch.",
+        "operationId": "delete_branch_v2_api_v2_datasets__datasetRid__branches__branchName__delete",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/transactions": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Create Transaction V2",
+        "description": "POST /v2/datasets/{datasetRid}/transactions — Create a transaction.",
+        "operationId": "create_transaction_v2_api_v2_datasets__datasetRid__transactions_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Commit Transaction V2",
+        "description": "POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit.",
+        "operationId": "commit_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__commit_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "transactionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Transactionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Abort Transaction V2",
+        "description": "POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.",
+        "operationId": "abort_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__abort_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "transactionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Transactionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/files": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "List Files V2",
+        "description": "GET /v2/datasets/{datasetRid}/files — List files in dataset.",
+        "operationId": "list_files_v2_api_v2_datasets__datasetRid__files_get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/files/{filePath}/content": {
+      "get": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Get File Content V2",
+        "description": "GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.",
+        "operationId": "get_file_content_v2_api_v2_datasets__datasetRid__files__filePath__content_get",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "filePath",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filepath"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/files:upload": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Upload File V2",
+        "description": "POST /v2/datasets/{datasetRid}/files:upload — Upload file.",
+        "operationId": "upload_file_v2_api_v2_datasets__datasetRid__files_upload_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
+            }
+          },
+          {
+            "name": "filePath",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filepath"
+            }
+          },
+          {
+            "name": "branchName",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branchname"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/readTable": {
+      "post": {
+        "tags": [
+          "Foundry Datasets v2"
+        ],
+        "summary": "Read Table V2",
+        "description": "POST /v2/datasets/{datasetRid}/readTable — Read table rows.",
+        "operationId": "read_table_v2_api_v2_datasets__datasetRid__readTable_post",
+        "parameters": [
+          {
+            "name": "datasetRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Datasetrid"
             }
           },
           {
@@ -7849,7 +9696,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Cancel Task Api V1 Tasks  Task Id  Delete"
                 }
               }
@@ -8071,7 +9917,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Task Result Api V1 Tasks  Task Id  Result Get"
                 }
               }
@@ -8206,7 +10051,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Replay Result Api V1 Admin Replay Instance State  Task Id  Result Get"
                 }
               }
@@ -8395,7 +10239,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Replay Trace Api V1 Admin Replay Instance State  Task Id  Trace Get"
                 }
               }
@@ -8468,7 +10311,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Cleanup Old Replay Results Api V1 Admin Cleanup Old Replays Post"
                 }
               }
@@ -8603,7 +10445,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Recompute Projection Result Api V1 Admin Recompute Projection  Task Id  Result Get"
                 }
               }
@@ -8698,7 +10539,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Reindex Instances Endpoint Api V1 Admin Reindex Instances Post"
                 }
               }
@@ -8731,7 +10571,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get System Health Api V1 Admin System Health Get"
                 }
@@ -8780,7 +10619,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response List Lakefs Credentials Api V1 Admin Lakefs Credentials Get"
                 }
@@ -8837,7 +10675,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Upsert Lakefs Credentials Api V1 Admin Lakefs Credentials Post"
                 }
@@ -8942,7 +10779,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Rebuild Instance Index Endpoint Api V1 Admin Databases  Db Name  Rebuild Index Post"
                 }
               }
@@ -9020,7 +10856,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Rebuild Status Api V1 Admin Databases  Db Name  Rebuild Index  Task Id  Status Get"
                 }
               }
@@ -9117,7 +10952,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object",
                 "title": "Payload"
               }
@@ -9131,7 +10965,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Start Google Sheets Oauth Api V1 Data Connectors Google Sheets Oauth Start Post"
                 }
@@ -9263,7 +11096,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response List Google Sheets Connections Api V1 Data Connectors Google Sheets Connections Get"
                 }
@@ -9347,7 +11179,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Delete Google Sheets Connection Api V1 Data Connectors Google Sheets Connections  Connection Id  Delete"
                 }
               }
@@ -9441,7 +11272,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response List Google Sheets Spreadsheets Api V1 Data Connectors Google Sheets Drive Spreadsheets Get"
                 }
               }
@@ -9518,7 +11348,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response List Google Sheets Worksheets Api V1 Data Connectors Google Sheets Spreadsheets  Sheet Id  Worksheets Get"
                 }
               }
@@ -9550,7 +11379,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object",
                 "title": "Sheet Data"
               }
@@ -9564,7 +11392,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Register Google Sheet Api V1 Data Connectors Google Sheets Register Post"
                 }
@@ -9685,7 +11512,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Preview Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Preview Get"
                 }
               }
@@ -9761,7 +11587,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response List Registered Sheets Api V1 Data Connectors Google Sheets Registered Get"
                 }
               }
@@ -9900,7 +11725,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -9913,7 +11737,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Start Pipelining Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Start Pipelining Post"
                 }
               }
@@ -12349,7 +14172,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Search Context7 Api V1 Context7 Search Post"
                 }
@@ -12448,7 +14270,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Entity Context Api V1 Context7 Context  Entity Id  Get"
                 }
               }
@@ -12496,7 +14317,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Add Knowledge Api V1 Context7 Knowledge Post"
                 }
@@ -12570,7 +14390,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Create Entity Link Api V1 Context7 Link Post"
                 }
@@ -12644,7 +14463,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Analyze Ontology Api V1 Context7 Analyze Ontology Post"
                 }
@@ -12752,7 +14570,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Ontology Suggestions Api V1 Context7 Suggestions  Db Name   Class Id  Get"
                 }
               }
@@ -12790,7 +14607,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Check Context7 Health Api V1 Context7 Health Get"
                 }
@@ -13246,7 +15062,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Summary Api V1 Summary Get"
                 }
               }
@@ -13359,7 +15174,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -13929,7 +15743,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -14007,7 +15820,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -14085,7 +15897,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -14211,7 +16022,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -14419,7 +16229,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -14853,8 +16662,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "object"
                   },
                   {
                     "type": "null"
@@ -15280,7 +17088,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15440,7 +17247,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15518,7 +17324,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15596,7 +17401,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15651,7 +17455,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Create Mapping Spec Api V1 Objectify Mapping Specs Post"
                 }
               }
@@ -15759,7 +17562,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response List Mapping Specs Api V1 Objectify Mapping Specs Get"
                 }
               }
@@ -15837,7 +17639,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Run Objectify Api V1 Objectify Datasets  Dataset Id  Run Post"
                 }
               }
@@ -15915,7 +17716,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Run Objectify Dag Api V1 Objectify Databases  Db Name  Run Dag Post"
                 }
               }
@@ -16000,11 +17800,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DetectRelationshipsRequest",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DetectRelationshipsRequest"
+                  }
+                ],
                 "default": {
                   "confidence_threshold": 0.6,
                   "include_sample_analysis": true
-                }
+                },
+                "title": "Body"
               }
             }
           }
@@ -16016,7 +17821,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Detect Relationships Api V1 Objectify Databases  Db Name  Datasets  Dataset Id  Detect Relationships Post"
                 }
               }
@@ -16092,11 +17896,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TriggerIncrementalRequest",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TriggerIncrementalRequest"
+                  }
+                ],
                 "default": {
                   "execution_mode": "incremental",
                   "force_full_refresh": false
-                }
+                },
+                "title": "Body"
               }
             }
           }
@@ -16108,7 +17917,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Trigger Incremental Objectify Api V1 Objectify Mapping Specs  Mapping Spec Id  Trigger Incremental Post"
                 }
               }
@@ -16187,7 +17995,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Get Mapping Spec Watermark Api V1 Objectify Mapping Specs  Mapping Spec Id  Watermark Get"
                 }
               }
@@ -18122,7 +19929,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Ops Status Api V1 Ops Status Get"
                 }
@@ -18350,7 +20156,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Execute Simple Graph Query Api V1 Graph Query  Db Name  Simple Post"
                 }
               }
@@ -18446,7 +20251,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": true,
                 "title": "Query"
               }
             }
@@ -18459,7 +20263,6 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true,
                   "title": "Response Execute Multi Hop Query Api V1 Graph Query  Db Name  Multi Hop Post"
                 }
               }
@@ -19795,7 +21598,6 @@
           "context": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -19875,7 +21677,6 @@
           "llm": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20003,7 +21804,11 @@
             "default": "main"
           },
           "mode": {
-            "$ref": "#/components/schemas/AIQueryMode",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AIQueryMode"
+              }
+            ],
             "default": "auto"
           },
           "limit": {
@@ -20051,12 +21856,10 @@
             "$ref": "#/components/schemas/AIQueryPlan"
           },
           "execution": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Execution"
           },
           "llm": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Llm"
           },
@@ -20106,7 +21909,6 @@
             "title": "Subject Id"
           },
           "policy": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Policy"
           },
@@ -20265,7 +22067,6 @@
           "raw": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20296,7 +22097,6 @@
           "data": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20368,7 +22168,6 @@
             ]
           },
           "parameters": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           }
@@ -20379,7 +22178,6 @@
       "BatchApplyActionRequestItemV2": {
         "properties": {
           "parameters": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           }
@@ -20654,7 +22452,6 @@
         "properties": {
           "instances": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -20664,7 +22461,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20824,7 +22620,6 @@
           "format_stats": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20848,13 +22643,16 @@
             "description": "명령 ID"
           },
           "status": {
-            "$ref": "#/components/schemas/CommandStatus",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CommandStatus"
+              }
+            ],
             "description": "실행 상태"
           },
           "result": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -20972,7 +22770,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21155,7 +22952,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21195,7 +22991,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21322,7 +23117,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21358,7 +23152,6 @@
           "properties": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21381,14 +23174,12 @@
       "ExecuteQueryRequestV2": {
         "properties": {
           "parameters": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           },
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21423,7 +23214,6 @@
             "title": "Description"
           },
           "rules": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Rules"
           },
@@ -21468,7 +23258,6 @@
           "provenance": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21543,7 +23332,6 @@
           "display": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21555,7 +23343,6 @@
           "data": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21567,7 +23354,6 @@
           "index_status": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21579,7 +23365,6 @@
           "provenance": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21617,7 +23402,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21768,7 +23552,6 @@
             "title": "Edges"
           },
           "query": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Query"
           },
@@ -21787,7 +23570,6 @@
           "page": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21800,7 +23582,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -21814,7 +23595,6 @@
           "index_summary": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21850,7 +23630,6 @@
       "InstanceCreateRequest": {
         "properties": {
           "data": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Data",
             "description": "인스턴스 데이터 (Label 키 사용)"
@@ -21858,7 +23637,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21879,7 +23657,6 @@
       "InstanceUpdateRequest": {
         "properties": {
           "data": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Data",
             "description": "수정할 데이터 (Label 키 사용)"
@@ -21887,7 +23664,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21920,7 +23696,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22042,7 +23817,6 @@
           "dataset_sample": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22055,7 +23829,6 @@
           "answers": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22207,7 +23980,6 @@
             "description": "Class relationships"
           },
           "metadata": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Metadata",
             "description": "Additional metadata"
@@ -22276,7 +24048,6 @@
           "answers": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22288,7 +24059,6 @@
           "planner_hints": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22300,7 +24070,6 @@
           "task_spec": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22641,7 +24410,6 @@
             "default": false
           },
           "constraints": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Constraints",
             "description": "Property constraints"
@@ -22776,7 +24544,6 @@
           "items": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23237,7 +25004,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23273,7 +25039,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23300,7 +25065,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23408,7 +25172,6 @@
           "dataset": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23420,7 +25183,6 @@
           "ingest_request": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23432,7 +25194,6 @@
           "version": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23468,7 +25229,6 @@
             "title": "Risk Summary"
           },
           "risk_policy": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Risk Policy"
           }
@@ -23507,7 +25267,6 @@
             "description": "Column name when applicable"
           },
           "evidence": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Evidence",
             "description": "Structured context"
@@ -23632,7 +25391,11 @@
       "TaskMetricsResponse": {
         "properties": {
           "metrics": {
-            "$ref": "#/components/schemas/TaskMetrics",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskMetrics"
+              }
+            ],
             "description": "Task execution metrics"
           },
           "timestamp": {
@@ -23680,7 +25443,11 @@
             "description": "Task type"
           },
           "status": {
-            "$ref": "#/components/schemas/TaskStatus",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatus"
+              }
+            ],
             "description": "Current status"
           },
           "created_at": {
@@ -23730,7 +25497,6 @@
           "progress": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23743,7 +25509,6 @@
           "result": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23903,7 +25668,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23938,7 +25702,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {

@@ -309,7 +309,18 @@ def _build_response(
     retry_count: int,
     retry_backoff_duration: str,
     abort_on_failure: bool,
+    pipeline: Any = None,
 ) -> dict[str, Any]:
+    # Determine scheduleRid from pipeline schedule fields
+    schedule_rid_value: str | None = None
+    if pipeline is not None:
+        cron = getattr(pipeline, "schedule_cron", None) or (pipeline.get("schedule_cron") if isinstance(pipeline, dict) else None)
+        interval = getattr(pipeline, "schedule_interval_seconds", None) or (pipeline.get("schedule_interval_seconds") if isinstance(pipeline, dict) else None)
+        if cron or interval:
+            pid = getattr(pipeline, "pipeline_id", None) or (pipeline.get("pipeline_id") if isinstance(pipeline, dict) else None)
+            if pid:
+                schedule_rid_value = f"ri.spice.main.schedule.{pid}"
+
     return {
         "rid": _build_rid(job_id),
         "branchName": branch_name,
@@ -321,7 +332,7 @@ def _build_response(
         "retryBackoffDuration": retry_backoff_duration,
         "abortOnFailure": abort_on_failure,
         "status": _normalize_build_status(run.get("status") if isinstance(run, dict) else "RUNNING"),
-        "scheduleRid": None,
+        "scheduleRid": schedule_rid_value,
     }
 
 
@@ -405,6 +416,7 @@ async def create_build_v2(
             retry_count=resolved.retry_count,
             retry_backoff_duration=resolved.retry_backoff_duration,
             abort_on_failure=resolved.abort_on_failure,
+            pipeline=pipeline,
         )
     except Exception as exc:
         logger.error("Failed to create Foundry orchestration build: %s", exc)
@@ -458,6 +470,7 @@ async def get_build_v2(
         retry_count=0,
         retry_backoff_duration="PT0S",
         abort_on_failure=False,
+        pipeline=pipeline,
     )
 
 
@@ -506,6 +519,7 @@ async def get_builds_batch_v2(
             retry_count=0,
             retry_backoff_duration="PT0S",
             abort_on_failure=False,
+            pipeline=pipeline,
         )
     return {"data": result}
 
@@ -614,3 +628,249 @@ async def cancel_build_v2(
         finished_at=utcnow(),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Schedules — Foundry Orchestration Schedules API v2
+# ---------------------------------------------------------------------------
+
+_SCHEDULE_RID_PREFIXES = (
+    "ri.spice.main.schedule.",
+    "ri.foundry.main.schedule.",
+)
+
+
+def _schedule_rid(pipeline_id: str) -> str:
+    return f"ri.spice.main.schedule.{pipeline_id}"
+
+
+def _pipeline_id_from_schedule_rid(schedule_rid: str) -> str | None:
+    text = str(schedule_rid or "").strip()
+    if not text:
+        return None
+    for prefix in _SCHEDULE_RID_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix):].strip() or None
+    try:
+        UUID(text)
+        return text
+    except ValueError:
+        return None
+
+
+def _schedule_response(pipeline: Any) -> dict[str, Any]:
+    pipeline_id = getattr(pipeline, "pipeline_id", None) or (pipeline.get("pipeline_id") if isinstance(pipeline, dict) else None)
+    schedule_cron = getattr(pipeline, "schedule_cron", None) or (pipeline.get("schedule_cron") if isinstance(pipeline, dict) else None)
+    schedule_interval = getattr(pipeline, "schedule_interval_seconds", None) or (pipeline.get("schedule_interval_seconds") if isinstance(pipeline, dict) else None)
+    branch = getattr(pipeline, "branch", None) or (pipeline.get("branch") if isinstance(pipeline, dict) else None)
+    pipeline_status = str(getattr(pipeline, "status", None) or (pipeline.get("status") if isinstance(pipeline, dict) else "") or "").strip().lower()
+
+    trigger: dict[str, Any] = {"type": "time"}
+    if schedule_cron:
+        trigger["cronExpression"] = str(schedule_cron)
+    if schedule_interval:
+        trigger["intervalSeconds"] = int(schedule_interval)
+
+    schedule_status = "ACTIVE"
+    if pipeline_status in {"paused", "disabled"}:
+        schedule_status = "PAUSED"
+
+    return {
+        "rid": _schedule_rid(pipeline_id),
+        "targetRid": f"ri.spice.main.pipeline.{pipeline_id}",
+        "trigger": trigger,
+        "action": {
+            "type": "build",
+            "branchName": str(branch or "main"),
+        },
+        "status": schedule_status,
+        "createdTime": _iso_timestamp(getattr(pipeline, "created_at", None) or (pipeline.get("created_at") if isinstance(pipeline, dict) else None)),
+        "createdBy": "system",
+    }
+
+
+def _has_schedule(pipeline: Any) -> bool:
+    cron = getattr(pipeline, "schedule_cron", None) or (pipeline.get("schedule_cron") if isinstance(pipeline, dict) else None)
+    interval = getattr(pipeline, "schedule_interval_seconds", None) or (pipeline.get("schedule_interval_seconds") if isinstance(pipeline, dict) else None)
+    return bool(cron) or bool(interval)
+
+
+@router.post("/schedules")
+@trace_endpoint("bff.foundry_v2_orchestration.create_schedule")
+async def create_schedule_v2(
+    payload: Dict[str, Any],
+    request: Request,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> JSONResponse:
+    """POST /v2/orchestration/schedules — Create a schedule."""
+    target_rid = str(payload.get("targetRid") or "").strip()
+    pipeline_id = _pipeline_id_from_target_rid(target_rid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "targetRid must reference a pipeline RID"})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="PipelineNotFound", parameters={"pipelineId": pipeline_id})
+
+    trigger = payload.get("trigger") if isinstance(payload.get("trigger"), dict) else {}
+    cron_expression = str(trigger.get("cronExpression") or "").strip() or None
+    interval_seconds = trigger.get("intervalSeconds")
+    if interval_seconds is not None:
+        try:
+            interval_seconds = int(interval_seconds)
+        except (TypeError, ValueError):
+            return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "intervalSeconds must be an integer"})
+
+    if not cron_expression and not interval_seconds:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "trigger.cronExpression or trigger.intervalSeconds required"})
+
+    try:
+        await pipeline_registry.update_pipeline(
+            pipeline_id=pipeline_id,
+            schedule_cron=cron_expression,
+            schedule_interval_seconds=interval_seconds,
+        )
+    except Exception as exc:
+        logger.error("Failed to create schedule: %s", exc)
+        return _foundry_error(500, error_code="INTERNAL", error_name="ScheduleCreationFailed", parameters={"message": str(exc)})
+
+    updated_pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    return JSONResponse(content=_schedule_response(updated_pipeline or pipeline))
+
+
+@router.get("/schedules/{scheduleRid}")
+@trace_endpoint("bff.foundry_v2_orchestration.get_schedule")
+async def get_schedule_v2(
+    scheduleRid: str,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> JSONResponse:
+    """GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule."""
+    pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    if not _has_schedule(pipeline):
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    return JSONResponse(content=_schedule_response(pipeline))
+
+
+@router.delete("/schedules/{scheduleRid}", status_code=status.HTTP_204_NO_CONTENT)
+@trace_endpoint("bff.foundry_v2_orchestration.delete_schedule")
+async def delete_schedule_v2(
+    scheduleRid: str,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> Response:
+    """DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule."""
+    pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    try:
+        await pipeline_registry.update_pipeline(
+            pipeline_id=pipeline_id,
+            schedule_cron="",
+            schedule_interval_seconds=0,
+        )
+    except Exception as exc:
+        logger.error("Failed to delete schedule: %s", exc)
+        return _foundry_error(500, error_code="INTERNAL", error_name="ScheduleDeletionFailed", parameters={"message": str(exc)})
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/schedules/{scheduleRid}/pause", status_code=status.HTTP_204_NO_CONTENT)
+@trace_endpoint("bff.foundry_v2_orchestration.pause_schedule")
+async def pause_schedule_v2(
+    scheduleRid: str,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> Response:
+    """POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule."""
+    pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    try:
+        await pipeline_registry.update_pipeline(pipeline_id=pipeline_id, status="paused")
+    except Exception as exc:
+        logger.error("Failed to pause schedule: %s", exc)
+        return _foundry_error(500, error_code="INTERNAL", error_name="SchedulePauseFailed", parameters={"message": str(exc)})
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/schedules/{scheduleRid}/unpause", status_code=status.HTTP_204_NO_CONTENT)
+@trace_endpoint("bff.foundry_v2_orchestration.unpause_schedule")
+async def unpause_schedule_v2(
+    scheduleRid: str,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> Response:
+    """POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule."""
+    pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    try:
+        await pipeline_registry.update_pipeline(pipeline_id=pipeline_id, status="active")
+    except Exception as exc:
+        logger.error("Failed to unpause schedule: %s", exc)
+        return _foundry_error(500, error_code="INTERNAL", error_name="ScheduleUnpauseFailed", parameters={"message": str(exc)})
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/schedules/{scheduleRid}/runs")
+@trace_endpoint("bff.foundry_v2_orchestration.list_schedule_runs")
+async def list_schedule_runs_v2(
+    scheduleRid: str,
+    pageSize: int = Query(default=25, ge=1, le=100),
+    pageToken: str = Query(default=""),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> JSONResponse:
+    """GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs."""
+    pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
+    if not pipeline_id:
+        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
+
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    if pipeline is None:
+        return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
+
+    # Load recent runs for this pipeline
+    try:
+        runs = await pipeline_registry.list_runs(pipeline_id=pipeline_id, limit=pageSize)
+    except Exception:
+        runs = []
+
+    offset = int(pageToken) if pageToken.strip().isdigit() else 0
+    page = runs[offset: offset + pageSize] if isinstance(runs, list) else []
+    next_token = str(offset + pageSize) if offset + pageSize < len(runs) else None
+
+    data = []
+    for run_item in page:
+        if isinstance(run_item, dict):
+            job_id = str(run_item.get("job_id") or "").strip()
+            data.append({
+                "buildRid": _build_rid(job_id) if job_id else None,
+                "status": _normalize_build_status(run_item.get("status")),
+                "startedTime": _iso_timestamp(run_item.get("started_at")),
+                "finishedTime": _iso_timestamp(run_item.get("finished_at")) if run_item.get("finished_at") else None,
+            })
+
+    return JSONResponse(content={"data": data, "nextPageToken": next_token})

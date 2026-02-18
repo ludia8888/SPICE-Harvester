@@ -22,32 +22,32 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **216**
+- Total documented endpoints: **243**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 159 |
-| `v2` | 57 |
+| `v2` | 84 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 46 |
 | `pipelines` | 29 |
+| `datasets` | 16 |
 | `databases` | 15 |
 | `admin` | 13 |
+| `connectivity` | 11 |
 | `data-connectors` | 11 |
+| `orchestration` | 11 |
 | `lineage` | 10 |
 | `monitoring` | 10 |
 | `config` | 9 |
 | `context7` | 7 |
 | `objectify` | 7 |
 | `schema-changes` | 7 |
-| `connectivity` | 6 |
 | `backing-datasources` | 5 |
-| `graph-query` | 5 |
-| `orchestration` | 5 |
 
 ## Endpoint Catalog (`/api/v1`, `/api/v2`)
 
@@ -190,12 +190,38 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v2/connectivity/connections` | List Connections V2 | `v2` | no | no | `list_connections_v2_api_v2_connectivity_connections_get` |
+| `POST` | `/api/v2/connectivity/connections` | Create Connection V2 | `v2` | no | no | `create_connection_v2_api_v2_connectivity_connections_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}` | Get Connection V2 | `v2` | no | no | `get_connection_v2_api_v2_connectivity_connections__connectionRid__get` |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}` | Delete Connection V2 | `v2` | no | no | `delete_connection_v2_api_v2_connectivity_connections__connectionRid__delete` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | List Table Imports V2 | `v2` | no | no | `list_table_imports_v2_api_v2_connectivity_connections__connectionRid__tableImports_get` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | Create Table Import V2 | `v2` | no | no | `create_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Get Table Import V2 | `v2` | no | no | `get_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__get` |
 | `PUT` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Replace Table Import V2 | `v2` | no | no | `replace_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__put` |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | `v2` | no | no | `delete_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__delete` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | `v2` | no | no | `execute_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__execute_post` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/test` | Test Connection V2 | `v2` | no | no | `test_connection_v2_api_v2_connectivity_connections__connectionRid__test_post` |
+
+### Foundry Datasets v2
+
+| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v2/datasets` | List Datasets V2 | `v2` | no | no | `list_datasets_v2_api_v2_datasets_get` |
+| `POST` | `/api/v2/datasets` | Create Dataset V2 | `v2` | no | no | `create_dataset_v2_api_v2_datasets_post` |
+| `GET` | `/api/v2/datasets/{datasetRid}` | Get Dataset V2 | `v2` | no | no | `get_dataset_v2_api_v2_datasets__datasetRid__get` |
+| `GET` | `/api/v2/datasets/{datasetRid}/branches` | List Branches V2 | `v2` | no | no | `list_branches_v2_api_v2_datasets__datasetRid__branches_get` |
+| `POST` | `/api/v2/datasets/{datasetRid}/branches` | Create Branch V2 | `v2` | no | no | `create_branch_v2_api_v2_datasets__datasetRid__branches_post` |
+| `GET` | `/api/v2/datasets/{datasetRid}/branches/{branchName}` | Get Branch V2 | `v2` | no | no | `get_branch_v2_api_v2_datasets__datasetRid__branches__branchName__get` |
+| `DELETE` | `/api/v2/datasets/{datasetRid}/branches/{branchName}` | Delete Branch V2 | `v2` | no | no | `delete_branch_v2_api_v2_datasets__datasetRid__branches__branchName__delete` |
+| `GET` | `/api/v2/datasets/{datasetRid}/files` | List Files V2 | `v2` | no | no | `list_files_v2_api_v2_datasets__datasetRid__files_get` |
+| `GET` | `/api/v2/datasets/{datasetRid}/files/{filePath}/content` | Get File Content V2 | `v2` | no | no | `get_file_content_v2_api_v2_datasets__datasetRid__files__filePath__content_get` |
+| `POST` | `/api/v2/datasets/{datasetRid}/files:upload` | Upload File V2 | `v2` | no | no | `upload_file_v2_api_v2_datasets__datasetRid__files_upload_post` |
+| `POST` | `/api/v2/datasets/{datasetRid}/readTable` | Read Table V2 | `v2` | no | no | `read_table_v2_api_v2_datasets__datasetRid__readTable_post` |
+| `GET` | `/api/v2/datasets/{datasetRid}/schema` | Get Schema V2 | `v2` | no | no | `get_schema_v2_api_v2_datasets__datasetRid__schema_get` |
+| `PUT` | `/api/v2/datasets/{datasetRid}/schema` | Update Schema V2 | `v2` | no | no | `update_schema_v2_api_v2_datasets__datasetRid__schema_put` |
+| `POST` | `/api/v2/datasets/{datasetRid}/transactions` | Create Transaction V2 | `v2` | no | no | `create_transaction_v2_api_v2_datasets__datasetRid__transactions_post` |
+| `POST` | `/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort` | Abort Transaction V2 | `v2` | no | no | `abort_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__abort_post` |
+| `POST` | `/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit` | Commit Transaction V2 | `v2` | no | no | `commit_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__commit_post` |
 
 ### Foundry Ontologies v2
 
@@ -257,6 +283,12 @@
 | `GET` | `/api/v2/orchestration/builds/{buildRid}` | Get Build V2 | `v2` | no | no | `get_build_v2_api_v2_orchestration_builds__buildRid__get` |
 | `POST` | `/api/v2/orchestration/builds/{buildRid}/cancel` | Cancel Build V2 | `v2` | no | no | `cancel_build_v2_api_v2_orchestration_builds__buildRid__cancel_post` |
 | `GET` | `/api/v2/orchestration/builds/{buildRid}/jobs` | List Build Jobs V2 | `v2` | no | no | `list_build_jobs_v2_api_v2_orchestration_builds__buildRid__jobs_get` |
+| `POST` | `/api/v2/orchestration/schedules` | Create Schedule V2 | `v2` | no | no | `create_schedule_v2_api_v2_orchestration_schedules_post` |
+| `GET` | `/api/v2/orchestration/schedules/{scheduleRid}` | Get Schedule V2 | `v2` | no | no | `get_schedule_v2_api_v2_orchestration_schedules__scheduleRid__get` |
+| `DELETE` | `/api/v2/orchestration/schedules/{scheduleRid}` | Delete Schedule V2 | `v2` | no | no | `delete_schedule_v2_api_v2_orchestration_schedules__scheduleRid__delete` |
+| `POST` | `/api/v2/orchestration/schedules/{scheduleRid}/pause` | Pause Schedule V2 | `v2` | no | no | `pause_schedule_v2_api_v2_orchestration_schedules__scheduleRid__pause_post` |
+| `GET` | `/api/v2/orchestration/schedules/{scheduleRid}/runs` | List Schedule Runs V2 | `v2` | no | no | `list_schedule_runs_v2_api_v2_orchestration_schedules__scheduleRid__runs_get` |
+| `POST` | `/api/v2/orchestration/schedules/{scheduleRid}/unpause` | Unpause Schedule V2 | `v2` | no | no | `unpause_schedule_v2_api_v2_orchestration_schedules__scheduleRid__unpause_post` |
 
 ### Governance
 

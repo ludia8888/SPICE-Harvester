@@ -1391,6 +1391,28 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 updated_at=row["updated_at"],
             )
 
+    async def update_schema(
+        self,
+        *,
+        dataset_id: str,
+        schema_json: Dict[str, Any],
+    ) -> None:
+        """Update the schema_json of an existing dataset."""
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        schema_payload = normalize_json_payload(schema_json)
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.datasets
+                SET schema_json = $2::jsonb,
+                    updated_at = NOW()
+                WHERE dataset_id = $1
+                """,
+                dataset_id,
+                schema_payload,
+            )
+
     async def get_dataset_by_source_ref(
         self,
         *,

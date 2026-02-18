@@ -88,6 +88,7 @@ from bff.routers import (
     data_connector,
     database,
     foundry_connectivity_v2,
+    foundry_datasets_v2,
     foundry_orchestration_v2,
     governance,
     graph,
@@ -1014,6 +1015,7 @@ app.include_router(ontology.router, prefix="/api/v1")
 app.include_router(foundry_ontology_v2.router, prefix="/api")
 app.include_router(foundry_orchestration_v2.router, prefix="/api")
 app.include_router(foundry_connectivity_v2.router, prefix="/api")
+app.include_router(foundry_datasets_v2.router, prefix="/api")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(instance_async.router, prefix="/api/v1")

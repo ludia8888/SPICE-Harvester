@@ -7,9 +7,10 @@ to centralize connector-to-dataset materialization (Facade pattern).
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, Request
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -31,6 +32,128 @@ from shared.utils.s3_uri import build_s3_uri
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sync mode helpers — APPEND / UPDATE
+# ---------------------------------------------------------------------------
+
+
+def _row_hash(row: List[Any]) -> str:
+    """Deterministic hash of a row for deduplication."""
+    return hashlib.sha256("|".join(str(v) for v in row).encode("utf-8")).hexdigest()
+
+
+def _parse_csv_bytes(data: bytes) -> Tuple[List[str], List[List[str]]]:
+    """Parse CSV bytes into (columns, rows)."""
+    text = data.decode("utf-8", errors="replace")
+    reader = csv.reader(io.StringIO(text))
+    columns: List[str] = []
+    rows: List[List[str]] = []
+    for i, row in enumerate(reader):
+        if i == 0:
+            columns = row
+        else:
+            rows.append(row)
+    return columns, rows
+
+
+def _apply_append_mode(
+    existing_columns: List[str],
+    existing_rows: List[List[Any]],
+    new_columns: List[str],
+    new_rows: List[List[Any]],
+) -> Tuple[List[str], List[List[Any]]]:
+    """APPEND mode: add only new rows (by hash) that don't exist in the current dataset."""
+    # Use new_columns as canonical if existing is empty
+    merged_columns = existing_columns if existing_columns else new_columns
+
+    # Build hash set of existing rows for O(1) lookup
+    existing_hashes = {_row_hash(row) for row in existing_rows}
+
+    appended = list(existing_rows)
+    for row in new_rows:
+        h = _row_hash(row)
+        if h not in existing_hashes:
+            appended.append(row)
+            existing_hashes.add(h)
+
+    return merged_columns, appended
+
+
+def _apply_update_mode(
+    existing_columns: List[str],
+    existing_rows: List[List[Any]],
+    new_columns: List[str],
+    new_rows: List[List[Any]],
+    primary_key_column: Optional[str] = None,
+) -> Tuple[List[str], List[List[Any]]]:
+    """UPDATE mode: merge/upsert rows by primary key column.
+
+    If primary_key_column is not specified, the first column is used as the PK.
+    Existing rows are updated if the PK matches; new rows are appended.
+    """
+    merged_columns = existing_columns if existing_columns else new_columns
+
+    # Resolve PK column index
+    pk_col = primary_key_column or (merged_columns[0] if merged_columns else None)
+    pk_index = 0
+    if pk_col and pk_col in merged_columns:
+        pk_index = merged_columns.index(pk_col)
+
+    # Build index of existing rows by PK value
+    pk_map: Dict[str, int] = {}
+    merged_rows = list(existing_rows)
+    for idx, row in enumerate(merged_rows):
+        pk_value = str(row[pk_index]) if pk_index < len(row) else ""
+        pk_map[pk_value] = idx
+
+    for row in new_rows:
+        pk_value = str(row[pk_index]) if pk_index < len(row) else ""
+        if pk_value in pk_map:
+            # Update existing row
+            merged_rows[pk_map[pk_value]] = row
+        else:
+            # Insert new row
+            pk_map[pk_value] = len(merged_rows)
+            merged_rows.append(row)
+
+    return merged_columns, merged_rows
+
+
+async def _load_existing_csv(
+    *,
+    dataset: Any,
+    dataset_registry: DatasetRegistry,
+    lakefs_storage_service: Any,
+    repo: str,
+) -> Tuple[List[str], List[List[str]]]:
+    """Load the latest version's CSV from lakeFS. Returns (columns, rows) or empty if none."""
+    try:
+        version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
+        if version is None or not version.artifact_key:
+            return [], []
+
+        # Extract the object path from the artifact_key (s3://repo/commit_id/path)
+        artifact = str(version.artifact_key)
+        # artifact_key format: s3://raw-datasets/commit_id/path/to/source.csv
+        # We need to read from the branch + path
+        branch_name = (dataset.branch or "main").strip() or "main"
+        object_prefix = dataset_ops._dataset_artifact_prefix(
+            db_name=dataset.db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name,
+        )
+        object_key = f"{object_prefix}/source.csv"
+
+        csv_bytes = await lakefs_storage_service.load_bytes(
+            repo, f"{branch_name}/{object_key}",
+        )
+        if not csv_bytes:
+            return [], []
+
+        return _parse_csv_bytes(csv_bytes)
+    except Exception as exc:
+        logger.warning("Failed to load existing CSV for sync mode: %s", exc)
+        return [], []
 
 
 @trace_external_call("bff.data_connector_pipelining.start_pipelining_google_sheet")
@@ -159,11 +282,48 @@ async def start_pipelining_google_sheet(
         )
         object_key = f"{object_prefix}/source.csv"
 
+        # -----------------------------------------------------------
+        # Sync mode: SNAPSHOT (default), APPEND, or UPDATE
+        # -----------------------------------------------------------
+        import_mode = str(config.get("import_mode") or "SNAPSHOT").strip().upper()
+        if import_mode not in {"SNAPSHOT", "APPEND", "UPDATE"}:
+            import_mode = "SNAPSHOT"
+
+        final_columns = columns
+        final_rows = rows
+
+        if import_mode in {"APPEND", "UPDATE"} and dataset:
+            existing_columns, existing_rows = await _load_existing_csv(
+                dataset=dataset,
+                dataset_registry=dataset_registry,
+                lakefs_storage_service=lakefs_storage_service,
+                repo=repo,
+            )
+            if existing_columns or existing_rows:
+                if import_mode == "APPEND":
+                    final_columns, final_rows = _apply_append_mode(
+                        existing_columns, existing_rows, columns, rows,
+                    )
+                    logger.info(
+                        "APPEND mode: %d existing + %d new → %d total rows",
+                        len(existing_rows), len(rows), len(final_rows),
+                    )
+                elif import_mode == "UPDATE":
+                    pk_column = config.get("primary_key_column") or None
+                    final_columns, final_rows = _apply_update_mode(
+                        existing_columns, existing_rows, columns, rows,
+                        primary_key_column=pk_column,
+                    )
+                    logger.info(
+                        "UPDATE mode (pk=%s): %d existing + %d incoming → %d merged rows",
+                        pk_column or "(first column)", len(existing_rows), len(rows), len(final_rows),
+                    )
+
         csv_buffer = io.StringIO()
         writer = csv.writer(csv_buffer)
-        if columns:
-            writer.writerow(columns)
-        for row in rows:
+        if final_columns:
+            writer.writerow(final_columns)
+        for row in final_rows:
             writer.writerow(row)
 
         branch_name = (dataset.branch or "main").strip() or "main"
@@ -179,12 +339,13 @@ async def start_pipelining_google_sheet(
             csv_buffer.getvalue().encode("utf-8"),
             content_type="text/csv",
         )
+        commit_msg_mode = import_mode.lower()
         commit_id = await dataset_ops._commit_lakefs_with_predicate_fallback(
             lakefs_client=lakefs_client,
             lakefs_storage_service=lakefs_storage_service,
             repository=repo,
             branch=branch_name,
-            message=f"Google Sheets snapshot {db_name}/{dataset.name}",
+            message=f"Google Sheets {commit_msg_mode} {db_name}/{dataset.name}",
             metadata=dataset_ops._sanitize_s3_metadata(
                 {
                     "dataset_id": dataset.dataset_id,
@@ -199,12 +360,12 @@ async def start_pipelining_google_sheet(
         artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
 
         objectify_job_id: Optional[str] = None
-        if rows:
+        if final_rows:
             version = await dataset_registry.add_version(
                 dataset_id=dataset.dataset_id,
                 lakefs_commit_id=commit_id,
                 artifact_key=artifact_key,
-                row_count=len(rows),
+                row_count=len(final_rows),
                 sample_json={"columns": schema_columns, "rows": sample_rows},
                 schema_json={"columns": schema_columns},
             )

@@ -458,3 +458,285 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
     assert orchestration_get_resp.json()["status"] == "SUCCEEDED"
 
     assert delete_resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# Foundry Orchestration Schedules API v2 tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_foundry_schedule_paths_exist_in_openapi():
+    app = _build_test_app()
+    schema = app.openapi()
+    expected_schedule_paths = {
+        "/api/v2/orchestration/schedules",
+        "/api/v2/orchestration/schedules/{scheduleRid}",
+        "/api/v2/orchestration/schedules/{scheduleRid}/pause",
+        "/api/v2/orchestration/schedules/{scheduleRid}/unpause",
+        "/api/v2/orchestration/schedules/{scheduleRid}/runs",
+    }
+    for path in expected_schedule_paths:
+        assert path in schema.get("paths", {}), f"Missing path: {path}"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_schedule_create_get_pause_unpause_delete():
+    pipeline_id = str(uuid.uuid4())
+    schedule_updates: dict[str, Any] = {}
+
+    class _PipelineRegistry:
+        def __init__(self) -> None:
+            self._schedule_cron: str | None = None
+            self._schedule_interval: int | None = None
+            self._status: str = "active"
+
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                pipeline_id=pipeline_id,
+                branch="main",
+                status=self._status,
+                schedule_cron=self._schedule_cron,
+                schedule_interval_seconds=self._schedule_interval,
+                created_at=None,
+            )
+
+        async def update_pipeline(self, *, pipeline_id: str, **kwargs: Any):  # noqa: ANN401
+            schedule_updates.update(kwargs)
+            if "schedule_cron" in kwargs:
+                self._schedule_cron = kwargs["schedule_cron"] or None
+            if "schedule_interval_seconds" in kwargs:
+                val = kwargs["schedule_interval_seconds"]
+                self._schedule_interval = val if val else None
+            if "status" in kwargs:
+                self._status = kwargs["status"]
+
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25):  # noqa: ANN001
+            return [
+                {
+                    "job_id": f"build-{pipeline_id}-run1",
+                    "status": "SUCCESS",
+                    "started_at": None,
+                    "finished_at": None,
+                }
+            ]
+
+    app = _build_test_app()
+    registry = _PipelineRegistry()
+    app.dependency_overrides[get_pipeline_registry] = lambda: registry
+
+    schedule_rid = f"ri.spice.main.schedule.{pipeline_id}"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Create schedule
+        create_resp = await client.post(
+            "/api/v2/orchestration/schedules",
+            json={
+                "targetRid": f"ri.spice.main.pipeline.{pipeline_id}",
+                "trigger": {"cronExpression": "0 0 * * *"},
+            },
+        )
+        assert create_resp.status_code == 200
+        body = create_resp.json()
+        assert body["rid"] == schedule_rid
+        assert body["trigger"]["cronExpression"] == "0 0 * * *"
+        assert body["status"] == "ACTIVE"
+
+        # Get schedule
+        get_resp = await client.get(f"/api/v2/orchestration/schedules/{schedule_rid}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["rid"] == schedule_rid
+
+        # Pause schedule
+        pause_resp = await client.post(f"/api/v2/orchestration/schedules/{schedule_rid}/pause")
+        assert pause_resp.status_code == 204
+        assert registry._status == "paused"
+
+        # Unpause schedule
+        unpause_resp = await client.post(f"/api/v2/orchestration/schedules/{schedule_rid}/unpause")
+        assert unpause_resp.status_code == 204
+        assert registry._status == "active"
+
+        # List runs
+        runs_resp = await client.get(f"/api/v2/orchestration/schedules/{schedule_rid}/runs")
+        assert runs_resp.status_code == 200
+        runs_body = runs_resp.json()
+        assert len(runs_body["data"]) == 1
+        assert runs_body["data"][0]["status"] == "SUCCEEDED"
+
+        # Delete schedule
+        delete_resp = await client.delete(f"/api/v2/orchestration/schedules/{schedule_rid}")
+        assert delete_resp.status_code == 204
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_schedule_not_found_for_missing_pipeline():
+    class _PipelineRegistry:
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return None
+
+    app = _build_test_app()
+    app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/v2/orchestration/schedules/ri.spice.main.schedule.{uuid.uuid4()}")
+    assert resp.status_code == 404
+    assert resp.json()["errorCode"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# Foundry Connectivity Connection CRUD tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_foundry_connection_crud_paths_exist_in_openapi():
+    app = _build_test_app()
+    schema = app.openapi()
+    expected_connection_paths = {
+        "/api/v2/connectivity/connections",
+        "/api/v2/connectivity/connections/{connectionRid}",
+        "/api/v2/connectivity/connections/{connectionRid}/test",
+    }
+    for path in expected_connection_paths:
+        assert path in schema.get("paths", {}), f"Missing path: {path}"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_create_get_list_delete():
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {}
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            from shared.utils.time_utils import utcnow
+            self.sources[(source_type, source_id)] = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            return self.sources[(source_type, source_id)]
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            return [
+                v for (kind, _), v in self.sources.items()
+                if kind == source_type and (enabled is None or v.enabled == enabled)
+            ]
+
+        async def set_source_enabled(self, *, source_type: str, source_id: str, enabled: bool):  # noqa: ANN001
+            src = self.sources.get((source_type, source_id))
+            if src is None:
+                return False
+            src.enabled = enabled
+            return True
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Create connection
+        create_resp = await client.post(
+            "/api/v2/connectivity/connections",
+            json={
+                "displayName": "My Google Sheets Connection",
+                "configuration": {
+                    "type": "GoogleSheetsConnectionConfig",
+                    "accountEmail": "test@example.com",
+                },
+            },
+        )
+        assert create_resp.status_code == 201
+        conn_body = create_resp.json()
+        assert conn_body["displayName"] == "My Google Sheets Connection"
+        assert conn_body["rid"].startswith("ri.spice.main.connection.")
+        assert conn_body["status"] == "CONNECTED"
+        assert conn_body["configuration"]["type"] == "GoogleSheetsConnectionConfig"
+
+        connection_rid = conn_body["rid"]
+
+        # Get connection
+        get_resp = await client.get(f"/api/v2/connectivity/connections/{connection_rid}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["rid"] == connection_rid
+        assert get_resp.json()["displayName"] == "My Google Sheets Connection"
+
+        # List connections
+        list_resp = await client.get("/api/v2/connectivity/connections")
+        assert list_resp.status_code == 200
+        list_body = list_resp.json()
+        assert len(list_body["data"]) == 1
+        assert list_body["data"][0]["rid"] == connection_rid
+
+        # Delete connection
+        delete_resp = await client.delete(f"/api/v2/connectivity/connections/{connection_rid}")
+        assert delete_resp.status_code == 204
+
+        # Verify deleted — listing should be empty now (disabled)
+        list_resp2 = await client.get("/api/v2/connectivity/connections")
+        assert list_resp2.status_code == 200
+        assert len(list_resp2.json()["data"]) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_get_not_found():
+    class _ConnectorRegistry:
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return None
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v2/connectivity/connections/ri.spice.main.connection.nonexistent")
+    assert resp.status_code == 404
+    assert resp.json()["errorCode"] == "NOT_FOUND"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_test_endpoint():
+    class _ConnectorRegistry:
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            if source_type == "google_sheets_connection" and source_id == "conn-test":
+                return SimpleNamespace(
+                    source_id="conn-test",
+                    source_type="google_sheets_connection",
+                    enabled=True,
+                    config_json={"display_name": "Test Conn", "status": "CONNECTED"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            return None
+
+        async def upsert_source(self, **kwargs: Any):  # noqa: ANN401
+            pass
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-test/test"
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["connectionRid"] == "ri.spice.main.connection.conn-test"
+    # No credentials, so should get WARNING
+    assert body["status"] == "WARNING"

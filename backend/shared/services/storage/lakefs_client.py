@@ -214,6 +214,115 @@ class LakeFSClient:
                 return commit_id.strip()
         raise LakeFSError(f"lakeFS branch response missing commit_id: {payload!r}")
 
+    @trace_external_call("lakefs.list_branches")
+    async def list_branches(
+        self,
+        *,
+        repository: str,
+        prefix: Optional[str] = None,
+        amount: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List branches in a repository."""
+        repository = str(repository).strip()
+        if not repository:
+            raise ValueError("repository is required")
+        params: Dict[str, Any] = {"amount": max(1, int(amount))}
+        if prefix:
+            params["prefix"] = str(prefix).strip()
+
+        results: List[Dict[str, Any]] = []
+        after: Optional[str] = None
+        async with self._client() as client:
+            while True:
+                p = dict(params)
+                if after:
+                    p["after"] = after
+                resp = await client.get(f"/repositories/{repository}/branches", params=p)
+                if resp.status_code in {401, 403}:
+                    raise LakeFSAuthError(resp.text)
+                if resp.status_code == 404:
+                    raise LakeFSNotFoundError(resp.text)
+                if not resp.is_success:
+                    raise LakeFSError(f"lakeFS list_branches failed ({resp.status_code}): {resp.text}")
+                payload = resp.json()
+                items = []
+                if isinstance(payload, dict):
+                    items = payload.get("results") or payload.get("branches") or []
+                elif isinstance(payload, list):
+                    items = payload
+                for item in items:
+                    if isinstance(item, dict):
+                        results.append(item)
+                    elif isinstance(item, str):
+                        results.append({"name": item})
+                pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+                next_offset = None
+                if isinstance(pagination, dict):
+                    next_offset = pagination.get("next_offset") or pagination.get("nextOffset")
+                if not next_offset:
+                    break
+                after = str(next_offset).strip() or None
+                if not after:
+                    break
+        return results
+
+    @trace_external_call("lakefs.list_objects")
+    async def list_objects(
+        self,
+        *,
+        repository: str,
+        ref: str,
+        prefix: Optional[str] = None,
+        amount: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """List objects under a ref (branch or commit) in a repository."""
+        repository = str(repository).strip()
+        ref = str(ref).strip()
+        if not repository:
+            raise ValueError("repository is required")
+        if not ref:
+            raise ValueError("ref is required")
+        params: Dict[str, Any] = {"amount": max(1, int(amount))}
+        if prefix:
+            params["prefix"] = str(prefix).strip()
+
+        results: List[Dict[str, Any]] = []
+        after: Optional[str] = None
+        async with self._client() as client:
+            while True:
+                p = dict(params)
+                if after:
+                    p["after"] = after
+                resp = await client.get(
+                    f"/repositories/{repository}/refs/{ref}/objects/ls",
+                    params=p,
+                )
+                if resp.status_code in {401, 403}:
+                    raise LakeFSAuthError(resp.text)
+                if resp.status_code == 404:
+                    raise LakeFSNotFoundError(resp.text)
+                if not resp.is_success:
+                    raise LakeFSError(f"lakeFS list_objects failed ({resp.status_code}): {resp.text}")
+                payload = resp.json()
+                items = []
+                if isinstance(payload, dict):
+                    items = payload.get("results") or payload.get("objects") or []
+                elif isinstance(payload, list):
+                    items = payload
+                for item in items:
+                    if isinstance(item, dict):
+                        results.append(item)
+                pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+                next_offset = None
+                if isinstance(pagination, dict):
+                    next_offset = pagination.get("next_offset") or pagination.get("nextOffset")
+                if not next_offset:
+                    break
+                after = str(next_offset).strip() or None
+                if not after:
+                    break
+        return results
+
     @trace_external_call("lakefs.list_diff_objects")
     async def list_diff_objects(
         self,
