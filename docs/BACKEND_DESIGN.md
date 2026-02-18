@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-19T01:45:58+09:00
+> Generated: 2026-02-19T02:05:33+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **988**
-- Modules with module docstring: **542/988**
+- Modules scanned: **989**
+- Modules with module docstring: **542/989**
 - Modules with broad `except Exception`: **278**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **241111**
+- Total code lines (non-empty, non-comment): **241169**
 
 ## Package Scoreboard
 
@@ -25,7 +25,7 @@
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 414 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
-| `data_connector` | 23 | 7/23 (30%) | 7 | 14 | 61 | 46 | 2471 |
+| `data_connector` | 23 | 7/23 (30%) | 7 | 14 | 61 | 46 | 2475 |
 | `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
 | `funnel` | 23 | 17/23 (73%) | 4 | 35 | 53 | 49 | 6409 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 301 | 204/301 (67%) | 105 | 382 | 863 | 1130 | 79905 |
-| `tests` | 286 | 49/286 (17%) | 20 | 51 | 1463 | 1401 | 46602 |
+| `tests` | 287 | 49/287 (17%) | 20 | 51 | 1465 | 1402 | 46656 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -4237,7 +4237,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=348 | code_lines=305 | risk_score=10
+- Source footprint: total_lines=352 | code_lines=309 | risk_score=10
 - API surface: public=1 | top-level functions=4 | classes=1 | methods=9
 - Runtime signals: async_functions=7 | try=5 | raise=7 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
@@ -11878,6 +11878,22 @@
 - Internal imports (1): data_connector.adapters.factory
 - External imports (2): __future__; pytest
 - Public API names: test_connector_kind_from_source_type_known_values; test_connector_kind_from_source_type_unknown_raises_in_strict_mode; test_import_config_key_for_source_type_known_values; test_import_config_key_for_source_type_unknown_raises_in_strict_mode
+
+### `backend/tests/unit/data_connector/test_mysql_connector_service.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=74 | code_lines=54 | risk_score=0
+- API surface: public=1 | top-level functions=1 | classes=3 | methods=7
+- Runtime signals: async_functions=2 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/3 (0%) | methods=0/7 (0%)
+- Internal imports (1): data_connector.adapters.factory
+- External imports (3): __future__; pytest; sys
+- Public API names: test_mysql_peek_change_token_binlog_uses_shared_blocking_runner
 
 ### `backend/tests/unit/data_connector/test_sql_query_guard.py`
 - Module summary: no docstring

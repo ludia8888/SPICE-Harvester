@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-19T01:45:58+09:00
+> Generated: 2026-02-19T02:05:33+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -10141,6 +10141,21 @@
   - `test_connector_kind_from_source_type_unknown_raises_in_strict_mode()` (line 15): no docstring
   - `test_import_config_key_for_source_type_known_values()` (line 20): no docstring
   - `test_import_config_key_for_source_type_unknown_raises_in_strict_mode()` (line 26): no docstring
+
+### `backend/tests/unit/data_connector/test_mysql_connector_service.py`
+- **Functions**
+  - `async test_mysql_peek_change_token_binlog_uses_shared_blocking_runner(monkeypatch)` (line 44): no docstring
+- **Classes**
+  - `_FakeCursor` (line 10): no docstring
+    - `execute(self, query)` (line 11): no docstring
+    - `fetchone(self)` (line 14): no docstring
+    - `__enter__(self)` (line 17): no docstring
+    - `__exit__(self, exc_type, exc, tb)` (line 20): no docstring
+  - `_FakeConnection` (line 25): no docstring
+    - `cursor(self)` (line 26): no docstring
+    - `close(self)` (line 29): no docstring
+  - `_FakeDriver` (line 33): no docstring
+    - `connect(self, **kwargs)` (line 37): no docstring
 
 ### `backend/tests/unit/data_connector/test_sql_query_guard.py`
 - **Functions**

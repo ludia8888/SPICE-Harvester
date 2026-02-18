@@ -325,7 +325,11 @@ class MySQLConnectorService(ConnectorAdapter):
                 finally:
                     conn.close()
 
-            value = await _run_blocking_query(_binlog_token, operation="peek_change_token binlog")
+            value = await run_blocking_query(
+                _binlog_token,
+                adapter_name="MySQL",
+                operation="peek_change_token binlog",
+            )
             if value is not None:
                 return value
 
