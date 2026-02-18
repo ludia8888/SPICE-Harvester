@@ -177,6 +177,77 @@ async def test_connector_ingest_service_append_deduplicates_rows(monkeypatch: py
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "incoming_rows", "expected_rows"),
+    [
+        (
+            "INCREMENTAL",
+            [{"id": "2", "name": "Bob"}, {"id": "3", "name": "Carol"}],
+            [["1", "Alice"], ["2", "Bob"], ["3", "Carol"]],
+        ),
+        (
+            "CDC",
+            [{"id": "2", "name": "Bob"}, {"id": "4", "name": "Dan"}],
+            [["1", "Alice"], ["2", "Bob"], ["4", "Dan"]],
+        ),
+    ],
+)
+async def test_connector_ingest_service_incremental_and_cdc_use_append_merge(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    incoming_rows: list[dict[str, str]],
+    expected_rows: list[list[str]],
+):
+    existing_dataset = SimpleNamespace(
+        dataset_id="dataset-existing",
+        db_name="sales_db",
+        name="orders",
+        branch="main",
+        schema_json={},
+    )
+    storage = _Storage()
+    dataset_registry = _DatasetRegistry(existing_dataset=existing_dataset)
+    pipeline_registry = _PipelineRegistry(storage)
+    service = ConnectorIngestService(
+        dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
+    )
+
+    async def _no_branch(*, repository: str, branch: str, source_branch: str = "main") -> None:
+        _ = repository, branch, source_branch
+        return None
+
+    async def _fixed_commit(**kwargs: Any) -> str:  # noqa: ANN401
+        _ = kwargs
+        return f"commit-{mode.lower()}"
+
+    async def _existing_csv(*, dataset: Any, repository: str):  # noqa: ANN401
+        _ = dataset, repository
+        return ["id", "name"], [["1", "Alice"], ["2", "Bob"]]
+
+    monkeypatch.setattr(service, "_ensure_branch_exists", _no_branch)
+    monkeypatch.setattr(service, "_commit", _fixed_commit)
+    monkeypatch.setattr(service, "_load_existing_csv", _existing_csv)
+
+    result = await service.ingest_rows(
+        db_name="sales_db",
+        source_type="postgresql",
+        source_id="orders",
+        columns=["id", "name"],
+        rows=incoming_rows,
+        import_mode=mode,
+        source_ref="postgresql:orders",
+    )
+
+    assert result["version"]["row_count"] == len(expected_rows)
+    assert len(storage.saved) == 1
+    columns, rows = _parse_saved_csv(storage.saved[0]["payload"])
+    assert columns == ["id", "name"]
+    assert rows == expected_rows
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_connector_ingest_service_update_upserts_by_primary_key(monkeypatch: pytest.MonkeyPatch):
     existing_dataset = SimpleNamespace(
         dataset_id="dataset-existing",

@@ -26,7 +26,12 @@ from data_connector.adapters.factory import (
     table_import_source_type_for_kind,
     virtual_table_source_type_for_kind,
 )
-from data_connector.adapters.sql_query_guard import normalize_sql_query
+from data_connector.adapters.import_config_validators import (
+    TABLE_IMPORT_MODES,
+    is_jdbc_connector_kind,
+    normalize_import_mode,
+    validate_resource_import_config,
+)
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.settings import get_settings
 from shared.dependencies.providers import LineageStoreDep
@@ -87,7 +92,6 @@ _VIRTUAL_TABLE_CONFIG_TYPES = {
     "sqlServerVirtualTableConfig",
     "oracleVirtualTableConfig",
 }
-_TABLE_IMPORT_MODES = {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC"}
 _DEFAULT_PARENT_FOLDER_RID = "ri.compass.main.folder.root"
 
 _KIND_TO_CONNECTION_CONFIG_TYPE = {
@@ -307,10 +311,6 @@ def _connection_kind_from_source(source: ConnectorSource) -> str:
             )
             return inferred
         raise
-
-
-def _is_jdbc_connector_kind(kind: str) -> bool:
-    return str(kind or "").strip().lower() != "google_sheets"
 
 
 def _require_preview_or_400(preview: bool) -> JSONResponse | None:
@@ -590,87 +590,10 @@ def _resource_invalid_config_response(
     )
 
 
-def _normalized_query(config: Dict[str, Any], *, field_name: str) -> str:
-    raw_query = str(config.get(field_name) or "").strip()
-    if not raw_query:
-        return ""
-    return normalize_sql_query(raw_query, field_name=field_name)
-
-
-def _normalize_import_mode(raw_mode: Any) -> str:
-    mode = str(raw_mode or "SNAPSHOT").strip().upper()
-    if mode not in _TABLE_IMPORT_MODES:
-        raise ValueError("importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
-    return mode
-
-
-def _validate_jdbc_mode_requirements(
-    *,
-    resource_kind: str,
-    import_mode: str,
-    config: Dict[str, Any],
-) -> None:
-    query = _normalized_query(config, field_name="query")
-    cdc_query = _normalized_query(config, field_name="cdcQuery")
-    watermark = str(config.get("watermarkColumn") or config.get("watermark_column") or "").strip()
-
-    label = resource_kind.replace("_", " ")
-    if import_mode in {"SNAPSHOT", "APPEND", "UPDATE"}:
-        if not query:
-            raise ValueError(f"config.query is required for JDBC {label}s")
-        return
-    if import_mode == "INCREMENTAL":
-        if not query:
-            raise ValueError("config.query is required for INCREMENTAL mode")
-        if not watermark:
-            raise ValueError("watermarkColumn is required for INCREMENTAL mode")
-        return
-    if import_mode == "CDC":
-        if cdc_query:
-            return
-        if not query:
-            raise ValueError("config.cdcQuery or config.query is required for CDC mode")
-        if not watermark:
-            raise ValueError("watermarkColumn is required for CDC mode without cdcQuery")
-        return
-
-
-def _validate_resource_import_config(
-    *,
-    resource_kind: str,
-    connector_kind: str,
-    import_mode: str,
-    config: Dict[str, Any],
-) -> None:
-    if not isinstance(config, dict) or not config:
-        raise ValueError(f"{resource_kind.replace('_', ' ')} config is required")
-
-    if resource_kind == "virtual_table" and import_mode != "SNAPSHOT":
-        raise ValueError("virtual tables support only SNAPSHOT mode")
-
-    if _is_jdbc_connector_kind(connector_kind):
-        _validate_jdbc_mode_requirements(
-            resource_kind=resource_kind,
-            import_mode=import_mode,
-            config=config,
-        )
-        return
-
-    if resource_kind == "file_import":
-        has_selector = any(
-            key in config and config.get(key) not in (None, "", [], {})
-            for key in ("fileImportFilters", "path", "subfolder", "filePattern", "fileFormat")
-        )
-        if not has_selector:
-            raise ValueError(
-                "file import requires at least one selector: fileImportFilters, path, subfolder, filePattern, or fileFormat"
-            )
-
-
 def _resource_import_mode_from_source(*, source_cfg: Dict[str, Any], resource_kind: str) -> str:
     if resource_kind == "virtual_table":
-        return _normalize_import_mode(source_cfg.get("import_mode") or "SNAPSHOT")
-    return _normalize_import_mode(source_cfg.get("import_mode"))
+        return normalize_import_mode(source_cfg.get("import_mode") or "SNAPSHOT")
+    return normalize_import_mode(source_cfg.get("import_mode"))
 
 
 def _resource_import_config_from_source(*, source_cfg: Dict[str, Any], resource_kind: str) -> Dict[str, Any]:
@@ -841,7 +764,7 @@ async def _build_table_import_response(
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
     import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
+    if import_mode not in TABLE_IMPORT_MODES:
         import_mode = "SNAPSHOT"
 
     table_import_config = cfg.get("table_import_config") if isinstance(cfg.get("table_import_config"), dict) else {}
@@ -883,7 +806,7 @@ async def _build_file_import_response(
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
     import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
+    if import_mode not in TABLE_IMPORT_MODES:
         import_mode = "SNAPSHOT"
 
     file_import_config = cfg.get("file_import_config") if isinstance(cfg.get("file_import_config"), dict) else {}
@@ -1288,7 +1211,7 @@ async def create_table_import_v2(
     resolved_db = destination_db or dataset_db_name
     resolved_branch = destination_branch or dataset_branch or "main"
 
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1297,7 +1220,7 @@ async def create_table_import_v2(
         )
 
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode"))
+        import_mode = normalize_import_mode(payload.get("importMode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
@@ -1382,7 +1305,7 @@ async def create_table_import_v2(
                     "branch_name": resolved_branch,
                 }
             )
-            _validate_resource_import_config(
+            validate_resource_import_config(
                 resource_kind="table_import",
                 connector_kind="google_sheets",
                 import_mode=import_mode,
@@ -1414,7 +1337,7 @@ async def create_table_import_v2(
         allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
         table_import_config = _resolve_table_import_config(payload, connector_kind=connector_kind)
         try:
-            _validate_resource_import_config(
+            validate_resource_import_config(
                 resource_kind="table_import",
                 connector_kind=connector_kind,
                 import_mode=import_mode,
@@ -1674,14 +1597,14 @@ async def replace_table_import_v2(
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
 
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
+        import_mode = normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
 
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1703,7 +1626,7 @@ async def replace_table_import_v2(
         worksheet_name=str(cfg.get("worksheet_name") or "").strip() or None,
     )
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="table_import",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -1889,7 +1812,7 @@ async def execute_table_import_v2(
         import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="table_import")
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1904,7 +1827,7 @@ async def execute_table_import_v2(
             parameters={"message": "CDC connectivity is disabled for this ontology"},
         )
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="table_import",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -2044,7 +1967,7 @@ async def create_file_import_v2(
     resolved_db = destination_db
     resolved_branch = destination_branch or "main"
 
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2053,7 +1976,7 @@ async def create_file_import_v2(
         )
 
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode"))
+        import_mode = normalize_import_mode(payload.get("importMode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
     if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
@@ -2070,7 +1993,7 @@ async def create_file_import_v2(
     allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
     file_import_config = _resolve_file_import_config(payload, connector_kind=connector_kind)
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="file_import",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -2335,13 +2258,13 @@ async def replace_file_import_v2(
     cfg = dict(source.config_json or {})
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
+        import_mode = normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2358,7 +2281,7 @@ async def replace_file_import_v2(
 
     file_import_config = _resolve_file_import_config(payload, connector_kind=connector_kind)
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="file_import",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -2537,7 +2460,7 @@ async def execute_file_import_v2(
         import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="file_import")
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2552,7 +2475,7 @@ async def execute_file_import_v2(
             parameters={"message": "CDC connectivity is disabled for this ontology"},
         )
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="file_import",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -2727,7 +2650,7 @@ async def execute_virtual_table_v2(
         import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="virtual_table")
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2735,7 +2658,7 @@ async def execute_virtual_table_v2(
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="virtual_table",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -2876,7 +2799,7 @@ async def create_virtual_table_v2(
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db
     resolved_branch = destination_branch or "main"
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2885,7 +2808,7 @@ async def create_virtual_table_v2(
         )
 
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode") or "SNAPSHOT")
+        import_mode = normalize_import_mode(payload.get("importMode") or "SNAPSHOT")
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
@@ -2893,7 +2816,7 @@ async def create_virtual_table_v2(
     source_type = virtual_table_source_type_for_kind(connector_kind)
     virtual_table_config = _resolve_virtual_table_config(payload, connector_kind=connector_kind)
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="virtual_table",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -3158,10 +3081,10 @@ async def replace_virtual_table_v2(
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
     try:
-        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT")
+        import_mode = normalize_import_mode(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT")
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -3170,7 +3093,7 @@ async def replace_virtual_table_v2(
         )
     virtual_table_config = _resolve_virtual_table_config(payload, connector_kind=connector_kind)
     try:
-        _validate_resource_import_config(
+        validate_resource_import_config(
             resource_kind="virtual_table",
             connector_kind=connector_kind,
             import_mode=import_mode,
@@ -3310,7 +3233,7 @@ async def create_connection_v2(
         kind = "google_sheets"
 
     # Connection create has no ontology context, so JDBC rollout is gated by global switch.
-    if _is_jdbc_connector_kind(kind):
+    if is_jdbc_connector_kind(kind):
         if not bool(getattr(get_settings().feature_flags, "enable_foundry_connectivity_jdbc", False)):
             return _foundry_error(
                 status.HTTP_403_FORBIDDEN,
@@ -3723,7 +3646,7 @@ async def upload_custom_jdbc_drivers_v2(
     assert source is not None
 
     kind = _connection_kind_from_source(source)
-    if not _is_jdbc_connector_kind(kind):
+    if not is_jdbc_connector_kind(kind):
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",

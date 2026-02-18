@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-19T01:05:52+09:00
+> Generated: 2026-02-19T01:45:58+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **986**
-- Modules with module docstring: **542/986**
+- Modules scanned: **988**
+- Modules with module docstring: **542/988**
 - Modules with broad `except Exception`: **278**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **241100**
+- Total code lines (non-empty, non-comment): **241111**
 
 ## Package Scoreboard
 
@@ -21,11 +21,11 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 81 | 462 | 1105 | 757 | 56012 |
+| `bff` | 222 | 167/222 (75%) | 81 | 462 | 1105 | 757 | 55898 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 414 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
-| `data_connector` | 21 | 7/21 (33%) | 7 | 14 | 64 | 40 | 2409 |
+| `data_connector` | 23 | 7/23 (30%) | 7 | 14 | 61 | 46 | 2471 |
 | `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
 | `funnel` | 23 | 17/23 (73%) | 4 | 35 | 53 | 49 | 6409 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 301 | 204/301 (67%) | 105 | 382 | 863 | 1130 | 79905 |
-| `tests` | 286 | 49/286 (17%) | 20 | 51 | 1459 | 1400 | 46539 |
+| `tests` | 286 | 49/286 (17%) | 20 | 51 | 1463 | 1401 | 46602 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -773,11 +773,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=3787 | code_lines=3402 | risk_score=51
-- API surface: public=28 | top-level functions=95 | classes=0 | methods=0
-- Runtime signals: async_functions=44 | try=37 | raise=16 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/95 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (14): bff.routers.data_connector_deps; bff.services; data_connector.adapters.factory; data_connector.adapters.sql_query_guard; data_connector.google_sheets.service; shared.config.settings; shared.dependencies.providers; shared.observability.tracing (+6 more)
+- Source footprint: total_lines=3710 | code_lines=3339 | risk_score=60
+- API surface: public=28 | top-level functions=90 | classes=0 | methods=0
+- Runtime signals: async_functions=44 | try=37 | raise=7 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/90 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (14): bff.routers.data_connector_deps; bff.services; data_connector.adapters.factory; data_connector.adapters.import_config_validators; data_connector.google_sheets.service; shared.config.settings; shared.dependencies.providers; shared.observability.tracing (+6 more)
 - External imports (5): fastapi; hashlib; logging; typing; uuid
 - Public API names: create_connection_v2; create_file_import_v2; create_table_import_v2; create_virtual_table_v2; delete_connection_v2; delete_file_import_v2; delete_table_import_v2; delete_virtual_table_v2; execute_file_import_v2; execute_table_import_v2; execute_virtual_table_v2; get_connection_configuration_batch_v2 (+16 more)
 
@@ -2245,11 +2245,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=807 | code_lines=701 | risk_score=30
-- API surface: public=4 | top-level functions=19 | classes=0 | methods=0
-- Runtime signals: async_functions=6 | try=6 | raise=19 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=6/19 (31%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (20): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.adapters.factory; data_connector.adapters.runtime_credentials; data_connector.adapters.sql_query_guard; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types (+12 more)
+- Source footprint: total_lines=744 | code_lines=650 | risk_score=30
+- API surface: public=4 | top-level functions=15 | classes=0 | methods=0
+- Runtime signals: async_functions=6 | try=6 | raise=7 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=6/15 (40%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (20): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.adapters.factory; data_connector.adapters.import_config_validators; data_connector.adapters.runtime_credentials; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types (+12 more)
 - External imports (7): __future__; csv; fastapi; hashlib; io; logging; typing
 - Public API names: start_pipelining_file_import; start_pipelining_google_sheet; start_pipelining_table_import; start_pipelining_virtual_table
 
@@ -4053,6 +4053,22 @@
 - External imports (4): __future__; abc; dataclasses; typing
 - Public API names: ConnectorAdapter; ConnectorConnectionTestResult; ConnectorExtractResult
 
+### `backend/data_connector/adapters/blocking_query.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=19 | code_lines=15 | risk_score=0
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=1 | try=1 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (3): __future__; asyncio; typing
+- Public API names: run_blocking_query
+
 ### `backend/data_connector/adapters/factory.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -4068,6 +4084,22 @@
 - Internal imports (7): data_connector.adapters.base; data_connector.google_sheets.service; data_connector.mysql.service; data_connector.oracle.service; data_connector.postgresql.service; data_connector.snowflake.service; data_connector.sqlserver.service
 - External imports (2): __future__; typing
 - Public API names: ConnectorAdapterFactory; connection_source_type_for_kind; connector_kind_from_source_type; file_import_source_type_for_kind; import_config_key_for_source_type; resolve_connector_kind_from_connection_config; table_import_source_type_for_kind; virtual_table_source_type_for_kind
+
+### `backend/data_connector/adapters/import_config_validators.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=88 | code_lines=71 | risk_score=0
+- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=9 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): data_connector.adapters.sql_query_guard
+- External imports (2): __future__; typing
+- Public API names: is_jdbc_connector_kind; normalize_import_mode; normalized_query; validate_jdbc_mode_requirements; validate_resource_import_config
 
 ### `backend/data_connector/adapters/runtime_credentials.py`
 - Module summary: no docstring
@@ -4205,12 +4237,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=356 | code_lines=311 | risk_score=10
-- API surface: public=1 | top-level functions=5 | classes=1 | methods=9
-- Runtime signals: async_functions=8 | try=6 | raise=8 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
-- External imports (5): __future__; asyncio; re; typing; urllib
+- Source footprint: total_lines=348 | code_lines=305 | risk_score=10
+- API surface: public=1 | top-level functions=4 | classes=1 | methods=9
+- Runtime signals: async_functions=7 | try=5 | raise=7 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
+- Internal imports (3): data_connector.adapters.base; data_connector.adapters.blocking_query; data_connector.adapters.sql_query_guard
+- External imports (4): __future__; re; typing; urllib
 - Public API names: MySQLConnectorService
 
 ### `backend/data_connector/oracle/__init__.py`
@@ -4237,12 +4269,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=316 | code_lines=277 | risk_score=29
-- API surface: public=1 | top-level functions=4 | classes=1 | methods=9
-- Runtime signals: async_functions=8 | try=10 | raise=6 | broad_except=5 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
-- External imports (5): __future__; asyncio; logging; re; typing
+- Source footprint: total_lines=308 | code_lines=271 | risk_score=29
+- API surface: public=1 | top-level functions=3 | classes=1 | methods=9
+- Runtime signals: async_functions=7 | try=9 | raise=5 | broad_except=5 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
+- Internal imports (3): data_connector.adapters.base; data_connector.adapters.blocking_query; data_connector.adapters.sql_query_guard
+- External imports (4): __future__; logging; re; typing
 - Public API names: OracleConnectorService
 
 ### `backend/data_connector/postgresql/__init__.py`
@@ -4301,12 +4333,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=300 | code_lines=261 | risk_score=12
-- API surface: public=1 | top-level functions=4 | classes=1 | methods=9
-- Runtime signals: async_functions=8 | try=7 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
-- External imports (4): __future__; asyncio; re; typing
+- Source footprint: total_lines=292 | code_lines=255 | risk_score=12
+- API surface: public=1 | top-level functions=3 | classes=1 | methods=9
+- Runtime signals: async_functions=7 | try=6 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
+- Internal imports (3): data_connector.adapters.base; data_connector.adapters.blocking_query; data_connector.adapters.sql_query_guard
+- External imports (3): __future__; re; typing
 - Public API names: SnowflakeConnectorService
 
 ### `backend/data_connector/sqlserver/__init__.py`
@@ -4333,12 +4365,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=327 | code_lines=286 | risk_score=11
-- API surface: public=1 | top-level functions=4 | classes=1 | methods=9
-- Runtime signals: async_functions=8 | try=7 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
-- External imports (4): __future__; asyncio; re; typing
+- Source footprint: total_lines=319 | code_lines=280 | risk_score=11
+- API surface: public=1 | top-level functions=3 | classes=1 | methods=9
+- Runtime signals: async_functions=7 | try=6 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
+- Internal imports (3): data_connector.adapters.base; data_connector.adapters.blocking_query; data_connector.adapters.sql_query_guard
+- External imports (3): __future__; re; typing
 - Public API names: SqlServerConnectorService
 
 ## examples
@@ -13391,13 +13423,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=249 | code_lines=206 | risk_score=0
-- API surface: public=4 | top-level functions=5 | classes=3 | methods=8
-- Runtime signals: async_functions=17 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/3 (0%) | methods=0/8 (0%)
+- Source footprint: total_lines=320 | code_lines=269 | risk_score=0
+- API surface: public=5 | top-level functions=6 | classes=3 | methods=8
+- Runtime signals: async_functions=21 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/3 (0%) | methods=0/8 (0%)
 - Internal imports (1): shared.services.core.connector_ingest_service
 - External imports (6): __future__; csv; io; pytest; types; typing
-- Public API names: test_connector_ingest_service_append_deduplicates_rows; test_connector_ingest_service_rejects_invalid_import_mode; test_connector_ingest_service_snapshot_creates_dataset_and_version; test_connector_ingest_service_update_upserts_by_primary_key
+- Public API names: test_connector_ingest_service_append_deduplicates_rows; test_connector_ingest_service_incremental_and_cdc_use_append_merge; test_connector_ingest_service_rejects_invalid_import_mode; test_connector_ingest_service_snapshot_creates_dataset_and_version; test_connector_ingest_service_update_upserts_by_primary_key
 
 ### `backend/tests/unit/services/test_consistency_token.py`
 - Module summary: no docstring

@@ -21,8 +21,11 @@ from data_connector.adapters.factory import (
     ConnectorAdapterFactory,
     connector_kind_from_source_type,
 )
+from data_connector.adapters.import_config_validators import (
+    normalize_import_mode,
+    validate_resource_import_config,
+)
 from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
-from data_connector.adapters.sql_query_guard import normalize_sql_query
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -39,7 +42,6 @@ from shared.utils.s3_uri import build_s3_uri
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
-_TABLE_IMPORT_MODES = {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC"}
 
 
 # ---------------------------------------------------------------------------
@@ -491,71 +493,18 @@ async def start_pipelining_google_sheet(
         raise classified_http_exception(500, str(e), code=ErrorCode.CONNECTOR_ERROR) from e
 
 
-def _is_jdbc_connector_kind(connector_kind: str) -> bool:
-    return str(connector_kind or "").strip().lower() != "google_sheets"
-
-
-def _normalize_import_mode(raw_mode: Any) -> str:
-    mode = str(raw_mode or "SNAPSHOT").strip().upper()
-    if mode not in _TABLE_IMPORT_MODES:
-        raise ValueError("import_mode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
-    return mode
-
-
-def _normalized_query(import_config: Dict[str, Any], *, field_name: str) -> str:
-    raw_query = str(import_config.get(field_name) or "").strip()
-    if not raw_query:
-        return ""
-    return normalize_sql_query(raw_query, field_name=field_name)
-
-
-def _validate_jdbc_mode_requirements(
-    *,
-    resource_label: str,
-    import_mode: str,
-    import_config: Dict[str, Any],
-) -> None:
-    query = _normalized_query(import_config, field_name="query")
-    cdc_query = _normalized_query(import_config, field_name="cdcQuery")
-    watermark = str(import_config.get("watermarkColumn") or import_config.get("watermark_column") or "").strip()
-
-    if import_mode in {"SNAPSHOT", "APPEND", "UPDATE"}:
-        if not query:
-            raise ValueError(f"{resource_label} config.query is required for JDBC connectors")
-        return
-
-    if import_mode == "INCREMENTAL":
-        if not query:
-            raise ValueError(f"{resource_label} config.query is required for INCREMENTAL mode")
-        if not watermark:
-            raise ValueError(f"{resource_label} watermarkColumn is required for INCREMENTAL mode")
-        return
-
-    if import_mode == "CDC":
-        # CDC adapters fall back to incremental mode when cdcQuery is absent.
-        if cdc_query:
-            return
-        if not query:
-            raise ValueError(f"{resource_label} config.cdcQuery or config.query is required for CDC mode")
-        if not watermark:
-            raise ValueError(f"{resource_label} watermarkColumn is required for CDC mode without cdcQuery")
-        return
-
-
 def _validate_table_import_runtime_config(
     *,
     connector_kind: str,
     import_mode: str,
     import_config: Dict[str, Any],
 ) -> None:
-    if not isinstance(import_config, dict) or not import_config:
-        raise ValueError("table import config is required")
-    if _is_jdbc_connector_kind(connector_kind):
-        _validate_jdbc_mode_requirements(
-            resource_label="table import",
-            import_mode=import_mode,
-            import_config=import_config,
-        )
+    validate_resource_import_config(
+        resource_kind="table_import",
+        connector_kind=connector_kind,
+        import_mode=import_mode,
+        config=import_config,
+    )
 
 
 def _validate_file_import_runtime_config(
@@ -564,23 +513,12 @@ def _validate_file_import_runtime_config(
     import_mode: str,
     import_config: Dict[str, Any],
 ) -> None:
-    if not isinstance(import_config, dict) or not import_config:
-        raise ValueError("file import config is required")
-    if _is_jdbc_connector_kind(connector_kind):
-        _validate_jdbc_mode_requirements(
-            resource_label="file import",
-            import_mode=import_mode,
-            import_config=import_config,
-        )
-        return
-    has_selector = any(
-        key in import_config and import_config.get(key) not in (None, "", [], {})
-        for key in ("fileImportFilters", "path", "subfolder", "filePattern", "fileFormat")
+    validate_resource_import_config(
+        resource_kind="file_import",
+        connector_kind=connector_kind,
+        import_mode=import_mode,
+        config=import_config,
     )
-    if not has_selector:
-        raise ValueError(
-            "file import requires at least one selector: fileImportFilters, path, subfolder, filePattern, or fileFormat"
-        )
 
 
 def _validate_virtual_table_runtime_config(
@@ -589,14 +527,13 @@ def _validate_virtual_table_runtime_config(
     import_mode: str,
     import_config: Dict[str, Any],
 ) -> None:
-    if not isinstance(import_config, dict) or not import_config:
-        raise ValueError("virtual table config is required")
-    if import_mode != "SNAPSHOT":
-        raise ValueError("virtual table execution supports only SNAPSHOT mode")
-    if _is_jdbc_connector_kind(connector_kind):
-        query = _normalized_query(import_config, field_name="query")
-        if not query:
-            raise ValueError("virtual table config.query is required for JDBC connectors")
+    validate_resource_import_config(
+        resource_kind="virtual_table",
+        connector_kind=connector_kind,
+        import_mode=import_mode,
+        config=import_config,
+        virtual_table_snapshot_error="virtual table execution supports only SNAPSHOT mode",
+    )
 
 
 async def start_pipelining_table_import(
@@ -720,7 +657,7 @@ async def _start_pipelining_connector_import(
     )
     source_cfg = dict(source.config_json or {})
     import_config = source_cfg.get(import_config_key) if isinstance(source_cfg.get(import_config_key), dict) else {}
-    import_mode = _normalize_import_mode(source_cfg.get("import_mode"))
+    import_mode = normalize_import_mode(source_cfg.get("import_mode"), mode_field_name="import_mode")
     config_validator(
         connector_kind=connector_kind,
         import_mode=import_mode,
