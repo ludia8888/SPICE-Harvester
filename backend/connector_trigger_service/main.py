@@ -24,10 +24,10 @@ from data_connector.adapters.factory import (
     ConnectorAdapterFactory,
     SUPPORTED_CONNECTOR_KINDS,
     connector_kind_from_source_type,
-    connection_source_type_for_kind,
     file_import_source_type_for_kind,
     table_import_source_type_for_kind,
 )
+from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -153,40 +153,16 @@ class ConnectorTriggerService:
         elapsed = (utcnow() - state.last_polled_at).total_seconds()
         return elapsed >= max(1, interval)
 
-    async def _resolve_source_runtime_credentials(
-        self,
-        *,
-        source: ConnectorSource,
-    ) -> tuple[dict, dict]:
-        if not self.registry:
-            return dict(source.config_json or {}), {}
-        source_cfg = dict(source.config_json or {})
-        connector_kind = connector_kind_from_source_type(source.source_type)
-        connection_id = str(source_cfg.get("connection_id") or "").strip() or None
-        if not connection_id:
-            return source_cfg, {}
-        connection_source_type = connection_source_type_for_kind(connector_kind)
-        connection_source = await self.registry.get_source(
-            source_type=connection_source_type,
-            source_id=connection_id,
-        )
-        if connection_source is None:
-            return source_cfg, {}
-        connection_cfg = dict(connection_source.config_json or {})
-        secrets = await self.registry.get_connection_secrets(
-            source_type=connection_source_type,
-            source_id=connection_id,
-        )
-        merged_cfg = dict(connection_cfg)
-        merged_cfg.update(source_cfg)
-        return merged_cfg, secrets
-
     async def _poll_with_adapter(self, source: ConnectorSource) -> None:
         if not self.registry or not self.adapter_factory:
             return
         connector_kind = connector_kind_from_source_type(source.source_type)
         adapter = self.adapter_factory.get_adapter(connector_kind)
-        config, secrets = await self._resolve_source_runtime_credentials(source=source)
+        config, secrets = await resolve_source_runtime_credentials(
+            connector_registry=self.registry,
+            source_type=source.source_type,
+            source_config=dict(source.config_json or {}),
+        )
         import_config = (
             source.config_json.get("table_import_config")
             if isinstance((source.config_json or {}).get("table_import_config"), dict)

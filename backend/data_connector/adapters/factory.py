@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from data_connector.adapters.base import ConnectorAdapter
@@ -43,6 +44,8 @@ _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND = {
     "sqlserver": "sqlserver_virtual_table",
 }
 
+logger = logging.getLogger(__name__)
+
 
 def connection_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
@@ -64,7 +67,7 @@ def virtual_table_source_type_for_kind(connector_kind: str) -> str:
     return _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_virtual_table")
 
 
-def connector_kind_from_source_type(source_type: str) -> str:
+def connector_kind_from_source_type(source_type: str, *, strict: bool = False) -> str:
     st = str(source_type or "").strip().lower()
     for kind, mapped in _CONNECTION_SOURCE_TYPE_BY_KIND.items():
         if mapped == st:
@@ -78,6 +81,10 @@ def connector_kind_from_source_type(source_type: str) -> str:
     for kind, mapped in _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.items():
         if mapped == st:
             return kind
+    if strict and st:
+        raise ValueError(f"Unknown connector source_type: {st}")
+    if st:
+        logger.warning("Unknown connector source_type '%s'; defaulting to google_sheets adapter", st)
     return "google_sheets"
 
 

@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **624**, functions **5942**, classes **869**, internal cross-imports **1469**
+- Population: files **626**, functions **5941**, classes **869**, internal cross-imports **1473**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1469 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1473 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/93 (3.23%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 51/624 (8.17%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 57/624 (9.13%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 317/5942 (5.33%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 5 | 파일 응집도 저하 | 51/626 (8.15%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 57/626 (9.11%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 317/5941 (5.34%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
 | 8 | 연속 상속 깊이(>=3) | 15/869 (1.73%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 714/5942 (12.02%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 397/5942 (6.68%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 9 | 복잡도 과다(CC>=15) | 714/5941 (12.02%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 397/5941 (6.68%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 

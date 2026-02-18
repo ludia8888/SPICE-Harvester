@@ -827,8 +827,6 @@ async def test_foundry_connection_get_not_found():
     app = _build_test_app()
     app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
-    app.dependency_overrides[get_google_sheets_service] = lambda: object()
-    app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

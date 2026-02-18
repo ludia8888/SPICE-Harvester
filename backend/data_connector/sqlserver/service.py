@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, Optional
 
 from data_connector.adapters.base import ConnectorAdapter, ConnectorConnectionTestResult, ConnectorExtractResult
+from data_connector.adapters.sql_query_guard import normalize_sql_query
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
 
@@ -150,9 +151,7 @@ class SqlServerConnectorService(ConnectorAdapter):
         secrets: Dict[str, Any],
         import_config: Dict[str, Any],
     ) -> ConnectorExtractResult:
-        query = str(import_config.get("query") or "").strip()
-        if not query:
-            raise ValueError("snapshot mode requires query")
+        query = normalize_sql_query(str(import_config.get("query") or ""), field_name="query")
         return await self._fetch(query=query, config=config, secrets=secrets)
 
     async def incremental_extract(
@@ -163,7 +162,7 @@ class SqlServerConnectorService(ConnectorAdapter):
         import_config: Dict[str, Any],
         sync_state: Dict[str, Any],
     ) -> ConnectorExtractResult:
-        base_query = str(import_config.get("query") or "").strip()
+        base_query = normalize_sql_query(str(import_config.get("query") or ""), field_name="query")
         watermark_column_raw = str(import_config.get("watermarkColumn") or import_config.get("watermark_column") or "").strip()
         if not base_query or not watermark_column_raw:
             raise ValueError("incremental mode requires query and watermarkColumn")
@@ -212,7 +211,8 @@ class SqlServerConnectorService(ConnectorAdapter):
         import_config: Dict[str, Any],
         sync_state: Dict[str, Any],
     ) -> ConnectorExtractResult:
-        cdc_query = str(import_config.get("cdcQuery") or import_config.get("cdc_query") or "").strip()
+        cdc_query_raw = str(import_config.get("cdcQuery") or import_config.get("cdc_query") or "").strip()
+        cdc_query = normalize_sql_query(cdc_query_raw, field_name="cdcQuery") if cdc_query_raw else ""
         cdc_strategy = str(import_config.get("cdcStrategy") or import_config.get("cdc_strategy") or "change_tracking").strip().lower()
         token_column_raw = str(import_config.get("cdcTokenColumn") or import_config.get("cdc_token_column") or "").strip()
         if not token_column_raw and cdc_strategy == "change_tracking":
@@ -272,7 +272,8 @@ class SqlServerConnectorService(ConnectorAdapter):
         import_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         cfg = import_config or {}
-        token_query = str(cfg.get("tokenQuery") or cfg.get("token_query") or "").strip()
+        token_query_raw = str(cfg.get("tokenQuery") or cfg.get("token_query") or "").strip()
+        token_query = normalize_sql_query(token_query_raw, field_name="tokenQuery") if token_query_raw else ""
         if token_query:
             result = await self._fetch(query=token_query, config=config, secrets=secrets)
             if result.rows and result.columns:

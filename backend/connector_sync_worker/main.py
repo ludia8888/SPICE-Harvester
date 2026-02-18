@@ -20,10 +20,10 @@ from data_connector.adapters.factory import (
     ConnectorAdapterFactory,
     SUPPORTED_CONNECTOR_KINDS,
     connector_kind_from_source_type,
-    connection_source_type_for_kind,
     file_import_source_type_for_kind,
     table_import_source_type_for_kind,
 )
+from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
@@ -301,36 +301,6 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         except Exception as exc:
             logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
-    async def _resolve_source_runtime_credentials(
-        self,
-        *,
-        source_type: str,
-        source_id: str,
-        source_config: Dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if not self.registry:
-            return dict(source_config), {}
-
-        connector_kind = connector_kind_from_source_type(source_type)
-        connection_id = str(source_config.get("connection_id") or "").strip() or None
-        if not connection_id:
-            return dict(source_config), {}
-
-        connection_source = await self.registry.get_source(
-            source_type=connection_source_type_for_kind(connector_kind),
-            source_id=connection_id,
-        )
-        if connection_source is None:
-            return dict(source_config), {}
-
-        secrets = await self.registry.get_connection_secrets(
-            source_type=connection_source.source_type,
-            source_id=connection_source.source_id,
-        )
-        merged_config = dict(connection_source.config_json or {})
-        merged_config.update(source_config)
-        return merged_config, secrets
-
     async def _process_connector_update(self, envelope: EventEnvelope) -> Optional[str]:
         if not self.registry or not self.adapter_factory or not self.ingest_service:
             raise RuntimeError("Worker not initialized")
@@ -363,9 +333,9 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
         import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}
 
-        runtime_config, secrets = await self._resolve_source_runtime_credentials(
+        runtime_config, secrets = await resolve_source_runtime_credentials(
+            connector_registry=self.registry,
             source_type=source_type,
-            source_id=source_id,
             source_config=source_cfg,
         )
 

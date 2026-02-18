@@ -19,9 +19,9 @@ import bff.routers.pipeline_datasets_ops as dataset_ops
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
 from data_connector.adapters.factory import (
     ConnectorAdapterFactory,
-    connection_source_type_for_kind,
     connector_kind_from_source_type,
 )
+from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -489,40 +489,12 @@ async def start_pipelining_google_sheet(
         raise classified_http_exception(500, str(e), code=ErrorCode.CONNECTOR_ERROR) from e
 
 
-async def _resolve_connector_credentials(
-    *,
-    connector_kind: str,
-    source: ConnectorSource,
-    connector_registry: ConnectorRegistry,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    source_cfg = dict(source.config_json or {})
-    connection_id = str(source_cfg.get("connection_id") or "").strip() or None
-    if not connection_id:
-        return source_cfg, {}
-
-    connection_source_type = connection_source_type_for_kind(connector_kind)
-    connection_source = await connector_registry.get_source(
-        source_type=connection_source_type,
-        source_id=connection_id,
-    )
-    if connection_source is None:
-        return source_cfg, {}
-
-    connection_cfg = dict(connection_source.config_json or {})
-    secrets = await connector_registry.get_connection_secrets(
-        source_type=connection_source_type,
-        source_id=connection_id,
-    )
-    merged_config = dict(connection_cfg)
-    merged_config.update(source_cfg)
-    return merged_config, secrets
-
-
 async def start_pipelining_table_import(
     *,
     source: ConnectorSource,
     mapping: ConnectorMapping,
     google_sheets_service: GoogleSheetsService,
+    connector_adapter_factory: Optional[ConnectorAdapterFactory],
     connector_registry: ConnectorRegistry,
     pipeline_registry: PipelineRegistry,
     dataset_registry: DatasetRegistry,
@@ -531,12 +503,13 @@ async def start_pipelining_table_import(
     actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     connector_kind = connector_kind_from_source_type(source.source_type)
-    adapter = ConnectorAdapterFactory(google_sheets_service=google_sheets_service).get_adapter(connector_kind)
+    adapter_factory = connector_adapter_factory or ConnectorAdapterFactory(google_sheets_service=google_sheets_service)
+    adapter = adapter_factory.get_adapter(connector_kind)
 
-    config, secrets = await _resolve_connector_credentials(
-        connector_kind=connector_kind,
-        source=source,
+    config, secrets = await resolve_source_runtime_credentials(
         connector_registry=connector_registry,
+        source_type=source.source_type,
+        source_config=dict(source.config_json or {}),
     )
     source_cfg = dict(source.config_json or {})
     import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}

@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T13:45:01+09:00
+> Generated: 2026-02-18T20:23:30+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **978**
-- Modules with module docstring: **542/978**
+- Modules scanned: **981**
+- Modules with module docstring: **542/981**
 - Modules with broad `except Exception`: **277**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **238822**
+- Total code lines (non-empty, non-comment): **238831**
 
 ## Package Scoreboard
 
@@ -21,11 +21,11 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1099 | 752 | 55154 |
+| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1098 | 752 | 55135 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
-| `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 12 | 1 | 438 |
-| `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 9 | 1 | 317 |
-| `data_connector` | 17 | 7/17 (41%) | 6 | 9 | 52 | 36 | 2030 |
+| `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 412 |
+| `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
+| `data_connector` | 19 | 7/19 (36%) | 6 | 9 | 53 | 38 | 2094 |
 | `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
 | `funnel` | 23 | 17/23 (73%) | 4 | 35 | 53 | 49 | 6409 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 301 | 204/301 (67%) | 105 | 383 | 863 | 1130 | 79879 |
-| `tests` | 282 | 49/282 (17%) | 20 | 51 | 1398 | 1374 | 45477 |
+| `tests` | 283 | 49/283 (17%) | 20 | 51 | 1398 | 1377 | 45490 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -73,8 +73,8 @@
 | `backend/action_worker/main.py` | 41 | 15 | 26 | 47 | 2404 |
 | `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
 | `backend/bff/main.py` | 33 | 40 | 42 | 28 | 824 |
-| `backend/connector_sync_worker/main.py` | 12 | 4 | 4 | 7 | 437 |
-| `backend/connector_trigger_service/main.py` | 9 | 9 | 10 | 3 | 316 |
+| `backend/connector_sync_worker/main.py` | 11 | 4 | 4 | 7 | 411 |
+| `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 293 |
 | `backend/funnel/main.py` | 3 | 1 | 1 | 1 | 59 |
 | `backend/ingest_reconciler_worker/main.py` | 5 | 3 | 5 | 1 | 215 |
 | `backend/instance_worker/main.py` | 27 | 36 | 43 | 69 | 2299 |
@@ -773,7 +773,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=3072 | code_lines=2738 | risk_score=37
+- Source footprint: total_lines=3076 | code_lines=2742 | risk_score=37
 - API surface: public=25 | top-level functions=80 | classes=0 | methods=0
 - Runtime signals: async_functions=40 | try=16 | raise=4 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/80 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -2245,11 +2245,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=621 | code_lines=535 | risk_score=30
-- API surface: public=2 | top-level functions=10 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=6 | raise=7 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=6/10 (60%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (18): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.adapters.factory; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types; shared.observability.tracing; shared.security.input_sanitizer (+10 more)
+- Source footprint: total_lines=594 | code_lines=512 | risk_score=30
+- API surface: public=2 | top-level functions=9 | classes=0 | methods=0
+- Runtime signals: async_functions=3 | try=6 | raise=7 | broad_except=6 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=6/9 (66%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (19): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.adapters.factory; data_connector.adapters.runtime_credentials; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types; shared.observability.tracing (+11 more)
 - External imports (7): __future__; csv; fastapi; hashlib; io; logging; typing
 - Public API names: start_pipelining_google_sheet; start_pipelining_table_import
 
@@ -3961,11 +3961,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=504 | code_lines=437 | risk_score=20
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=18
-- Runtime signals: async_functions=12 | try=4 | raise=7 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/18 (0%)
-- Internal imports (26): data_connector.adapters.factory; data_connector.google_sheets.service; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.errors.runtime_exception_policy; shared.models.event_envelope; shared.observability.metrics (+18 more)
+- Source footprint: total_lines=474 | code_lines=411 | risk_score=20
+- API surface: public=1 | top-level functions=0 | classes=1 | methods=17
+- Runtime signals: async_functions=11 | try=4 | raise=7 | broad_except=4 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/17 (0%)
+- Internal imports (27): data_connector.adapters.factory; data_connector.adapters.runtime_credentials; data_connector.google_sheets.service; shared.config.app_config; shared.config.settings; shared.errors.error_types; shared.errors.runtime_exception_policy; shared.models.event_envelope (+19 more)
 - External imports (6): __future__; asyncio; confluent_kafka; datetime; logging; typing
 - Public API names: ConnectorSyncWorker
 
@@ -3995,11 +3995,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=360 | code_lines=316 | risk_score=52
-- API surface: public=1 | top-level functions=0 | classes=1 | methods=11
-- Runtime signals: async_functions=9 | try=10 | raise=3 | broad_except=9 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/11 (0%)
-- Internal imports (13): data_connector.adapters.factory; data_connector.google_sheets.service; shared.config.app_config; shared.config.settings; shared.observability.context_propagation; shared.observability.metrics; shared.observability.tracing; shared.services.kafka.producer_factory (+5 more)
+- Source footprint: total_lines=336 | code_lines=293 | risk_score=52
+- API surface: public=1 | top-level functions=0 | classes=1 | methods=10
+- Runtime signals: async_functions=8 | try=10 | raise=3 | broad_except=9 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/1 (0%) | methods=0/10 (0%)
+- Internal imports (14): data_connector.adapters.factory; data_connector.adapters.runtime_credentials; data_connector.google_sheets.service; shared.config.app_config; shared.config.settings; shared.observability.context_propagation; shared.observability.metrics; shared.observability.tracing (+6 more)
 - External imports (7): __future__; asyncio; confluent_kafka; json; logging; time; typing
 - Public API names: ConnectorTriggerService
 
@@ -4061,13 +4061,45 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=214 | code_lines=178 | risk_score=5
+- Source footprint: total_lines=221 | code_lines=184 | risk_score=5
 - API surface: public=7 | top-level functions=6 | classes=2 | methods=9
-- Runtime signals: async_functions=6 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=6 | try=1 | raise=2 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/6 (0%) | classes=0/2 (0%) | methods=0/9 (0%)
 - Internal imports (6): data_connector.adapters.base; data_connector.google_sheets.service; data_connector.mysql.service; data_connector.postgresql.service; data_connector.snowflake.service; data_connector.sqlserver.service
-- External imports (2): __future__; typing
+- External imports (3): __future__; logging; typing
 - Public API names: ConnectorAdapterFactory; connection_source_type_for_kind; connector_kind_from_source_type; file_import_source_type_for_kind; resolve_connector_kind_from_connection_config; table_import_source_type_for_kind; virtual_table_source_type_for_kind
+
+### `backend/data_connector/adapters/runtime_credentials.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=42 | code_lines=34 | risk_score=0
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): data_connector.adapters.factory; shared.services.registries.connector_registry
+- External imports (2): __future__; typing
+- Public API names: resolve_source_runtime_credentials
+
+### `backend/data_connector/adapters/sql_query_guard.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=24 | code_lines=18 | risk_score=0
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (1): __future__
+- Public API names: normalize_sql_query
 
 ### `backend/data_connector/google_sheets/__init__.py`
 - Module summary: no docstring
@@ -4173,11 +4205,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=347 | code_lines=304 | risk_score=10
+- Source footprint: total_lines=348 | code_lines=305 | risk_score=10
 - API surface: public=1 | top-level functions=4 | classes=1 | methods=9
-- Runtime signals: async_functions=7 | try=5 | raise=8 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=5 | raise=7 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (1): data_connector.adapters.base
+- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
 - External imports (5): __future__; asyncio; re; typing; urllib
 - Public API names: MySQLConnectorService
 
@@ -4205,11 +4237,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=260 | code_lines=225 | risk_score=6
+- Source footprint: total_lines=263 | code_lines=228 | risk_score=6
 - API surface: public=1 | top-level functions=4 | classes=1 | methods=8
 - Runtime signals: async_functions=7 | try=6 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/8 (0%)
-- Internal imports (1): data_connector.adapters.base
+- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
 - External imports (4): __future__; asyncpg; re; typing
 - Public API names: PostgreSQLConnectorService
 
@@ -4237,11 +4269,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=291 | code_lines=254 | risk_score=11
+- Source footprint: total_lines=292 | code_lines=255 | risk_score=12
 - API surface: public=1 | top-level functions=3 | classes=1 | methods=9
-- Runtime signals: async_functions=7 | try=6 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=6 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (1): data_connector.adapters.base
+- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
 - External imports (4): __future__; asyncio; re; typing
 - Public API names: SnowflakeConnectorService
 
@@ -4269,11 +4301,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=318 | code_lines=279 | risk_score=10
+- Source footprint: total_lines=319 | code_lines=280 | risk_score=11
 - API surface: public=1 | top-level functions=3 | classes=1 | methods=9
-- Runtime signals: async_functions=7 | try=6 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=7 | try=6 | raise=5 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/1 (0%) | methods=0/9 (0%)
-- Internal imports (1): data_connector.adapters.base
+- Internal imports (2): data_connector.adapters.base; data_connector.adapters.sql_query_guard
 - External imports (4): __future__; asyncio; re; typing
 - Public API names: SqlServerConnectorService
 
@@ -11767,6 +11799,22 @@
 - External imports (2): __future__; pytest
 - Public API names: test_agent_bff_token_and_command_timeout_fallback; test_client_token_fallbacks; test_feature_flags_no_strict_compat_toggles; test_lakefs_repository_defaults; test_local_port_host_aliases; test_objectify_dataset_primary_chunk_size_clamps_lower_bound; test_objectify_dataset_primary_chunk_size_defaults; test_pipeline_publish_lock_timeout_fallback; test_service_settings_no_external_funnel_address_surface
 
+### `backend/tests/unit/data_connector/test_sql_query_guard.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=23 | code_lines=15 | risk_score=0
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): data_connector.adapters.sql_query_guard
+- External imports (2): __future__; pytest
+- Public API names: test_normalize_sql_query_allows_single_statement; test_normalize_sql_query_rejects_empty; test_normalize_sql_query_rejects_multi_statement
+
 ### `backend/tests/unit/errors/__init__.py`
 - Module summary: Unit tests for enterprise error taxonomy and handlers.
 - Responsibilities: not documented
@@ -12575,7 +12623,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1283 | code_lines=1088 | risk_score=0
+- Source footprint: total_lines=1281 | code_lines=1086 | risk_score=0
 - API surface: public=17 | top-level functions=19 | classes=0 | methods=0
 - Runtime signals: async_functions=77 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/19 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
