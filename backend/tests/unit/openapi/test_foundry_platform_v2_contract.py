@@ -1343,6 +1343,19 @@ async def test_foundry_virtual_table_supports_foundry_name_and_parent_rid(
             "sqlserver_connection",
             {"connectionString": "DRIVER={ODBC Driver 18 for SQL Server};SERVER=sql.internal,1433;DATABASE=demo;UID=demo_user;PWD=rotated;"},
         ),
+        (
+            {
+                "type": "OracleConnectionConfig",
+                "host": "oracle.internal",
+                "port": 1521,
+                "serviceName": "ORCLPDB1",
+                "username": "demo_user",
+                "password": "top-secret",
+            },
+            "OracleConnectionConfig",
+            "oracle_connection",
+            {"password": "rotated"},
+        ),
     ],
 )
 async def test_foundry_connection_create_jdbc_kinds(

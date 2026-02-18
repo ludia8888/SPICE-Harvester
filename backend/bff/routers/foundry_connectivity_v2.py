@@ -68,6 +68,7 @@ _TABLE_IMPORT_CONFIG_TYPES = {
     "snowflakeImportConfig",
     "mySqlImportConfig",
     "sqlServerImportConfig",
+    "oracleImportConfig",
 }
 _FILE_IMPORT_CONFIG_TYPES = {
     "jdbcFileImportConfig",
@@ -75,6 +76,7 @@ _FILE_IMPORT_CONFIG_TYPES = {
     "snowflakeFileImportConfig",
     "mySqlFileImportConfig",
     "sqlServerFileImportConfig",
+    "oracleFileImportConfig",
 }
 _VIRTUAL_TABLE_CONFIG_TYPES = {
     "jdbcVirtualTableConfig",
@@ -82,6 +84,7 @@ _VIRTUAL_TABLE_CONFIG_TYPES = {
     "snowflakeVirtualTableConfig",
     "mySqlVirtualTableConfig",
     "sqlServerVirtualTableConfig",
+    "oracleVirtualTableConfig",
 }
 _TABLE_IMPORT_MODES = {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC"}
 _DEFAULT_PARENT_FOLDER_RID = "ri.compass.main.folder.root"
@@ -92,6 +95,7 @@ _KIND_TO_CONNECTION_CONFIG_TYPE = {
     "postgresql": "PostgreSqlConnectionConfig",
     "mysql": "MySqlConnectionConfig",
     "sqlserver": "SqlServerConnectionConfig",
+    "oracle": "OracleConnectionConfig",
 }
 _KIND_TO_DEFAULT_IMPORT_CONFIG_TYPE = {
     "google_sheets": "jdbcImportConfig",
@@ -99,6 +103,7 @@ _KIND_TO_DEFAULT_IMPORT_CONFIG_TYPE = {
     "postgresql": "postgreSqlImportConfig",
     "mysql": "jdbcImportConfig",
     "sqlserver": "jdbcImportConfig",
+    "oracle": "oracleImportConfig",
 }
 _KIND_TO_DEFAULT_FILE_IMPORT_CONFIG_TYPE = {
     "google_sheets": "jdbcFileImportConfig",
@@ -106,6 +111,7 @@ _KIND_TO_DEFAULT_FILE_IMPORT_CONFIG_TYPE = {
     "postgresql": "postgreSqlFileImportConfig",
     "mysql": "mySqlFileImportConfig",
     "sqlserver": "sqlServerFileImportConfig",
+    "oracle": "oracleFileImportConfig",
 }
 _KIND_TO_DEFAULT_VIRTUAL_TABLE_CONFIG_TYPE = {
     "google_sheets": "jdbcVirtualTableConfig",
@@ -113,6 +119,7 @@ _KIND_TO_DEFAULT_VIRTUAL_TABLE_CONFIG_TYPE = {
     "postgresql": "postgreSqlVirtualTableConfig",
     "mysql": "mySqlVirtualTableConfig",
     "sqlserver": "sqlServerVirtualTableConfig",
+    "oracle": "oracleVirtualTableConfig",
 }
 
 _SECRET_KEYS_BY_KIND = {
@@ -121,6 +128,7 @@ _SECRET_KEYS_BY_KIND = {
     "postgresql": {"password", "dsn"},
     "mysql": {"password", "dsn"},
     "sqlserver": {"password", "connectionString"},
+    "oracle": {"password", "dsn"},
 }
 
 

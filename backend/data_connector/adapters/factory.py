@@ -6,11 +6,12 @@ from typing import Any, Dict
 from data_connector.adapters.base import ConnectorAdapter
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.mysql.service import MySQLConnectorService
+from data_connector.oracle.service import OracleConnectorService
 from data_connector.postgresql.service import PostgreSQLConnectorService
 from data_connector.sqlserver.service import SqlServerConnectorService
 from data_connector.snowflake.service import SnowflakeConnectorService
 
-SUPPORTED_CONNECTOR_KINDS = {"google_sheets", "snowflake", "postgresql", "mysql", "sqlserver"}
+SUPPORTED_CONNECTOR_KINDS = {"google_sheets", "snowflake", "postgresql", "mysql", "sqlserver", "oracle"}
 
 _CONNECTION_SOURCE_TYPE_BY_KIND = {
     "google_sheets": "google_sheets_connection",
@@ -18,6 +19,7 @@ _CONNECTION_SOURCE_TYPE_BY_KIND = {
     "postgresql": "postgresql_connection",
     "mysql": "mysql_connection",
     "sqlserver": "sqlserver_connection",
+    "oracle": "oracle_connection",
 }
 
 _TABLE_IMPORT_SOURCE_TYPE_BY_KIND = {
@@ -26,6 +28,7 @@ _TABLE_IMPORT_SOURCE_TYPE_BY_KIND = {
     "postgresql": "postgresql_table_import",
     "mysql": "mysql_table_import",
     "sqlserver": "sqlserver_table_import",
+    "oracle": "oracle_table_import",
 }
 
 _FILE_IMPORT_SOURCE_TYPE_BY_KIND = {
@@ -34,6 +37,7 @@ _FILE_IMPORT_SOURCE_TYPE_BY_KIND = {
     "postgresql": "postgresql_file_import",
     "mysql": "mysql_file_import",
     "sqlserver": "sqlserver_file_import",
+    "oracle": "oracle_file_import",
 }
 
 _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND = {
@@ -42,6 +46,7 @@ _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND = {
     "postgresql": "postgresql_virtual_table",
     "mysql": "mysql_virtual_table",
     "sqlserver": "sqlserver_virtual_table",
+    "oracle": "oracle_virtual_table",
 }
 
 logger = logging.getLogger(__name__)
@@ -115,6 +120,13 @@ def resolve_connector_kind_from_connection_config(configuration: Dict[str, Any])
         or url.startswith("jdbc:sqlserver:")
     ):
         return "sqlserver"
+    if (
+        cfg_type in {"oracleconnectionconfig", "oracle"}
+        or provider == "oracle"
+        or "oracle" in driver
+        or url.startswith("jdbc:oracle:")
+    ):
+        return "oracle"
     return "google_sheets"
 
 
@@ -207,6 +219,7 @@ class ConnectorAdapterFactory:
         self._postgresql = PostgreSQLConnectorService()
         self._mysql = MySQLConnectorService()
         self._sqlserver = SqlServerConnectorService()
+        self._oracle = OracleConnectorService()
 
     def get_adapter(self, connector_kind: str) -> ConnectorAdapter:
         kind = str(connector_kind or "").strip().lower()
@@ -218,4 +231,6 @@ class ConnectorAdapterFactory:
             return self._mysql
         if kind == "sqlserver":
             return self._sqlserver
+        if kind == "oracle":
+            return self._oracle
         return _GoogleSheetsAdapter(service=self._google_sheets_service)
