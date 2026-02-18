@@ -47,9 +47,17 @@ def test_foundry_platform_v2_paths_exist_in_openapi():
         "/api/v2/orchestration/builds/getBatch",
         "/api/v2/orchestration/builds/{buildRid}/jobs",
         "/api/v2/orchestration/builds/{buildRid}/cancel",
+        "/api/v2/connectivity/connections/{connectionRid}/getConfiguration",
+        "/api/v2/connectivity/connections/getConfigurationBatch",
+        "/api/v2/connectivity/connections/{connectionRid}/updateSecrets",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}",
     }
     for path in expected_paths:
         assert path in schema.get("paths", {})
@@ -60,6 +68,27 @@ def test_foundry_platform_v2_paths_exist_in_openapi():
         method="post",
     )
     assert build_params == []
+
+    create_connection_params = _param_names(
+        schema,
+        path="/api/v2/connectivity/connections",
+        method="post",
+    )
+    assert "preview" in create_connection_params
+
+    table_import_list_params = _param_names(
+        schema,
+        path="/api/v2/connectivity/connections/{connectionRid}/tableImports",
+        method="get",
+    )
+    assert "preview" in table_import_list_params
+
+    config_batch_params = _param_names(
+        schema,
+        path="/api/v2/connectivity/connections/getConfigurationBatch",
+        method="post",
+    )
+    assert "preview" in config_batch_params
 
 
 @pytest.mark.unit
@@ -217,6 +246,20 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
                 target_db_name="sales_db",
                 target_branch="main",
                 target_class_label="Order",
+                enabled=True,
+                status="confirmed",
+                field_mappings=[],
+            )
+
+        async def upsert_mapping(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return SimpleNamespace(
+                target_db_name="sales_db",
+                target_branch="main",
+                target_class_label="Order",
+                enabled=True,
+                status="confirmed",
+                field_mappings=[],
             )
 
         async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
@@ -277,6 +320,7 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/v2/connectivity/connections/ri.spice.main.connection.conn-1/tableImports",
+            params={"preview": "true"},
             json={
                 "displayName": "Orders import",
                 "importMode": "SNAPSHOT",
@@ -378,7 +422,7 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
             _ = kwargs
             return None
 
-    async def _fake_start_pipelining_google_sheet(**kwargs: Any):  # noqa: ANN401
+    async def _fake_start_pipelining_table_import(**kwargs: Any):  # noqa: ANN401
         _ = kwargs
         return {"status": "success", "data": {"dataset": {"dataset_id": "dataset-1"}}}
 
@@ -432,19 +476,20 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
     app.dependency_overrides[get_lineage_store] = lambda: object()
     monkeypatch.setattr(
         foundry_connectivity_v2.data_connector_pipelining_service,
-        "start_pipelining_google_sheet",
-        _fake_start_pipelining_google_sheet,
+        "start_pipelining_table_import",
+        _fake_start_pipelining_table_import,
     )
 
     base = "/api/v2/connectivity/connections/ri.spice.main.connection.conn-1/tableImports"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        get_resp = await client.get(f"{base}/ri.spice.main.table-import.sheet-123")
-        list_resp = await client.get(base)
-        execute_resp = await client.post(f"{base}/ri.spice.main.table-import.sheet-123/execute")
+        preview = {"preview": "true"}
+        get_resp = await client.get(f"{base}/ri.spice.main.table-import.sheet-123", params=preview)
+        list_resp = await client.get(base, params=preview)
+        execute_resp = await client.post(f"{base}/ri.spice.main.table-import.sheet-123/execute", params=preview)
         build_rid = execute_resp.json() if execute_resp.status_code == 200 else ""
         orchestration_get_resp = await client.get(f"/api/v2/orchestration/builds/{build_rid}")
-        delete_resp = await client.delete(f"{base}/ri.spice.main.table-import.sheet-123")
+        delete_resp = await client.delete(f"{base}/ri.spice.main.table-import.sheet-123", params=preview)
 
     assert get_resp.status_code == 200
     assert get_resp.json()["rid"] == "ri.spice.main.table-import.sheet-123"
@@ -658,6 +703,14 @@ def test_foundry_connection_crud_paths_exist_in_openapi():
         "/api/v2/connectivity/connections",
         "/api/v2/connectivity/connections/{connectionRid}",
         "/api/v2/connectivity/connections/{connectionRid}/test",
+        "/api/v2/connectivity/connections/{connectionRid}/getConfiguration",
+        "/api/v2/connectivity/connections/getConfigurationBatch",
+        "/api/v2/connectivity/connections/{connectionRid}/updateSecrets",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}",
+        "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}",
     }
     for path in expected_connection_paths:
         assert path in schema.get("paths", {}), f"Missing path: {path}"
@@ -708,11 +761,17 @@ async def test_foundry_connection_create_get_list_delete():
         # Create connection
         create_resp = await client.post(
             "/api/v2/connectivity/connections",
+            params={"preview": "true"},
             json={
                 "displayName": "My Google Sheets Connection",
-                "configuration": {
+                "connectionConfiguration": {
                     "type": "GoogleSheetsConnectionConfig",
                     "accountEmail": "test@example.com",
+                },
+                "parentFolderRid": "ri.compass.main.folder.connectivity",
+                "exportSettings": {
+                    "markingIds": ["ri.marking.main.classification.low"],
+                    "sharing": {"scope": "DEFAULT"},
                 },
             },
         )
@@ -721,32 +780,39 @@ async def test_foundry_connection_create_get_list_delete():
         assert conn_body["displayName"] == "My Google Sheets Connection"
         assert conn_body["rid"].startswith("ri.spice.main.connection.")
         assert conn_body["status"] == "CONNECTED"
+        assert conn_body["parentFolderRid"] == "ri.compass.main.folder.connectivity"
+        assert conn_body["exportSettings"]["markingIds"] == ["ri.marking.main.classification.low"]
+        assert conn_body["connectionConfiguration"]["type"] == "GoogleSheetsConnectionConfig"
+        assert conn_body["connectionConfiguration"]["accountEmail"] == "test@example.com"
+        # Backward-compatible alias.
         assert conn_body["configuration"]["type"] == "GoogleSheetsConnectionConfig"
         assert conn_body["configuration"]["accountEmail"] == "test@example.com"
 
         connection_rid = conn_body["rid"]
 
         # Get connection
-        get_resp = await client.get(f"/api/v2/connectivity/connections/{connection_rid}")
+        get_resp = await client.get(f"/api/v2/connectivity/connections/{connection_rid}", params={"preview": "true"})
         assert get_resp.status_code == 200
         assert get_resp.json()["rid"] == connection_rid
         assert get_resp.json()["displayName"] == "My Google Sheets Connection"
+        assert get_resp.json()["connectionConfiguration"]["accountEmail"] == "test@example.com"
         assert get_resp.json()["configuration"]["accountEmail"] == "test@example.com"
 
         # List connections
-        list_resp = await client.get("/api/v2/connectivity/connections")
+        list_resp = await client.get("/api/v2/connectivity/connections", params={"preview": "true"})
         assert list_resp.status_code == 200
         list_body = list_resp.json()
         assert len(list_body["data"]) == 1
         assert list_body["data"][0]["rid"] == connection_rid
+        assert list_body["data"][0]["connectionConfiguration"]["accountEmail"] == "test@example.com"
         assert list_body["data"][0]["configuration"]["accountEmail"] == "test@example.com"
 
         # Delete connection
-        delete_resp = await client.delete(f"/api/v2/connectivity/connections/{connection_rid}")
+        delete_resp = await client.delete(f"/api/v2/connectivity/connections/{connection_rid}", params={"preview": "true"})
         assert delete_resp.status_code == 204
 
         # Verify deleted — listing should be empty now (disabled)
-        list_resp2 = await client.get("/api/v2/connectivity/connections")
+        list_resp2 = await client.get("/api/v2/connectivity/connections", params={"preview": "true"})
         assert list_resp2.status_code == 200
         assert len(list_resp2.json()["data"]) == 0
 
@@ -760,10 +826,16 @@ async def test_foundry_connection_get_not_found():
 
     app = _build_test_app()
     app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/connectivity/connections/ri.spice.main.connection.nonexistent")
+        resp = await client.get(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.nonexistent",
+            params={"preview": "true"},
+        )
     assert resp.status_code == 404
     assert resp.json()["errorCode"] == "NOT_FOUND"
 
@@ -787,6 +859,10 @@ async def test_foundry_connection_test_endpoint():
         async def upsert_source(self, **kwargs: Any):  # noqa: ANN401
             pass
 
+        async def get_connection_secrets(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return {}
+
     app = _build_test_app()
     app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
@@ -794,10 +870,414 @@ async def test_foundry_connection_test_endpoint():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(
-            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-test/test"
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-test/test",
+            params={"preview": "true"},
         )
     assert resp.status_code == 200
     body = resp.json()
     assert body["connectionRid"] == "ri.spice.main.connection.conn-test"
     # No credentials, so should get WARNING
     assert body["status"] == "WARNING"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_update_secrets_keeps_response_non_secret():
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.source = SimpleNamespace(
+                source_id="conn-secrets",
+                source_type="postgresql_connection",
+                enabled=True,
+                config_json={
+                    "display_name": "PG Conn",
+                    "type": "PostgreSqlConnectionConfig",
+                    "host": "localhost",
+                    "database": "demo",
+                    "username": "demo_user",
+                },
+                created_at=None,
+                updated_at=None,
+            )
+            self.secrets: dict[str, Any] = {}
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            if source_type == "postgresql_connection" and source_id == "conn-secrets":
+                return self.source
+            return None
+
+        async def get_connection_secrets(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return dict(self.secrets)
+
+        async def upsert_connection_secrets(self, *, source_type: str, source_id: str, secrets_json: dict):  # noqa: ANN001
+            _ = source_type, source_id
+            self.secrets.update(dict(secrets_json))
+            return dict(self.secrets)
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        update_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-secrets/updateSecrets",
+            params={"preview": "true"},
+            json={"secrets": {"password": "secret-pass"}},
+        )
+        get_cfg_resp = await client.get(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-secrets/getConfiguration",
+            params={"preview": "true"},
+        )
+
+    assert update_resp.status_code == 204
+    assert get_cfg_resp.status_code == 200
+    assert get_cfg_resp.json()["connectionConfiguration"]["type"] == "PostgreSqlConnectionConfig"
+    cfg = get_cfg_resp.json()["configuration"]
+    assert cfg["type"] == "PostgreSqlConnectionConfig"
+    assert "password" not in cfg
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_file_import_requires_preview_and_supports_create(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-fi"): SimpleNamespace(
+                    source_id="conn-fi",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            }
+            self.mapping = None
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            self.sources[(source_type, source_id)] = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=None,
+                updated_at=None,
+            )
+            return self.sources[(source_type, source_id)]
+
+        async def upsert_mapping(self, **kwargs: Any):  # noqa: ANN401
+            self.mapping = SimpleNamespace(
+                target_db_name=kwargs.get("target_db_name"),
+                target_branch=kwargs.get("target_branch"),
+                target_class_label=kwargs.get("target_class_label"),
+                enabled=kwargs.get("enabled"),
+                status=kwargs.get("status"),
+                field_mappings=[],
+            )
+            return self.mapping
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return self.mapping
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            _ = enabled, limit
+            return [v for (kind, _), v in self.sources.items() if kind == source_type]
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        no_preview = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi/fileImports",
+            json={
+                "displayName": "FI",
+                "importMode": "SNAPSHOT",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "postgreSqlFileImportConfig", "query": "select 1 as id"},
+            },
+        )
+        assert no_preview.status_code == 400
+        assert no_preview.json()["errorName"] == "ApiFeaturePreviewUsageOnly"
+
+        with_preview = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi/fileImports",
+            params={"preview": "true"},
+            json={
+                "displayName": "FI",
+                "importMode": "SNAPSHOT",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "postgreSqlFileImportConfig", "query": "select 1 as id"},
+            },
+        )
+        assert with_preview.status_code == 200
+        payload = with_preview.json()
+        assert payload["name"] == "FI"
+        assert payload["parentRid"] == "ri.spice.main.connection.conn-fi"
+        assert payload["connectionRid"] == "ri.spice.main.connection.conn-fi"
+        assert payload["rid"].startswith("ri.spice.main.file-import.")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_virtual_table_supports_foundry_name_and_parent_rid(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-vt"): SimpleNamespace(
+                    source_id="conn-vt",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            }
+            self.mapping = None
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            self.sources[(source_type, source_id)] = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=None,
+                updated_at=None,
+            )
+            return self.sources[(source_type, source_id)]
+
+        async def upsert_mapping(self, **kwargs: Any):  # noqa: ANN401
+            self.mapping = SimpleNamespace(
+                target_db_name=kwargs.get("target_db_name"),
+                target_branch=kwargs.get("target_branch"),
+                target_class_label=kwargs.get("target_class_label"),
+                enabled=kwargs.get("enabled"),
+                status=kwargs.get("status"),
+                field_mappings=[],
+            )
+            return self.mapping
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return self.mapping
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            _ = enabled, limit
+            return [v for (kind, _), v in self.sources.items() if kind == source_type]
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        no_preview = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-vt/virtualTables",
+            json={
+                "name": "VT-Orders",
+                "parentRid": "ri.spice.main.connection.conn-vt",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "postgreSqlVirtualTableConfig", "query": "select * from orders"},
+            },
+        )
+        assert no_preview.status_code == 400
+        assert no_preview.json()["errorName"] == "ApiFeaturePreviewUsageOnly"
+
+        with_preview = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-vt/virtualTables",
+            params={"preview": "true"},
+            json={
+                "name": "VT-Orders",
+                "parentRid": "ri.spice.main.connection.conn-vt",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "postgreSqlVirtualTableConfig", "query": "select * from orders"},
+            },
+        )
+        assert with_preview.status_code == 200
+        payload = with_preview.json()
+        assert payload["name"] == "VT-Orders"
+        assert payload["displayName"] == "VT-Orders"
+        assert payload["parentRid"] == "ri.spice.main.connection.conn-vt"
+        assert payload["rid"].startswith("ri.spice.main.virtual-table.")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("connection_config", "expected_type", "expected_source_type", "secret_payload"),
+    [
+        (
+            {
+                "type": "MySqlConnectionConfig",
+                "host": "mysql.internal",
+                "port": 3306,
+                "database": "demo",
+                "username": "demo_user",
+                "password": "top-secret",
+            },
+            "MySqlConnectionConfig",
+            "mysql_connection",
+            {"password": "new-secret"},
+        ),
+        (
+            {
+                "type": "SqlServerConnectionConfig",
+                "host": "sql.internal",
+                "port": 1433,
+                "database": "demo",
+                "username": "demo_user",
+                "password": "top-secret",
+            },
+            "SqlServerConnectionConfig",
+            "sqlserver_connection",
+            {"connectionString": "DRIVER={ODBC Driver 18 for SQL Server};SERVER=sql.internal,1433;DATABASE=demo;UID=demo_user;PWD=rotated;"},
+        ),
+    ],
+)
+async def test_foundry_connection_create_jdbc_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    connection_config: dict[str, Any],
+    expected_type: str,
+    expected_source_type: str,
+    secret_payload: dict[str, Any],
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {}
+            self.secrets: dict[tuple[str, str], dict[str, Any]] = {}
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            from shared.utils.time_utils import utcnow
+
+            self.sources[(source_type, source_id)] = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            return self.sources[(source_type, source_id)]
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            _ = enabled, limit
+            return [v for (kind, _), v in self.sources.items() if kind == source_type]
+
+        async def get_connection_secrets(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return dict(self.secrets.get((source_type, source_id), {}))
+
+        async def upsert_connection_secrets(self, *, source_type: str, source_id: str, secrets_json: dict):  # noqa: ANN001
+            key = (source_type, source_id)
+            existing = dict(self.secrets.get(key, {}))
+            existing.update(dict(secrets_json))
+            self.secrets[key] = existing
+            return dict(existing)
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            "/api/v2/connectivity/connections",
+            params={"preview": "true"},
+            json={
+                "displayName": "JDBC Connection",
+                "configuration": connection_config,
+            },
+        )
+        assert create_resp.status_code == 201
+        created = create_resp.json()
+        rid = created["rid"]
+        assert created["connectionConfiguration"]["type"] == expected_type
+        assert created["configuration"]["type"] == expected_type
+        assert "password" not in created["configuration"]
+        assert "connectionString" not in created["configuration"]
+        assert any(kind == expected_source_type for (kind, _connection_id) in registry.sources.keys())
+
+        batch_resp = await client.post(
+            "/api/v2/connectivity/connections/getConfigurationBatch",
+            params={"preview": "true"},
+            json=[{"connectionRid": rid}],
+        )
+        assert batch_resp.status_code == 200
+        assert batch_resp.json()["data"][rid]["type"] == expected_type
+
+        update_resp = await client.post(
+            f"/api/v2/connectivity/connections/{rid}/updateSecrets",
+            params={"preview": "true"},
+            json={"secrets": secret_payload},
+        )
+        assert update_resp.status_code == 204

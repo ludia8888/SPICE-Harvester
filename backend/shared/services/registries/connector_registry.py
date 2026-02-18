@@ -23,6 +23,7 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
+from shared.security.data_encryption import encryptor_from_keys
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dict, coerce_json_list, coerce_json_strict, normalize_json_payload
 from shared.utils.time_utils import utcnow
@@ -72,6 +73,7 @@ class SyncState:
     rate_limit_until: Optional[datetime]
     next_retry_at: Optional[datetime]
     last_command_id: Optional[str]
+    sync_state_json: Dict[str, Any]
     updated_at: datetime
 
 
@@ -111,6 +113,43 @@ class ConnectorRegistry(PostgresSchemaRegistry):
             pool_max=resolved_pool_max,
             command_timeout=int(perf.connector_registry_pg_command_timeout_seconds),
         )
+        self._secrets_encryptor = encryptor_from_keys(get_settings().security.data_encryption_keys)
+
+    @staticmethod
+    def _secret_aad(*, source_type: str, source_id: str) -> bytes:
+        return f"{source_type}:{source_id}".encode("utf-8")
+
+    def _encrypt_secrets_payload(
+        self,
+        *,
+        source_type: str,
+        source_id: str,
+        secrets_json: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        aad = self._secret_aad(source_type=source_type, source_id=source_id)
+        for key, value in (secrets_json or {}).items():
+            if self._secrets_encryptor:
+                payload[str(key)] = self._secrets_encryptor.encrypt_json(value, aad=aad)
+            else:
+                payload[str(key)] = value
+        return payload
+
+    def _decrypt_secrets_payload(
+        self,
+        *,
+        source_type: str,
+        source_id: str,
+        secrets_json_enc: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        aad = self._secret_aad(source_type=source_type, source_id=source_id)
+        payload: Dict[str, Any] = {}
+        for key, value in (secrets_json_enc or {}).items():
+            if self._secrets_encryptor:
+                payload[str(key)] = self._secrets_encryptor.decrypt_json(value, aad=aad)
+            else:
+                payload[str(key)] = value
+        return payload
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
@@ -164,6 +203,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 rate_limit_until TIMESTAMPTZ,
                 next_retry_at TIMESTAMPTZ,
                 last_command_id TEXT,
+                sync_state_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (source_type, source_id),
                 FOREIGN KEY (source_type, source_id)
@@ -191,6 +231,27 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                     REFERENCES {self._schema}.connector_sources(source_type, source_id)
                     ON DELETE CASCADE
             )
+            """
+        )
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.connector_connection_secrets (
+                source_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                secrets_json_enc JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (source_type, source_id),
+                FOREIGN KEY (source_type, source_id)
+                    REFERENCES {self._schema}.connector_sources(source_type, source_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        await conn.execute(
+            f"""
+            ALTER TABLE {self._schema}.connector_sync_state
+            ADD COLUMN IF NOT EXISTS sync_state_json JSONB NOT NULL DEFAULT '{{}}'::jsonb
             """
         )
 
@@ -448,6 +509,115 @@ class ConnectorRegistry(PostgresSchemaRegistry):
             )
 
     # -----------------
+    # Connection secrets
+    # -----------------
+
+    async def upsert_connection_secrets(
+        self,
+        *,
+        source_type: str,
+        source_id: str,
+        secrets_json: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("ConnectorRegistry not connected")
+        st = (source_type or "").strip()
+        sid = (source_id or "").strip()
+        if not st:
+            raise ValueError("source_type is required")
+        if not sid:
+            raise ValueError("source_id is required")
+
+        secrets_payload = coerce_json_strict(secrets_json)
+        encrypted_payload = self._encrypt_secrets_payload(
+            source_type=st,
+            source_id=sid,
+            secrets_json=secrets_payload,
+        )
+        encoded_payload = normalize_json_payload(encrypted_payload)
+
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._schema}.connector_sources (source_type, source_id, enabled, config_json, created_at, updated_at)
+                    VALUES ($1, $2, TRUE, '{{}}'::jsonb, NOW(), NOW())
+                    ON CONFLICT (source_type, source_id) DO NOTHING
+                    """,
+                    st,
+                    sid,
+                )
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {self._schema}.connector_connection_secrets (
+                        source_type,
+                        source_id,
+                        secrets_json_enc,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES ($1, $2, $3::jsonb, NOW(), NOW())
+                    ON CONFLICT (source_type, source_id) DO UPDATE
+                      SET secrets_json_enc = EXCLUDED.secrets_json_enc,
+                          updated_at = NOW()
+                    RETURNING source_type, source_id, secrets_json_enc
+                    """,
+                    st,
+                    sid,
+                    encoded_payload,
+                )
+        if not row:
+            raise RuntimeError("Failed to upsert connector secrets")
+        stored = coerce_json_dict(row["secrets_json_enc"], parsed_fallback_key=None)
+        return self._decrypt_secrets_payload(
+            source_type=st,
+            source_id=sid,
+            secrets_json_enc=stored,
+        )
+
+    async def get_connection_secrets(self, *, source_type: str, source_id: str) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("ConnectorRegistry not connected")
+        st = (source_type or "").strip()
+        sid = (source_id or "").strip()
+        if not st or not sid:
+            return {}
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT secrets_json_enc
+                FROM {self._schema}.connector_connection_secrets
+                WHERE source_type = $1 AND source_id = $2
+                """,
+                st,
+                sid,
+            )
+        if not row:
+            return {}
+        stored = coerce_json_dict(row["secrets_json_enc"], parsed_fallback_key=None)
+        return self._decrypt_secrets_payload(
+            source_type=st,
+            source_id=sid,
+            secrets_json_enc=stored,
+        )
+
+    async def delete_connection_secrets(self, *, source_type: str, source_id: str) -> bool:
+        if not self._pool:
+            raise RuntimeError("ConnectorRegistry not connected")
+        st = (source_type or "").strip()
+        sid = (source_id or "").strip()
+        async with self._pool.acquire() as conn:
+            res = await conn.execute(
+                f"""
+                DELETE FROM {self._schema}.connector_connection_secrets
+                WHERE source_type = $1 AND source_id = $2
+                """,
+                st,
+                sid,
+            )
+        return res.upper().startswith("DELETE ") and not res.endswith(" 0")
+
+    # -----------------
     # Change detection
     # -----------------
 
@@ -500,8 +670,16 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 if not state:
                     await conn.execute(
                         f"""
-                        INSERT INTO {self._schema}.connector_sync_state (source_type, source_id, last_seen_cursor, last_emitted_seq, last_polled_at, updated_at)
-                        VALUES ($1, $2, NULL, 0, $3, $3)
+                        INSERT INTO {self._schema}.connector_sync_state (
+                            source_type,
+                            source_id,
+                            last_seen_cursor,
+                            last_emitted_seq,
+                            last_polled_at,
+                            sync_state_json,
+                            updated_at
+                        )
+                        VALUES ($1, $2, NULL, 0, $3, '{{}}'::jsonb, $3)
                         ON CONFLICT (source_type, source_id) DO NOTHING
                         """,
                         st,
@@ -731,6 +909,77 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                         command_id,
                     )
 
+    async def upsert_sync_state_json(
+        self,
+        *,
+        source_type: str,
+        source_id: str,
+        sync_state_json: Optional[Dict[str, Any]],
+        merge: bool = True,
+    ) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("ConnectorRegistry not connected")
+        st = (source_type or "").strip()
+        sid = (source_id or "").strip()
+        if not st:
+            raise ValueError("source_type is required")
+        if not sid:
+            raise ValueError("source_id is required")
+        payload = coerce_json_strict(sync_state_json)
+        payload_json = normalize_json_payload(payload)
+        now = utcnow()
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    f"""
+                    INSERT INTO {self._schema}.connector_sync_state (
+                        source_type,
+                        source_id,
+                        last_seen_cursor,
+                        last_emitted_seq,
+                        sync_state_json,
+                        updated_at
+                    )
+                    VALUES ($1, $2, NULL, 0, $3::jsonb, $4)
+                    ON CONFLICT (source_type, source_id) DO NOTHING
+                    """,
+                    st,
+                    sid,
+                    payload_json,
+                    now,
+                )
+                if merge:
+                    row = await conn.fetchrow(
+                        f"""
+                        UPDATE {self._schema}.connector_sync_state
+                        SET sync_state_json = COALESCE(sync_state_json, '{{}}'::jsonb) || $3::jsonb,
+                            updated_at = $4
+                        WHERE source_type = $1 AND source_id = $2
+                        RETURNING sync_state_json
+                        """,
+                        st,
+                        sid,
+                        payload_json,
+                        now,
+                    )
+                else:
+                    row = await conn.fetchrow(
+                        f"""
+                        UPDATE {self._schema}.connector_sync_state
+                        SET sync_state_json = $3::jsonb,
+                            updated_at = $4
+                        WHERE source_type = $1 AND source_id = $2
+                        RETURNING sync_state_json
+                        """,
+                        st,
+                        sid,
+                        payload_json,
+                        now,
+                    )
+        if not row:
+            return payload
+        return coerce_json_dict(row["sync_state_json"], parsed_fallback_key=None)
+
     async def get_sync_state(self, *, source_type: str, source_id: str) -> Optional[SyncState]:
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
@@ -741,7 +990,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 f"""
                 SELECT source_type, source_id, last_seen_cursor, last_emitted_seq, last_polled_at,
                        last_success_at, last_failure_at, last_error, attempt_count, rate_limit_until,
-                       next_retry_at, last_command_id, updated_at
+                       next_retry_at, last_command_id, sync_state_json, updated_at
                 FROM {self._schema}.connector_sync_state
                 WHERE source_type = $1 AND source_id = $2
                 """,
@@ -763,5 +1012,6 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 rate_limit_until=row["rate_limit_until"],
                 next_retry_at=row["next_retry_at"],
                 last_command_id=row["last_command_id"],
+                sync_state_json=coerce_json_dict(row["sync_state_json"], parsed_fallback_key=None),
                 updated_at=row["updated_at"],
             )

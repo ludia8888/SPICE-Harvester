@@ -102,6 +102,16 @@ REMOVED_V1_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/v1/databases/{db_name}/import-from-excel/commit"),
     ("post", "/api/v1/data-connectors/google-sheets/grid"),
     ("post", "/api/v1/data-connectors/google-sheets/preview"),
+    ("post", "/api/v1/data-connectors/google-sheets/register"),
+    ("get", "/api/v1/data-connectors/google-sheets/registered"),
+    ("get", "/api/v1/data-connectors/google-sheets/{sheet_id}/preview"),
+    ("delete", "/api/v1/data-connectors/google-sheets/{sheet_id}"),
+    ("post", "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining"),
+    ("post", "/api/v1/data-connectors/google-sheets/oauth/start"),
+    ("get", "/api/v1/data-connectors/google-sheets/oauth/callback"),
+    ("get", "/api/v1/data-connectors/google-sheets/drive/spreadsheets"),
+    ("get", "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets"),
+    ("delete", "/api/v1/data-connectors/google-sheets/connections/{connection_id}"),
 )
 
 _BROKEN_OFFICIAL_DOC_URLS: tuple[str, ...] = (
@@ -499,6 +509,16 @@ def test_removed_v1_compat_path_literals_absent_from_runtime_code() -> None:
         "/api/v1/databases/{db_name}/import-from-excel/commit",
         "/api/v1/data-connectors/google-sheets/grid",
         "/api/v1/data-connectors/google-sheets/preview",
+        "/api/v1/data-connectors/google-sheets/register",
+        "/api/v1/data-connectors/google-sheets/registered",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/preview",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}",
+        "/api/v1/data-connectors/google-sheets/connections/{connection_id}",
+        "/api/v1/data-connectors/google-sheets/oauth/start",
+        "/api/v1/data-connectors/google-sheets/oauth/callback",
+        "/api/v1/data-connectors/google-sheets/drive/spreadsheets",
+        "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets",
     ]
     forbidden_path_fragments = [
         "/actions/logs",
@@ -532,6 +552,16 @@ def test_architecture_guard_covers_legacy_action_and_funnel_path_literals() -> N
         "/api/v1/actions/",
         "/api/v1/data-connectors/google-sheets/grid",
         "/api/v1/data-connectors/google-sheets/preview",
+        "/api/v1/data-connectors/google-sheets/register",
+        "/api/v1/data-connectors/google-sheets/registered",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/preview",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}",
+        "/api/v1/data-connectors/google-sheets/connections/{connection_id}",
+        "/api/v1/data-connectors/google-sheets/oauth/start",
+        "/api/v1/data-connectors/google-sheets/oauth/callback",
+        "/api/v1/data-connectors/google-sheets/drive/spreadsheets",
+        "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets",
         "/api/v1/funnel/",
         "/api/v1/version/",
         "/api/v1/branch/",
@@ -675,9 +705,11 @@ def test_legacy_data_connector_sheet_tools_router_deleted() -> None:
     backend_root = Path(__file__).resolve().parents[3]
     legacy_path = backend_root / "bff" / "routers" / "data_connector_sheet_tools.py"
     assert not legacy_path.exists()
+    data_connector_router = backend_root / "bff" / "routers" / "data_connector.py"
+    assert not data_connector_router.exists()
 
-    data_connector_module = (backend_root / "bff" / "routers" / "data_connector.py").read_text(encoding="utf-8")
-    assert "data_connector_sheet_tools" not in data_connector_module
+    main_text = (backend_root / "bff" / "main.py").read_text(encoding="utf-8")
+    assert "data_connector.router" not in main_text
 
 
 @pytest.mark.unit
@@ -900,6 +932,16 @@ def test_removed_v1_paths_absent_from_generated_api_docs() -> None:
     removed_literals = [
         "/api/v1/data-connectors/google-sheets/grid",
         "/api/v1/data-connectors/google-sheets/preview",
+        "/api/v1/data-connectors/google-sheets/register",
+        "/api/v1/data-connectors/google-sheets/registered",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/preview",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining",
+        "/api/v1/data-connectors/google-sheets/{sheet_id}",
+        "/api/v1/data-connectors/google-sheets/connections/{connection_id}",
+        "/api/v1/data-connectors/google-sheets/oauth/start",
+        "/api/v1/data-connectors/google-sheets/oauth/callback",
+        "/api/v1/data-connectors/google-sheets/drive/spreadsheets",
+        "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets",
         "/api/v1/databases/{db_name}/actions/logs/{action_log_id}/undo",
         "/api/v1/databases/{db_name}/actions/logs",
         "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",

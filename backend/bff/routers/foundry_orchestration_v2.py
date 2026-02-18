@@ -374,7 +374,7 @@ async def create_build_v2(
             parameters={"message": str(exc)},
         )
 
-    pipeline = await pipeline_registry.get_pipeline(resolved.pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=resolved.pipeline_id)
     if pipeline is None:
         return _foundry_error(
             status.HTTP_404_NOT_FOUND,
@@ -455,7 +455,7 @@ async def get_build_v2(
             parameters={"buildRid": buildRid},
         )
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     branch_name = _extract_build_branch(
         run=run,
         pipeline_branch=getattr(pipeline, "branch", None) if pipeline else None,
@@ -504,7 +504,7 @@ async def get_builds_batch_v2(
             continue
         if not isinstance(run, dict):
             continue
-        pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+        pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         branch_name = _extract_build_branch(
             run=run,
             pipeline_branch=getattr(pipeline, "branch", None) if pipeline else None,
@@ -708,7 +708,7 @@ async def create_schedule_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "targetRid must reference a pipeline RID"})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="PipelineNotFound", parameters={"pipelineId": pipeline_id})
 
@@ -734,7 +734,7 @@ async def create_schedule_v2(
         logger.error("Failed to create schedule: %s", exc)
         return _foundry_error(500, error_code="INTERNAL", error_name="ScheduleCreationFailed", parameters={"message": str(exc)})
 
-    updated_pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    updated_pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     return JSONResponse(content=_schedule_response(updated_pipeline or pipeline))
 
 
@@ -749,7 +749,7 @@ async def get_schedule_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 
@@ -770,7 +770,7 @@ async def delete_schedule_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 
@@ -798,7 +798,7 @@ async def pause_schedule_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 
@@ -822,7 +822,7 @@ async def unpause_schedule_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 
@@ -848,7 +848,7 @@ async def list_schedule_runs_v2(
     if not pipeline_id:
         return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidScheduleRid", parameters={"scheduleRid": scheduleRid})
 
-    pipeline = await pipeline_registry.get_pipeline(pipeline_id)
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 

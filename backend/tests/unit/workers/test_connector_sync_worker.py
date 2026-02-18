@@ -7,10 +7,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from connector_sync_worker import main as sync_module
 from connector_sync_worker.main import ConnectorSyncWorker
 from shared.models.event_envelope import EventEnvelope
-from shared.services.registries.connector_registry import ConnectorMapping, ConnectorSource
+from shared.services.registries.connector_registry import ConnectorMapping, ConnectorSource, SyncState
 from shared.services.registries.processed_event_registry import ClaimDecision, ClaimResult
 
 
@@ -19,24 +18,95 @@ class _FakeTracing:
         return nullcontext()
 
 
+class _FakeAdapter:
+    async def snapshot_extract(self, *, config, secrets, import_config):  # noqa: ANN001, ANN003
+        _ = config, secrets, import_config
+        from data_connector.adapters.base import ConnectorExtractResult
+
+        return ConnectorExtractResult(
+            columns=["id", "name"],
+            rows=[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
+            next_state={"watermark": 2},
+        )
+
+    async def incremental_extract(self, *, config, secrets, import_config, sync_state):  # noqa: ANN001, ANN003
+        return await self.snapshot_extract(config=config, secrets=secrets, import_config=import_config)
+
+    async def cdc_extract(self, *, config, secrets, import_config, sync_state):  # noqa: ANN001, ANN003
+        return await self.snapshot_extract(config=config, secrets=secrets, import_config=import_config)
+
+
+class _FakeAdapterFactory:
+    def __init__(self) -> None:
+        self.adapter = _FakeAdapter()
+
+    def get_adapter(self, connector_kind: str):  # noqa: ANN001
+        _ = connector_kind
+        return self.adapter
+
+
 class _FakeRegistry:
     def __init__(self) -> None:
         self.source: ConnectorSource | None = None
+        self.connection_source: ConnectorSource | None = None
         self.mapping: ConnectorMapping | None = None
-        self.upserts: list[tuple[str, str, dict]] = []
+        self.sync_state: SyncState | None = None
         self.sync_outcomes: list[dict] = []
+        self.sync_state_updates: list[dict] = []
 
     async def get_source(self, *, source_type: str, source_id: str):
-        return self.source
+        if self.source and self.source.source_type == source_type and self.source.source_id == source_id:
+            return self.source
+        if self.connection_source and self.connection_source.source_type == source_type and self.connection_source.source_id == source_id:
+            return self.connection_source
+        return None
 
     async def get_mapping(self, *, source_type: str, source_id: str):
+        _ = source_type, source_id
         return self.mapping
 
-    async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict) -> None:
-        self.upserts.append((source_type, source_id, config_json))
+    async def get_sync_state(self, *, source_type: str, source_id: str):
+        _ = source_type, source_id
+        return self.sync_state
+
+    async def get_connection_secrets(self, *, source_type: str, source_id: str):
+        _ = source_type, source_id
+        return {"access_token": "token-1"}
+
+    async def upsert_sync_state_json(self, *, source_type: str, source_id: str, sync_state_json: dict, merge: bool):  # noqa: ARG002
+        self.sync_state_updates.append(
+            {
+                "source_type": source_type,
+                "source_id": source_id,
+                "sync_state_json": dict(sync_state_json),
+            }
+        )
+        return sync_state_json
 
     async def record_sync_outcome(self, **kwargs):  # noqa: ANN003
         self.sync_outcomes.append(dict(kwargs))
+
+
+class _FakeIngestService:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def ingest_rows(self, **kwargs):  # noqa: ANN003
+        self.calls.append(dict(kwargs))
+        return {
+            "dataset": {
+                "dataset_id": "dataset-1",
+                "db_name": kwargs.get("db_name"),
+                "name": "connector_dataset",
+            },
+            "version": {
+                "version_id": "version-1",
+                "lakefs_commit_id": "c1",
+                "artifact_key": "s3://raw-datasets/c1/path.csv",
+                "row_count": 2,
+            },
+            "objectify_job_id": None,
+        }
 
 
 class _FakeProcessed:
@@ -59,57 +129,6 @@ class _FakeProcessed:
     async def heartbeat(self, **kwargs):  # noqa: ANN003
         self.heartbeat_calls.append(dict(kwargs))
         return False
-
-
-class _FakeSheets:
-    def __init__(self) -> None:
-        self.values = [["id", "name"], [1, "Alice"], [2, "Bob"]]
-
-    async def fetch_sheet_values(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        return "sheet-1", {"sheets": []}, "Sheet1", None, self.values
-
-
-class _FakeResponse:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self):
-        return self._payload
-
-
-class _FakeHttp:
-    def __init__(self) -> None:
-        self.get_calls: list[dict] = []
-        self.post_calls: list[dict] = []
-
-    async def get(self, url: str, **kwargs):  # noqa: ANN003
-        self.get_calls.append({"url": url, **kwargs})
-        return _FakeResponse(
-            {
-                "properties": [
-                    {"name": "id", "label": "ID", "type": "xsd:integer"},
-                    {"name": "name", "type": "xsd:string"},
-                ]
-            }
-        )
-
-    async def post(self, url: str, **kwargs):  # noqa: ANN003
-        self.post_calls.append({"url": url, **kwargs})
-        return _FakeResponse({"command_id": "cmd-1"})
-
-
-class _FakeLineage:
-    def __init__(self) -> None:
-        self.links: list[dict] = []
-
-    def node_event(self, value: str) -> str:
-        return f"event:{value}"
-
-    async def record_link(self, **kwargs):  # noqa: ANN003
-        self.links.append(dict(kwargs))
 
 
 class _FakeMessage:
@@ -156,47 +175,10 @@ class _FakeConsumer:
 
 
 @pytest.mark.asyncio
-async def test_sync_worker_bff_scope_headers() -> None:
-    worker = ConnectorSyncWorker()
-    assert worker._bff_scope_headers(db_name="") == {}
-    assert worker._bff_scope_headers(db_name="demo") == {"X-DB-Name": "demo", "X-Project": "demo"}
-
-
-@pytest.mark.asyncio
-async def test_sync_worker_fetch_schema_and_target_types(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
-
-    worker = ConnectorSyncWorker()
-    worker.http = _FakeHttp()
-
-    schema = await worker._fetch_ontology_schema(db_name="demo", class_label="User", branch="main")
-    assert schema["properties"][0]["name"] == "id"
-
-    types = await worker._target_field_types(db_name="demo", class_label="User", branch="main")
-    assert types["id"] == "xsd:integer"
-    assert types["ID"] == "xsd:integer"
-    assert types["name"] == "xsd:string"
-
-
-@pytest.mark.asyncio
-async def test_sync_worker_process_google_sheets_update(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
-
-    class _FakeOAuth:
-        client_id = "client"
-        client_secret = "secret"
-
-        async def refresh_access_token(self, refresh_token: str):  # noqa: ARG002
-            return {"access_token": "new-token", "refresh_token": "refresh-token", "expires_at": 123}
-
-    monkeypatch.setattr("data_connector.google_sheets.auth.GoogleOAuth2Client", _FakeOAuth)
-
+async def test_sync_worker_process_connector_update_snapshot() -> None:
     worker = ConnectorSyncWorker()
     registry = _FakeRegistry()
-    worker.registry = registry
-    worker.sheets = _FakeSheets()
-    worker.http = _FakeHttp()
-    worker.lineage = _FakeLineage()
+    ingest = _FakeIngestService()
 
     registry.source = ConnectorSource(
         source_type="google_sheets",
@@ -204,8 +186,8 @@ async def test_sync_worker_process_google_sheets_update(monkeypatch: pytest.Monk
         enabled=True,
         config_json={
             "sheet_url": "https://docs.google.com/spreadsheets/d/sheet-1/edit",
-            "refresh_token": "refresh-token",
-            "max_import_rows": 10,
+            "import_mode": "SNAPSHOT",
+            "table_import_config": {"type": "jdbcImportConfig", "query": "SELECT * FROM external_sheet"},
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -223,19 +205,46 @@ async def test_sync_worker_process_google_sheets_update(monkeypatch: pytest.Monk
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
+    registry.sync_state = SyncState(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        last_seen_cursor="cursor-1",
+        last_emitted_seq=1,
+        last_polled_at=datetime.now(timezone.utc),
+        last_success_at=None,
+        last_failure_at=None,
+        last_error=None,
+        attempt_count=0,
+        rate_limit_until=None,
+        next_retry_at=None,
+        last_command_id=None,
+        sync_state_json={"watermark": 1},
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    worker.registry = registry
+    worker.adapter_factory = _FakeAdapterFactory()
+    worker.ingest_service = ingest
+    worker.tracing = _FakeTracing()
 
     envelope = EventEnvelope.from_connector_update(
         source_type="google_sheets",
         source_id="sheet-1",
-        cursor="cursor-1",
+        cursor="cursor-2",
         data={"source_type": "google_sheets", "source_id": "sheet-1"},
     )
 
-    command_id = await worker._process_google_sheets_update(envelope)
+    version_id = await worker._process_connector_update(envelope)
 
-    assert command_id == "cmd-1"
-    assert registry.upserts, "Expected token refresh update"
-    assert worker.lineage.links, "Expected lineage link recorded"
+    assert version_id == "version-1"
+    assert ingest.calls
+    call = ingest.calls[0]
+    assert call["db_name"] == "demo"
+    assert call["import_mode"] == "SNAPSHOT"
+    assert call["source_type"] == "google_sheets"
+    assert call["source_id"] == "sheet-1"
+    assert registry.sync_state_updates
+    assert registry.sync_state_updates[0]["sync_state_json"] == {"watermark": 2}
 
 
 @pytest.mark.asyncio
@@ -250,6 +259,48 @@ async def test_sync_worker_handle_envelope_rejects_unknown() -> None:
     )
     with pytest.raises(ValueError):
         await worker._handle_envelope(envelope)
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_handle_envelope_accepts_sqlserver_table_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = ConnectorSyncWorker()
+    envelope = EventEnvelope.from_connector_update(
+        source_type="sqlserver_table_import",
+        source_id="import-1",
+        cursor="cursor-1",
+        data={"source_type": "sqlserver_table_import", "source_id": "import-1"},
+    )
+
+    async def _handle_stub(payload):  # noqa: ANN001
+        _ = payload
+        return "version-1"
+
+    monkeypatch.setattr(worker, "_process_connector_update", _handle_stub)
+    result = await worker._handle_envelope(envelope)
+    assert result == "version-1"
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_handle_envelope_accepts_mysql_file_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = ConnectorSyncWorker()
+    envelope = EventEnvelope.from_connector_update(
+        source_type="mysql_file_import",
+        source_id="import-2",
+        cursor="cursor-1",
+        data={"source_type": "mysql_file_import", "source_id": "import-2"},
+    )
+
+    async def _handle_stub(payload):  # noqa: ANN001
+        _ = payload
+        return "version-2"
+
+    monkeypatch.setattr(worker, "_process_connector_update", _handle_stub)
+    result = await worker._handle_envelope(envelope)
+    assert result == "version-2"
 
 
 @pytest.mark.asyncio
@@ -269,7 +320,7 @@ async def test_sync_worker_run_processes_message(monkeypatch: pytest.MonkeyPatch
     worker.consumer._messages = [_FakeMessage(envelope.model_dump(mode="json"))]
 
     async def _handle_stub(envelope):  # noqa: ANN001
-        return "cmd-1"
+        return "version-1"
 
     monkeypatch.setattr(worker, "_handle_envelope", _handle_stub)
     monkeypatch.setattr(worker, "_heartbeat_loop", lambda **kwargs: asyncio.sleep(0))  # noqa: ARG005

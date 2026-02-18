@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **518 settings** total.
+SPICE Harvester uses **45 configuration classes** with **522 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -203,13 +203,17 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Feature flags / opt-in endpoints.
 
-**3 settings**
+**7 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
 | `enable_pipeline_control_plane_events` | `bool` | `True` | `ENABLE_PIPELINE_CONTROL_PLANE_EVENTS` | Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS) |
 | `enable_sync_database_create_fallback` | `bool` | `True` | `ENABLE_SYNC_DATABASE_CREATE_FALLBACK` | Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK) |
 | `enable_oms_rollback` | `bool` | `False` | `ENABLE_OMS_ROLLBACK` | Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK) |
+| `enable_foundry_connectivity_jdbc` | `bool` | `False` | `ENABLE_FOUNDRY_CONNECTIVITY_JDBC` | Enable Foundry connectivity JDBC connectors (ENABLE_FOUNDRY_CONNECTIVITY_JDBC) |
+| `foundry_connectivity_jdbc_db_allowlist` | `str` | `` | `FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST` | Comma-separated ontology DB allowlist for JDBC connectivity when global flag is off (FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST) |
+| `enable_foundry_connectivity_cdc` | `bool` | `False` | `ENABLE_FOUNDRY_CONNECTIVITY_CDC` | Enable Foundry connectivity CDC mode (ENABLE_FOUNDRY_CONNECTIVITY_CDC) |
+| `foundry_connectivity_cdc_db_allowlist` | `str` | `` | `FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST` | Comma-separated ontology DB allowlist for CDC mode when global flag is off (FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST) |
 
 ## PipelineSettings
 
@@ -945,7 +949,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `google_sheets_credentials_path` | `Optional[str]` | **required** | `GOOGLE_SHEETS_CREDENTIALS_PATH` | Google Sheets service account credentials path |
 | `oauth_client_id` | `Optional[str]` | **required** | `OAUTH_CLIENT_ID`, `GOOGLE_CLIENT_ID` | Google OAuth client id (GOOGLE_CLIENT_ID) |
 | `oauth_client_secret` | `Optional[str]` | **required** | `OAUTH_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (GOOGLE_CLIENT_SECRET) |
-| `oauth_redirect_uri` | `str` | `http://localhost:8002/api/v1/data-co...` | `OAUTH_REDIRECT_URI`, `GOOGLE_REDIRECT_URI` | Google OAuth redirect URI (GOOGLE_REDIRECT_URI) |
+| `oauth_redirect_uri` | `str` | `http://localhost:8002/oauth/callback` | `OAUTH_REDIRECT_URI`, `GOOGLE_REDIRECT_URI` | Google OAuth redirect URI (GOOGLE_REDIRECT_URI) |
 
 ## ApplicationSettings
 

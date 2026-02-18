@@ -917,6 +917,35 @@ class FeatureFlagsSettings(BaseSettings):
         default=False,
         description="Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
     )
+    enable_foundry_connectivity_jdbc: bool = Field(
+        default=False,
+        description="Enable Foundry connectivity JDBC connectors (ENABLE_FOUNDRY_CONNECTIVITY_JDBC)",
+    )
+    foundry_connectivity_jdbc_db_allowlist: str = Field(
+        default="",
+        description=(
+            "Comma-separated ontology DB allowlist for JDBC connectivity when global flag is off "
+            "(FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST)"
+        ),
+    )
+    enable_foundry_connectivity_cdc: bool = Field(
+        default=False,
+        description="Enable Foundry connectivity CDC mode (ENABLE_FOUNDRY_CONNECTIVITY_CDC)",
+    )
+    foundry_connectivity_cdc_db_allowlist: str = Field(
+        default="",
+        description=(
+            "Comma-separated ontology DB allowlist for CDC mode when global flag is off "
+            "(FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST)"
+        ),
+    )
+
+    _normalize_connectivity_allowlists = field_validator(
+        "foundry_connectivity_jdbc_db_allowlist",
+        "foundry_connectivity_cdc_db_allowlist",
+        mode="before",
+    )(_strip_text_if_not_none)
+
 class PipelineSettings(BaseSettings):
     """Pipeline Builder + pipeline worker settings."""
 
@@ -4082,7 +4111,7 @@ class GoogleSheetsSettings(BaseSettings):
         description="Google OAuth client secret (GOOGLE_CLIENT_SECRET)",
     )
     oauth_redirect_uri: str = Field(
-        default="http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback",
+        default="http://localhost:8002/oauth/callback",
         validation_alias="GOOGLE_REDIRECT_URI",
         description="Google OAuth redirect URI (GOOGLE_REDIRECT_URI)",
     )

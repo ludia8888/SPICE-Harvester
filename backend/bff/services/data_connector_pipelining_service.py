@@ -17,11 +17,17 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 
 import bff.routers.pipeline_datasets_ops as dataset_ops
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
+from data_connector.adapters.factory import (
+    ConnectorAdapterFactory,
+    connection_source_type_for_kind,
+    connector_kind_from_source_type,
+)
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.services.core.connector_ingest_service import ConnectorIngestService
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
-from shared.services.registries.connector_registry import ConnectorRegistry
+from shared.services.registries.connector_registry import ConnectorMapping, ConnectorRegistry, ConnectorSource
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.objectify_registry import ObjectifyRegistry
@@ -481,3 +487,135 @@ async def start_pipelining_google_sheet(
     except Exception as e:
         logger.error("Failed to start pipelining: %s", e)
         raise classified_http_exception(500, str(e), code=ErrorCode.CONNECTOR_ERROR) from e
+
+
+async def _resolve_connector_credentials(
+    *,
+    connector_kind: str,
+    source: ConnectorSource,
+    connector_registry: ConnectorRegistry,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    source_cfg = dict(source.config_json or {})
+    connection_id = str(source_cfg.get("connection_id") or "").strip() or None
+    if not connection_id:
+        return source_cfg, {}
+
+    connection_source_type = connection_source_type_for_kind(connector_kind)
+    connection_source = await connector_registry.get_source(
+        source_type=connection_source_type,
+        source_id=connection_id,
+    )
+    if connection_source is None:
+        return source_cfg, {}
+
+    connection_cfg = dict(connection_source.config_json or {})
+    secrets = await connector_registry.get_connection_secrets(
+        source_type=connection_source_type,
+        source_id=connection_id,
+    )
+    merged_config = dict(connection_cfg)
+    merged_config.update(source_cfg)
+    return merged_config, secrets
+
+
+async def start_pipelining_table_import(
+    *,
+    source: ConnectorSource,
+    mapping: ConnectorMapping,
+    google_sheets_service: GoogleSheetsService,
+    connector_registry: ConnectorRegistry,
+    pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+    objectify_job_queue: ObjectifyJobQueue,
+    actor_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    connector_kind = connector_kind_from_source_type(source.source_type)
+    adapter = ConnectorAdapterFactory(google_sheets_service=google_sheets_service).get_adapter(connector_kind)
+
+    config, secrets = await _resolve_connector_credentials(
+        connector_kind=connector_kind,
+        source=source,
+        connector_registry=connector_registry,
+    )
+    source_cfg = dict(source.config_json or {})
+    import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}
+    import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
+
+    sync_state = await connector_registry.get_sync_state(source_type=source.source_type, source_id=source.source_id)
+    sync_state_json = dict(sync_state.sync_state_json or {}) if sync_state else {}
+
+    if import_mode == "SNAPSHOT":
+        extract = await adapter.snapshot_extract(
+            config=config,
+            secrets=secrets,
+            import_config=import_config,
+        )
+    elif import_mode == "INCREMENTAL":
+        extract = await adapter.incremental_extract(
+            config=config,
+            secrets=secrets,
+            import_config=import_config,
+            sync_state=sync_state_json,
+        )
+    elif import_mode == "CDC":
+        extract = await adapter.cdc_extract(
+            config=config,
+            secrets=secrets,
+            import_config=import_config,
+            sync_state=sync_state_json,
+        )
+    elif import_mode in {"APPEND", "UPDATE"}:
+        # For connectors with no distinct append/update extraction, use snapshot extraction and ingest merge modes.
+        extract = await adapter.snapshot_extract(
+            config=config,
+            secrets=secrets,
+            import_config=import_config,
+        )
+    else:
+        raise ValueError("import_mode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
+
+    ingest_service = ConnectorIngestService(
+        dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+    )
+    branch_name = str(mapping.target_branch or "").strip() or "main"
+    db_name = str(mapping.target_db_name or "").strip()
+    if not db_name:
+        raise ValueError("target_db_name is required")
+
+    ingest_result = await ingest_service.ingest_rows(
+        db_name=db_name,
+        source_type=source.source_type,
+        source_id=source.source_id,
+        columns=list(extract.columns or []),
+        rows=list(extract.rows or []),
+        branch=branch_name,
+        dataset_name=str(source_cfg.get("display_name") or f"{connector_kind}_{source.source_id}"),
+        import_mode=import_mode,
+        primary_key_column=(
+            str(import_config.get("primaryKeyColumn") or import_config.get("primary_key_column") or "").strip() or None
+        ),
+        actor_user_id=actor_user_id,
+        source_ref=f"{source.source_type}:{source.source_id}",
+    )
+
+    if extract.next_state:
+        await connector_registry.upsert_sync_state_json(
+            source_type=source.source_type,
+            source_id=source.source_id,
+            sync_state_json=dict(extract.next_state),
+            merge=True,
+        )
+
+    return {
+        "status": "success",
+        "message": "Table import execution completed",
+        "data": {
+            "dataset": ingest_result.get("dataset") if isinstance(ingest_result, dict) else {},
+            "version": ingest_result.get("version") if isinstance(ingest_result, dict) else {},
+            "objectify_job_id": (ingest_result or {}).get("objectify_job_id") if isinstance(ingest_result, dict) else None,
+        },
+    }

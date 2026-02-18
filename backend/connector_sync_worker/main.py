@@ -3,14 +3,8 @@ Connector Sync Worker (shared runtime).
 
 Consumes Kafka `connector-updates` events (EventEnvelope; metadata.kind='connector_update').
 
-When a confirmed mapping exists, fetches + normalizes data via connector adapters and submits
-write commands to the platform engine (BFF/OMS async 202 path).
-
-Core policies (operational tradeoffs):
-- At-least-once + idempotent: ProcessedEventRegistry claims side-effects.
-- Mapping-gated: no mapping → no writes.
-- Queueing + backoff + DLQ: defaults to safe operational behavior.
-- Lineage: connector event → submitted command_id edge is recorded (fail-closed by default).
+When a confirmed mapping exists, extracts rows via connector adapters and writes through
+shared connector ingest service (dataset version + objectify enqueue).
 """
 
 from __future__ import annotations
@@ -20,11 +14,17 @@ import logging
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
-import httpx
 from confluent_kafka import Producer
 
+from data_connector.adapters.factory import (
+    ConnectorAdapterFactory,
+    SUPPORTED_CONNECTOR_KINDS,
+    connector_kind_from_source_type,
+    connection_source_type_for_kind,
+    file_import_source_type_for_kind,
+    table_import_source_type_for_kind,
+)
 from data_connector.google_sheets.service import GoogleSheetsService
-from data_connector.google_sheets.utils import normalize_sheet_data
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -32,6 +32,7 @@ from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_ra
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.core.connector_ingest_service import ConnectorIngestService
 from shared.services.kafka.dlq_publisher import (
     EnvelopeDlqSpec,
 )
@@ -40,13 +41,14 @@ from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, KafkaProducerOps, close_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.connector_registry import ConnectorRegistry
+from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
-from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
-from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.utils.app_logger import configure_logging
-from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.time_utils import utcnow
 from shared.utils.worker_runner import run_component_lifecycle
 
@@ -83,16 +85,25 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         self.consumer_ops = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_producer_ops: Optional[KafkaProducerOps] = None
+
         self.registry: Optional[ConnectorRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
         self.enable_lineage = bool(settings.observability.enable_lineage)
         self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
+
         self.sheets: Optional[GoogleSheetsService] = None
-        self.http: Optional[httpx.AsyncClient] = None
+        self.adapter_factory: Optional[ConnectorAdapterFactory] = None
+
+        self.dataset_registry: Optional[DatasetRegistry] = None
+        self.pipeline_registry: Optional[PipelineRegistry] = None
+        self.objectify_registry: Optional[ObjectifyRegistry] = None
+        self.objectify_job_queue: Optional[ObjectifyJobQueue] = None
+        self.ingest_service: Optional[ConnectorIngestService] = None
 
     async def initialize(self) -> None:
         settings = get_settings()
+
         self.registry = ConnectorRegistry()
         await self.registry.initialize()
 
@@ -116,18 +127,23 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                 )
                 self.lineage = None
 
-        # Connector adapter (v1: google sheets)
-        api_key = settings.google_sheets.google_sheets_api_key
-        self.sheets = GoogleSheetsService(api_key=api_key)
+        self.sheets = GoogleSheetsService(api_key=settings.google_sheets.google_sheets_api_key)
+        self.adapter_factory = ConnectorAdapterFactory(google_sheets_service=self.sheets)
 
-        # HTTP client to call BFF (auth is fail-closed in prod).
-        token = get_expected_token(BFF_TOKEN_ENV_KEYS)
-        headers: Dict[str, str] = {}
-        if token:
-            headers["X-Admin-Token"] = token
-        else:
-            logger.warning("No BFF auth token configured; BFF calls may fail (set ADMIN_TOKEN/BFF_ADMIN_TOKEN).")
-        self.http = httpx.AsyncClient(timeout=60.0, headers=headers)
+        self.dataset_registry = DatasetRegistry()
+        await self.dataset_registry.initialize()
+        self.pipeline_registry = PipelineRegistry()
+        await self.pipeline_registry.initialize()
+        self.objectify_registry = ObjectifyRegistry()
+        await self.objectify_registry.initialize()
+        self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
+
+        self.ingest_service = ConnectorIngestService(
+            dataset_registry=self.dataset_registry,
+            pipeline_registry=self.pipeline_registry,
+            objectify_registry=self.objectify_registry,
+            objectify_job_queue=self.objectify_job_queue,
+        )
 
         self._initialize_safe_consumer_runtime(
             group_id=self.group_id,
@@ -136,7 +152,6 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             thread_name_prefix="connector-sync-worker-kafka",
         )
 
-        # DLQ producer (best-effort)
         self.dlq_producer = create_kafka_dlq_producer(
             bootstrap_servers=settings.database.kafka_servers,
             client_id=settings.observability.service_name or "connector-sync-worker",
@@ -149,12 +164,25 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         logger.info(f"✅ ConnectorSyncWorker initialized (topic={self.topic}, group={self.group_id})")
 
     async def close(self) -> None:
-        if self.http:
-            await self.http.aclose()
-            self.http = None
         if self.sheets:
             await self.sheets.close()
             self.sheets = None
+        self.adapter_factory = None
+
+        if self.objectify_job_queue:
+            await self.objectify_job_queue.close()
+            self.objectify_job_queue = None
+        if self.objectify_registry:
+            await self.objectify_registry.close()
+            self.objectify_registry = None
+        if self.pipeline_registry:
+            await self.pipeline_registry.close()
+            self.pipeline_registry = None
+        if self.dataset_registry:
+            await self.dataset_registry.close()
+            self.dataset_registry = None
+        self.ingest_service = None
+
         if self.lineage:
             await self.lineage.close()
             self.lineage = None
@@ -164,6 +192,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         if self.registry:
             await self.registry.close()
             self.registry = None
+
         await self._close_consumer_runtime()
         await close_kafka_producer(
             producer_ops=self.dlq_producer_ops,
@@ -194,7 +223,6 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             missing_producer_message="DLQ producer not configured; dropping connector sync DLQ payload: %s",
         )
 
-    # --- EventEnvelopeKafkaWorker hooks ---
     async def _process_payload(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         return await self._handle_envelope(payload)
 
@@ -273,204 +301,147 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         except Exception as exc:
             logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
-    def _bff_scope_headers(self, *, db_name: str) -> Dict[str, str]:
-        scope = (db_name or "").strip()
-        if not scope:
-            return {}
-        return {"X-DB-Name": scope, "X-Project": scope}
+    async def _resolve_source_runtime_credentials(
+        self,
+        *,
+        source_type: str,
+        source_id: str,
+        source_config: Dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not self.registry:
+            return dict(source_config), {}
 
-    async def _fetch_ontology_schema(self, *, db_name: str, class_label: str, branch: str) -> Dict[str, Any]:
-        if not self.http:
-            raise RuntimeError("HTTP client not initialized")
-        bff_url = get_settings().services.bff_base_url
-        url = f"{bff_url}/api/v1/databases/{db_name}/ontology/{class_label}/schema"
-        headers = self._bff_scope_headers(db_name=db_name)
-        resp = await self.http.get(url, params={"format": "json", "branch": branch}, headers=headers or None)
-        resp.raise_for_status()
-        data = resp.json()
-        if not isinstance(data, dict):
-            raise ValueError("Ontology schema response is not an object")
-        return data
+        connector_kind = connector_kind_from_source_type(source_type)
+        connection_id = str(source_config.get("connection_id") or "").strip() or None
+        if not connection_id:
+            return dict(source_config), {}
 
-    async def _target_field_types(self, *, db_name: str, class_label: str, branch: str) -> Dict[str, str]:
-        schema = await self._fetch_ontology_schema(db_name=db_name, class_label=class_label, branch=branch)
-        props = schema.get("properties") or []
-        types: Dict[str, str] = {}
-        if isinstance(props, list):
-            for p in props:
-                if not isinstance(p, dict):
-                    continue
-                name = (p.get("name") or "").strip()
-                label = (p.get("label") or "").strip()
-                typ = normalize_import_target_type(p.get("type"))
-                if name:
-                    types[name] = typ
-                if label:
-                    types[label] = typ
-        return types
+        connection_source = await self.registry.get_source(
+            source_type=connection_source_type_for_kind(connector_kind),
+            source_id=connection_id,
+        )
+        if connection_source is None:
+            return dict(source_config), {}
 
-    async def _process_google_sheets_update(self, envelope: EventEnvelope) -> Optional[str]:
-        if not self.registry or not self.sheets or not self.http:
+        secrets = await self.registry.get_connection_secrets(
+            source_type=connection_source.source_type,
+            source_id=connection_source.source_id,
+        )
+        merged_config = dict(connection_source.config_json or {})
+        merged_config.update(source_config)
+        return merged_config, secrets
+
+    async def _process_connector_update(self, envelope: EventEnvelope) -> Optional[str]:
+        if not self.registry or not self.adapter_factory or not self.ingest_service:
             raise RuntimeError("Worker not initialized")
 
         data = envelope.data or {}
+        source_type = str(data.get("source_type") or "").strip()
         source_id = str(data.get("source_id") or "").strip()
-        if not source_id:
-            raise ValueError("connector_update missing source_id")
+        if not source_type or not source_id:
+            raise ValueError("connector_update missing source_type/source_id")
 
-        source = await self.registry.get_source(source_type="google_sheets", source_id=source_id)
+        source = await self.registry.get_source(source_type=source_type, source_id=source_id)
         if not source or not source.enabled:
-            logger.info(f"Skipping disabled/unregistered source (google_sheets:{source_id})")
+            logger.info("Skipping disabled/unregistered source (%s:%s)", source_type, source_id)
             return None
 
-        mapping = await self.registry.get_mapping(source_type="google_sheets", source_id=source_id)
+        mapping = await self.registry.get_mapping(source_type=source_type, source_id=source_id)
         if not mapping or not mapping.enabled:
-            logger.info(f"Skipping auto-import (mapping not enabled) for google_sheets:{source_id}")
+            logger.info("Skipping auto-import (mapping not enabled) for %s:%s", source_type, source_id)
             return None
 
         db_name = (mapping.target_db_name or "").strip()
-        class_label = (mapping.target_class_label or "").strip()
         branch = (mapping.target_branch or "main").strip() or "main"
-        if not db_name or not class_label:
-            logger.info(f"Skipping auto-import (target not configured) for google_sheets:{source_id}")
+        if not db_name:
+            logger.info("Skipping auto-import (target DB not configured) for %s:%s", source_type, source_id)
             return None
 
-        cfg = source.config_json or {}
-        sheet_url = (cfg.get("sheet_url") or "").strip()
-        worksheet_name = (cfg.get("worksheet_name") or "").strip() or None
-        if not sheet_url:
-            raise ValueError("Registered source is missing sheet_url")
+        connector_kind = connector_kind_from_source_type(source_type)
+        adapter = self.adapter_factory.get_adapter(connector_kind)
+        source_cfg = dict(source.config_json or {})
+        import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
+        import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}
 
-        access_token = (cfg.get("access_token") or "").strip() or None
-        if not access_token:
-            refresh_token = (cfg.get("refresh_token") or "").strip() or None
-            if refresh_token:
-                from data_connector.google_sheets.auth import GoogleOAuth2Client
-
-                oauth_client = GoogleOAuth2Client()
-                if oauth_client.client_id and oauth_client.client_secret:
-                    refreshed = await oauth_client.refresh_access_token(refresh_token)
-                    access_token = (refreshed.get("access_token") or "").strip() or None
-                    cfg.update(
-                        {
-                            "access_token": refreshed.get("access_token"),
-                            "refresh_token": refreshed.get("refresh_token", refresh_token),
-                            "expires_at": refreshed.get("expires_at"),
-                        }
-                    )
-                    await self.registry.upsert_source(
-                        source_type=source.source_type,
-                        source_id=source.source_id,
-                        enabled=True,
-                        config_json=cfg,
-                    )
-
-        _, _, _, _, values = await self.sheets.fetch_sheet_values(
-            sheet_url,
-            worksheet_name=worksheet_name,
-            access_token=access_token,
-        )
-        columns, rows = normalize_sheet_data(values)
-
-        max_rows = cfg.get("max_import_rows")
-        try:
-            max_rows = int(max_rows) if max_rows is not None else None
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at connector_sync_worker/main.py:365", exc_info=True)
-            max_rows = None
-        if max_rows is not None and max_rows > 0:
-            rows = rows[: int(max_rows)]
-
-        if not columns or not rows:
-            logger.info(f"No data to import (google_sheets:{source_id})")
-            return None
-
-        # Build mappings (identity by default)
-        mappings: list[FieldMapping] = []
-        fm_raw = mapping.field_mappings or []
-        if fm_raw:
-            for m in fm_raw:
-                if not isinstance(m, dict):
-                    continue
-                sf = (m.get("source_field") or "").strip()
-                tf = (m.get("target_field") or "").strip()
-                if sf and tf:
-                    mappings.append(FieldMapping(source_field=sf, target_field=tf))
-        else:
-            for c in columns:
-                name = str(c).strip()
-                if name:
-                    mappings.append(FieldMapping(source_field=name, target_field=name))
-
-        if not mappings:
-            raise ValueError("No field mappings available for auto-import")
-
-        target_types = await self._target_field_types(db_name=db_name, class_label=class_label, branch=branch)
-        build = SheetImportService.build_instances(
-            columns=columns,
-            rows=rows,
-            mappings=mappings,
-            target_field_types=target_types,
+        runtime_config, secrets = await self._resolve_source_runtime_credentials(
+            source_type=source_type,
+            source_id=source_id,
+            source_config=source_cfg,
         )
 
-        instances = build.get("instances") or []
-        errors = build.get("errors") or []
-        warnings = build.get("warnings") or []
+        sync_state = await self.registry.get_sync_state(source_type=source_type, source_id=source_id)
+        sync_state_json = dict(sync_state.sync_state_json or {}) if sync_state else {}
 
-        if not instances:
-            raise ValueError(f"No valid instances to import (errors={len(errors)})")
-
-        bff_url = get_settings().services.bff_base_url
-        url = f"{bff_url}/api/v1/databases/{db_name}/instances/{class_label}/bulk-create"
-        payload = {
-            "instances": instances,
-            "metadata": {
-                "source": "connector_sync_worker",
-                "connector": {
-                    "source_type": "google_sheets",
-                    "source_id": source_id,
-                    "event_id": str(envelope.event_id),
-                    "sequence_number": envelope.sequence_number,
-                    "cursor": data.get("cursor"),
-                    "previous_cursor": data.get("previous_cursor"),
-                },
-                "import": {
-                    "warnings": warnings[:200],
-                    "errors": errors[:200],
-                    "stats": build.get("stats") or {},
-                },
-            },
-        }
-
-        headers = self._bff_scope_headers(db_name=db_name)
-        resp = await self.http.post(url, params={"branch": branch}, json=payload, headers=headers or None)
-        resp.raise_for_status()
-        result = resp.json()
-
-        command_id: Optional[str] = None
-        if isinstance(result, dict):
-            command_id = (
-                str(result.get("command_id") or "").strip()
-                or str(result.get("commandId") or "").strip()
-                or str(result.get("id") or "").strip()
+        if import_mode == "SNAPSHOT":
+            extract = await adapter.snapshot_extract(
+                config=runtime_config,
+                secrets=secrets,
+                import_config=import_config,
             )
-            if not command_id:
-                # Some endpoints may return nested structures; keep best-effort.
-                data_obj = result.get("data") if isinstance(result.get("data"), dict) else None
-                if data_obj:
-                    command_id = str(data_obj.get("command_id") or data_obj.get("commandId") or "").strip() or None
+        elif import_mode == "INCREMENTAL":
+            extract = await adapter.incremental_extract(
+                config=runtime_config,
+                secrets=secrets,
+                import_config=import_config,
+                sync_state=sync_state_json,
+            )
+        elif import_mode == "CDC":
+            extract = await adapter.cdc_extract(
+                config=runtime_config,
+                secrets=secrets,
+                import_config=import_config,
+                sync_state=sync_state_json,
+            )
+        elif import_mode in {"APPEND", "UPDATE"}:
+            extract = await adapter.snapshot_extract(
+                config=runtime_config,
+                secrets=secrets,
+                import_config=import_config,
+            )
+        else:
+            raise ValueError("Unsupported import mode")
 
-        if command_id:
+        ingest = await self.ingest_service.ingest_rows(
+            db_name=db_name,
+            source_type=source_type,
+            source_id=source_id,
+            columns=list(extract.columns or []),
+            rows=list(extract.rows or []),
+            branch=branch,
+            dataset_name=str(source_cfg.get("display_name") or f"{connector_kind}_{source_id}"),
+            import_mode=import_mode,
+            primary_key_column=(
+                str(import_config.get("primaryKeyColumn") or import_config.get("primary_key_column") or "").strip() or None
+            ),
+            actor_user_id="connector_sync_worker",
+            source_ref=f"{source_type}:{source_id}",
+        )
+
+        if extract.next_state:
+            await self.registry.upsert_sync_state_json(
+                source_type=source_type,
+                source_id=source_id,
+                sync_state_json=dict(extract.next_state),
+                merge=True,
+            )
+
+        dataset = ingest.get("dataset") if isinstance(ingest, dict) else {}
+        version = ingest.get("version") if isinstance(ingest, dict) else {}
+        command_id = str(version.get("version_id") or "").strip() or None
+
+        if command_id and self.lineage and dataset:
+            dataset_id = str(dataset.get("dataset_id") or "").strip() or None
+
             async def _record_connector_command_lineage() -> None:
                 await self.lineage.record_link(  # type: ignore[union-attr]
                     from_node_id=LineageStore.node_event(str(envelope.event_id)),
-                    to_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_aggregate("Dataset", dataset_id or command_id),
                     edge_type="connector_triggered_command",
                     occurred_at=envelope.occurred_at,
                     db_name=db_name,
                     edge_metadata={
                         "db_name": db_name,
-                        "source_type": "google_sheets",
+                        "source_type": source_type,
                         "source_id": source_id,
                         "event_id": str(envelope.event_id),
                         "command_id": str(command_id),
@@ -493,11 +464,12 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             )
 
         logger.info(
-            "✅ Auto-import submitted (source=google_sheets:%s, db=%s, class=%s, instances=%s, command_id=%s)",
+            "✅ Connector sync completed (source=%s:%s, db=%s, mode=%s, rows=%s, version_id=%s)",
+            source_type,
             source_id,
             db_name,
-            class_label,
-            len(instances),
+            import_mode,
+            len(extract.rows or []),
             command_id,
         )
         return command_id
@@ -508,9 +480,15 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             raise ValueError(f"Unexpected envelope kind: {kind}")
 
         source_type = str((envelope.data or {}).get("source_type") or "").strip()
-        if source_type == "google_sheets":
-            return await self._process_google_sheets_update(envelope)
-        raise ValueError(f"Unsupported source_type: {source_type}")
+        supported_source_types = {
+            table_import_source_type_for_kind(kind) for kind in SUPPORTED_CONNECTOR_KINDS
+        }
+        supported_source_types.update(
+            {file_import_source_type_for_kind(kind) for kind in SUPPORTED_CONNECTOR_KINDS}
+        )
+        if source_type not in supported_source_types:
+            raise ValueError(f"Unsupported source_type: {source_type}")
+        return await self._process_connector_update(envelope)
 
     async def run(self) -> None:
         if not self.consumer or not self.processed or not self.registry:
@@ -518,7 +496,6 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
 
         self.running = True
         logger.info("🚀 ConnectorSyncWorker started")
-
         await self.run_loop(poll_timeout=1.0, idle_sleep=None, catch_exceptions=False)
 
 

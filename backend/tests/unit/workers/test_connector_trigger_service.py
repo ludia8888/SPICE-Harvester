@@ -28,6 +28,7 @@ class _FakeRegistry:
         self.published: list[str] = []
         self.failed: list[tuple[str, str]] = []
         self.upserts: list[tuple[str, str, dict]] = []
+        self.secrets: dict[tuple[str, str], dict] = {}
         self.on_claim: callable | None = None
 
     async def initialize(self) -> None:
@@ -40,7 +41,17 @@ class _FakeRegistry:
         return self.sync_state
 
     async def list_sources(self, *, source_type: str, enabled: bool, limit: int):
-        return self.sources
+        _ = enabled, limit
+        return [src for src in self.sources if src.source_type == source_type]
+
+    async def get_source(self, *, source_type: str, source_id: str):
+        for src in self.sources:
+            if src.source_type == source_type and src.source_id == source_id:
+                return src
+        return None
+
+    async def get_connection_secrets(self, *, source_type: str, source_id: str):
+        return dict(self.secrets.get((source_type, source_id), {}))
 
     async def record_poll_result(self, **kwargs):  # noqa: ANN003
         return self.poll_envelope
@@ -75,6 +86,24 @@ class _FakeSheets:
         return "sheet-1", {"sheets": []}, "Sheet1", None, self.values
 
 
+class _FakeAdapter:
+    async def peek_change_token(self, *, config, secrets, import_config=None):  # noqa: ANN001, ANN003
+        _ = import_config
+        if config.get("force_none"):
+            return None
+        return f"token:{config.get('sheet_url') or config.get('query') or 'default'}:{bool(secrets)}"
+
+
+class _FakeAdapterFactory:
+    def __init__(self, *, google_sheets_service):  # noqa: ANN001
+        _ = google_sheets_service
+        self.adapter = _FakeAdapter()
+
+    def get_adapter(self, connector_kind: str):  # noqa: ANN001
+        _ = connector_kind
+        return self.adapter
+
+
 class _FakeProducer:
     def __init__(self, config: dict) -> None:
         self.config = config
@@ -94,6 +123,7 @@ async def test_trigger_service_initialize_and_close(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
     monkeypatch.setattr(trigger_module, "ConnectorRegistry", _FakeRegistry)
     monkeypatch.setattr(trigger_module, "GoogleSheetsService", _FakeSheets)
+    monkeypatch.setattr(trigger_module, "ConnectorAdapterFactory", _FakeAdapterFactory)
     monkeypatch.setattr(trigger_module, "Producer", _FakeProducer)
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:1234")
 
@@ -104,6 +134,10 @@ async def test_trigger_service_initialize_and_close(monkeypatch: pytest.MonkeyPa
     assert isinstance(service.sheets, _FakeSheets)
     assert isinstance(service.producer, _FakeProducer)
     assert service.registry.initialized is True
+    assert "mysql_table_import" in service.source_types
+    assert "sqlserver_table_import" in service.source_types
+    assert "mysql_file_import" in service.source_types
+    assert "sqlserver_file_import" in service.source_types
 
     registry = service.registry
     sheets = service.sheets
@@ -145,6 +179,7 @@ async def test_trigger_service_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
         rate_limit_until=None,
         next_retry_at=None,
         last_command_id=None,
+        sync_state_json={},
         updated_at=datetime.now(timezone.utc),
     )
 
@@ -152,14 +187,16 @@ async def test_trigger_service_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_trigger_service_poll_google_sheets_refreshes_token(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_trigger_service_poll_source_uses_adapter_and_records_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
+    monkeypatch.setattr(trigger_module, "ConnectorAdapterFactory", _FakeAdapterFactory)
 
     service = ConnectorTriggerService()
     registry = _FakeRegistry()
     sheets = _FakeSheets()
     service.registry = registry
     service.sheets = sheets
+    service.adapter_factory = _FakeAdapterFactory(google_sheets_service=sheets)
 
     source = ConnectorSource(
         source_type="google_sheets",
@@ -167,7 +204,6 @@ async def test_trigger_service_poll_google_sheets_refreshes_token(monkeypatch: p
         enabled=True,
         config_json={
             "sheet_url": "https://docs.google.com/spreadsheets/d/sheet-1/edit",
-            "refresh_token": "refresh-token",
         },
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -179,19 +215,8 @@ async def test_trigger_service_poll_google_sheets_refreshes_token(monkeypatch: p
         source_id="sheet-1",
         cursor="cursor-1",
     )
-
-    class _FakeOAuth:
-        client_id = "client"
-        client_secret = "secret"
-
-        async def refresh_access_token(self, refresh_token: str):  # noqa: ARG002
-            return {"access_token": "new-token", "refresh_token": "refresh-token", "expires_at": 123}
-
-    monkeypatch.setattr("data_connector.google_sheets.auth.GoogleOAuth2Client", _FakeOAuth)
-
-    await service._poll_google_sheets(source)
-
-    assert registry.upserts, "Expected refresh token update"
+    await service._poll_with_adapter(source)
+    assert registry.poll_envelope is not None
 
 
 @pytest.mark.asyncio

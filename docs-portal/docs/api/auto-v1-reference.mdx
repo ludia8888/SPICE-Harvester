@@ -16,7 +16,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 159**
+**Total v1 endpoints: 148**
 
 ### Object Types & Schema (15 endpoints)
 
@@ -159,7 +159,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 |--------|------|---------|------|
 | `GET` | `/api/v1/ops/status` | Ops Status | No |
 
-### Other (63 endpoints)
+### Other (52 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -173,17 +173,6 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/backing-datasources/{backing_id}/versions` | List Backing Datasource Versions | No |
 | `POST` | `/api/v1/backing-datasources/{backing_id}/versions` | Create Backing Datasource Version | No |
 | `GET` | `/api/v1/commands/{command_id}/status` | Get Command Status | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/connections` | List Google Sheets connections | No |
-| `DELETE` | `/api/v1/data-connectors/google-sheets/connections/{connection_id}` | Remove Google Sheets connection | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/drive/spreadsheets` | List Google Sheets spreadsheets | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/oauth/callback` | Google Sheets OAuth callback | No |
-| `POST` | `/api/v1/data-connectors/google-sheets/oauth/start` | Start Google Sheets OAuth flow | No |
-| `POST` | `/api/v1/data-connectors/google-sheets/register` | Register Google Sheet for data monitoring | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/registered` | List registered Google Sheets | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets` | List worksheets for a spreadsheet | No |
-| `DELETE` | `/api/v1/data-connectors/google-sheets/{sheet_id}` | Unregister Google Sheet | No |
-| `GET` | `/api/v1/data-connectors/google-sheets/{sheet_id}/preview` | Preview registered Google Sheet data | No |
-| `POST` | `/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining` | Start pipelining from a registered Google Sheet | No |
 | `POST` | `/api/v1/document-bundles/{bundle_id}/search` | Search Document Bundle | No |
 | `GET` | `/api/v1/gate-policies` | List Gate Policies | No |
 | `POST` | `/api/v1/gate-policies` | Upsert Gate Policy | No |

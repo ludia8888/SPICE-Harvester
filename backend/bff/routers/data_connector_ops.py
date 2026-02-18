@@ -53,9 +53,13 @@ async def _resolve_google_connection(
         raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Connection not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
     config = source.config_json or {}
-    token = config.get("access_token")
-    expires_at = config.get("expires_at")
-    refresh_token = config.get("refresh_token")
+    secrets = await connector_registry.get_connection_secrets(
+        source_type=source.source_type,
+        source_id=source.source_id,
+    )
+    token = secrets.get("access_token") or config.get("access_token")
+    expires_at = secrets.get("expires_at") or config.get("expires_at")
+    refresh_token = secrets.get("refresh_token") or config.get("refresh_token")
 
     if token and expires_at:
         try:
@@ -68,20 +72,20 @@ async def _resolve_google_connection(
 
     if not token and refresh_token:
         refreshed = await oauth_client.refresh_access_token(str(refresh_token))
-        config.update(
+        refreshed_secrets = dict(secrets)
+        refreshed_secrets.update(
             {
                 "access_token": refreshed.get("access_token"),
                 "expires_at": refreshed.get("expires_at"),
                 "refresh_token": refreshed.get("refresh_token", refresh_token),
             }
         )
-        await connector_registry.upsert_source(
+        await connector_registry.upsert_connection_secrets(
             source_type=source.source_type,
             source_id=source.source_id,
-            enabled=True,
-            config_json=config,
+            secrets_json=refreshed_secrets,
         )
-        token = config.get("access_token")
+        token = refreshed_secrets.get("access_token")
 
     return source, str(token) if token else None
 
@@ -100,4 +104,3 @@ async def _resolve_optional_access_token(
         connection_id=str(connection_id),
     )
     return access_token
-

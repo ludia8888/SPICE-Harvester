@@ -85,7 +85,6 @@ from bff.routers import (
     context_tools,
     document_bundles,
     agent_proxy,
-    data_connector,
     database,
     foundry_connectivity_v2,
     foundry_datasets_v2,
@@ -1024,7 +1023,6 @@ app.include_router(websocket.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(ci_webhooks.router, prefix="/api/v1")
-app.include_router(data_connector.router, prefix="/api/v1")
 app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")

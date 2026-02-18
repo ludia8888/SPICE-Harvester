@@ -962,7 +962,7 @@
     {
       "name": "FeatureFlagsSettings",
       "docstring": "Feature flags / opt-in endpoints.",
-      "field_count": 3,
+      "field_count": 7,
       "fields": [
         {
           "name": "enable_pipeline_control_plane_events",
@@ -991,6 +991,46 @@
           "description": "Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
           "env_vars": [
             "ENABLE_OMS_ROLLBACK"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_foundry_connectivity_jdbc",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable Foundry connectivity JDBC connectors (ENABLE_FOUNDRY_CONNECTIVITY_JDBC)",
+          "env_vars": [
+            "ENABLE_FOUNDRY_CONNECTIVITY_JDBC"
+          ],
+          "required": false
+        },
+        {
+          "name": "foundry_connectivity_jdbc_db_allowlist",
+          "type": "str",
+          "default": "",
+          "description": "Comma-separated ontology DB allowlist for JDBC connectivity when global flag is off (FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST)",
+          "env_vars": [
+            "FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST"
+          ],
+          "required": false
+        },
+        {
+          "name": "enable_foundry_connectivity_cdc",
+          "type": "bool",
+          "default": "False",
+          "description": "Enable Foundry connectivity CDC mode (ENABLE_FOUNDRY_CONNECTIVITY_CDC)",
+          "env_vars": [
+            "ENABLE_FOUNDRY_CONNECTIVITY_CDC"
+          ],
+          "required": false
+        },
+        {
+          "name": "foundry_connectivity_cdc_db_allowlist",
+          "type": "str",
+          "default": "",
+          "description": "Comma-separated ontology DB allowlist for CDC mode when global flag is off (FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST)",
+          "env_vars": [
+            "FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST"
           ],
           "required": false
         }
@@ -5259,7 +5299,7 @@
         {
           "name": "oauth_redirect_uri",
           "type": "str",
-          "default": "http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback",
+          "default": "http://localhost:8002/oauth/callback",
           "description": "Google OAuth redirect URI (GOOGLE_REDIRECT_URI)",
           "env_vars": [
             "OAUTH_REDIRECT_URI",
@@ -5568,5 +5608,5 @@
       ]
     }
   ],
-  "total_fields": 518
+  "total_fields": 522
 }

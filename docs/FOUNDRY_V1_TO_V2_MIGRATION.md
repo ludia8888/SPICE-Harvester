@@ -20,6 +20,13 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/ontology-object-sets/aggregate-object-set`
   - `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-object-sets/create-temporary-object-set/`
 - `Connectivity Table Imports` canonical reference: `https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/table-imports/create-table-import`
+- `Connectivity Connections` canonical references:
+  - `https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/get-connection-configuration`
+  - `https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/get-connection-configuration-batch`
+  - `https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/update-connection-secrets`
+- `Connectivity Source Types` canonical references:
+  - `https://www.palantir.com/docs/foundry/data-integration/source-type-overview/`
+  - `https://www.palantir.com/docs/foundry/administration/data-connection/source-types/custom-jdbc/`
 - `Dataset Schema` canonical references:
   - `https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/get-dataset-schema`
   - `https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/put-dataset-schema`
@@ -65,7 +72,10 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Object count surface parity: `POST /api/v2/ontologies/{ontology}/objects/{objectType}/count` is exposed on BFF/OMS v2 with Foundry-style branch/sdk query params.
 - ObjectSet searchAround parity: `loadObjects*` endpoints now execute `objectSet.type=searchAround` by resolving link metadata and traversing linked primary keys with Foundry error mapping (`LinkTypeNotFound`).
 - Orchestration build parity (P0): `POST /api/v2/orchestration/builds/create`, `GET /api/v2/orchestration/builds/{buildRid}`, `POST /api/v2/orchestration/builds/getBatch`, `GET /api/v2/orchestration/builds/{buildRid}/jobs`, `POST /api/v2/orchestration/builds/{buildRid}/cancel` are exposed with Foundry-style build resource payloads.
-- Connectivity table-import parity (P0): connection-scoped endpoints `POST /api/v2/connectivity/connections/{connectionRid}/tableImports`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports`, `PUT /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `DELETE /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `POST /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` are exposed and mapped to connector runtime, with execute build IDs persisted so orchestration build APIs can resolve the same run.
+- Connectivity parity (P0): connection-scoped table import endpoints are exposed and mapped to connector runtime, with execute build IDs persisted so orchestration build APIs can resolve the same run. Connector coverage is expanded to `google_sheets + snowflake + postgresql + mysql + sqlserver`, import modes include `SNAPSHOT/APPEND/UPDATE/INCREMENTAL/CDC`, and connection surfaces now include `GET /api/v2/connectivity/connections/{connectionRid}/getConfiguration`, `POST /api/v2/connectivity/connections/getConfigurationBatch` (batch body is `[{connectionRid: ...}]`), `POST /api/v2/connectivity/connections/{connectionRid}/updateSecrets`.
+- Connectivity expansion (P1): preview-gated connection-scoped `fileImports` and `virtualTables` surfaces are exposed on `/api/v2/connectivity/connections/{connectionRid}/*` with Foundry-style `preview=true` usage policy.
+- Connectivity response contract hardening (P1): connection payloads prioritize Foundry field names (`connectionConfiguration`, `parentFolderRid`, `exportSettings`), and `fileImports`/`virtualTables` payloads prioritize (`name`, `parentRid`, `config`) while preserving alias keys for internal backward compatibility.
+- JDBC CDC hardening (P1): connector-specific CDC resume tokens now support tie-breaker-aware advancement (`token` + `tiebreaker`) and strategy-aware peeking for Snowflake/PostgreSQL/MySQL/SQL Server.
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.
@@ -171,6 +181,16 @@ These routes are fully deleted from runtime handlers and OpenAPI:
 - `POST /api/v1/databases/{db_name}/import-from-excel/commit`
 - `POST /api/v1/data-connectors/google-sheets/grid`
 - `POST /api/v1/data-connectors/google-sheets/preview`
+- `POST /api/v1/data-connectors/google-sheets/register`
+- `GET /api/v1/data-connectors/google-sheets/registered`
+- `GET /api/v1/data-connectors/google-sheets/{sheet_id}/preview`
+- `DELETE /api/v1/data-connectors/google-sheets/{sheet_id}`
+- `POST /api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining`
+- `POST /api/v1/data-connectors/google-sheets/oauth/start`
+- `GET /api/v1/data-connectors/google-sheets/oauth/callback`
+- `GET /api/v1/data-connectors/google-sheets/drive/spreadsheets`
+- `GET /api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets`
+- `DELETE /api/v1/data-connectors/google-sheets/connections/{connection_id}`
 
 ### Removed OMS legacy governance routes (code deleted)
 These OMS-internal v1 governance endpoints are also removed from runtime handlers and OpenAPI:

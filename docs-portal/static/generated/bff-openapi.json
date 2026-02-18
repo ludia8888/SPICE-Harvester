@@ -6705,6 +6705,16 @@
             }
           },
           {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -6775,6 +6785,16 @@
             "schema": {
               "type": "string",
               "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           },
           {
@@ -6882,6 +6902,16 @@
             }
           },
           {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -6949,6 +6979,16 @@
             "schema": {
               "type": "string",
               "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           },
           {
@@ -7034,6 +7074,16 @@
             }
           },
           {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -7106,6 +7156,982 @@
             }
           },
           {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/fileImports": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Create File Import V2",
+        "operationId": "create_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "List File Imports V2",
+        "operationId": "list_file_imports_v2_api_v2_connectivity_connections__connectionRid__fileImports_get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}": {
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get File Import V2",
+        "operationId": "get_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "fileImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fileimportrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Replace File Import V2",
+        "operationId": "replace_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__put",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "fileImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fileimportrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Delete File Import V2",
+        "operationId": "delete_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__delete",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "fileImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fileimportrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Execute File Import V2",
+        "operationId": "execute_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__execute_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "fileImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fileimportrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/virtualTables": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Create Virtual Table V2",
+        "operationId": "create_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "List Virtual Tables V2",
+        "operationId": "list_virtual_tables_v2_api_v2_connectivity_connections__connectionRid__virtualTables_get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}": {
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get Virtual Table V2",
+        "operationId": "get_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "virtualTableRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Virtualtablerid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Replace Virtual Table V2",
+        "operationId": "replace_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__put",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "virtualTableRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Virtualtablerid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Delete Virtual Table V2",
+        "operationId": "delete_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__delete",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "virtualTableRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Virtualtablerid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -7157,8 +8183,42 @@
           "Foundry Connectivity v2"
         ],
         "summary": "Create Connection V2",
-        "description": "POST /v2/connectivity/connections — Create a connection.",
         "operationId": "create_connection_v2_api_v2_connectivity_connections_post",
+        "parameters": [
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -7190,41 +8250,25 @@
               }
             }
           }
-        },
-        "parameters": [
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ]
+        }
       },
       "get": {
         "tags": [
           "Foundry Connectivity v2"
         ],
         "summary": "List Connections V2",
-        "description": "GET /v2/connectivity/connections — List connections.",
         "operationId": "list_connections_v2_api_v2_connectivity_connections_get",
         "parameters": [
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
           {
             "name": "pageSize",
             "in": "query",
@@ -7305,7 +8349,6 @@
           "Foundry Connectivity v2"
         ],
         "summary": "Get Connection V2",
-        "description": "GET /v2/connectivity/connections/{connectionRid} — Get a connection.",
         "operationId": "get_connection_v2_api_v2_connectivity_connections__connectionRid__get",
         "parameters": [
           {
@@ -7315,6 +8358,16 @@
             "schema": {
               "type": "string",
               "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           },
           {
@@ -7367,7 +8420,6 @@
           "Foundry Connectivity v2"
         ],
         "summary": "Delete Connection V2",
-        "description": "DELETE /v2/connectivity/connections/{connectionRid} — Delete connection.",
         "operationId": "delete_connection_v2_api_v2_connectivity_connections__connectionRid__delete",
         "parameters": [
           {
@@ -7377,6 +8429,16 @@
             "schema": {
               "type": "string",
               "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           },
           {
@@ -7431,7 +8493,6 @@
           "Foundry Connectivity v2"
         ],
         "summary": "Test Connection V2",
-        "description": "POST /v2/connectivity/connections/{connectionRid}/test — Test a connection.",
         "operationId": "test_connection_v2_api_v2_connectivity_connections__connectionRid__test_post",
         "parameters": [
           {
@@ -7441,6 +8502,16 @@
             "schema": {
               "type": "string",
               "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
             }
           },
           {
@@ -7467,6 +8538,243 @@
             "example": "en-US,en;q=0.9,ko;q=0.8"
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/getConfiguration": {
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get Connection Configuration V2",
+        "operationId": "get_connection_configuration_v2_api_v2_connectivity_connections__connectionRid__getConfiguration_get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/getConfigurationBatch": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get Connection Configuration Batch V2",
+        "operationId": "get_connection_configuration_batch_v2_api_v2_connectivity_connections_getConfigurationBatch_post",
+        "parameters": [
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/updateSecrets": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Update Connection Secrets V2",
+        "operationId": "update_connection_secrets_v2_api_v2_connectivity_connections__connectionRid__updateSecrets_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -10964,833 +12272,6 @@
             "example": "en-US,en;q=0.9,ko;q=0.8"
           }
         ]
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/oauth/start": {
-      "post": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Start Google Sheets OAuth flow",
-        "operationId": "start_google_sheets_oauth_api_v1_data_connectors_google_sheets_oauth_start_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Payload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Start Google Sheets Oauth Api V1 Data Connectors Google Sheets Oauth Start Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ]
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/oauth/callback": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Google Sheets OAuth callback",
-        "operationId": "google_sheets_oauth_callback_api_v1_data_connectors_google_sheets_oauth_callback_get",
-        "parameters": [
-          {
-            "name": "code",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Code"
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "State"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/connections": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "List Google Sheets connections",
-        "operationId": "list_google_sheets_connections_api_v1_data_connectors_google_sheets_connections_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response List Google Sheets Connections Api V1 Data Connectors Google Sheets Connections Get"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ]
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/connections/{connection_id}": {
-      "delete": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Remove Google Sheets connection",
-        "operationId": "delete_google_sheets_connection_api_v1_data_connectors_google_sheets_connections__connection_id__delete",
-        "parameters": [
-          {
-            "name": "connection_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Connection Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Delete Google Sheets Connection Api V1 Data Connectors Google Sheets Connections  Connection Id  Delete"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/drive/spreadsheets": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "List Google Sheets spreadsheets",
-        "operationId": "list_google_sheets_spreadsheets_api_v1_data_connectors_google_sheets_drive_spreadsheets_get",
-        "parameters": [
-          {
-            "name": "connection_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Connection Id"
-            }
-          },
-          {
-            "name": "query",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Query"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Google Sheets Spreadsheets Api V1 Data Connectors Google Sheets Drive Spreadsheets Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "List worksheets for a spreadsheet",
-        "operationId": "list_google_sheets_worksheets_api_v1_data_connectors_google_sheets_spreadsheets__sheet_id__worksheets_get",
-        "parameters": [
-          {
-            "name": "sheet_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Sheet Id"
-            }
-          },
-          {
-            "name": "connection_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Connection Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Google Sheets Worksheets Api V1 Data Connectors Google Sheets Spreadsheets  Sheet Id  Worksheets Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/register": {
-      "post": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Register Google Sheet for data monitoring",
-        "description": "Register a Google Sheet URL for data change monitoring and automatic import",
-        "operationId": "register_google_sheet_api_v1_data_connectors_google_sheets_register_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Sheet Data"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Register Google Sheet Api V1 Data Connectors Google Sheets Register Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ]
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/{sheet_id}/preview": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Preview registered Google Sheet data",
-        "description": "Get a preview of data from a registered Google Sheet.",
-        "operationId": "preview_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__preview_get",
-        "parameters": [
-          {
-            "name": "sheet_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Sheet Id"
-            }
-          },
-          {
-            "name": "worksheet_name",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Worksheet Name"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 10,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Preview Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Preview Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/registered": {
-      "get": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "List registered Google Sheets",
-        "description": "Get list of all registered Google Sheets for monitoring.",
-        "operationId": "list_registered_sheets_api_v1_data_connectors_google_sheets_registered_get",
-        "parameters": [
-          {
-            "name": "database_name",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Database Name"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Registered Sheets Api V1 Data Connectors Google Sheets Registered Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/{sheet_id}": {
-      "delete": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Unregister Google Sheet",
-        "description": "Remove a Google Sheet from monitoring.",
-        "operationId": "unregister_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__delete",
-        "parameters": [
-          {
-            "name": "sheet_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Sheet Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Unregister Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Delete"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining": {
-      "post": {
-        "tags": [
-          "Data Connectors",
-          "Data Connectors"
-        ],
-        "summary": "Start pipelining from a registered Google Sheet",
-        "description": "Materialize a dataset entry for a registered connector and return it for Pipeline Builder.",
-        "operationId": "start_pipelining_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__start_pipelining_post",
-        "parameters": [
-          {
-            "name": "sheet_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Sheet Id"
-            }
-          },
-          {
-            "name": "lang",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ko"
-              ]
-            },
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
-          },
-          {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Payload"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Start Pipelining Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Start Pipelining Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/api/v1/lineage/graph": {

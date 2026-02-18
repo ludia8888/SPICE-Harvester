@@ -20,8 +20,15 @@ from typing import Optional
 
 from confluent_kafka import Producer
 
+from data_connector.adapters.factory import (
+    ConnectorAdapterFactory,
+    SUPPORTED_CONNECTOR_KINDS,
+    connector_kind_from_source_type,
+    connection_source_type_for_kind,
+    file_import_source_type_for_kind,
+    table_import_source_type_for_kind,
+)
 from data_connector.google_sheets.service import GoogleSheetsService
-from data_connector.google_sheets.utils import calculate_data_hash
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
@@ -49,17 +56,20 @@ class ConnectorTriggerService:
 
         self.running = False
         self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
-        self.source_type = str(cfg.source_type or "google_sheets").strip() or "google_sheets"
         self.tick_seconds = int(cfg.tick_seconds)
         self.poll_concurrency = int(cfg.poll_concurrency)
         self.outbox_batch = int(cfg.outbox_batch)
         self.tracing = get_tracing_service("connector-trigger-service")
         self.metrics = get_metrics_collector("connector-trigger-service")
+        table_source_types = [table_import_source_type_for_kind(kind) for kind in SUPPORTED_CONNECTOR_KINDS]
+        file_source_types = [file_import_source_type_for_kind(kind) for kind in SUPPORTED_CONNECTOR_KINDS]
+        self.source_types = tuple(table_source_types + file_source_types)
 
         self.registry: Optional[ConnectorRegistry] = None
         self.producer: Optional[Producer] = None
         self.producer_ops: Optional[KafkaProducerOps] = None
         self.sheets: Optional[GoogleSheetsService] = None
+        self.adapter_factory: Optional[ConnectorAdapterFactory] = None
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -70,6 +80,7 @@ class ConnectorTriggerService:
         # Connector library (no polling inside)
         api_key = settings.google_sheets.google_sheets_api_key
         self.sheets = GoogleSheetsService(api_key=api_key)
+        self.adapter_factory = ConnectorAdapterFactory(google_sheets_service=self.sheets)
 
         # Kafka producer (blocking)
         self.producer = create_kafka_producer(
@@ -88,7 +99,7 @@ class ConnectorTriggerService:
 
         logger.info(
             "✅ ConnectorTriggerService initialized "
-            f"(source_type={self.source_type}, topic={self.topic}, tick={self.tick_seconds}s)"
+            f"(source_types={','.join(self.source_types)}, topic={self.topic}, tick={self.tick_seconds}s)"
         )
 
     async def close(self) -> None:
@@ -98,6 +109,7 @@ class ConnectorTriggerService:
             except Exception:
                 logger.warning("Failed to close GoogleSheetsService", exc_info=True)
             self.sheets = None
+        self.adapter_factory = None
         ops = self.producer_ops
         producer = self.producer
         if ops:
@@ -141,70 +153,63 @@ class ConnectorTriggerService:
         elapsed = (utcnow() - state.last_polled_at).total_seconds()
         return elapsed >= max(1, interval)
 
-    async def _poll_google_sheets(self, source: ConnectorSource) -> None:
-        if not self.registry or not self.sheets:
-            return
-
-        cfg = source.config_json or {}
-        sheet_url = (cfg.get("sheet_url") or "").strip()
-        worksheet_name = (cfg.get("worksheet_name") or "").strip() or None
-
-        if not sheet_url:
-            logger.warning(f"Skipping google_sheets source with missing sheet_url (source_id={source.source_id})")
-            return
-
-        access_token = (cfg.get("access_token") or "").strip() or None
-        if not access_token:
-            refresh_token = (cfg.get("refresh_token") or "").strip() or None
-            if refresh_token:
-                from data_connector.google_sheets.auth import GoogleOAuth2Client
-
-                oauth_client = GoogleOAuth2Client()
-                if oauth_client.client_id and oauth_client.client_secret:
-                    refreshed = await oauth_client.refresh_access_token(refresh_token)
-                    access_token = (refreshed.get("access_token") or "").strip() or None
-                    cfg.update(
-                        {
-                            "access_token": refreshed.get("access_token"),
-                            "refresh_token": refreshed.get("refresh_token", refresh_token),
-                            "expires_at": refreshed.get("expires_at"),
-                        }
-                    )
-                    await self.registry.upsert_source(
-                        source_type=source.source_type,
-                        source_id=source.source_id,
-                        enabled=True,
-                        config_json=cfg,
-                    )
-        sheet_id, _, resolved_ws, _, values = await self.sheets.fetch_sheet_values(
-            sheet_url,
-            worksheet_name=worksheet_name,
-            access_token=access_token,
+    async def _resolve_source_runtime_credentials(
+        self,
+        *,
+        source: ConnectorSource,
+    ) -> tuple[dict, dict]:
+        if not self.registry:
+            return dict(source.config_json or {}), {}
+        source_cfg = dict(source.config_json or {})
+        connector_kind = connector_kind_from_source_type(source.source_type)
+        connection_id = str(source_cfg.get("connection_id") or "").strip() or None
+        if not connection_id:
+            return source_cfg, {}
+        connection_source_type = connection_source_type_for_kind(connector_kind)
+        connection_source = await self.registry.get_source(
+            source_type=connection_source_type,
+            source_id=connection_id,
         )
+        if connection_source is None:
+            return source_cfg, {}
+        connection_cfg = dict(connection_source.config_json or {})
+        secrets = await self.registry.get_connection_secrets(
+            source_type=connection_source_type,
+            source_id=connection_id,
+        )
+        merged_cfg = dict(connection_cfg)
+        merged_cfg.update(source_cfg)
+        return merged_cfg, secrets
 
-        if str(sheet_id) != str(source.source_id):
-            logger.warning(
-                "google_sheets source_id mismatch; continuing (registry_id=%s, fetched_id=%s)",
-                source.source_id,
-                sheet_id,
-            )
-
-        cursor = calculate_data_hash(values)
+    async def _poll_with_adapter(self, source: ConnectorSource) -> None:
+        if not self.registry or not self.adapter_factory:
+            return
+        connector_kind = connector_kind_from_source_type(source.source_type)
+        adapter = self.adapter_factory.get_adapter(connector_kind)
+        config, secrets = await self._resolve_source_runtime_credentials(source=source)
+        import_config = (
+            source.config_json.get("table_import_config")
+            if isinstance((source.config_json or {}).get("table_import_config"), dict)
+            else None
+        )
+        cursor = await adapter.peek_change_token(
+            config=config,
+            secrets=secrets,
+            import_config=import_config,
+        )
         envelope = await self.registry.record_poll_result(
             source_type=source.source_type,
             source_id=source.source_id,
             current_cursor=cursor,
             kafka_topic=self.topic,
         )
-
         if envelope:
             logger.info(
-                "🔔 Change detected and enqueued (source=%s:%s, seq=%s, event_id=%s, worksheet=%s)",
+                "🔔 Change detected and enqueued (source=%s:%s, seq=%s, event_id=%s)",
                 source.source_type,
                 source.source_id,
                 envelope.sequence_number,
                 envelope.event_id,
-                resolved_ws,
             )
 
     async def _poll_source(self, source: ConnectorSource, sem: asyncio.Semaphore) -> None:
@@ -217,8 +222,7 @@ class ConnectorTriggerService:
                         "connector.source_id": str(source.source_id),
                     },
                 ):
-                    if self.source_type == "google_sheets":
-                        await self._poll_google_sheets(source)
+                    await self._poll_with_adapter(source)
             except Exception as e:
                 logger.error("Polling error (source=%s:%s): %s", source.source_type, source.source_id, e)
 
@@ -229,7 +233,9 @@ class ConnectorTriggerService:
         sem = asyncio.Semaphore(self.poll_concurrency)
         while self.running:
             try:
-                sources = await self.registry.list_sources(source_type=self.source_type, enabled=True, limit=2000)
+                sources: list[ConnectorSource] = []
+                for source_type in self.source_types:
+                    sources.extend(await self.registry.list_sources(source_type=source_type, enabled=True, limit=2000))
                 tasks = []
                 for src in sources:
                     if not await self._is_due(src):

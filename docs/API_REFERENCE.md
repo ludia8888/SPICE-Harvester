@@ -22,24 +22,23 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **243**
+- Total documented endpoints: **246**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 159 |
-| `v2` | 84 |
+| `v1` | 148 |
+| `v2` | 98 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 46 |
 | `pipelines` | 29 |
+| `connectivity` | 25 |
 | `datasets` | 16 |
 | `databases` | 15 |
 | `admin` | 13 |
-| `connectivity` | 11 |
-| `data-connectors` | 11 |
 | `orchestration` | 11 |
 | `lineage` | 10 |
 | `monitoring` | 10 |
@@ -48,6 +47,7 @@
 | `objectify` | 7 |
 | `schema-changes` | 7 |
 | `backing-datasources` | 5 |
+| `graph-query` | 5 |
 
 ## Endpoint Catalog (`/api/v1`, `/api/v2`)
 
@@ -154,22 +154,6 @@
 | `POST` | `/api/v1/context7/search` | Search Context7 | `v1` | no | no | `search_context7_api_v1_context7_search_post` |
 | `GET` | `/api/v1/context7/suggestions/{db_name}/{class_id}` | Get Ontology Suggestions | `v1` | no | no | `get_ontology_suggestions_api_v1_context7_suggestions__db_name___class_id__get` |
 
-### Data Connectors
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/data-connectors/google-sheets/connections` | List Google Sheets connections | `v1` | no | no | `list_google_sheets_connections_api_v1_data_connectors_google_sheets_connections_get` |
-| `DELETE` | `/api/v1/data-connectors/google-sheets/connections/{connection_id}` | Remove Google Sheets connection | `v1` | no | no | `delete_google_sheets_connection_api_v1_data_connectors_google_sheets_connections__connection_id__delete` |
-| `GET` | `/api/v1/data-connectors/google-sheets/drive/spreadsheets` | List Google Sheets spreadsheets | `v1` | no | no | `list_google_sheets_spreadsheets_api_v1_data_connectors_google_sheets_drive_spreadsheets_get` |
-| `GET` | `/api/v1/data-connectors/google-sheets/oauth/callback` | Google Sheets OAuth callback | `v1` | no | no | `google_sheets_oauth_callback_api_v1_data_connectors_google_sheets_oauth_callback_get` |
-| `POST` | `/api/v1/data-connectors/google-sheets/oauth/start` | Start Google Sheets OAuth flow | `v1` | no | no | `start_google_sheets_oauth_api_v1_data_connectors_google_sheets_oauth_start_post` |
-| `POST` | `/api/v1/data-connectors/google-sheets/register` | Register Google Sheet for data monitoring | `v1` | no | no | `register_google_sheet_api_v1_data_connectors_google_sheets_register_post` |
-| `GET` | `/api/v1/data-connectors/google-sheets/registered` | List registered Google Sheets | `v1` | no | no | `list_registered_sheets_api_v1_data_connectors_google_sheets_registered_get` |
-| `GET` | `/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets` | List worksheets for a spreadsheet | `v1` | no | no | `list_google_sheets_worksheets_api_v1_data_connectors_google_sheets_spreadsheets__sheet_id__worksheets_get` |
-| `DELETE` | `/api/v1/data-connectors/google-sheets/{sheet_id}` | Unregister Google Sheet | `v1` | no | no | `unregister_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__delete` |
-| `GET` | `/api/v1/data-connectors/google-sheets/{sheet_id}/preview` | Preview registered Google Sheet data | `v1` | no | no | `preview_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__preview_get` |
-| `POST` | `/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining` | Start pipelining from a registered Google Sheet | `v1` | no | no | `start_pipelining_google_sheet_api_v1_data_connectors_google_sheets__sheet_id__start_pipelining_post` |
-
 ### Database Management
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
@@ -192,8 +176,16 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v2/connectivity/connections` | List Connections V2 | `v2` | no | no | `list_connections_v2_api_v2_connectivity_connections_get` |
 | `POST` | `/api/v2/connectivity/connections` | Create Connection V2 | `v2` | no | no | `create_connection_v2_api_v2_connectivity_connections_post` |
+| `POST` | `/api/v2/connectivity/connections/getConfigurationBatch` | Get Connection Configuration Batch V2 | `v2` | no | no | `get_connection_configuration_batch_v2_api_v2_connectivity_connections_getConfigurationBatch_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}` | Get Connection V2 | `v2` | no | no | `get_connection_v2_api_v2_connectivity_connections__connectionRid__get` |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}` | Delete Connection V2 | `v2` | no | no | `delete_connection_v2_api_v2_connectivity_connections__connectionRid__delete` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | List File Imports V2 | `v2` | no | no | `list_file_imports_v2_api_v2_connectivity_connections__connectionRid__fileImports_get` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | Create File Import V2 | `v2` | no | no | `create_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Get File Import V2 | `v2` | no | no | `get_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__get` |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Replace File Import V2 | `v2` | no | no | `replace_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__put` |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Delete File Import V2 | `v2` | no | no | `delete_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__delete` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute` | Execute File Import V2 | `v2` | no | no | `execute_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__execute_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/getConfiguration` | Get Connection Configuration V2 | `v2` | no | no | `get_connection_configuration_v2_api_v2_connectivity_connections__connectionRid__getConfiguration_get` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | List Table Imports V2 | `v2` | no | no | `list_table_imports_v2_api_v2_connectivity_connections__connectionRid__tableImports_get` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | Create Table Import V2 | `v2` | no | no | `create_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Get Table Import V2 | `v2` | no | no | `get_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__get` |
@@ -201,6 +193,12 @@
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | `v2` | no | no | `delete_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__delete` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | `v2` | no | no | `execute_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__execute_post` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/test` | Test Connection V2 | `v2` | no | no | `test_connection_v2_api_v2_connectivity_connections__connectionRid__test_post` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateSecrets` | Update Connection Secrets V2 | `v2` | no | no | `update_connection_secrets_v2_api_v2_connectivity_connections__connectionRid__updateSecrets_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | List Virtual Tables V2 | `v2` | no | no | `list_virtual_tables_v2_api_v2_connectivity_connections__connectionRid__virtualTables_get` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | Create Virtual Table V2 | `v2` | no | no | `create_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Get Virtual Table V2 | `v2` | no | no | `get_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__get` |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Replace Virtual Table V2 | `v2` | no | no | `replace_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__put` |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Delete Virtual Table V2 | `v2` | no | no | `delete_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__delete` |
 
 ### Foundry Datasets v2
 

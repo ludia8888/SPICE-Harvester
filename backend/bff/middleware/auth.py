@@ -28,7 +28,6 @@ from shared.utils.uuid_utils import safe_uuid as _safe_uuid
 _EXEMPT_PATHS_DEFAULT = (
     "/api/v1/health",
     "/api/v1/",
-    "/api/v1/data-connectors/google-sheets/oauth/callback",
 )
 logger = logging.getLogger(__name__)
 _DELEGATED_AUTH_HEADER = "X-Delegated-Authorization"

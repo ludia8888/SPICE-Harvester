@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 84**
+**Total v2 endpoints: 98**
 
 ### Ontologies (12 endpoints)
 
@@ -99,14 +99,22 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes` | List Value Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes/{valueType}` | Get Value Type V2 | No |
 
-### Other v2 Endpoints (38 endpoints)
+### Other v2 Endpoints (52 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `GET` | `/api/v2/connectivity/connections` | List Connections V2 | No |
 | `POST` | `/api/v2/connectivity/connections` | Create Connection V2 | No |
+| `POST` | `/api/v2/connectivity/connections/getConfigurationBatch` | Get Connection Configuration Batch V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}` | Get Connection V2 | No |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}` | Delete Connection V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | List File Imports V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | Create File Import V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Get File Import V2 | No |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Replace File Import V2 | No |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Delete File Import V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute` | Execute File Import V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/getConfiguration` | Get Connection Configuration V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | List Table Imports V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | Create Table Import V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Get Table Import V2 | No |
@@ -114,6 +122,12 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/test` | Test Connection V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateSecrets` | Update Connection Secrets V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | List Virtual Tables V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | Create Virtual Table V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Get Virtual Table V2 | No |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Replace Virtual Table V2 | No |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Delete Virtual Table V2 | No |
 | `GET` | `/api/v2/datasets` | List Datasets V2 | No |
 | `POST` | `/api/v2/datasets` | Create Dataset V2 | No |
 | `GET` | `/api/v2/datasets/{datasetRid}` | Get Dataset V2 | No |

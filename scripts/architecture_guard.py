@@ -83,6 +83,46 @@ FORBIDDEN_PATH_LITERALS: tuple[ForbiddenPathLiteral, ...] = (
         reason="Legacy public Google Sheets preview route must remain removed",
     ),
     ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/register",
+        reason="Legacy public Google Sheets registration route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/registered",
+        reason="Legacy public Google Sheets list route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/{sheet_id}/preview",
+        reason="Legacy public Google Sheets preview-by-id route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining",
+        reason="Legacy public Google Sheets pipelining route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/{sheet_id}",
+        reason="Legacy public Google Sheets unregister route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/connections/{connection_id}",
+        reason="Legacy public Google Sheets connection-delete route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/oauth/start",
+        reason="Legacy public Google Sheets OAuth start route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/oauth/callback",
+        reason="Legacy public Google Sheets OAuth callback route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/drive/spreadsheets",
+        reason="Legacy public Google Sheets drive browse route must remain removed",
+    ),
+    ForbiddenPathLiteral(
+        needle="/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets",
+        reason="Legacy public Google Sheets worksheet list route must remain removed",
+    ),
+    ForbiddenPathLiteral(
         needle="/api/v1/funnel/",
         reason="Legacy public funnel v1 route prefix must remain removed",
     ),

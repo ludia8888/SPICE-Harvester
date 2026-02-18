@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import asyncpg
-from asyncpg.exceptions import UniqueViolationError
+from asyncpg.exceptions import UndefinedColumnError, UniqueViolationError
 
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
@@ -1327,22 +1327,39 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         async with self._pool.acquire() as conn:
-            if target_class_id and not mapping_spec_id:
+            try:
+                if target_class_id and not mapping_spec_id:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
+                               watermark_column, watermark_value, dataset_version_id,
+                               lakefs_commit_id, rows_processed, created_at, updated_at
+                        FROM objectify_watermarks
+                        WHERE target_class_id = $1 AND dataset_branch = $2
+                        """,
+                        target_class_id,
+                        dataset_branch,
+                    )
+                else:
+                    row = await conn.fetchrow(
+                        """
+                        SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
+                               watermark_column, watermark_value, dataset_version_id,
+                               lakefs_commit_id, rows_processed, created_at, updated_at
+                        FROM objectify_watermarks
+                        WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
+                        """,
+                        mapping_spec_id,
+                        dataset_branch,
+                    )
+            except UndefinedColumnError:
+                # Backward-compatible fallback for DBs where legacy objectify_watermarks
+                # was created before target_class_id column rollout.
+                if target_class_id and not mapping_spec_id:
+                    return None
                 row = await conn.fetchrow(
                     """
-                    SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
-                           watermark_column, watermark_value, dataset_version_id,
-                           lakefs_commit_id, rows_processed, created_at, updated_at
-                    FROM objectify_watermarks
-                    WHERE target_class_id = $1 AND dataset_branch = $2
-                    """,
-                    target_class_id,
-                    dataset_branch,
-                )
-            else:
-                row = await conn.fetchrow(
-                    """
-                    SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
+                    SELECT watermark_id, mapping_spec_id, dataset_branch,
                            watermark_column, watermark_value, dataset_version_id,
                            lakefs_commit_id, rows_processed, created_at, updated_at
                     FROM objectify_watermarks

@@ -204,7 +204,7 @@ async def test_rate_limit_headers_present_on_success():
         headers=_auth_headers(),
     ) as session:
         await _wait_for_ok(session, f"{BFF_URL}/api/v1/health")
-        async with session.get(f"{BFF_URL}/api/v1/data-connectors/google-sheets/registered") as resp:
+        async with session.get(f"{BFF_URL}/api/v2/connectivity/connections") as resp:
             assert resp.status == 200
             assert resp.headers.get("X-RateLimit-Limit")
             assert resp.headers.get("X-RateLimit-Remaining") is not None
@@ -235,7 +235,7 @@ async def test_redis_down_rate_limit_and_command_status_fallback():
         assert command_id, f"Missing command_id in response: {payload}"
 
         async with _redis_down():
-            async with session.get(f"{BFF_URL}/api/v1/data-connectors/google-sheets/registered") as resp:
+            async with session.get(f"{BFF_URL}/api/v2/connectivity/connections") as resp:
                 assert resp.status == 200
                 assert resp.headers.get("X-RateLimit-Mode") == "local"
                 assert resp.headers.get("X-RateLimit-Degraded") == "true"

@@ -44,6 +44,11 @@ Official references:
 - Get Value Type (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/get-ontology-value-type
 - List Ontologies (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontologies/list-ontologies
 - Connectivity Table Imports (v2): https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/table-imports/create-table-import
+- Connectivity Get Connection Configuration (v2): https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/get-connection-configuration
+- Connectivity Get Connection Configuration Batch (v2): https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/get-connection-configuration-batch
+- Connectivity Update Connection Secrets (v2): https://www.palantir.com/docs/foundry/api/v2/connectivity-v2-resources/connections/update-connection-secrets
+- Connectivity Source Type Overview: https://www.palantir.com/docs/foundry/data-integration/source-type-overview/
+- Connectivity Custom JDBC Source Type: https://www.palantir.com/docs/foundry/administration/data-connection/source-types/custom-jdbc/
 - Datasets Schema (v2): https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/get-dataset-schema
 - API Errors (v2): https://www.palantir.com/docs/foundry/api/general/overview/errors
 - Pipeline Builder Overview: https://www.palantir.com/docs/foundry/pipeline-builder/overview
@@ -124,6 +129,16 @@ Current status:
 - [x] Foundry v2 query execute surface is exposed with official path/parameter shape: `POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` (`version`, `sdkPackageRid`, `sdkVersion`, `transactionId`; no `branch`).
 - [x] Foundry v2 orchestration build surface is exposed with core subresources: `POST /api/v2/orchestration/builds/create`, `GET /api/v2/orchestration/builds/{buildRid}`, `POST /api/v2/orchestration/builds/getBatch`, `GET /api/v2/orchestration/builds/{buildRid}/jobs`, `POST /api/v2/orchestration/builds/{buildRid}/cancel`.
 - [x] Foundry v2 connectivity table-import surface is connection-scoped: `POST /api/v2/connectivity/connections/{connectionRid}/tableImports`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports`, `PUT /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `DELETE /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `POST /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute`; execute가 생성한 `buildRid`는 orchestration build 조회(`get/getBatch/jobs/cancel`)와 동일한 저장소에서 round-trip됩니다.
+- [x] Foundry v2 connectivity connection configuration surfaces are exposed: `GET /api/v2/connectivity/connections/{connectionRid}/getConfiguration`, `POST /api/v2/connectivity/connections/getConfigurationBatch`, `POST /api/v2/connectivity/connections/{connectionRid}/updateSecrets`.
+- [x] Connectivity connection 응답은 Foundry 문서 필드(`connectionConfiguration`, `parentFolderRid`, `exportSettings`)를 기본으로 반환하며, 내부 호환을 위해 `configuration` alias를 병행 유지합니다.
+- [x] Foundry v2 connectivity preview gating is enforced for connection + table/file/virtual import surfaces (`preview=true` required on matching endpoints per official docs).
+- [x] Connectivity connector coverage includes `google_sheets + snowflake + postgresql + mysql + sqlserver`, with source-type mapping `google_sheets_connection|snowflake_connection|postgresql_connection|mysql_connection|sqlserver_connection` and table-import source mapping `google_sheets|snowflake_table_import|postgresql_table_import|mysql_table_import|sqlserver_table_import`.
+- [x] Connectivity sync modes include `SNAPSHOT + APPEND + UPDATE + INCREMENTAL + CDC`; JDBC/CDC rollout is gated by feature flags + DB allowlists.
+- [x] Connectivity preview surfaces are expanded with `fileImports` and `virtualTables` under `/api/v2/connectivity/connections/{connectionRid}/*` (`preview=true` required).
+- [x] `fileImports`/`virtualTables` 응답은 Foundry 문서 필드(`name`, `parentRid`, `config`)를 기본 제공하고, 내부 호환을 위해 `displayName`/`connectionRid` alias를 병행 유지합니다.
+- [x] JDBC CDC resume strategy includes connector-optimized token progression (token + tie-breaker state) and strategy-aware token peek (`stream/lsn/binlog/change_tracking` paths).
+- [x] Connectivity secrets are separated from public config via `connector_connection_secrets` and encrypted at rest (field-level encrypted JSON payload).
+- [x] Legacy BFF public Google Sheets connector routes (`/api/v1/data-connectors/google-sheets/*`) are code-deleted and absent from OpenAPI.
 - [x] v1 action log/simulation read compatibility endpoints (`GET /api/v1/databases/{db}/actions/logs*`, `GET /api/v1/databases/{db}/actions/simulations*`) are removed from BFF runtime/OpenAPI.
 - [x] Dedicated action log/simulation read routes are not exposed in public `/api/v2/ontologies/*` surface (Foundry action-resource parity).
 - [x] CI architecture static guard (`scripts/architecture_guard.py`) blocks forbidden runtime path literals reintroduction across production code (`/actions/logs*`, `/actions/simulations*`, legacy `/api/v1/actions/*`, `/api/v1/funnel/*`, `/api/v1/version/*`, `/api/v1/branch/*`, legacy Google Sheets sheet-tool paths).
