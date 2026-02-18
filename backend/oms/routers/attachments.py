@@ -21,9 +21,11 @@ from uuid import uuid4
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep, StorageServiceDep
 from shared.observability.tracing import trace_endpoint
+from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_branch_name,
@@ -32,8 +34,7 @@ from shared.security.input_sanitizer import (
 )
 
 logger = logging.getLogger(__name__)
-
-_ATTACHMENTS_BUCKET = "attachments-data"
+_ACTOR_HEADER_KEYS = ("X-User-ID", "X-User", "X-Actor")
 
 # Two separate routers: one for upload (no object context), one for property reads.
 attachments_upload_router = APIRouter(
@@ -86,6 +87,28 @@ def _detect_media_type(filename: str) -> str:
 def _attachment_s3_key(attachment_rid: str, filename: str) -> str:
     """Build S3 key for an attachment file."""
     return f"{attachment_rid}/{filename}"
+
+
+def _attachments_bucket(storage: StorageServiceDep) -> str:
+    configured = getattr(getattr(storage, "_settings", None), "attachments_bucket", None)
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return str(get_settings().storage.attachments_bucket or "attachments-data").strip() or "attachments-data"
+
+
+def _has_actor_headers(request: Request) -> bool:
+    return any(str(request.headers.get(key) or "").strip() for key in _ACTOR_HEADER_KEYS)
+
+
+async def _require_domain_role_if_actor(request: Request, *, db_name: str) -> None:
+    if not _has_actor_headers(request):
+        return
+    await enforce_database_role(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        require_env_key="OMS_REQUIRE_DB_ACCESS",
+    )
 
 
 def _parse_attachment_metadata(value: Any) -> List[Dict[str, Any]]:
@@ -217,7 +240,7 @@ async def upload_attachment(
 
     try:
         await storage.save_bytes(
-            bucket=_ATTACHMENTS_BUCKET,
+            bucket=_attachments_bucket(storage),
             key=s3_key,
             data=body,
             content_type=media_type,
@@ -260,6 +283,7 @@ async def list_property_attachments(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
@@ -269,6 +293,22 @@ async def list_property_attachments(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -320,6 +360,7 @@ async def get_attachment_content(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
@@ -330,6 +371,22 @@ async def get_attachment_content(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -373,7 +430,7 @@ async def get_attachment_content(
 
     s3_key = _attachment_s3_key(rid, filename)
     try:
-        data = await storage.load_bytes(_ATTACHMENTS_BUCKET, s3_key)
+        data = await storage.load_bytes(_attachments_bucket(storage), s3_key)
     except FileNotFoundError:
         return _foundry_error(
             status.HTTP_404_NOT_FOUND,
@@ -395,6 +452,7 @@ async def get_attachment_by_rid(
     primaryKey: str,
     property: str,
     attachmentRid: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
@@ -404,6 +462,22 @@ async def get_attachment_by_rid(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -454,6 +528,7 @@ async def get_attachment_content_by_rid(
     primaryKey: str,
     property: str,
     attachmentRid: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
@@ -464,6 +539,22 @@ async def get_attachment_content_by_rid(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -506,7 +597,7 @@ async def get_attachment_content_by_rid(
     s3_key = _attachment_s3_key(attachmentRid, filename)
 
     try:
-        data = await storage.load_bytes(_ATTACHMENTS_BUCKET, s3_key)
+        data = await storage.load_bytes(_attachments_bucket(storage), s3_key)
     except FileNotFoundError:
         return _foundry_error(
             status.HTTP_404_NOT_FOUND,

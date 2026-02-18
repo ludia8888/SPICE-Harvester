@@ -22,18 +22,18 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **203**
+- Total documented endpoints: **204**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 159 |
-| `v2` | 44 |
+| `v2` | 45 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `ontologies` | 44 |
+| `ontologies` | 45 |
 | `pipelines` | 29 |
 | `databases` | 15 |
 | `admin` | 13 |
@@ -191,6 +191,7 @@
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v2/ontologies` | List Ontologies V2 | `v2` | no | no | `list_ontologies_v2_api_v2_ontologies_get` |
+| `POST` | `/api/v2/ontologies/attachments/upload` | Upload Attachment V2 | `v2` | no | no | `upload_attachment_v2_api_v2_ontologies_attachments_upload_post` |
 | `GET` | `/api/v2/ontologies/{ontology}` | Get Ontology V2 | `v2` | no | no | `get_ontology_v2_api_v2_ontologies__ontology__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes` | List Action Types V2 | `v2` | no | no | `list_action_types_v2_api_v2_ontologies__ontology__actionTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}` | Get Action Type By Rid V2 | `v2` | no | no | `get_action_type_by_rid_v2_api_v2_ontologies__ontology__actionTypes_byRid__actionTypeRid__get` |

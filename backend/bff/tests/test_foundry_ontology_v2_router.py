@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -14,6 +15,7 @@ from shared.utils.foundry_page_token import encode_offset_page_token
 class _FakeOMSClient:
     def __init__(self) -> None:
         self.last_post: tuple[str, dict] | None = None
+        self.last_call_headers: dict[str, dict[str, str] | None] = {}
 
     async def list_databases(self):  # noqa: ANN201
         return {
@@ -360,6 +362,86 @@ class _FakeOMSClient:
             }
         }
 
+    async def get_timeseries_first_point(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, branch
+        self.last_call_headers["timeseries_first_point"] = dict(headers or {}) or None
+        return {"time": "2024-01-01T00:00:00Z", "value": 10}
+
+    async def get_timeseries_last_point(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, branch
+        self.last_call_headers["timeseries_last_point"] = dict(headers or {}) or None
+        return {"time": "2024-01-02T00:00:00Z", "value": 20}
+
+    async def stream_timeseries_points(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, payload, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, payload, branch
+        self.last_call_headers["timeseries_stream_points"] = dict(headers or {}) or None
+        request = httpx.Request("POST", "http://oms/api/v2/timeseries/streamPoints")
+        return httpx.Response(
+            200,
+            request=request,
+            content=b'{"time":"2024-01-01T00:00:00Z","value":10}\n',
+            headers={"content-type": "application/x-ndjson"},
+        )
+
+    async def upload_attachment(  # noqa: ANN001, ANN003
+        self, *, filename, data, content_type="application/octet-stream", headers=None
+    ):
+        _ = data, content_type
+        self.last_call_headers["attachments_upload"] = dict(headers or {}) or None
+        return {
+            "rid": "ri.attachments.main.attachment.test",
+            "filename": filename,
+            "sizeBytes": 4,
+            "mediaType": "application/octet-stream",
+        }
+
+    async def list_property_attachments(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, branch
+        self.last_call_headers["attachments_list_property"] = dict(headers or {}) or None
+        return {
+            "type": "single",
+            "rid": "ri.attachments.main.attachment.test",
+            "filename": "doc.txt",
+            "sizeBytes": 4,
+            "mediaType": "text/plain",
+        }
+
+    async def get_attachment_by_rid(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, attachment_rid, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, branch
+        self.last_call_headers["attachments_get_by_rid"] = dict(headers or {}) or None
+        return {
+            "rid": attachment_rid,
+            "filename": "doc.txt",
+            "sizeBytes": 4,
+            "mediaType": "text/plain",
+        }
+
+    async def get_attachment_content(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, branch
+        self.last_call_headers["attachments_get_content"] = dict(headers or {}) or None
+        request = httpx.Request("GET", "http://oms/api/v2/attachments/content")
+        return httpx.Response(200, request=request, content=b"data", headers={"content-type": "text/plain"})
+
+    async def get_attachment_content_by_rid(  # noqa: ANN001, ANN003
+        self, db_name, object_type, primary_key, property_name, attachment_rid, *, branch="main", headers=None
+    ):
+        _ = db_name, object_type, primary_key, property_name, attachment_rid, branch
+        self.last_call_headers["attachments_get_content_by_rid"] = dict(headers or {}) or None
+        request = httpx.Request("GET", "http://oms/api/v2/attachments/content")
+        return httpx.Response(200, request=request, content=b"data", headers={"content-type": "text/plain"})
+
 
 class _ApiNameOnlyOMSClient(_FakeOMSClient):
     async def list_databases(self):  # noqa: ANN201
@@ -621,6 +703,22 @@ class _LinkedPaginationOMSClient(_FakeOMSClient):
 async def _noop_require_domain_role(request, *, db_name):  # noqa: ANN001, ANN003
     _ = request, db_name
     return None
+
+
+def _request_with_body(
+    body: bytes,
+    *,
+    method: str = "POST",
+    path: str = "/",
+    headers: list[tuple[bytes, bytes]] | None = None,
+) -> Request:
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {"type": "http", "method": method, "path": path, "headers": headers or []},
+        receive=receive,
+    )
 
 
 @pytest.mark.asyncio
@@ -2402,3 +2500,145 @@ async def test_list_object_types_v2_rejects_page_token_when_page_size_changes():
     assert second.status_code == 400
     payload = json.loads(second.body.decode("utf-8"))
     assert payload["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.asyncio
+async def test_timeseries_first_point_v2_requires_domain_role_and_returns_payload():
+    request = Request({"type": "http", "headers": []})
+    calls: list[str] = []
+
+    async def _capture_require_domain_role(req, *, db_name):  # noqa: ANN001, ANN003
+        _ = req
+        calls.append(db_name)
+        return None
+
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _capture_require_domain_role
+    try:
+        response = await router_v2.get_timeseries_first_point_v2(
+            ontology="test_db",
+            objectType="Sensor",
+            primaryKey="sensor-001",
+            property="temperature",
+            request=request,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["time"] == "2024-01-01T00:00:00Z"
+    assert calls == ["test_db"]
+
+
+@pytest.mark.asyncio
+async def test_timeseries_first_point_v2_forwards_actor_headers_to_oms():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"user"),
+                (b"x-user-roles", b"domain_editor"),
+            ],
+        }
+    )
+    oms_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_timeseries_first_point_v2(
+            ontology="test_db",
+            objectType="Sensor",
+            primaryKey="sensor-001",
+            property="temperature",
+            request=request,
+            branch="main",
+            oms_client=oms_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    headers = oms_client.last_call_headers.get("timeseries_first_point") or {}
+    assert headers.get("X-User-ID") == "alice"
+    assert headers.get("X-User-Type") == "user"
+    assert headers.get("X-User-Roles") == "domain_editor"
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_v2_proxies_binary_payload_to_oms():
+    request = _request_with_body(b"data", path="/api/v2/ontologies/attachments/upload")
+    response = await router_v2.upload_attachment_v2(
+        request=request,
+        filename="doc.txt",
+        oms_client=_FakeOMSClient(),
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["filename"] == "doc.txt"
+    assert payload["rid"].startswith("ri.attachments.main.attachment.")
+
+
+@pytest.mark.asyncio
+async def test_upload_attachment_v2_forwards_actor_headers_to_oms():
+    request = _request_with_body(
+        b"data",
+        path="/api/v2/ontologies/attachments/upload",
+        headers=[
+            (b"x-user-id", b"alice"),
+            (b"x-user-type", b"user"),
+            (b"x-user-roles", b"domain_editor"),
+        ],
+    )
+    oms_client = _FakeOMSClient()
+    response = await router_v2.upload_attachment_v2(
+        request=request,
+        filename="doc.txt",
+        oms_client=oms_client,
+    )
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    headers = oms_client.last_call_headers.get("attachments_upload") or {}
+    assert headers.get("X-User-ID") == "alice"
+    assert headers.get("X-User-Type") == "user"
+    assert headers.get("X-User-Roles") == "domain_editor"
+
+
+@pytest.mark.asyncio
+async def test_attachment_property_v2_requires_domain_role_and_returns_payload():
+    request = Request({"type": "http", "headers": []})
+    calls: list[str] = []
+
+    async def _capture_require_domain_role(req, *, db_name):  # noqa: ANN001, ANN003
+        _ = req
+        calls.append(db_name)
+        return None
+
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _capture_require_domain_role
+    try:
+        response = await router_v2.list_attachment_property_v2(
+            ontology="test_db",
+            objectType="Employee",
+            primaryKey="emp-001",
+            property="resume",
+            request=request,
+            branch="main",
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["type"] == "single"
+    assert calls == ["test_db"]

@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from oms.routers import timeseries as timeseries_module
 from oms.routers.timeseries import timeseries_router
 from shared.dependencies.providers import get_elasticsearch_service, get_storage_service
 
@@ -197,3 +198,41 @@ async def test_stream_points_404_when_no_ts_data(mock_es, mock_storage):
     # streamPoints returns empty stream when no data (not 404)
     assert resp.status_code == 200
     assert resp.text.strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_timeseries_skips_role_enforcement_without_actor_headers(monkeypatch: pytest.MonkeyPatch):
+    checker = AsyncMock()
+    monkeypatch.setattr(timeseries_module, "enforce_database_role", checker)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/firstPoint",
+        )
+
+    assert resp.status_code == 200
+    checker.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_timeseries_returns_permission_denied_when_actor_header_present_and_role_check_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _deny(**kwargs):  # noqa: ANN001, ANN003
+        _ = kwargs
+        raise ValueError("permission denied")
+
+    monkeypatch.setattr(timeseries_module, "enforce_database_role", _deny)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/firstPoint",
+            headers={"X-User-ID": "alice"},
+        )
+
+    assert resp.status_code == 403
+    body = resp.json()
+    assert body["errorCode"] == "PERMISSION_DENIED"
+    assert body["errorName"] == "PermissionDenied"

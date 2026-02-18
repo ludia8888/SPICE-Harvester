@@ -4832,6 +4832,38 @@
             }
           },
           {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -4930,6 +4962,38 @@
               "type": "string",
               "default": "main",
               "title": "Branch"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
             }
           },
           {
@@ -5034,6 +5098,136 @@
             }
           },
           {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/attachments/upload": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Upload Attachment V2",
+        "description": "Upload an attachment payload (Foundry v2 shape).",
+        "operationId": "upload_attachment_v2_api_v2_ontologies_attachments_upload_post",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The name of the file being uploaded",
+              "title": "Filename"
+            },
+            "description": "The name of the file being uploaded"
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -5132,6 +5326,38 @@
               "type": "string",
               "default": "main",
               "title": "Branch"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
             }
           },
           {
@@ -5245,6 +5471,38 @@
             }
           },
           {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
+            }
+          },
+          {
             "name": "lang",
             "in": "query",
             "required": false,
@@ -5343,6 +5601,38 @@
               "type": "string",
               "default": "main",
               "title": "Branch"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
             }
           },
           {
@@ -5453,6 +5743,38 @@
               "type": "string",
               "default": "main",
               "title": "Branch"
+            }
+          },
+          {
+            "name": "sdkPackageRid",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkpackagerid"
+            }
+          },
+          {
+            "name": "sdkVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sdkversion"
             }
           },
           {

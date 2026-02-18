@@ -32,6 +32,14 @@ Official references:
 - List Query Types (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/list-query-types
 - Get Query Type (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/get-query-type
 - Execute Query (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/queries/execute-query
+- Time Series Property API overview (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property
+- Time Series first point (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/get-first-point
+- Time Series last point (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/get-last-point
+- Time Series stream points (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/stream-points
+- Attachment Property API overview (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property
+- Attachment upload (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/upload-attachment
+- Attachment list property values (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/list-property-values
+- Attachment get property value (v2): https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/get-property-value
 - List Value Types (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/list-ontology-value-types
 - Get Value Type (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontology-value-types/get-ontology-value-type
 - List Ontologies (v2): https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/ontologies/list-ontologies
@@ -51,7 +59,7 @@ Supplementary references (non-authoritative, validation aid only):
 Current status:
 - [x] OMS Search Objects read surface is Foundry v2 path-aligned (`/api/v2/ontologies/{ontology}/objects/{objectType}/search`), and legacy v1 object-search path is removed from OpenAPI.
 - [x] SearchJsonQueryV2 operator mapping is implemented in OMS router.
-- [x] SearchJsonQueryV2 contract aligned with Foundry docs: undocumented `in` operator removed; `isNull` supports boolean null/not-null semantics.
+- [x] SearchJsonQueryV2 contract aligned with Foundry docs: `in`/`wildcard`/`regex`/`interval`/`relativeDateRange` and geo operators are supported; `isNull` supports boolean null/not-null semantics.
 - [x] Search Objects branch parameter now accepts Foundry-style branch RID values (`ri.ontology.main.branch...`) in addition to branch names.
 - [x] OMS Search Objects responses now include Foundry-required object locator fields (`__apiName`, `__primaryKey`) and omit null-valued fields from serialized object payloads.
 - [x] BFF Foundry v2 read/search OpenAPI now exposes `branch` query params on branch-aware routes (`objectTypes`, `outgoingLinkTypes`, `objects/{objectType}/search`).
@@ -60,7 +68,10 @@ Current status:
 - [x] BFF Foundry v2 object-set load surface includes `POST /v2/ontologies/{ontology}/objectSets/loadObjects` with Foundry-style query params (`branch`, `transactionId`, `sdkPackageRid`, `sdkVersion`) and body paging/select/order fields (`select/selectV2`, `pageSize/pageToken`, `orderBy`, `excludeRid`, `snapshot`).
 - [x] BFF Foundry v2 object-set extended surfaces include `POST /v2/ontologies/{ontology}/objectSets/loadLinks` (preview), `POST /v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes`, `POST /v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces`, `POST /v2/ontologies/{ontology}/objectSets/aggregate`, `POST /v2/ontologies/{ontology}/objectSets/createTemporary`, and `GET /v2/ontologies/{ontology}/objectSets/{objectSetRid}`.
 - [x] BFF Foundry v2 object aggregate surface includes `POST /v2/ontologies/{ontology}/objects/{objectType}/aggregate` with Foundry-style aggregation/groupBy clauses.
-- [x] BFF objectSet aggregate now scans all pages from OMS object search (no first-page-only truncation), preventing incorrect totals on datasets larger than one page.
+- [x] BFF objectSet aggregate delegates to OMS ES-native aggregate execution (`/objects/{objectType}/aggregate`) instead of application-layer page scanning.
+- [x] BFF Foundry v2 Time Series and Attachment Property read surfaces are exposed with OMS-backed proxy routes, including attachment upload (`POST /v2/ontologies/attachments/upload`).
+- [x] BFF Time Series/Attachment proxy calls forward actor identity headers (`X-User-ID`, `X-User-Type`, `X-User-Roles`) to OMS so downstream role checks can enforce user-context access.
+- [x] OMS Time Series/Attachment property reads enforce domain role checks only when actor headers are present (service-to-service internal calls without actor context are not blocked).
 - [x] BFF Foundry v2 linked-object read surface includes `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` and `GET /v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}`.
 - [x] Foundry-style API error envelope is implemented for object search and v2 read routers.
 - [x] BFF action apply/applyBatch now normalizes non-Foundry OMS validation error payloads (`code/category/message`) into Foundry error envelope shape.

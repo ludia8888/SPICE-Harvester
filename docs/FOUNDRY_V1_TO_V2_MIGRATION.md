@@ -34,6 +34,16 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/list-query-types`
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/query-types/get-query-type`
   - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/queries/execute-query`
+- `Time Series Property` canonical references:
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/get-first-point`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/get-last-point`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/time-series-property/stream-points`
+- `Attachment Property` canonical references:
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/upload-attachment`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/list-property-values`
+  - `https://www.palantir.com/docs/foundry/api/v2/ontologies-v2-resources/attachment-property/get-property-value`
 - `Pipeline Builder / Orchestration` canonical references:
   - `https://www.palantir.com/docs/foundry/pipeline-builder/overview`
   - `https://www.palantir.com/docs/foundry/api/v2/orchestration-v2-resources/builds/create-build`
@@ -45,9 +55,11 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 ## P0 Parity Hardening Update (2026-02-17)
 - Object search/read payload alignment: object rows now include Foundry-required locator fields (`__apiName`, `__primaryKey`) and synthesize `__rid` when absent; null-valued fields are omitted from response payloads.
 - Object aggregate parity: `POST /api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` is now exposed and aligned with Foundry aggregate clause shapes.
-- ObjectSet aggregate correctness: `POST /api/v2/ontologies/{ontology}/objectSets/aggregate` now paginates through all result pages instead of aggregating only the first page.
+- ObjectSet aggregate correctness: `POST /api/v2/ontologies/{ontology}/objectSets/aggregate` now delegates to OMS ES-native aggregate execution, eliminating first-page truncation risk.
 - Action error envelope alignment: non-Foundry upstream action validation errors (`code/category/message`) are normalized into Foundry error envelope (`errorCode/errorName/errorInstanceId/parameters`).
 - Pagination token compatibility: Foundry v2 page token acceptance window increased from 60 seconds to 24 hours on OMS/BFF v2 read surfaces.
+- Time Series and Attachment Property parity: BFF v2 now exposes Foundry-style proxy routes for first/last/stream points and attachment upload/read paths.
+- Time Series and Attachment Property auth-context parity: BFF forwards actor headers (`X-User-ID`, `X-User-Type`, `X-User-Roles`) to OMS, and OMS applies domain-role enforcement only when actor context is present.
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

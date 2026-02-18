@@ -518,12 +518,14 @@ class OMSClient(ManagedAsyncClient):
         property_name: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Proxy GET firstPoint to OMS Time Series router."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/firstPoint",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -539,12 +541,14 @@ class OMSClient(ManagedAsyncClient):
         property_name: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Proxy GET lastPoint to OMS Time Series router."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/lastPoint",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -561,6 +565,7 @@ class OMSClient(ManagedAsyncClient):
         payload: Dict[str, Any],
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
         """Proxy POST streamPoints to OMS (returns raw response for streaming)."""
         try:
@@ -568,6 +573,7 @@ class OMSClient(ManagedAsyncClient):
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/streamPoints",
                 params={"branch": branch},
                 json=payload,
+                headers=headers,
             )
             response.raise_for_status()
             return response
@@ -579,6 +585,32 @@ class OMSClient(ManagedAsyncClient):
     # Attachment Property proxy
     # ------------------------------------------------------------------
 
+    async def upload_attachment(
+        self,
+        *,
+        filename: str,
+        data: bytes,
+        content_type: str = "application/octet-stream",
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Proxy POST attachment upload to OMS."""
+        try:
+            response = await self.client.post(
+                "/api/v2/ontologies/attachments/upload",
+                params={"filename": filename},
+                content=data,
+                headers={
+                    **(headers or {}),
+                    "Content-Type": content_type,
+                    "Accept": "application/json",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Attachment upload failed ({filename}): {e}")
+            raise
+
     async def list_property_attachments(
         self,
         db_name: str,
@@ -587,12 +619,14 @@ class OMSClient(ManagedAsyncClient):
         property_name: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Proxy GET list attachment property metadata."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -609,12 +643,14 @@ class OMSClient(ManagedAsyncClient):
         attachment_rid: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Proxy GET attachment metadata by RID."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -630,12 +666,14 @@ class OMSClient(ManagedAsyncClient):
         property_name: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
         """Proxy GET attachment content (returns raw response for binary data)."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/content",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response
@@ -652,12 +690,14 @@ class OMSClient(ManagedAsyncClient):
         attachment_rid: str,
         *,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
         """Proxy GET attachment content by RID (returns raw response for binary data)."""
         try:
             response = await self.client.get(
                 f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}/content",
                 params={"branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             return response

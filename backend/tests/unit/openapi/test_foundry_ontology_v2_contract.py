@@ -270,6 +270,42 @@ def test_foundry_v2_aggregate_objects_keeps_foundry_query_params():
 
 
 @pytest.mark.unit
+def test_foundry_v2_timeseries_and_attachment_query_params():
+    app = FastAPI()
+    app.include_router(foundry_ontology_v2.router, prefix="/api")
+    schema = app.openapi()
+
+    timeseries_params = _param_names(
+        schema,
+        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint",
+        method="get",
+    )
+    attachment_params = _param_names(
+        schema,
+        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}",
+        method="get",
+    )
+
+    assert {"branch", "sdkPackageRid", "sdkVersion"} <= set(timeseries_params)
+    assert {"branch", "sdkPackageRid", "sdkVersion"} <= set(attachment_params)
+
+
+@pytest.mark.unit
+def test_foundry_v2_attachment_upload_query_params():
+    app = FastAPI()
+    app.include_router(foundry_ontology_v2.router, prefix="/api")
+    schema = app.openapi()
+
+    params = _param_names(
+        schema,
+        path="/api/v2/ontologies/attachments/upload",
+        method="post",
+    )
+
+    assert {"filename", "sdkPackageRid", "sdkVersion"} <= set(params)
+
+
+@pytest.mark.unit
 def test_foundry_v2_strict_compat_env_gate(monkeypatch: pytest.MonkeyPatch):
     assert foundry_ontology_v2._is_foundry_v2_strict_compat_enabled(db_name="any_db") is True
 

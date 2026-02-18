@@ -50,6 +50,13 @@ _FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
 _TEMP_OBJECT_SET_TTL_SECONDS = 60 * 60
 _TEMP_OBJECT_SET_STORE: dict[str, tuple[float, dict[str, Any]]] = {}
 _TEMP_OBJECT_SET_LOCK = asyncio.Lock()
+_FORWARDED_ACTOR_HEADER_KEYS = (
+    "X-User-ID",
+    "X-User-Type",
+    "X-User",
+    "X-Actor",
+    "X-User-Roles",
+)
 
 
 class OntologyNotFoundError(Exception):
@@ -1277,6 +1284,15 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
         if str(exc).strip().lower() == "permission denied":
             raise PermissionDeniedError("Permission denied") from exc
         raise
+
+
+def _extract_actor_forward_headers(request: Request) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    for key in _FORWARDED_ACTOR_HEADER_KEYS:
+        value = str(request.headers.get(key) or "").strip()
+        if value:
+            headers[key] = value
+    return headers
 
 
 def _validate_ontology_db_name(ontology: str) -> str:
@@ -5659,7 +5675,10 @@ async def get_timeseries_first_point_v2(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the first (earliest) point of a time series property."""
@@ -5670,9 +5689,18 @@ async def get_timeseries_first_point_v2(
         "property": property,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_first_point(
-            db_name, objectType, primaryKey, property, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
     except httpx.HTTPStatusError as exc:
@@ -5694,7 +5722,10 @@ async def get_timeseries_last_point_v2(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the last (most recent) point of a time series property."""
@@ -5705,9 +5736,18 @@ async def get_timeseries_last_point_v2(
         "property": property,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_last_point(
-            db_name, objectType, primaryKey, property, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
     except httpx.HTTPStatusError as exc:
@@ -5731,6 +5771,8 @@ async def stream_timeseries_points_v2(
     property: str,
     request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> StreamingResponse | JSONResponse:
     """Stream all points of a time series property with optional range filter."""
@@ -5741,10 +5783,20 @@ async def stream_timeseries_points_v2(
         "property": property,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         body = await request.json() if await request.body() else {}
         response = await oms_client.stream_timeseries_points(
-            db_name, objectType, primaryKey, property, body, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            body,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return StreamingResponse(
             content=iter([response.content]),
@@ -5768,13 +5820,49 @@ async def stream_timeseries_points_v2(
 # =====================================================================
 
 
+@router.post("/attachments/upload")
+async def upload_attachment_v2(
+    request: Request,
+    filename: str = Query(..., description="The name of the file being uploaded"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
+    oms_client: OMSClient = OMSClientDep,
+) -> JSONResponse:
+    """Upload an attachment payload (Foundry v2 shape)."""
+    error_parameters: Dict[str, Any] = {"filename": filename}
+    try:
+        body = await request.body()
+        _ = sdk_package_rid, sdk_version
+        forward_headers = _extract_actor_forward_headers(request)
+        result = await oms_client.upload_attachment(
+            filename=filename,
+            data=body,
+            headers=forward_headers if forward_headers else None,
+        )
+        return JSONResponse(content=result)
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology="attachments", parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology="attachments", parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to upload attachment (v2)", exc=exc,
+            ontology="attachments", parameters=error_parameters,
+        )
+
+
 @router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}")
 async def list_attachment_property_v2(
     ontology: str,
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """List attachment metadata for a property (single or multiple)."""
@@ -5785,9 +5873,18 @@ async def list_attachment_property_v2(
         "property": property,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.list_property_attachments(
-            db_name, objectType, primaryKey, property, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
     except httpx.HTTPStatusError as exc:
@@ -5810,7 +5907,10 @@ async def get_attachment_by_rid_v2(
     primaryKey: str,
     property: str,
     attachmentRid: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get metadata for a specific attachment by its RID."""
@@ -5822,9 +5922,19 @@ async def get_attachment_by_rid_v2(
         "attachmentRid": attachmentRid,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_attachment_by_rid(
-            db_name, objectType, primaryKey, property, attachmentRid, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            attachmentRid,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
     except httpx.HTTPStatusError as exc:
@@ -5846,7 +5956,10 @@ async def get_attachment_content_v2(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of a single-valued attachment property."""
@@ -5857,9 +5970,18 @@ async def get_attachment_content_v2(
         "property": property,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content(
-            db_name, objectType, primaryKey, property, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return Response(
             content=response.content,
@@ -5885,7 +6007,10 @@ async def get_attachment_content_by_rid_v2(
     primaryKey: str,
     property: str,
     attachmentRid: str,
+    request: Request,
     branch: str = Query("main"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of an attachment by its RID."""
@@ -5897,9 +6022,19 @@ async def get_attachment_content_by_rid_v2(
         "attachmentRid": attachmentRid,
     }
     try:
-        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        await _require_domain_role(request, db_name=db_name)
+        forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content_by_rid(
-            db_name, objectType, primaryKey, property, attachmentRid, branch=branch,
+            db_name,
+            objectType,
+            primaryKey,
+            property,
+            attachmentRid,
+            branch=branch,
+            headers=forward_headers if forward_headers else None,
         )
         return Response(
             content=response.content,

@@ -14,14 +14,17 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Query, status
+from fastapi import APIRouter, Body, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep, StorageServiceDep
 from shared.observability.tracing import trace_endpoint
+from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_branch_name,
@@ -30,6 +33,7 @@ from shared.security.input_sanitizer import (
 )
 
 logger = logging.getLogger(__name__)
+_ACTOR_HEADER_KEYS = ("X-User-ID", "X-User", "X-Actor")
 
 timeseries_router = APIRouter(
     prefix="/v2/ontologies/{ontology}/objects",
@@ -71,6 +75,55 @@ def _ts_s3_key(
 ) -> str:
     """Build canonical S3 key for a time series property."""
     return f"{db_name}/{branch}/{class_id}/{instance_id}/{property_name}.json"
+
+
+def _timeseries_bucket(storage: StorageServiceDep) -> str:
+    configured = getattr(getattr(storage, "_settings", None), "timeseries_bucket", None)
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    return str(get_settings().storage.timeseries_bucket or "timeseries-data").strip() or "timeseries-data"
+
+
+def _resolve_timeseries_location(
+    *,
+    db_name: str,
+    branch: str,
+    object_type: str,
+    primary_key: str,
+    property_name: str,
+    ts_ref: Optional[str],
+    default_bucket: str,
+) -> tuple[str, str]:
+    canonical_key = _ts_s3_key(db_name, branch, object_type, primary_key, property_name)
+    ref = str(ts_ref or "").strip()
+    if not ref:
+        return default_bucket, canonical_key
+
+    if ref.startswith("s3://"):
+        parsed = urlparse(ref)
+        bucket = str(parsed.netloc or "").strip() or default_bucket
+        key = str(parsed.path or "").lstrip("/")
+        return bucket, key or canonical_key
+
+    if "://" in ref:
+        return default_bucket, canonical_key
+
+    return default_bucket, ref.lstrip("/") or canonical_key
+
+
+def _has_actor_headers(request: Request) -> bool:
+    return any(str(request.headers.get(key) or "").strip() for key in _ACTOR_HEADER_KEYS)
+
+
+async def _require_domain_role_if_actor(request: Request, *, db_name: str) -> None:
+    if not _has_actor_headers(request):
+        return
+    await enforce_database_role(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        require_env_key="OMS_REQUIRE_DB_ACCESS",
+    )
 
 
 async def _find_instance_by_pk(
@@ -247,6 +300,7 @@ async def get_first_point(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
@@ -257,6 +311,22 @@ async def get_first_point(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -284,10 +354,15 @@ async def get_first_point(
             parameters={"objectType": object_type, "property": property},
         )
 
-    s3_key = _ts_s3_key(db_name, branch, object_type, primaryKey, property)
-    settings_bucket = getattr(getattr(storage, "_settings", None), "timeseries_bucket", "timeseries-data")
-    bucket = "timeseries-data"
-
+    bucket, s3_key = _resolve_timeseries_location(
+        db_name=db_name,
+        branch=branch,
+        object_type=object_type,
+        primary_key=primaryKey,
+        property_name=property,
+        ts_ref=ts_ref,
+        default_bucket=_timeseries_bucket(storage),
+    )
     points = await _load_ts_points(storage, bucket, s3_key)
     if not points:
         return _foundry_error(
@@ -307,6 +382,7 @@ async def get_last_point(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
@@ -317,6 +393,22 @@ async def get_last_point(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -344,9 +436,15 @@ async def get_last_point(
             parameters={"objectType": object_type, "property": property},
         )
 
-    s3_key = _ts_s3_key(db_name, branch, object_type, primaryKey, property)
-    bucket = "timeseries-data"
-
+    bucket, s3_key = _resolve_timeseries_location(
+        db_name=db_name,
+        branch=branch,
+        object_type=object_type,
+        primary_key=primaryKey,
+        property_name=property,
+        ts_ref=ts_ref,
+        default_bucket=_timeseries_bucket(storage),
+    )
     points = await _load_ts_points(storage, bucket, s3_key)
     if not points:
         return _foundry_error(
@@ -366,6 +464,7 @@ async def stream_points(
     objectType: str,
     primaryKey: str,
     property: str,
+    request: Request,
     payload: Dict[str, Any] = Body(default={}),
     branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
@@ -377,6 +476,22 @@ async def stream_points(
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
     except (SecurityViolationError, ValueError) as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    try:
+        await _require_domain_role_if_actor(request, db_name=db_name)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="PermissionDenied",
+                parameters={"message": "Permission denied"},
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -404,9 +519,15 @@ async def stream_points(
             parameters={"objectType": object_type, "property": property},
         )
 
-    s3_key = _ts_s3_key(db_name, branch, object_type, primaryKey, property)
-    bucket = "timeseries-data"
-
+    bucket, s3_key = _resolve_timeseries_location(
+        db_name=db_name,
+        branch=branch,
+        object_type=object_type,
+        primary_key=primaryKey,
+        property_name=property,
+        ts_ref=ts_ref,
+        default_bucket=_timeseries_bucket(storage),
+    )
     points = await _load_ts_points(storage, bucket, s3_key)
 
     range_spec = payload.get("range") if isinstance(payload, dict) else None
