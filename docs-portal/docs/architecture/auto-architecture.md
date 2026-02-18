@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **615**, functions **5700**, classes **858**, internal cross-imports **1476**
+- Population: files **617**, functions **5745**, classes **859**, internal cross-imports **1491**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1476 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1491 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/92 (3.26%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 50/615 (8.13%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 54/615 (8.78%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 300/5700 (5.26%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/858 (1.75%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 672/5700 (11.79%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 382/5700 (6.70%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 51/617 (8.27%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 54/617 (8.75%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 304/5745 (5.29%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/859 (1.75%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 680/5745 (11.84%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 387/5745 (6.74%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -319,10 +319,10 @@ flowchart LR
 
 ## Router Inventory (BFF)
 
-- Routers detected: **30**
+- Routers detected: **32**
 - Distinct prefixes: **5**
 - Routers with explicit tags: **0**
-- Routers with resolved source files: **30**
+- Routers with resolved source files: **32**
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
@@ -338,7 +338,9 @@ flowchart LR
 | `data_connector.router` | `/api/v1` | - | `backend/bff/routers/data_connector.py` |
 | `database.router` | `/api/v1` | - | `backend/bff/routers/database.py` |
 | `document_bundles.router` | `/api/v1` | - | `backend/bff/routers/document_bundles.py` |
+| `foundry_connectivity_v2.router` | `/api` | - | `backend/bff/routers/foundry_connectivity_v2.py` |
 | `foundry_ontology_v2.router` | `/api` | - | `backend/bff/routers/foundry_ontology_v2.py` |
+| `foundry_orchestration_v2.router` | `/api` | - | `backend/bff/routers/foundry_orchestration_v2.py` |
 | `governance.router` | `/api/v1` | - | `backend/bff/routers/governance.py` |
 | `graph.router` | `router-defined` | - | `backend/bff/routers/graph.py` |
 | `health.router` | `/api/v1` | - | `backend/bff/routers/health.py` |

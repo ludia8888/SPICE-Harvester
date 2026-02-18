@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-18T11:03:51+09:00
+> Generated: 2026-02-18T11:43:36+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -255,56 +255,56 @@
 
 ### `backend/bff/main.py`
 - **Functions**
-  - `async lifespan(app)` (line 632): Modern application lifecycle management
-  - `async get_oms_client()` (line 877): Get OMS client from BFF container
-  - `async get_label_mapper()` (line 888): Get label mapper from BFF container
-  - `async get_google_sheets_service()` (line 899): Get Google Sheets service from BFF container
-  - `async get_connector_registry()` (line 910): Get ConnectorRegistry from BFF container
-  - `async get_dataset_registry()` (line 921): Get DatasetRegistry from BFF container
-  - `async get_dataset_profile_registry()` (line 932): Get DatasetProfileRegistry from BFF container
-  - `async get_pipeline_registry()` (line 943): Get PipelineRegistry from BFF container
-  - `async get_pipeline_plan_registry()` (line 961): Get PipelinePlanRegistry from BFF container
-  - `async get_objectify_registry()` (line 972): no docstring
-  - `async get_agent_registry()` (line 977): no docstring
-  - `async get_agent_session_registry()` (line 983): no docstring
-  - `async get_agent_policy_registry()` (line 989): no docstring
-  - `async get_pipeline_executor()` (line 995): Get PipelineExecutor from BFF container
+  - `async lifespan(app)` (line 634): Modern application lifecycle management
+  - `async get_oms_client()` (line 879): Get OMS client from BFF container
+  - `async get_label_mapper()` (line 890): Get label mapper from BFF container
+  - `async get_google_sheets_service()` (line 901): Get Google Sheets service from BFF container
+  - `async get_connector_registry()` (line 912): Get ConnectorRegistry from BFF container
+  - `async get_dataset_registry()` (line 923): Get DatasetRegistry from BFF container
+  - `async get_dataset_profile_registry()` (line 934): Get DatasetProfileRegistry from BFF container
+  - `async get_pipeline_registry()` (line 945): Get PipelineRegistry from BFF container
+  - `async get_pipeline_plan_registry()` (line 963): Get PipelinePlanRegistry from BFF container
+  - `async get_objectify_registry()` (line 974): no docstring
+  - `async get_agent_registry()` (line 979): no docstring
+  - `async get_agent_session_registry()` (line 985): no docstring
+  - `async get_agent_policy_registry()` (line 991): no docstring
+  - `async get_pipeline_executor()` (line 997): Get PipelineExecutor from BFF container
 - **Classes**
-  - `BFFServiceContainer` (line 124): BFF-specific service container to manage BFF services
-    - `__init__(self, container, settings)` (line 132): no docstring
-    - `async initialize_bff_services(self)` (line 137): Initialize BFF-specific services
-    - `async _initialize_oms_client(self)` (line 194): Initialize OMS client with health check
-    - `async _initialize_label_mapper(self)` (line 215): Initialize label mapper
-    - `async _initialize_type_inference(self)` (line 221): Initialize type inference service
-    - `async _initialize_websocket_service(self)` (line 235): Initialize WebSocket notification service
-    - `async _initialize_rate_limiter(self)` (line 257): Initialize rate limiting service
-    - `async _initialize_connector_registry(self)` (line 261): Initialize Postgres-backed connector registry.
-    - `async _initialize_dataset_registry(self)` (line 273): Initialize Postgres-backed dataset registry.
-    - `async _initialize_dataset_profile_registry(self)` (line 284): Initialize Postgres-backed dataset profile registry.
-    - `async _initialize_pipeline_registry(self)` (line 295): Initialize Postgres-backed pipeline registry.
-    - `async _initialize_pipeline_plan_registry(self)` (line 306): Initialize Postgres-backed pipeline plan registry.
-    - `async _initialize_objectify_registry(self)` (line 317): Initialize Postgres-backed objectify registry.
-    - `async _initialize_agent_registry(self)` (line 328): Initialize Postgres-backed agent registry.
-    - `async _initialize_agent_session_registry(self)` (line 339): Initialize Postgres-backed agent session registry.
-    - `async _initialize_agent_policy_registry(self)` (line 350): Initialize Postgres-backed agent policy registry.
-    - `async _initialize_agent_tool_registry(self)` (line 361): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
-    - `async _initialize_pipeline_executor(self)` (line 380): Initialize pipeline executor (preview/build engine).
-    - `async _initialize_google_sheets_service(self)` (line 398): Initialize Google Sheets service (connector library)
-    - `async shutdown_bff_services(self)` (line 417): Shutdown BFF-specific services
-    - `get_oms_client(self)` (line 542): Get OMS client instance
-    - `get_label_mapper(self)` (line 548): Get label mapper instance
-    - `get_google_sheets_service(self)` (line 554): Get Google Sheets service instance
-    - `get_connector_registry(self)` (line 560): Get connector registry instance
-    - `get_dataset_registry(self)` (line 566): Get dataset registry instance
-    - `get_dataset_profile_registry(self)` (line 572): Get dataset profile registry instance
-    - `get_pipeline_registry(self)` (line 578): Get pipeline registry instance
-    - `get_pipeline_plan_registry(self)` (line 584): Get pipeline plan registry instance
-    - `get_objectify_registry(self)` (line 590): Get objectify registry instance
-    - `get_agent_registry(self)` (line 596): Get agent registry instance
-    - `get_agent_session_registry(self)` (line 602): Get agent session registry instance
-    - `get_agent_policy_registry(self)` (line 608): Get agent policy registry instance
-    - `get_agent_tool_registry(self)` (line 614): Get agent tool registry instance
-    - `get_pipeline_executor(self)` (line 620): Get pipeline executor instance
+  - `BFFServiceContainer` (line 126): BFF-specific service container to manage BFF services
+    - `__init__(self, container, settings)` (line 134): no docstring
+    - `async initialize_bff_services(self)` (line 139): Initialize BFF-specific services
+    - `async _initialize_oms_client(self)` (line 196): Initialize OMS client with health check
+    - `async _initialize_label_mapper(self)` (line 217): Initialize label mapper
+    - `async _initialize_type_inference(self)` (line 223): Initialize type inference service
+    - `async _initialize_websocket_service(self)` (line 237): Initialize WebSocket notification service
+    - `async _initialize_rate_limiter(self)` (line 259): Initialize rate limiting service
+    - `async _initialize_connector_registry(self)` (line 263): Initialize Postgres-backed connector registry.
+    - `async _initialize_dataset_registry(self)` (line 275): Initialize Postgres-backed dataset registry.
+    - `async _initialize_dataset_profile_registry(self)` (line 286): Initialize Postgres-backed dataset profile registry.
+    - `async _initialize_pipeline_registry(self)` (line 297): Initialize Postgres-backed pipeline registry.
+    - `async _initialize_pipeline_plan_registry(self)` (line 308): Initialize Postgres-backed pipeline plan registry.
+    - `async _initialize_objectify_registry(self)` (line 319): Initialize Postgres-backed objectify registry.
+    - `async _initialize_agent_registry(self)` (line 330): Initialize Postgres-backed agent registry.
+    - `async _initialize_agent_session_registry(self)` (line 341): Initialize Postgres-backed agent session registry.
+    - `async _initialize_agent_policy_registry(self)` (line 352): Initialize Postgres-backed agent policy registry.
+    - `async _initialize_agent_tool_registry(self)` (line 363): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
+    - `async _initialize_pipeline_executor(self)` (line 382): Initialize pipeline executor (preview/build engine).
+    - `async _initialize_google_sheets_service(self)` (line 400): Initialize Google Sheets service (connector library)
+    - `async shutdown_bff_services(self)` (line 419): Shutdown BFF-specific services
+    - `get_oms_client(self)` (line 544): Get OMS client instance
+    - `get_label_mapper(self)` (line 550): Get label mapper instance
+    - `get_google_sheets_service(self)` (line 556): Get Google Sheets service instance
+    - `get_connector_registry(self)` (line 562): Get connector registry instance
+    - `get_dataset_registry(self)` (line 568): Get dataset registry instance
+    - `get_dataset_profile_registry(self)` (line 574): Get dataset profile registry instance
+    - `get_pipeline_registry(self)` (line 580): Get pipeline registry instance
+    - `get_pipeline_plan_registry(self)` (line 586): Get pipeline plan registry instance
+    - `get_objectify_registry(self)` (line 592): Get objectify registry instance
+    - `get_agent_registry(self)` (line 598): Get agent registry instance
+    - `get_agent_session_registry(self)` (line 604): Get agent session registry instance
+    - `get_agent_policy_registry(self)` (line 610): Get agent policy registry instance
+    - `get_agent_tool_registry(self)` (line 616): Get agent tool registry instance
+    - `get_pipeline_executor(self)` (line 622): Get pipeline executor instance
 
 ### `backend/bff/middleware/__init__.py`
 
@@ -495,6 +495,32 @@
 - **Classes**
   - `DocumentBundleSearchRequest` (line 33): no docstring
 
+### `backend/bff/routers/foundry_connectivity_v2.py`
+- **Functions**
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 55): no docstring
+  - `_connection_id_from_rid(connection_rid)` (line 73): no docstring
+  - `_connection_rid(connection_id)` (line 86): no docstring
+  - `_sheet_id_from_table_import_rid(table_import_rid)` (line 90): no docstring
+  - `_table_import_rid(sheet_id)` (line 102): no docstring
+  - `_dataset_id_from_rid(dataset_rid)` (line 106): no docstring
+  - `_dataset_rid(dataset_id)` (line 118): no docstring
+  - `_table_import_pipeline_id(connection_id, sheet_id)` (line 122): no docstring
+  - `_table_import_build_job_id(pipeline_id)` (line 126): no docstring
+  - `_resolve_table_import_config(payload, sheet_url, worksheet_name)` (line 130): no docstring
+  - `_resolve_register_sheet_payload(payload, connection_id, dataset_db_name, dataset_branch)` (line 149): no docstring
+  - `async _resolve_dataset_context(payload, dataset_registry)` (line 232): no docstring
+  - `async _load_table_import_source(connector_registry, connection_id, sheet_id)` (line 255): no docstring
+  - `async _resolve_output_dataset_rid(source, mapping, dataset_registry)` (line 272): no docstring
+  - `async _build_table_import_response(connection_id, source, mapping, dataset_registry)` (line 302): no docstring
+  - `async _ensure_table_import_pipeline(pipeline_registry, connection_id, sheet_id, mapping)` (line 341): no docstring
+  - `_build_execute_run_output(connection_rid, table_import_rid, branch_name, requested_by, result_payload, error_detail)` (line 369): no docstring
+  - `async create_table_import_v2(connectionRid, payload, request, google_sheets_service, connector_registry, dataset_registry, lineage_store)` (line 398): no docstring
+  - `async get_table_import_v2(connectionRid, tableImportRid, connector_registry, dataset_registry)` (line 533): no docstring
+  - `async list_table_imports_v2(connectionRid, pageSize, pageToken, connector_registry, dataset_registry)` (line 580): no docstring
+  - `async replace_table_import_v2(connectionRid, tableImportRid, payload, connector_registry, dataset_registry)` (line 674): no docstring
+  - `async delete_table_import_v2(connectionRid, tableImportRid, connector_registry)` (line 774): no docstring
+  - `async execute_table_import_v2(connectionRid, tableImportRid, request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 820): no docstring
+
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
   - `_foundry_error(status_code, error_code, error_name, parameters)` (line 106): no docstring
@@ -670,6 +696,33 @@
   - `BatchApplyActionRequestOptionsV2` (line 92): no docstring
   - `BatchApplyActionRequestV2` (line 96): no docstring
   - `ExecuteQueryRequestV2` (line 101): no docstring
+
+### `backend/bff/routers/foundry_orchestration_v2.py`
+- **Functions**
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 40): no docstring
+  - `_pipeline_id_from_target_rid(target_rid)` (line 58): no docstring
+  - `_job_id_from_build_rid(build_rid)` (line 72): no docstring
+  - `_pipeline_id_from_build_job_id(job_id)` (line 80): no docstring
+  - `_build_rid(job_id)` (line 93): no docstring
+  - `_job_rid(job_id)` (line 97): no docstring
+  - `_to_int(value, field_name, minimum)` (line 101): no docstring
+  - `_iso_timestamp(value)` (line 111): no docstring
+  - `_normalize_build_status(run_status)` (line 119): no docstring
+  - `_normalize_job_status(run_status)` (line 130): no docstring
+  - `_extract_created_by(run, fallback)` (line 145): no docstring
+  - `_extract_build_branch(run, pipeline_branch, requested_branch)` (line 154): no docstring
+  - `_extract_job_outputs(run)` (line 176): no docstring
+  - `_resolve_create_build_input(payload, request)` (line 219): no docstring
+  - `_request_with_internal_idempotency(request)` (line 294): no docstring
+  - `_build_response(job_id, run, branch_name, created_by, fallback_branches, retry_count, retry_backoff_duration, abort_on_failure)` (line 302): no docstring
+  - `async _load_build_run(build_rid, pipeline_registry)` (line 328): no docstring
+  - `async create_build_v2(payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client)` (line 347): no docstring
+  - `async get_build_v2(buildRid, pipeline_registry)` (line 421): no docstring
+  - `async get_builds_batch_v2(payload, pipeline_registry)` (line 466): no docstring
+  - `async list_build_jobs_v2(buildRid, pageSize, pageToken, pipeline_registry)` (line 515): no docstring
+  - `async cancel_build_v2(buildRid, pipeline_registry)` (line 568): no docstring
+- **Classes**
+  - `_ResolvedCreateBuildInput` (line 207): no docstring
 
 ### `backend/bff/routers/governance.py`
 - **Functions**
@@ -10465,6 +10518,16 @@
   - `async test_foundry_v2_route_get_outgoing_link_type_strict_on_unresolved_returns_not_found(monkeypatch)` (line 1215): no docstring
   - `async test_foundry_v2_route_get_outgoing_link_type_unresolved_returns_not_found(monkeypatch)` (line 1252): no docstring
   - `async test_foundry_v2_route_list_outgoing_link_types_strict_on_drops_unresolved(monkeypatch)` (line 1289): no docstring
+
+### `backend/tests/unit/openapi/test_foundry_platform_v2_contract.py`
+- **Functions**
+  - `_param_names(schema, path, method)` (line 27): no docstring
+  - `_build_test_app()` (line 32): no docstring
+  - `test_foundry_platform_v2_paths_exist_in_openapi()` (line 40): no docstring
+  - `async test_foundry_orchestration_create_build_returns_foundry_build_shape(monkeypatch)` (line 67): no docstring
+  - `async test_foundry_orchestration_get_batch_jobs_and_cancel_flow()` (line 124): no docstring
+  - `async test_foundry_connectivity_connection_scoped_table_import_create(monkeypatch)` (line 188): no docstring
+  - `async test_foundry_connectivity_get_list_execute_and_delete_table_import(monkeypatch)` (line 307): no docstring
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - **Functions**

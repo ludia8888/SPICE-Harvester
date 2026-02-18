@@ -64,6 +64,8 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Action request contract hardening: `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` enforces max 20 requests and forwards `options.returnEdits` to OMS runtime.
 - Object count surface parity: `POST /api/v2/ontologies/{ontology}/objects/{objectType}/count` is exposed on BFF/OMS v2 with Foundry-style branch/sdk query params.
 - ObjectSet searchAround parity: `loadObjects*` endpoints now execute `objectSet.type=searchAround` by resolving link metadata and traversing linked primary keys with Foundry error mapping (`LinkTypeNotFound`).
+- Orchestration build parity (P0): `POST /api/v2/orchestration/builds/create`, `GET /api/v2/orchestration/builds/{buildRid}`, `POST /api/v2/orchestration/builds/getBatch`, `GET /api/v2/orchestration/builds/{buildRid}/jobs`, `POST /api/v2/orchestration/builds/{buildRid}/cancel` are exposed with Foundry-style build resource payloads.
+- Connectivity table-import parity (P0): connection-scoped endpoints `POST /api/v2/connectivity/connections/{connectionRid}/tableImports`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `GET /api/v2/connectivity/connections/{connectionRid}/tableImports`, `PUT /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `DELETE /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}`, `POST /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` are exposed and mapped to connector runtime, with execute build IDs persisted so orchestration build APIs can resolve the same run.
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

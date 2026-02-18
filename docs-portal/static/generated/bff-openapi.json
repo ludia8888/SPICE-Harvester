@@ -5939,6 +5939,826 @@
         }
       }
     },
+    "/api/v2/orchestration/builds/create": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Create Build V2",
+        "operationId": "create_build_v2_api_v2_orchestration_builds_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ]
+      }
+    },
+    "/api/v2/orchestration/builds/{buildRid}": {
+      "get": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Get Build V2",
+        "operationId": "get_build_v2_api_v2_orchestration_builds__buildRid__get",
+        "parameters": [
+          {
+            "name": "buildRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Buildrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/orchestration/builds/getBatch": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Get Builds Batch V2",
+        "operationId": "get_builds_batch_v2_api_v2_orchestration_builds_getBatch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ]
+      }
+    },
+    "/api/v2/orchestration/builds/{buildRid}/jobs": {
+      "get": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "List Build Jobs V2",
+        "operationId": "list_build_jobs_v2_api_v2_orchestration_builds__buildRid__jobs_get",
+        "parameters": [
+          {
+            "name": "buildRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Buildrid"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/orchestration/builds/{buildRid}/cancel": {
+      "post": {
+        "tags": [
+          "Foundry Orchestration v2"
+        ],
+        "summary": "Cancel Build V2",
+        "operationId": "cancel_build_v2_api_v2_orchestration_builds__buildRid__cancel_post",
+        "parameters": [
+          {
+            "name": "buildRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Buildrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/tableImports": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Create Table Import V2",
+        "operationId": "create_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "List Table Imports V2",
+        "operationId": "list_table_imports_v2_api_v2_connectivity_connections__connectionRid__tableImports_get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}": {
+      "get": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Get Table Import V2",
+        "operationId": "get_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__get",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "tableImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Replace Table Import V2",
+        "operationId": "replace_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__put",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "tableImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Delete Table Import V2",
+        "operationId": "delete_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__delete",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "tableImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Execute Table Import V2",
+        "operationId": "execute_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__execute_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "tableImportRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tableimportrid"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/databases/{db_name}/mappings/export": {
       "post": {
         "tags": [

@@ -22,14 +22,14 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **205**
+- Total documented endpoints: **216**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 159 |
-| `v2` | 46 |
+| `v2` | 57 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
@@ -44,10 +44,10 @@
 | `context7` | 7 |
 | `objectify` | 7 |
 | `schema-changes` | 7 |
+| `connectivity` | 6 |
 | `backing-datasources` | 5 |
 | `graph-query` | 5 |
-| `tasks` | 5 |
-| `ai` | 3 |
+| `orchestration` | 5 |
 
 ## Endpoint Catalog (`/api/v1`, `/api/v2`)
 
@@ -186,6 +186,17 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/document-bundles/{bundle_id}/search` | Search Document Bundle | `v1` | no | no | `search_document_bundle_api_v1_document_bundles__bundle_id__search_post` |
 
+### Foundry Connectivity v2
+
+| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | List Table Imports V2 | `v2` | no | no | `list_table_imports_v2_api_v2_connectivity_connections__connectionRid__tableImports_get` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | Create Table Import V2 | `v2` | no | no | `create_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Get Table Import V2 | `v2` | no | no | `get_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__get` |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Replace Table Import V2 | `v2` | no | no | `replace_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__put` |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | `v2` | no | no | `delete_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__delete` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | `v2` | no | no | `execute_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__execute_post` |
+
 ### Foundry Ontologies v2
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
@@ -236,6 +247,16 @@
 | `GET` | `/api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}` | Get Shared Property Type V2 | `v2` | no | no | `get_shared_property_type_v2_api_v2_ontologies__ontology__sharedPropertyTypes__sharedPropertyType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes` | List Value Types V2 | `v2` | no | no | `list_value_types_v2_api_v2_ontologies__ontology__valueTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes/{valueType}` | Get Value Type V2 | `v2` | no | no | `get_value_type_v2_api_v2_ontologies__ontology__valueTypes__valueType__get` |
+
+### Foundry Orchestration v2
+
+| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/v2/orchestration/builds/create` | Create Build V2 | `v2` | no | no | `create_build_v2_api_v2_orchestration_builds_create_post` |
+| `POST` | `/api/v2/orchestration/builds/getBatch` | Get Builds Batch V2 | `v2` | no | no | `get_builds_batch_v2_api_v2_orchestration_builds_getBatch_post` |
+| `GET` | `/api/v2/orchestration/builds/{buildRid}` | Get Build V2 | `v2` | no | no | `get_build_v2_api_v2_orchestration_builds__buildRid__get` |
+| `POST` | `/api/v2/orchestration/builds/{buildRid}/cancel` | Cancel Build V2 | `v2` | no | no | `cancel_build_v2_api_v2_orchestration_builds__buildRid__cancel_post` |
+| `GET` | `/api/v2/orchestration/builds/{buildRid}/jobs` | List Build Jobs V2 | `v2` | no | no | `list_build_jobs_v2_api_v2_orchestration_builds__buildRid__jobs_get` |
 
 ### Governance
 

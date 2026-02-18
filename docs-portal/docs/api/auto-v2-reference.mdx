@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 46**
+**Total v2 endpoints: 57**
 
 ### Ontologies (12 endpoints)
 
@@ -98,3 +98,19 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 |--------|------|---------|------|
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes` | List Value Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes/{valueType}` | Get Value Type V2 | No |
+
+### Other v2 Endpoints (11 endpoints)
+
+| Method | Path | Summary | Auth |
+|--------|------|---------|------|
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | List Table Imports V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports` | Create Table Import V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Get Table Import V2 | No |
+| `PUT` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Replace Table Import V2 | No |
+| `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | No |
+| `POST` | `/api/v2/orchestration/builds/create` | Create Build V2 | No |
+| `POST` | `/api/v2/orchestration/builds/getBatch` | Get Builds Batch V2 | No |
+| `GET` | `/api/v2/orchestration/builds/{buildRid}` | Get Build V2 | No |
+| `POST` | `/api/v2/orchestration/builds/{buildRid}/cancel` | Cancel Build V2 | No |
+| `GET` | `/api/v2/orchestration/builds/{buildRid}/jobs` | List Build Jobs V2 | No |

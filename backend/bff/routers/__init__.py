@@ -26,4 +26,6 @@ __all__ = [
     "governance",
     "object_types",
     "foundry_ontology_v2",
+    "foundry_orchestration_v2",
+    "foundry_connectivity_v2",
 ]

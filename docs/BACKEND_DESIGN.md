@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T11:03:51+09:00
+> Generated: 2026-02-18T11:43:36+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **966**
-- Modules with module docstring: **542/966**
-- Modules with broad `except Exception`: **268**
+- Modules scanned: **969**
+- Modules with module docstring: **542/969**
+- Modules with broad `except Exception`: **270**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **230236**
+- Total code lines (non-empty, non-comment): **232023**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 225 | 172/225 (76%) | 78 | 434 | 1037 | 709 | 51014 |
+| `bff` | 227 | 172/227 (75%) | 80 | 438 | 1054 | 720 | 52404 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 300 | 204/300 (68%) | 104 | 380 | 850 | 1129 | 79065 |
-| `tests` | 279 | 47/279 (16%) | 20 | 51 | 1284 | 1335 | 43159 |
+| `tests` | 280 | 47/280 (16%) | 20 | 51 | 1314 | 1340 | 43556 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -51,7 +51,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `backend/bff/routers/foundry_ontology_v2.py` | 468 | 88 | 0 | 0 | 100 | 72 | 5977 |
 | `backend/pipeline_worker/main.py` | 235 | 47 | 0 | 0 | 64 | 83 | 6352 |
-| `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 820 |
+| `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 824 |
 | `backend/instance_worker/main.py` | 180 | 36 | 0 | 0 | 43 | 69 | 2299 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 516 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2644 |
@@ -72,7 +72,7 @@
 | `backend/action_outbox_worker/main.py` | 9 | 7 | 9 | 9 | 377 |
 | `backend/action_worker/main.py` | 41 | 15 | 26 | 47 | 2404 |
 | `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
-| `backend/bff/main.py` | 33 | 40 | 42 | 28 | 820 |
+| `backend/bff/main.py` | 33 | 40 | 42 | 28 | 824 |
 | `backend/connector_sync_worker/main.py` | 13 | 5 | 5 | 11 | 455 |
 | `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 304 |
 | `backend/funnel/main.py` | 3 | 1 | 1 | 1 | 59 |
@@ -96,24 +96,24 @@
 | --- | --- | --- |
 | 1 | `backend/bff/routers/foundry_ontology_v2.py` | API contract surface, Foundry v2 compatibility, ontology model contract |
 | 2 | `backend/ontology_worker/main.py` | entrypoint lifecycle, ontology model contract |
-| 3 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
-| 4 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 5 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 6 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 7 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 8 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 9 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
-| 10 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
-| 11 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 12 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
-| 13 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
-| 14 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
-| 15 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
-| 16 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 17 | `backend/bff/main.py` | entrypoint lifecycle |
-| 18 | `backend/message_relay/main.py` | entrypoint lifecycle |
-| 19 | `backend/oms/main.py` | entrypoint lifecycle |
-| 20 | `backend/connector_trigger_service/main.py` | entrypoint lifecycle |
+| 3 | `backend/bff/routers/foundry_connectivity_v2.py` | API contract surface, Foundry v2 compatibility |
+| 4 | `backend/bff/routers/foundry_orchestration_v2.py` | API contract surface, Foundry v2 compatibility |
+| 5 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
+| 6 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 7 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 8 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 9 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 10 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 11 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
+| 12 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
+| 13 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 14 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
+| 15 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
+| 16 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
+| 17 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
+| 18 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 19 | `backend/bff/main.py` | entrypoint lifecycle |
+| 20 | `backend/message_relay/main.py` | entrypoint lifecycle |
 
 ## action_outbox_worker
 
@@ -405,7 +405,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=1045 | code_lines=820 | risk_score=214
+- Source footprint: total_lines=1049 | code_lines=824 | risk_score=214
 - API surface: public=15 | top-level functions=14 | classes=1 | methods=34
 - Runtime signals: async_functions=33 | try=42 | raise=28 | broad_except=40 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=33/34 (97%)
@@ -453,7 +453,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=29 | code_lines=28 | risk_score=0
+- Source footprint: total_lines=31 | code_lines=30 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -861,6 +861,22 @@
 - External imports (4): fastapi; logging; pydantic; typing
 - Public API names: DocumentBundleSearchRequest; search_document_bundle
 
+### `backend/bff/routers/foundry_connectivity_v2.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=960 | code_lines=846 | risk_score=15
+- API surface: public=6 | top-level functions=23 | classes=0 | methods=0
+- Runtime signals: async_functions=11 | try=7 | raise=7 | broad_except=3 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/23 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (11): bff.routers.data_connector_deps; bff.services; data_connector.google_sheets.service; shared.dependencies.providers; shared.observability.tracing; shared.services.events.objectify_job_queue; shared.services.registries.connector_registry; shared.services.registries.dataset_registry (+3 more)
+- External imports (4): fastapi; logging; typing; uuid
+- Public API names: create_table_import_v2; delete_table_import_v2; execute_table_import_v2; get_table_import_v2; list_table_imports_v2; replace_table_import_v2
+
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - Module summary: Foundry Ontologies v2 read-compat router.
 - Responsibilities: not documented
@@ -876,6 +892,22 @@
 - Internal imports (8): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer; shared.utils.foundry_page_token
 - External imports (8): asyncio; fastapi; httpx; logging; pydantic; time; typing; uuid
 - Public API names: ApiFeaturePreviewUsageOnlyError; ApplyActionRequestOptionsV2; ApplyActionRequestV2; BatchApplyActionRequestItemV2; BatchApplyActionRequestOptionsV2; BatchApplyActionRequestV2; ExecuteQueryRequestV2; ObjectSetNotFoundError; OntologyNotFoundError; PermissionDeniedError; aggregate_object_set_v2; aggregate_objects_v2 (+44 more)
+
+### `backend/bff/routers/foundry_orchestration_v2.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=616 | code_lines=538 | risk_score=6
+- API surface: public=5 | top-level functions=22 | classes=1 | methods=0
+- Runtime signals: async_functions=6 | try=9 | raise=8 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/22 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Internal imports (10): bff.dependencies; bff.routers.pipeline_deps; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.observability.tracing; shared.services.pipeline.pipeline_job_queue; shared.services.registries.dataset_registry (+2 more)
+- External imports (6): dataclasses; fastapi; logging; types; typing; uuid
+- Public API names: cancel_build_v2; create_build_v2; get_build_v2; get_builds_batch_v2; list_build_jobs_v2
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -12406,6 +12438,22 @@
 - Internal imports (2): bff.dependencies; bff.routers
 - External imports (4): fastapi; httpx; pytest; unittest
 - Public API names: test_foundry_v2_aggregate_object_set_delegates_to_oms; test_foundry_v2_aggregate_object_set_returns_metrics; test_foundry_v2_aggregate_objects_keeps_foundry_query_params; test_foundry_v2_aggregate_objects_route_returns_metrics; test_foundry_v2_attachment_upload_query_params; test_foundry_v2_count_objects_includes_foundry_query_params; test_foundry_v2_count_objects_routes_to_oms_count; test_foundry_v2_create_temporary_and_get_object_set_roundtrip; test_foundry_v2_execute_query_keeps_foundry_query_params; test_foundry_v2_full_metadata_branch_contract; test_foundry_v2_list_linked_objects_includes_foundry_query_params; test_foundry_v2_list_objects_includes_foundry_query_params (+26 more)
+
+### `backend/tests/unit/openapi/test_foundry_platform_v2_contract.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=460 | code_lines=397 | risk_score=0
+- API surface: public=5 | top-level functions=7 | classes=0 | methods=0
+- Runtime signals: async_functions=30 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (5): bff.dependencies; bff.routers; bff.routers.data_connector_deps; bff.routers.pipeline_deps; shared.dependencies.providers
+- External imports (6): fastapi; httpx; pytest; types; typing; uuid
+- Public API names: test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - Module summary: no docstring
