@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T13:21:33+09:00
+> Generated: 2026-02-18T13:32:12+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **271**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **234685**
+- Total code lines (non-empty, non-comment): **234679**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 228 | 173/228 (75%) | 81 | 462 | 1083 | 747 | 53844 |
+| `bff` | 228 | 173/228 (75%) | 81 | 462 | 1083 | 747 | 53838 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
@@ -885,7 +885,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=971 | code_lines=778 | risk_score=88
+- Source footprint: total_lines=964 | code_lines=772 | risk_score=88
 - API surface: public=16 | top-level functions=29 | classes=0 | methods=0
 - Runtime signals: async_functions=17 | try=18 | raise=0 | broad_except=14 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=16/29 (55%) | classes=0/0 (n/a) | methods=0/0 (n/a)

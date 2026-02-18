@@ -647,12 +647,8 @@ async def commit_transaction_v2(
         return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
 
     # Transaction RID resolves to transaction_id, not ingest_request_id.
-    if hasattr(dataset_registry, "get_ingest_transaction_by_id"):
-        txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
-    else:
-        txn = await dataset_registry.get_ingest_transaction(ingest_request_id=transaction_id)
+    txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not txn:
-        # Try treating transaction_id as the transaction_id field directly
         return _foundry_error(404, error_code="NOT_FOUND", error_name="TransactionNotFound", parameters={"transactionRid": transactionRid})
 
     if txn.status != "OPEN":
@@ -710,10 +706,7 @@ async def abort_transaction_v2(
     if not dataset:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
 
-    if hasattr(dataset_registry, "get_ingest_transaction_by_id"):
-        txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
-    else:
-        txn = await dataset_registry.get_ingest_transaction(ingest_request_id=transaction_id)
+    txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not txn:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="TransactionNotFound", parameters={"transactionRid": transactionRid})
 

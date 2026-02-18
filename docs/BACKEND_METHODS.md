@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-18T13:21:33+09:00
+> Generated: 2026-02-18T13:32:12+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -554,11 +554,11 @@
   - `async delete_branch_v2(datasetRid, branchName, request, dataset_registry, pipeline_registry)` (line 542): DELETE /v2/datasets/{datasetRid}/branches/{branchName} — Delete branch.
   - `async create_transaction_v2(datasetRid, request, dataset_registry)` (line 582): POST /v2/datasets/{datasetRid}/transactions — Create a transaction.
   - `async commit_transaction_v2(datasetRid, transactionRid, request, dataset_registry, pipeline_registry)` (line 629): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit.
-  - `async abort_transaction_v2(datasetRid, transactionRid, dataset_registry)` (line 695): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.
-  - `async list_files_v2(datasetRid, branchName, pageSize, request, dataset_registry, pipeline_registry)` (line 744): GET /v2/datasets/{datasetRid}/files — List files in dataset.
-  - `async get_file_content_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 795): GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.
-  - `async upload_file_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 833): POST /v2/datasets/{datasetRid}/files:upload — Upload file.
-  - `async read_table_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 885): POST /v2/datasets/{datasetRid}/readTable — Read table rows.
+  - `async abort_transaction_v2(datasetRid, transactionRid, dataset_registry)` (line 691): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.
+  - `async list_files_v2(datasetRid, branchName, pageSize, request, dataset_registry, pipeline_registry)` (line 737): GET /v2/datasets/{datasetRid}/files — List files in dataset.
+  - `async get_file_content_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 788): GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.
+  - `async upload_file_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 826): POST /v2/datasets/{datasetRid}/files:upload — Upload file.
+  - `async read_table_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 878): POST /v2/datasets/{datasetRid}/readTable — Read table rows.
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**

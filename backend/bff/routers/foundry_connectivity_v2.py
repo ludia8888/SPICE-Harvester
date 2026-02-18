@@ -1004,14 +1004,14 @@ def _connection_response(source: ConnectorSource) -> dict[str, Any]:
         "displayName": display_name,
         "configuration": configuration,
         "status": conn_status,
-        "createdTime": _iso_timestamp(source.created_at) if source.created_at else utcnow().isoformat(),
-        "updatedTime": _iso_timestamp(source.updated_at) if source.updated_at else None,
+        "createdTime": _iso_timestamp(source.created_at),
+        "updatedTime": _iso_timestamp(source.updated_at),
     }
 
 
-def _iso_timestamp(value: Any) -> str:
+def _iso_timestamp(value: Any) -> str | None:
     if value is None:
-        return utcnow().isoformat()
+        return None
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
