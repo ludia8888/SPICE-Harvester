@@ -5,33 +5,317 @@ sidebar_position: 3
 
 # Foundry v2 Migration Guide
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks platform administrators through migrating from the internal v1 API to the Foundry v2-aligned API. The v2 API provides Palantir Foundry-compatible endpoints, standardized resource identifiers (RIDs), and a consistent object model.
 
-## What This Guide Covers
+## Why Migrate to v2
 
-This guide will walk platform administrators through migrating from the v1 API to the Foundry v2-aligned API, including:
+| Aspect | v1 (Internal) | v2 (Foundry-aligned) |
+|--------|------|------|
+| **Identifiers** | Numeric IDs | String API names + RIDs |
+| **Object format** | Flat JSON | `__rid`, `__primaryKey`, `__apiName`, `properties` |
+| **Pagination** | Offset/limit | Opaque `pageToken` (cursor-based) |
+| **Search** | Custom filter syntax | `SearchJsonQueryV2` operators (23 operators) |
+| **Write operations** | Direct PUT/DELETE | Actions API with validation and audit trail |
+| **Consistency** | Varied formats | Foundry-compatible across all endpoints |
 
-- **Migration Overview** -- Why migrate, what changes, and the timeline for v1 deprecation
-- **URL Path Changes** -- Mapping v1 paths to v2 paths (e.g., `/api/v1/ontology/{id}` to `/api/v2/ontologies/{apiName}`)
-- **Identifier Migration** -- Moving from numeric IDs to string API names
-- **Response Format Changes** -- Adapting to the Foundry v2 object format (`__rid`, `__primaryKey`, `__apiName`, `properties`)
-- **Pagination Migration** -- Switching from offset/limit to opaque `pageToken` pagination
-- **Search Migration** -- Converting v1 filter syntax to `SearchJsonQueryV2` operators
-- **Write Operation Migration** -- Moving from direct PUT/DELETE to the Actions API
-- **Client SDK Updates** -- Updating Python and TypeScript SDK usage
-- **Dual-Running Period** -- Running v1 and v2 simultaneously during migration
-- **Validation and Testing** -- Verifying that migrated integrations produce correct results
-- **Rollback Plan** -- Steps to revert if issues are discovered
+## Migration Timeline
+
+```
+Phase 1: Deploy v2 endpoints (v1 unchanged)
+Phase 2: Migrate integrations to v2
+Phase 3: Deprecate v1 endpoints
+Phase 4: Remove v1 endpoints
+```
+
+During Phases 1-2, both v1 and v2 endpoints are available simultaneously.
+
+## URL Path Migration
+
+### Ontology Endpoints
+
+| v1 Path | v2 Path |
+|---------|---------|
+| `GET /api/databases/{db}/ontology` | `GET /api/v2/ontologies/{apiName}/objectTypes` |
+| `GET /api/databases/{db}/ontology/{classId}` | `GET /api/v2/ontologies/{apiName}/objectTypes/{typeApiName}` |
+| `POST /api/databases/{db}/ontology` | `POST /api/v2/ontologies/{apiName}/actions/createObject` |
+
+### Object Endpoints
+
+| v1 Path | v2 Path |
+|---------|---------|
+| `GET /api/databases/{db}/objects/{type}` | `GET /api/v2/ontologies/{apiName}/objectTypes/{type}/objects` |
+| `GET /api/databases/{db}/objects/{type}/{id}` | `GET /api/v2/ontologies/{apiName}/objectTypes/{type}/objects/{pk}` |
+| `PUT /api/databases/{db}/objects/{type}/{id}` | `POST /api/v2/ontologies/{apiName}/actions/editObject` |
+| `DELETE /api/databases/{db}/objects/{type}/{id}` | `POST /api/v2/ontologies/{apiName}/actions/deleteObject` |
+
+### Search Endpoints
+
+| v1 Path | v2 Path |
+|---------|---------|
+| `POST /api/databases/{db}/search` | `POST /api/v2/ontologies/{apiName}/objectTypes/{type}/objects/search` |
+
+### Dataset Endpoints
+
+| v1 Path | v2 Path |
+|---------|---------|
+| `GET /api/databases/{db}/datasets` | `GET /api/v2/datasets` |
+| `GET /api/databases/{db}/datasets/{id}` | `GET /api/v2/datasets/{datasetRid}` |
+
+### Connectivity Endpoints
+
+| v1 Path | v2 Path |
+|---------|---------|
+| `POST /api/data-connector/connections` | `POST /api/v2/connectivity/connections` |
+| `POST /api/data-connector/imports` | `POST /api/v2/connectivity/tableImports` |
+
+## Identifier Migration
+
+### Resource Identifiers (RIDs)
+
+The v2 API uses Foundry-style RIDs (Resource Identifiers):
+
+```
+Format: ri.spice.main.{resource-type}.{id}
+```
+
+| Resource | RID Example |
+|----------|-------------|
+| Object Type | `ri.spice.main.object-type.Employee` |
+| Object | `ri.spice.main.object.employee-00042` |
+| Dataset | `ri.spice.main.dataset.a1b2c3d4` |
+| Connection | `ri.spice.main.connection.conn-123` |
+| Table Import | `ri.spice.main.table-import.imp-456` |
+| Build | `ri.spice.main.build.build-789` |
+| Schedule | `ri.spice.main.schedule.sched-012` |
+| Transaction | `ri.spice.main.transaction.txn-345` |
+
+### Mapping v1 IDs to v2 RIDs
+
+v1 numeric IDs map to v2 RIDs through a consistent prefix:
+
+```python
+# v1
+object_id = 42
+
+# v2
+object_rid = "ri.spice.main.object.employee-00042"
+```
+
+The BFF layer handles this mapping internally. You only need to update your client code to use the RID format.
+
+## Response Format Migration
+
+### Object Response
+
+**v1 format:**
+
+```json
+{
+  "id": 42,
+  "type": "Employee",
+  "data": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering"
+  }
+}
+```
+
+**v2 format:**
+
+```json
+{
+  "__rid": "ri.spice.main.object.employee-00042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering"
+  }
+}
+```
+
+### Key changes:
+- `id` (numeric) → `__rid` (string RID)
+- `type` → `__apiName`
+- `data` → `properties`
+- Added `__primaryKey` field
+
+## Pagination Migration
+
+### v1 (Offset/Limit)
+
+```bash
+GET /api/databases/acme/objects/Employee?offset=50&limit=25
+```
+
+### v2 (Cursor-based)
+
+```bash
+# First page
+GET /api/v2/ontologies/acme/objectTypes/Employee/objects?pageSize=25
+
+# Next page (using token from previous response)
+GET /api/v2/ontologies/acme/objectTypes/Employee/objects?pageSize=25&pageToken=eyJvZmZzZXQiOjI1fQ==
+```
+
+**Benefits of cursor-based pagination:**
+- Consistent results even when data is modified between pages
+- Better performance for large datasets
+- No risk of skipping or duplicating items
+
+## Search Migration
+
+### v1 Filter Syntax
+
+```json
+{
+  "filters": {
+    "department": "Engineering",
+    "salary_gte": 80000
+  },
+  "sort": "fullName",
+  "order": "asc"
+}
+```
+
+### v2 SearchJsonQueryV2
+
+```json
+{
+  "where": {
+    "type": "and",
+    "value": [
+      { "type": "eq", "field": "department", "value": "Engineering" },
+      { "type": "gte", "field": "salary", "value": 80000 }
+    ]
+  },
+  "orderBy": {
+    "fields": [{ "field": "fullName", "direction": "asc" }]
+  },
+  "pageSize": 25
+}
+```
+
+### Common Search Patterns
+
+| v1 Pattern | v2 Operator |
+|-----------|------------|
+| `field: value` | `{"type": "eq", "field": "...", "value": "..."}` |
+| `field_gte: value` | `{"type": "gte", "field": "...", "value": ...}` |
+| `field_contains: text` | `{"type": "containsAnyTerm", "field": "...", "value": "..."}` |
+| `field_is_null: true` | `{"type": "isNull", "field": "...", "value": true}` |
+| Multiple filters (AND) | `{"type": "and", "value": [...]}` |
+| Multiple filters (OR) | `{"type": "or", "value": [...]}` |
+
+## Write Operation Migration
+
+### v1 (Direct CRUD)
+
+```bash
+# Create
+POST /api/databases/acme/objects/Employee
+{"employeeId": "EMP-099", "fullName": "John Smith"}
+
+# Update
+PUT /api/databases/acme/objects/Employee/EMP-099
+{"department": "Sales"}
+
+# Delete
+DELETE /api/databases/acme/objects/Employee/EMP-099
+```
+
+### v2 (Actions API)
+
+```bash
+# Create
+POST /api/v2/ontologies/acme/actions/createObject
+{
+  "parameters": {
+    "objectType": "Employee",
+    "properties": {"employeeId": "EMP-099", "fullName": "John Smith"}
+  }
+}
+
+# Edit
+POST /api/v2/ontologies/acme/actions/editObject
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099",
+    "properties": {"department": "Sales"}
+  }
+}
+
+# Delete
+POST /api/v2/ontologies/acme/actions/deleteObject
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099"
+  }
+}
+```
+
+**Benefits of the Actions API:**
+- Validation before execution
+- Complete audit trail via event sourcing
+- Undo support through compensating actions
+- Conflict detection for concurrent modifications
+- Action templates for reusable business logic
+
+## Client SDK Updates
+
+### Python SDK
+
+```python
+# v1
+response = requests.get(f"{base_url}/databases/acme/objects/Employee/{pk}")
+
+# v2
+employee = client.objects.get("acme", "Employee", pk)
+```
+
+### TypeScript SDK
+
+```typescript
+// v1
+const response = await fetch(`${baseUrl}/databases/acme/objects/Employee/${pk}`);
+
+// v2
+const employee = await client.objects.get('acme', 'Employee', pk);
+```
+
+## Migration Checklist
+
+1. **Inventory** -- list all integrations using v1 endpoints
+2. **Map endpoints** -- for each v1 endpoint, identify the v2 equivalent
+3. **Update identifiers** -- switch from numeric IDs to API names and RIDs
+4. **Update response parsing** -- adapt to the new object format (`__rid`, `properties`)
+5. **Update search queries** -- convert to `SearchJsonQueryV2` operators
+6. **Update writes** -- switch from direct CRUD to Actions API
+7. **Update pagination** -- switch from offset/limit to `pageToken`
+8. **Test thoroughly** -- verify all operations produce correct results
+9. **Monitor** -- watch for v1 endpoint usage and error rates
+10. **Decommission** -- remove v1 integrations once all clients have migrated
+
+## Rollback Plan
+
+If issues are discovered during migration:
+
+1. Both v1 and v2 endpoints remain active during the migration period
+2. Clients can switch back to v1 endpoints at any time
+3. No data migration is required -- v1 and v2 share the same underlying data
+4. The BFF handles both API surfaces simultaneously
 
 ## Prerequisites
 
-- [API Overview](/docs/api/overview) -- Understanding of both v1 and v2 conventions
+- [API Overview](/docs/api/overview) -- Understanding of API conventions
 - [v2 Object Types API](/docs/api/v2-object-types) -- v2 endpoint documentation
 
-## Related Resources
+## Next Steps
 
-- [v1 Object Types](/docs/api/v1-object-types) -- Legacy v1 reference
-- [v1 Objects](/docs/api/v1-objects) -- Legacy v1 reference
-- [v1 Search](/docs/api/v1-search) -- Legacy v1 reference
+- **[REST API Guide](../integration-developer/rest-api)** -- v2 API integration patterns
+- **[Search & Query Guide](../business-analyst/search-query)** -- SearchJsonQueryV2 operator guide
+- **[SDK Guide](../integration-developer/sdk-guide)** -- Updated SDK usage

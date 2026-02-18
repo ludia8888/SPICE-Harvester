@@ -5,65 +5,443 @@ sidebar_position: 3
 
 # SDK Guide
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks integration developers through using the official SPICE Harvester client SDKs. The SDKs provide type-safe, ergonomic wrappers around the REST API for Python and TypeScript.
 
-## What This Guide Covers
-
-This guide will walk integration developers through using the official SPICE Harvester client SDKs, including:
-
-- **SDK Installation** -- Installing the Python and TypeScript SDKs
-- **Client Configuration** -- Setting up the client with base URL, authentication, and options
-- **Object Operations** -- Creating, reading, updating, and deleting objects with type-safe methods
-- **Search** -- Building search queries using SDK builder patterns
-- **Actions** -- Submitting actions with validation and error handling
-- **Pagination** -- Iterating through paginated results with async iterators
-- **Error Handling** -- Catching and handling typed SDK exceptions
-- **Logging and Debugging** -- Enabling request/response logging for troubleshooting
-- **Advanced Usage** -- Custom HTTP clients, request interceptors, and middleware
-- **SDK vs REST** -- When to use the SDK versus direct REST calls
+## Installation
 
 ### Python SDK
 
-```python
-# Installation
+```bash
 pip install spice-harvester-sdk
-
-# Basic usage
-from spice_harvester import SpiceClient
-
-client = SpiceClient(
-    base_url="http://localhost:8002",
-    token="your-access-token"
-)
-
-employees = client.objects.list("acme", "Employee", page_size=25)
 ```
 
 ### TypeScript SDK
 
-```typescript
-// Installation
+```bash
 npm install @spice-harvester/sdk
+```
 
-// Basic usage
+## Client Configuration
+
+### Python
+
+```python
+from spice_harvester import SpiceClient
+
+client = SpiceClient(
+    base_url="http://localhost:8080/api",
+    token="your-access-token",
+    timeout=30,           # Request timeout in seconds
+    max_retries=3,        # Retry count for transient errors
+)
+```
+
+### TypeScript
+
+```typescript
 import { SpiceClient } from '@spice-harvester/sdk';
 
 const client = new SpiceClient({
-  baseUrl: 'http://localhost:8002',
+  baseUrl: 'http://localhost:8080/api',
   token: 'your-access-token',
+  timeout: 30000,       // Request timeout in milliseconds
+  maxRetries: 3,        // Retry count for transient errors
+});
+```
+
+### Configuration Options
+
+| Option | Python | TypeScript | Description |
+|--------|--------|-----------|-------------|
+| Base URL | `base_url` | `baseUrl` | BFF service URL |
+| Token | `token` | `token` | Bearer authentication token |
+| Timeout | `timeout` | `timeout` | Request timeout |
+| Retries | `max_retries` | `maxRetries` | Auto-retry count for 5xx/429 errors |
+| Headers | `extra_headers` | `extraHeaders` | Additional HTTP headers |
+
+## Object Operations
+
+### List Objects
+
+**Python:**
+
+```python
+# List all employees with pagination
+employees = client.objects.list(
+    ontology="acme",
+    object_type="Employee",
+    page_size=25
+)
+
+for employee in employees:
+    print(f"{employee.properties['fullName']} - {employee.properties['department']}")
+```
+
+**TypeScript:**
+
+```typescript
+const employees = await client.objects.list('acme', 'Employee', {
+  pageSize: 25,
 });
 
-const employees = await client.objects.list('acme', 'Employee', { pageSize: 25 });
+for (const emp of employees.data) {
+  console.log(`${emp.properties.fullName} - ${emp.properties.department}`);
+}
 ```
+
+### Get Single Object
+
+**Python:**
+
+```python
+employee = client.objects.get(
+    ontology="acme",
+    object_type="Employee",
+    primary_key="EMP-042"
+)
+print(employee.properties["fullName"])  # "Jane Doe"
+```
+
+**TypeScript:**
+
+```typescript
+const employee = await client.objects.get('acme', 'Employee', 'EMP-042');
+console.log(employee.properties.fullName); // "Jane Doe"
+```
+
+### List Object Types
+
+**Python:**
+
+```python
+object_types = client.ontology.list_object_types(ontology="acme")
+for ot in object_types:
+    print(f"{ot.api_name}: {len(ot.properties)} properties")
+```
+
+**TypeScript:**
+
+```typescript
+const objectTypes = await client.ontology.listObjectTypes('acme');
+for (const ot of objectTypes.data) {
+  console.log(`${ot.apiName}: ${Object.keys(ot.properties).length} properties`);
+}
+```
+
+## Search
+
+### Basic Search
+
+**Python:**
+
+```python
+results = client.objects.search(
+    ontology="acme",
+    object_type="Employee",
+    where={
+        "type": "eq",
+        "field": "department",
+        "value": "Engineering"
+    },
+    order_by=[{"field": "fullName", "direction": "asc"}],
+    page_size=50
+)
+
+for emp in results:
+    print(emp.properties["fullName"])
+```
+
+**TypeScript:**
+
+```typescript
+const results = await client.objects.search('acme', 'Employee', {
+  where: {
+    type: 'eq',
+    field: 'department',
+    value: 'Engineering',
+  },
+  orderBy: { fields: [{ field: 'fullName', direction: 'asc' }] },
+  pageSize: 50,
+});
+```
+
+### Complex Search Queries
+
+**Python:**
+
+```python
+# Senior engineers with salary > 100k
+results = client.objects.search(
+    ontology="acme",
+    object_type="Employee",
+    where={
+        "type": "and",
+        "value": [
+            {"type": "eq", "field": "department", "value": "Engineering"},
+            {"type": "gte", "field": "salary", "value": 100000},
+            {
+                "type": "or",
+                "value": [
+                    {"type": "eq", "field": "level", "value": "Senior"},
+                    {"type": "eq", "field": "level", "value": "Staff"},
+                ]
+            }
+        ]
+    },
+    select=["employeeId", "fullName", "salary", "level"]
+)
+```
+
+### Text Search
+
+**Python:**
+
+```python
+# Typeahead / autocomplete
+results = client.objects.search(
+    ontology="acme",
+    object_type="Employee",
+    where={
+        "type": "containsAllTermsInOrderPrefixLastTerm",
+        "field": "fullName",
+        "value": "jane d"
+    },
+    page_size=10
+)
+```
+
+## Actions
+
+### Create Object
+
+**Python:**
+
+```python
+result = client.actions.apply(
+    ontology="acme",
+    action_type="createObject",
+    parameters={
+        "objectType": "Employee",
+        "properties": {
+            "employeeId": "EMP-099",
+            "fullName": "John Smith",
+            "department": "Marketing",
+            "startDate": "2024-01-15"
+        }
+    }
+)
+```
+
+**TypeScript:**
+
+```typescript
+const result = await client.actions.apply('acme', 'createObject', {
+  parameters: {
+    objectType: 'Employee',
+    properties: {
+      employeeId: 'EMP-099',
+      fullName: 'John Smith',
+      department: 'Marketing',
+      startDate: '2024-01-15',
+    },
+  },
+});
+```
+
+### Edit Object
+
+**Python:**
+
+```python
+client.actions.apply(
+    ontology="acme",
+    action_type="editObject",
+    parameters={
+        "objectType": "Employee",
+        "primaryKey": "EMP-099",
+        "properties": {
+            "department": "Sales"
+        }
+    }
+)
+```
+
+### Delete Object
+
+**Python:**
+
+```python
+client.actions.apply(
+    ontology="acme",
+    action_type="deleteObject",
+    parameters={
+        "objectType": "Employee",
+        "primaryKey": "EMP-099"
+    }
+)
+```
+
+### Batch Actions
+
+**Python:**
+
+```python
+results = client.actions.apply_batch(
+    ontology="acme",
+    action_type="createObject",
+    requests=[
+        {"parameters": {"objectType": "Employee", "properties": {"employeeId": "EMP-100", "fullName": "Alice"}}},
+        {"parameters": {"objectType": "Employee", "properties": {"employeeId": "EMP-101", "fullName": "Bob"}}},
+    ]
+)
+```
+
+### Simulate Action
+
+Test an action without applying it:
+
+**Python:**
+
+```python
+simulation = client.actions.simulate(
+    ontology="acme",
+    action_type="editObject",
+    parameters={
+        "objectType": "Employee",
+        "primaryKey": "EMP-042",
+        "properties": {"department": "Research"}
+    }
+)
+print(simulation.validation_result)  # Check if action would succeed
+```
+
+## Pagination
+
+### Automatic Pagination
+
+The SDK handles pagination automatically when iterating:
+
+**Python:**
+
+```python
+# Iterates through ALL pages automatically
+for employee in client.objects.list("acme", "Employee", page_size=100):
+    process(employee)
+```
+
+### Manual Pagination
+
+For more control, use page tokens directly:
+
+**Python:**
+
+```python
+page = client.objects.list_page(
+    ontology="acme",
+    object_type="Employee",
+    page_size=25
+)
+
+while page:
+    for employee in page.data:
+        process(employee)
+
+    if page.next_page_token:
+        page = client.objects.list_page(
+            ontology="acme",
+            object_type="Employee",
+            page_size=25,
+            page_token=page.next_page_token
+        )
+    else:
+        break
+```
+
+## Error Handling
+
+### Python
+
+```python
+from spice_harvester.exceptions import (
+    SpiceApiError,
+    ObjectNotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
+
+try:
+    employee = client.objects.get("acme", "Employee", "EMP-999")
+except ObjectNotFoundError as e:
+    print(f"Employee not found: {e.primary_key}")
+except PermissionDeniedError:
+    print("Insufficient permissions")
+except RateLimitError as e:
+    print(f"Rate limited. Retry after {e.retry_after} seconds")
+except SpiceApiError as e:
+    print(f"API error: {e.error_code} - {e.message}")
+```
+
+### TypeScript
+
+```typescript
+import { SpiceApiError, ObjectNotFoundError } from '@spice-harvester/sdk';
+
+try {
+  const employee = await client.objects.get('acme', 'Employee', 'EMP-999');
+} catch (error) {
+  if (error instanceof ObjectNotFoundError) {
+    console.log(`Employee not found: ${error.primaryKey}`);
+  } else if (error instanceof SpiceApiError) {
+    console.log(`API error: ${error.errorCode} - ${error.message}`);
+  }
+}
+```
+
+## Logging and Debugging
+
+### Enable Request Logging
+
+**Python:**
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+client = SpiceClient(
+    base_url="http://localhost:8080/api",
+    token="your-token",
+    debug=True  # Logs all requests and responses
+)
+```
+
+**TypeScript:**
+
+```typescript
+const client = new SpiceClient({
+  baseUrl: 'http://localhost:8080/api',
+  token: 'your-token',
+  debug: true, // Logs all requests and responses
+});
+```
+
+## SDK vs REST: When to Use Each
+
+| Scenario | Recommendation | Why |
+|----------|---------------|-----|
+| Application development | **SDK** | Type safety, auto-pagination, error handling |
+| Quick scripting | **SDK** | Less boilerplate |
+| Shell scripts / cURL | **REST** | SDK not available in shell |
+| Custom HTTP client | **REST** | Full control over HTTP layer |
+| Unsupported language | **REST** | SDKs only available for Python and TypeScript |
+| Debugging API issues | **REST** | Easier to inspect raw requests/responses |
 
 ## Prerequisites
 
 - [API Overview](/docs/api/overview) -- API conventions the SDKs build upon
 - [REST API Guide](./rest-api) -- Understanding the underlying REST API
 
-## Related Resources
+## Next Steps
 
-- [Auth Flow Guide](./auth-flow) -- Token management in SDK clients
-- [v2 Search API](/docs/api/v2-search) -- Search operator reference
+- **[Auth Flow Guide](./auth-flow)** -- Token management in SDK clients
+- **[v2 Search API](/docs/api/v2-search)** -- Search operator reference
+- **[REST API Guide](./rest-api)** -- Direct REST API usage

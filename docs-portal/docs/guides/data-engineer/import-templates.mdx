@@ -1,33 +1,594 @@
 ---
-title: Import Templates
+title: Import Templates & Connectivity
 sidebar_position: 3
 ---
 
-# Import Templates
+# Import Templates & Connectivity
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
+This guide walks data engineers through connecting external data sources and importing data into SPICE Harvester. You will learn how to configure connections, create import resources, choose sync modes, and execute data ingestion.
+
+## Architecture Overview
+
+The Connectivity system follows a layered architecture:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                    Foundry v2 API                          │
+│         /v2/connectivity/connections                       │
+│         /v2/connectivity/tableImports                      │
+│         /v2/connectivity/fileImports                       │
+│         /v2/connectivity/virtualTables                     │
+└────────────────────────┬──────────────────────────────────┘
+                         │
+┌────────────────────────▼──────────────────────────────────┐
+│                Connector Adapter Layer                      │
+│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌───────┐          │
+│  │ Google   │ │PostgreSQL│ │ MySQL  │ │Oracle │          │
+│  │ Sheets   │ │          │ │        │ │       │          │
+│  ├──────────┤ ├──────────┤ ├────────┤ ├───────┤          │
+│  │Snowflake │ │SQL Server│ │        │ │       │          │
+│  └──────────┘ └──────────┘ └────────┘ └───────┘          │
+└────────────────────────┬──────────────────────────────────┘
+                         │
+┌────────────────────────▼──────────────────────────────────┐
+│              Connector Ingest Service                       │
+│  SNAPSHOT │ APPEND │ UPDATE │ INCREMENTAL │ CDC            │
+└────────────────────────┬──────────────────────────────────┘
+                         │
+┌────────────────────────▼──────────────────────────────────┐
+│            LakeFS Storage + Dataset Registry               │
+│       Versioned data files (CSV, Parquet)                  │
+└───────────────────────────────────────────────────────────┘
+```
+
+## Supported Connectors
+
+SPICE Harvester supports 6 connector types:
+
+| Connector | Library | Primary Use Case |
+|-----------|---------|-----------------|
+| **Google Sheets** | gspread | Spreadsheet imports, lightweight data sources |
+| **PostgreSQL** | asyncpg | Relational databases |
+| **MySQL** | pymysql | Relational databases |
+| **Oracle** | oracledb | Enterprise databases |
+| **Snowflake** | snowflake-connector | Data warehouses |
+| **SQL Server** | pymssql | Enterprise databases |
+
+### Connector Capabilities
+
+| Capability | Google Sheets | PostgreSQL | MySQL | Oracle | Snowflake | SQL Server |
+|-----------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Table Import | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| File Import | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Virtual Table | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| SNAPSHOT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| APPEND | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| UPDATE | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| INCREMENTAL | — | ✅ | ✅ | ✅ | ✅ | ✅ |
+| CDC | — | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+:::note
+INCREMENTAL and CDC modes require JDBC connectors. Google Sheets does not support these modes.
 :::
 
-## What This Guide Covers
+## Creating a Connection
 
-This guide will walk data engineers through using import templates to streamline bulk data ingestion, including:
+A **Connection** stores the configuration and credentials for an external data source.
 
-- **Template Concepts** -- What import templates are and when to use them
-- **Built-in Templates** -- Pre-configured templates for common data formats (CSV, Excel, JSON, NDJSON)
-- **Custom Templates** -- Creating reusable import templates with field mapping, validation, and transformation
-- **Column Mapping** -- Mapping source columns to ontology properties, including type conversions
-- **Data Validation** -- Configuring validation rules within templates (required fields, patterns, ranges)
-- **Conflict Handling** -- Strategies for handling duplicate primary keys (skip, overwrite, merge)
-- **Batch Processing** -- Managing large file imports with chunking and progress tracking
-- **Template Sharing** -- Exporting and importing templates across environments
+### Connection Structure
 
-## Prerequisites
+Each connection has:
+- **Public configuration** (host, port, database) — stored in `config_json`
+- **Secrets** (passwords, connection strings) — **AES-GCM encrypted** in `connector_connection_secrets`
 
-- [Schema Configuration](./schema-config) -- Object types must be defined
-- [Pipeline Builder](./pipeline-builder) -- Understanding of transforms
+### Connection via API
 
-## Related Resources
+```bash
+# Create a PostgreSQL connection
+curl -X POST http://localhost:8080/api/v2/connectivity/connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "Production Database",
+    "connectorKind": "postgresql",
+    "configuration": {
+      "host": "db.example.com",
+      "port": 5432,
+      "database": "production",
+      "schema": "public",
+      "sslMode": "require"
+    },
+    "secrets": {
+      "password": "super-secret-password"
+    }
+  }'
+```
 
-- [Type Inference Runtime](/docs/architecture/service-topology) -- Internal sheet/tabular analysis runtime used by import flows
-- [v2 Actions API](/docs/api/v2-actions) -- How imported records are written
+### Configuration by Connector Type
+
+#### Google Sheets
+
+```json
+{
+  "connectorKind": "google_sheets",
+  "configuration": {
+    "spreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
+    "sheetName": "Sheet1",
+    "headerRow": 1
+  },
+  "secrets": {
+    "serviceAccountJson": "{...}"
+  }
+}
+```
+
+**Secret fields:** `accessToken`, `refreshToken`, `apiKey`, `serviceAccountJson`
+
+#### PostgreSQL
+
+```json
+{
+  "connectorKind": "postgresql",
+  "configuration": {
+    "host": "db.example.com",
+    "port": 5432,
+    "database": "mydb",
+    "schema": "public",
+    "sslMode": "require"
+  },
+  "secrets": {
+    "password": "secret"
+  }
+}
+```
+
+**Secret fields:** `password`, `dsn`
+
+#### MySQL
+
+```json
+{
+  "connectorKind": "mysql",
+  "configuration": {
+    "host": "mysql.example.com",
+    "port": 3306,
+    "database": "mydb"
+  },
+  "secrets": {
+    "password": "secret"
+  }
+}
+```
+
+**Secret fields:** `password`, `dsn`
+
+#### Snowflake
+
+```json
+{
+  "connectorKind": "snowflake",
+  "configuration": {
+    "account": "xy12345.us-east-1",
+    "warehouse": "COMPUTE_WH",
+    "database": "MY_DB",
+    "schema": "PUBLIC",
+    "role": "ANALYST"
+  },
+  "secrets": {
+    "password": "secret"
+  }
+}
+```
+
+**Secret fields:** `password`, `privateKey`, `token`
+
+#### Oracle
+
+```json
+{
+  "connectorKind": "oracle",
+  "configuration": {
+    "host": "oracle.example.com",
+    "port": 1521,
+    "service_name": "ORCL"
+  },
+  "secrets": {
+    "password": "secret"
+  }
+}
+```
+
+**Secret fields:** `password`, `dsn`
+
+#### SQL Server
+
+```json
+{
+  "connectorKind": "sqlserver",
+  "configuration": {
+    "host": "sqlserver.example.com",
+    "port": 1433,
+    "database": "mydb"
+  },
+  "secrets": {
+    "password": "secret"
+  }
+}
+```
+
+**Secret fields:** `password`, `connectionString`
+
+## Import Resource Types
+
+SPICE Harvester supports three types of import resources:
+
+### Table Import
+
+SQL query-based data ingestion. The most common import type for structured data.
+
+```bash
+curl -X POST http://localhost:8080/api/v2/connectivity/tableImports \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionRid": "ri.spice.main.connection.conn-123",
+    "datasetRid": "ri.spice.main.dataset.target-dataset",
+    "displayName": "Daily Employee Sync",
+    "importMode": "SNAPSHOT",
+    "config": {
+      "query": "SELECT employee_id, full_name, department FROM employees WHERE active = true"
+    }
+  }'
+```
+
+### File Import
+
+File-based data ingestion using file selectors:
+
+```bash
+curl -X POST http://localhost:8080/api/v2/connectivity/fileImports \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionRid": "ri.spice.main.connection.conn-456",
+    "datasetRid": "ri.spice.main.dataset.target-dataset",
+    "displayName": "CSV File Import",
+    "importMode": "SNAPSHOT",
+    "config": {
+      "path": "/data/exports/employees.csv",
+      "fileFormat": "csv",
+      "filePattern": "*.csv"
+    }
+  }'
+```
+
+**Required:** At least one file selector must be provided:
+
+| Selector | Description |
+|----------|-------------|
+| `fileImportFilters` | Filter rules for file selection |
+| `path` | Specific file path |
+| `subfolder` | Directory to scan |
+| `filePattern` | Glob pattern for file matching |
+| `fileFormat` | Expected file format (csv, json, parquet) |
+
+### Virtual Table
+
+Read-only query views — **SNAPSHOT mode only**:
+
+```bash
+curl -X POST http://localhost:8080/api/v2/connectivity/virtualTables \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connectionRid": "ri.spice.main.connection.conn-789",
+    "datasetRid": "ri.spice.main.dataset.target-dataset",
+    "displayName": "Department Summary View",
+    "importMode": "SNAPSHOT",
+    "config": {
+      "query": "SELECT department, COUNT(*) as headcount FROM employees GROUP BY department"
+    }
+  }'
+```
+
+:::caution
+Virtual tables only support SNAPSHOT mode. Attempting to use APPEND, UPDATE, INCREMENTAL, or CDC will result in an error.
+:::
+
+## Sync Modes
+
+Sync modes determine how new data merges with existing data in the target dataset.
+
+### SNAPSHOT
+
+**Strategy:** Replace all data on each run.
+
+```json
+{
+  "importMode": "SNAPSHOT",
+  "config": {
+    "query": "SELECT * FROM products"
+  }
+}
+```
+
+**Required fields:** `query` (for JDBC connectors)
+
+**When to use:** Daily reports, small reference tables, data that changes unpredictably.
+
+**Behavior:** The entire target dataset is overwritten with the query result.
+
+### APPEND
+
+**Strategy:** Add new rows, deduplicate by content hash.
+
+```json
+{
+  "importMode": "APPEND",
+  "config": {
+    "query": "SELECT * FROM event_logs"
+  }
+}
+```
+
+**Required fields:** `query` (for JDBC connectors)
+
+**When to use:** Event logs, audit trails, growing datasets where rows are never updated.
+
+**Behavior:**
+1. Load existing dataset rows
+2. Fetch new rows from source
+3. Compute content hash for deduplication
+4. Append only genuinely new rows
+5. Save merged result
+
+### UPDATE
+
+**Strategy:** Upsert by primary key.
+
+```json
+{
+  "importMode": "UPDATE",
+  "config": {
+    "query": "SELECT * FROM customers",
+    "primary_key_column": "customer_id"
+  }
+}
+```
+
+**Required fields:** `query` (for JDBC connectors)
+
+**When to use:** Customer profiles, product catalogs, status tables — any data that changes in place.
+
+**Behavior:**
+1. Load existing dataset rows
+2. Fetch all rows from source
+3. Match by primary key column (or first column if not specified)
+4. Insert new rows, update existing rows with changed values
+5. Save merged result
+
+### INCREMENTAL
+
+**Strategy:** Fetch only rows after a watermark (timestamp or sequence).
+
+```json
+{
+  "importMode": "INCREMENTAL",
+  "config": {
+    "query": "SELECT * FROM orders WHERE updated_at > :watermark",
+    "watermarkColumn": "updated_at"
+  }
+}
+```
+
+**Required fields:** `query` + `watermarkColumn`
+
+**When to use:** Large tables with reliable timestamps, where scanning the full table is too expensive.
+
+**Behavior:**
+1. Read the last watermark value from sync state
+2. Execute query with watermark filter
+3. Append new rows to dataset
+4. Update watermark to the latest value seen
+
+:::note
+The `:watermark` placeholder in the query is replaced with the stored watermark value at execution time.
+:::
+
+### CDC (Change Data Capture)
+
+**Strategy:** Track changes via database-native change tokens (SCN, binlog position, LSN).
+
+```json
+{
+  "importMode": "CDC",
+  "config": {
+    "cdcQuery": "SELECT * FROM cdc_changes WHERE change_token > :token",
+    "watermarkColumn": "change_token"
+  }
+}
+```
+
+**Required fields:** Either `cdcQuery`, OR `query` + `watermarkColumn`
+
+**When to use:** Real-time replication, when the source database supports change tracking.
+
+**Behavior:**
+1. Read the last change token from sync state
+2. Call `peek_change_token()` to get the latest available token
+3. Execute CDC query between stored and latest tokens
+4. Apply changes (insert/update/delete) to target dataset
+5. Update stored token
+
+### Sync Mode Decision Matrix
+
+| Criteria | Recommended Mode |
+|----------|-----------------|
+| Small table, full refresh OK | SNAPSHOT |
+| Append-only data (logs, events) | APPEND |
+| Mutable rows with primary key | UPDATE |
+| Large table with timestamps | INCREMENTAL |
+| Database supports change tracking | CDC |
+| Read-only analytical view | SNAPSHOT (Virtual Table) |
+
+## Executing Imports
+
+### Manual Execution
+
+Trigger an import run immediately:
+
+```bash
+curl -X POST http://localhost:8080/api/v2/connectivity/tableImports/{importRid}/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "branchName": "main"
+  }'
+```
+
+### Execution Pipeline
+
+When an import is executed, the following steps occur:
+
+1. **Connection Resolution** — load connection config and decrypt secrets
+2. **Adapter Selection** — `ConnectorAdapterFactory.get_adapter(kind)` selects the appropriate adapter
+3. **Credential Injection** — merge parent connection secrets into import config
+4. **Config Validation** — validate import mode requirements:
+   - SNAPSHOT/APPEND/UPDATE: `query` required
+   - INCREMENTAL: `query` + `watermarkColumn` required
+   - CDC: `cdcQuery` or (`query` + `watermarkColumn`) required
+5. **SQL Guard** — normalize SQL query (trim, reject multi-statement injection)
+6. **Query Execution** — run query via adapter with 300-second timeout
+7. **Sync Mode Processing** — apply SNAPSHOT/APPEND/UPDATE/INCREMENTAL/CDC logic
+8. **Storage** — write result to LakeFS with versioned commit
+9. **Dataset Registration** — update dataset version in registry
+10. **Event Publishing** — publish completion event to Kafka
+
+### Execution Response
+
+```json
+{
+  "rid": "ri.spice.main.job.exec-123",
+  "status": "SUCCEEDED",
+  "startTime": "2024-01-15T09:30:00Z",
+  "endTime": "2024-01-15T09:30:45Z",
+  "datasetRid": "ri.spice.main.dataset.target-dataset",
+  "rowsProcessed": 15000,
+  "branchName": "main"
+}
+```
+
+## Security
+
+### Secret Encryption
+
+All connection secrets are encrypted using **AES-GCM** with:
+
+- **12-byte random nonce** per encryption operation
+- **Additional Authenticated Data (AAD)** — bound to the source type and source ID (`{source_type}:{source_id}`)
+- **Multi-key rotation** — supports decrypting with multiple keys during rotation periods
+- **Key sizes** — 16, 24, or 32 bytes (AES-128, AES-192, AES-256)
+
+```
+Encrypted format: "enc:v1:{base64(nonce + ciphertext + tag)}"
+```
+
+:::danger
+In production environments, the `ALLOW_PLAINTEXT_CONNECTOR_SECRETS` flag **must not** be set to `true`. Secrets stored without encryption are a security risk.
+:::
+
+### SQL Injection Guard
+
+All SQL queries submitted through the Connectivity API are normalized by the SQL query guard:
+
+- **Trailing semicolons** are stripped
+- **Multiple statements** (queries separated by `;`) are **rejected**
+- **Whitespace** is trimmed
+
+This prevents SQL injection attacks through the import configuration.
+
+### Query Timeouts
+
+All JDBC adapter operations execute with a **300-second (5 minute) timeout**. The query runs in an async thread pool via `run_blocking_query()`, and if it exceeds the timeout, it is cancelled and an error is returned.
+
+### Feature Flags
+
+Connectivity features are gated by feature flags for controlled rollout:
+
+| Flag | Environment Variable | Default | Description |
+|------|---------------------|---------|-------------|
+| JDBC Connectivity | `ENABLE_FOUNDRY_CONNECTIVITY_JDBC` | `false` | Enable JDBC connectors globally |
+| JDBC DB Allowlist | `FOUNDRY_CONNECTIVITY_JDBC_DB_ALLOWLIST` | `""` | Comma-separated ontology DB names allowed for JDBC |
+| CDC Mode | `ENABLE_FOUNDRY_CONNECTIVITY_CDC` | `false` | Enable CDC sync mode globally |
+| CDC DB Allowlist | `FOUNDRY_CONNECTIVITY_CDC_DB_ALLOWLIST` | `""` | Comma-separated ontology DB names allowed for CDC |
+
+**Allowlist behavior:** When the global flag is disabled, individual databases can still be enabled via the allowlist. This allows gradual rollout.
+
+## Scheduling Imports
+
+Imports can be scheduled for recurring execution through the Orchestration API:
+
+```bash
+curl -X POST http://localhost:8080/api/v2/orchestration/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipelineRid": "ri.spice.main.pipeline.import-pipeline",
+    "cronExpression": "0 */6 * * *",
+    "enabled": true
+  }'
+```
+
+The Pipeline Scheduler polls the registry, evaluates cron expressions, and enqueues import jobs to Kafka.
+
+## Monitoring & Troubleshooting
+
+### Common Errors
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `config.query is required for JDBC connectors` | Missing SQL query in SNAPSHOT/APPEND/UPDATE mode | Add `query` field to config |
+| `watermarkColumn is required for INCREMENTAL mode` | Missing watermark column | Add `watermarkColumn` to config |
+| `virtual tables support only SNAPSHOT mode` | Non-SNAPSHOT mode on virtual table | Change `importMode` to `SNAPSHOT` |
+| `file import requires at least one selector` | No file selector in file import | Add `path`, `filePattern`, or `subfolder` |
+| SQL injection guard rejection | Query contains multiple statements | Remove extra semicolons/statements |
+| Query timeout (300s) | Query takes too long | Optimize the source query |
+| Connection test failure | Invalid credentials or unreachable host | Verify connection config and network |
+| Decryption failure | Key rotation or corrupted secret | Re-encrypt with current key |
+
+### Sync State Tracking
+
+The platform tracks sync state for each import resource in `connector_sync_state`:
+
+| Field | Description |
+|-------|-------------|
+| `cursor` | Current watermark/token position |
+| `emitted_seq` | Sequence number of last emitted event |
+| `polled_at` | Timestamp of last poll |
+| `success_at` | Timestamp of last successful sync |
+| `failure_at` | Timestamp of last failure |
+| `error_count` | Consecutive error count |
+| `last_error` | Last error message |
+
+### Event Outbox
+
+Import events are durably queued in `connector_update_outbox` before being published to Kafka. This ensures **at-least-once delivery** with deterministic event IDs for deduplication.
+
+## Best Practices
+
+1. **Start with SNAPSHOT** — it is the simplest and most reliable mode. Switch to incremental modes only when SNAPSHOT becomes too slow.
+
+2. **Use UPDATE for mutable data** — if rows change in the source, UPDATE mode correctly handles upserts by primary key.
+
+3. **Set meaningful display names** — helps with monitoring and debugging when you have many imports.
+
+4. **Test connections first** — use the connection test endpoint before creating imports.
+
+5. **Monitor sync state** — check `success_at` and `error_count` to detect stale or failing imports.
+
+6. **Rotate encryption keys gracefully** — the multi-key rotation feature allows you to add the new key first, then remove the old key after all secrets have been re-encrypted.
+
+7. **Use allowlists for gradual rollout** — enable JDBC/CDC features per-database before enabling globally.
+
+8. **Optimize source queries** — add indexes on the source database for columns used in WHERE clauses and watermark columns.
+
+## Next Steps
+
+- **[Schema Configuration](./schema-config)** — Define target object types for imported data
+- **[Pipeline Builder](./pipeline-builder)** — Transform imported data with pipelines
+- **[Configuration Reference](/docs/reference/config)** — Connectivity-related environment variables
+- **[Core Concepts](/docs/getting-started/concepts)** — Review Connections, Sync Modes, and Datasets

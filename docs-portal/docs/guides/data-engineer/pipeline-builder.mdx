@@ -5,31 +5,741 @@ sidebar_position: 2
 
 # Pipeline Builder
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
+This guide walks data engineers through building, testing, and deploying data transformation pipelines in SPICE Harvester. Pipelines are the primary mechanism for transforming raw data into structured ontology objects.
+
+## Overview
+
+A **Pipeline** is a declarative data transformation workflow defined as a DAG (directed acyclic graph) of nodes. Each pipeline has:
+
+- **Input Nodes** — data sources (datasets, JDBC connections, Kafka topics, S3 files)
+- **Transform Nodes** — operations that reshape, filter, enrich, and validate data
+- **Output Nodes** — destinations (datasets, ontology object types, geotemporal stores)
+
+```
+[CSV Dataset] ──→ [Filter: active=true] ──→ [Compute: fullName] ──→ [Output: Employee]
+                                                   ↑
+[JDBC Source] ──→ [Join: dept_id] ────────────────┘
+```
+
+## Pipeline Definition
+
+Pipelines are defined as JSON documents with `nodes`, `edges`, and metadata:
+
+```json
+{
+  "nodes": {
+    "input_csv": {
+      "type": "input",
+      "title": "Employee CSV",
+      "metadata": {
+        "dataset_id": "ri.spice.main.dataset.emp-data",
+        "branch": "main"
+      }
+    },
+    "filter_active": {
+      "type": "transform",
+      "title": "Active Employees Only",
+      "metadata": {
+        "operation": "filter",
+        "expression": "row['status'] == 'ACTIVE'"
+      }
+    },
+    "compute_name": {
+      "type": "transform",
+      "title": "Compute Full Name",
+      "metadata": {
+        "operation": "compute",
+        "assignments": [
+          {
+            "column": "fullName",
+            "expression": "row['firstName'] + ' ' + row['lastName']"
+          }
+        ]
+      }
+    },
+    "output_ontology": {
+      "type": "output",
+      "title": "Write to Employee ObjectType",
+      "metadata": {
+        "outputName": "Employee",
+        "kind": "ontology"
+      }
+    }
+  },
+  "edges": [
+    { "source": "input_csv", "target": "filter_active" },
+    { "source": "filter_active", "target": "compute_name" },
+    { "source": "compute_name", "target": "output_ontology" }
+  ],
+  "executionMode": "snapshot",
+  "parameters": {},
+  "outputs": [
+    {
+      "name": "Employee",
+      "kind": "ontology",
+      "notes": "Upsert active employees into Employee object type"
+    }
+  ]
+}
+```
+
+### Node Types
+
+| Type | Description | Typical Use |
+|------|-------------|-------------|
+| `input` | Data source node | Reads from datasets, JDBC, Kafka, S3 |
+| `read_dataset` | Dataset reader | Reads a specific dataset version |
+| `transform` | Data transformation | Apply one of 22 transform operations |
+| `output` | Data sink | Writes to dataset, ontology, or geotemporal store |
+
+### Edge Structure
+
+Edges connect nodes and define data flow direction:
+
+```json
+{ "source": "node_a", "target": "node_b" }
+```
+
+Edges must form a valid DAG — cycles are rejected during validation.
+
+## Transform Operations
+
+SPICE Harvester supports **22 transform types** organized into four categories:
+
+### Data Manipulation
+
+#### filter
+
+Filter rows based on a Python expression:
+
+```json
+{
+  "operation": "filter",
+  "expression": "row['age'] >= 18 and row['status'] == 'ACTIVE'"
+}
+```
+
+#### compute
+
+Add or overwrite columns with computed values:
+
+```json
+{
+  "operation": "compute",
+  "assignments": [
+    { "column": "fullName", "expression": "row['first'] + ' ' + row['last']" },
+    { "column": "yearJoined", "expression": "row['startDate'][:4]" }
+  ]
+}
+```
+
+#### select
+
+Keep only specified columns:
+
+```json
+{
+  "operation": "select",
+  "columns": ["employeeId", "fullName", "department", "startDate"]
+}
+```
+
+#### drop
+
+Remove specified columns:
+
+```json
+{
+  "operation": "drop",
+  "columns": ["internalNotes", "tempFlag"]
+}
+```
+
+#### rename
+
+Rename columns:
+
+```json
+{
+  "operation": "rename",
+  "rename": {
+    "emp_id": "employeeId",
+    "dept_name": "department"
+  }
+}
+```
+
+#### cast
+
+Convert column data types:
+
+```json
+{
+  "operation": "cast",
+  "casts": [
+    { "column": "age", "target": "xsd:integer" },
+    { "column": "salary", "target": "xsd:decimal" },
+    { "column": "startDate", "target": "xsd:date" }
+  ]
+}
+```
+
+#### normalize
+
+Clean and standardize text data:
+
+```json
+{
+  "operation": "normalize",
+  "columns": ["email", "fullName"],
+  "trim": true,
+  "emptyToNull": true,
+  "whitespaceToNull": true,
+  "lowercase": true,
+  "uppercase": false
+}
+```
+
+#### regexReplace
+
+Apply regex-based text transformations:
+
+```json
+{
+  "operation": "regexReplace",
+  "column": "phone",
+  "pattern": "[^0-9+]",
+  "replacement": ""
+}
+```
+
+#### sort
+
+Sort rows by one or more columns:
+
+```json
+{
+  "operation": "sort",
+  "columns": ["department", "fullName"],
+  "ascending": [true, true]
+}
+```
+
+#### dedupe
+
+Remove duplicate rows based on column subsets:
+
+```json
+{
+  "operation": "dedupe",
+  "columns": ["employeeId"],
+  "keepFirst": true
+}
+```
+
+#### split
+
+Conditionally route rows into different branches:
+
+```json
+{
+  "operation": "split",
+  "expression": "row['department'] == 'Engineering'"
+}
+```
+
+### Aggregation
+
+#### groupBy
+
+Group rows by key columns (typically paired with aggregate):
+
+```json
+{
+  "operation": "groupBy",
+  "groupBy": ["department", "level"],
+  "aggregates": [
+    { "column": "salary", "op": "sum", "alias": "totalSalary" },
+    { "column": "employeeId", "op": "count", "alias": "headcount" },
+    { "column": "salary", "op": "avg", "alias": "avgSalary" }
+  ]
+}
+```
+
+**Supported aggregate operations:** `sum`, `count`, `avg`, `min`, `max`
+
+#### aggregate
+
+Standalone aggregation without explicit grouping:
+
+```json
+{
+  "operation": "aggregate",
+  "aggregates": [
+    { "column": "revenue", "op": "sum", "alias": "totalRevenue" }
+  ]
+}
+```
+
+#### pivot
+
+Create pivot tables:
+
+```json
+{
+  "operation": "pivot",
+  "pivot": {
+    "index": ["quarter"],
+    "columns": "region",
+    "values": "revenue",
+    "agg": "sum"
+  }
+}
+```
+
+#### window
+
+Apply window functions over partitioned data:
+
+```json
+{
+  "operation": "window",
+  "window": {
+    "partitionBy": ["department"],
+    "orderBy": ["salary"],
+    "outputColumn": "salaryRank"
+  }
+}
+```
+
+Window functions support `row_number`, `rank`, `dense_rank`, and cumulative operations.
+
+### Set Operations
+
+#### join
+
+Join two datasets together:
+
+```json
+{
+  "operation": "join",
+  "joinType": "left",
+  "leftKey": "departmentId",
+  "rightKey": "dept_id",
+  "allowCrossJoin": false
+}
+```
+
+**Join types:** `inner`, `left`, `right`, `full`, `cross`
+
+:::caution
+Cross joins can produce very large results. Set `allowCrossJoin: true` explicitly to enable them.
 :::
 
-## What This Guide Covers
+#### union
 
-This guide will walk data engineers through building and managing data pipelines in SPICE Harvester, including:
+Combine multiple datasets vertically:
 
-- **Pipeline Concepts** -- Sources, transforms, sinks, and execution models
-- **Creating a Pipeline** -- Step-by-step pipeline definition in JSON/YAML
-- **Source Configuration** -- Connecting to files (CSV, JSON, Parquet), APIs, databases, and Kafka topics
-- **Transform Chains** -- Combining the 22+ transform types (map, filter, join, validate, deduplicate, etc.)
-- **Output Transforms** -- Writing results to object types with `upsertObjects` and `createLinks`
-- **Pipeline Execution** -- Running pipelines, monitoring progress, and handling failures
-- **Scheduling** -- Setting up recurring pipeline executions
-- **Error Handling** -- Dealing with bad records, partial failures, and retry logic
-- **Performance Tuning** -- Optimizing pipeline throughput and resource usage
-- **Pipeline Testing** -- Using `preview` and `validate` modes before production runs
+```json
+{
+  "operation": "union",
+  "unionMode": "common_only"
+}
+```
 
-## Prerequisites
+**Union modes:**
+- `strict` — all datasets must have identical schemas
+- `common_only` — only keep columns present in all inputs
+- `pad_missing_nulls` — include all columns, fill missing with NULL
 
-- [Core Concepts](/docs/getting-started/concepts) -- Pipelines and transforms
-- [Schema Configuration](./schema-config) -- Target object types must exist before running pipelines
+#### explode
 
-## Related Resources
+Expand array columns into individual rows:
 
-- [Pipeline Tools Reference](/docs/reference/pipeline-tools) -- Complete transform type listing
-- [Configuration Reference](/docs/reference/config) -- Pipeline-related environment variables
+```json
+{
+  "operation": "explode",
+  "column": "tags"
+}
+```
+
+### Advanced
+
+#### udf
+
+Apply custom Python logic per row (see [UDF System](#user-defined-functions-udfs) below):
+
+```json
+{
+  "operation": "udf",
+  "udfId": "clean-phone-numbers",
+  "udfVersion": 1
+}
+```
+
+#### geospatial
+
+Geospatial operations for coordinate and shape data:
+
+```json
+{
+  "operation": "geospatial",
+  "geoOperation": "distance",
+  "sourceColumn": "location",
+  "targetColumn": "headquarters"
+}
+```
+
+#### patternMining
+
+Statistical pattern discovery:
+
+```json
+{
+  "operation": "patternMining",
+  "columns": ["category", "region"],
+  "minSupport": 0.05
+}
+```
+
+#### streamJoin
+
+Time-windowed streaming join:
+
+```json
+{
+  "operation": "streamJoin",
+  "leftKey": "userId",
+  "rightKey": "userId",
+  "windowSeconds": 3600
+}
+```
+
+## User-Defined Functions (UDFs)
+
+UDFs allow custom per-row transformations written in Python, executed in a **sandboxed environment** with strict security controls.
+
+### Writing a UDF
+
+```python
+def transform(row):
+    """Clean and normalize phone numbers."""
+    phone = row.get("phone", "")
+    # Remove all non-numeric characters except +
+    cleaned = ""
+    for ch in str(phone):
+        if ch.isdigit() or ch == "+":
+            cleaned += ch
+    return {"phone_cleaned": cleaned}
+```
+
+### UDF Contract
+
+- **Function name must be `transform`**
+- **Input:** `row` — a Python `dict` with column names as keys
+- **Output:** Must return a `dict` (single row) or `list[dict]` (multiple rows)
+- **Processing:** Each input row is processed independently
+
+### Security Sandbox
+
+UDFs run in a restricted environment enforced via Python AST (Abstract Syntax Tree) validation:
+
+**Blocked constructs:**
+
+| Construct | Reason |
+|-----------|--------|
+| `import`, `from ... import` | No external module access |
+| `class` definitions | No class creation |
+| `while`, `for` loops | Prevents infinite loops |
+| `lambda` expressions | No anonymous functions |
+| `try`/`except`/`raise` | No exception handling |
+| `with` statements | No context managers |
+| `async`/`await`/`yield` | No async or generator patterns |
+| `global`/`nonlocal` | No scope manipulation |
+| `__dunder__` attribute access | Prevents interpreter introspection |
+
+**Allowed built-in functions:**
+
+```
+abs, bool, dict, enumerate, float, int, len, list,
+max, min, range, round, str, sum
+```
+
+:::warning
+UDFs cannot import libraries, use loops, or access the file system. This is by design — UDFs should be simple per-row transformations. For complex logic, consider using multiple transform nodes.
+:::
+
+### UDF Caching
+
+UDFs are cached by `{udfId}:{version}:{code_hash}` to avoid recompilation across pipeline runs.
+
+## Execution Modes
+
+Pipelines support three execution modes that control how data is processed:
+
+### Preview Mode
+
+**Purpose:** Fast validation with sample data — no side effects.
+
+```json
+{
+  "__preview_meta__": {
+    "branch": "main",
+    "max_output_rows": 1000,
+    "sample_limit": 100
+  }
+}
+```
+
+- Runs on a limited sample of input data
+- Unsupported expressions produce `NULL` instead of errors (best-effort)
+- Skips full foreign key validation (requires full table scan)
+- No data is written to any output
+- Returns preview results for inspection
+
+**Use Preview for:** testing pipeline logic before committing resources, validating expressions, checking output schema.
+
+### Build Mode
+
+**Purpose:** Full execution that produces artifacts without deploying them.
+
+- Processes all input data
+- Validates schema contracts and expectations
+- Produces build artifacts stored in S3/LakeFS
+- Creates a versioned build record with status tracking
+- No data is written to production outputs
+
+**Use Build for:** CI/CD validation, change review workflows, pre-deployment testing.
+
+### Deploy Mode
+
+**Purpose:** Production execution that writes to outputs.
+
+- Processes all input data
+- Writes results to output datasets and/or ontology object types
+- Manages incremental state for subsequent runs
+- Publishes events to Kafka for downstream consumption
+- Records lineage edges
+
+**Use Deploy for:** production data loading, scheduled recurring pipelines.
+
+## Execution Semantics
+
+Pipelines support different execution semantics that determine how output data is managed:
+
+| Semantic | Description | When to Use |
+|----------|-------------|-------------|
+| `snapshot` | Full refresh — replaces all output data | Daily reports, small datasets |
+| `incremental` | Appends only new/changed data using watermarks | Large datasets with timestamps |
+| `streaming` | Continuous processing with state management | Real-time event streams |
+
+Configure via the `executionMode` field:
+
+```json
+{
+  "executionMode": "incremental",
+  "incremental": {
+    "watermarkColumn": "updated_at",
+    "watermarkType": "timestamp"
+  }
+}
+```
+
+## Schema Contract Enforcement
+
+Pipelines can enforce schema contracts on their output:
+
+```json
+{
+  "schemaContract": {
+    "enforcement": "fail"
+  },
+  "expectations": [
+    {
+      "type": "required_columns",
+      "columns": ["employeeId", "fullName"]
+    },
+    {
+      "type": "unique",
+      "columns": ["employeeId"]
+    },
+    {
+      "type": "fk_exists",
+      "columns": ["departmentId"],
+      "reference": {
+        "dataset_id": "ri.spice.main.dataset.dept-data",
+        "columns": ["deptId"]
+      }
+    }
+  ]
+}
+```
+
+### Expectation Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `required_columns` | Specified columns must exist in output | `["id", "name"]` |
+| `unique` | Values must be unique across specified columns | `["employeeId"]` |
+| `fk_exists` | Foreign key values must exist in reference dataset | References dept table |
+
+**Enforcement modes:**
+- `fail` — pipeline fails if any expectation is violated
+- `warn` — pipeline succeeds but logs warnings
+
+## Proposal Workflow
+
+Changes to pipelines on protected branches (`main`, `prod`) require **proposal approval** before deployment.
+
+### Proposal Lifecycle
+
+```
+1. Submit Proposal
+   └── LLM or engineer generates pipeline definition
+       └── Optional: reference a successful build job
+
+2. Build Bundle Created
+   ├── Validates build run exists (status: SUCCESS)
+   ├── Captures definition_hash + pipeline_spec_commit_id
+   ├── Records mapping spec IDs
+   └── Builds ontology bundle (branch, ref, commit info)
+
+3. Approval
+   ├── Reviewer approves pending proposal
+   └── Pipeline moves to deployment
+
+4. OR Rejection
+   ├── Reviewer rejects with reason
+   └── Proposal archived with audit trail
+```
+
+### Proposal States
+
+| State | Description |
+|-------|-------------|
+| `pending` | Submitted, awaiting review |
+| `approved` | Approved, ready for deployment |
+| `rejected` | Explicitly rejected |
+
+### Idempotency
+
+All proposal operations require an **idempotency key** to prevent duplicate submissions. If the same key is submitted twice, the second request returns the existing proposal.
+
+## Pipeline Execution Flow
+
+When a pipeline is executed, the system follows this flow:
+
+1. **Normalization** — `normalize_nodes()` and `normalize_edges()` validate structure
+2. **Topological Sort** — compute execution order from the DAG
+3. **Node Execution** — process each node in topological order:
+   - Load data for input nodes
+   - Apply transform operations
+   - Validate schema checks at each step
+4. **Output Processing** — validate schema contracts and expectations
+5. **Result Recording** — log run status, artifacts, and lineage
+
+### Concurrency Control
+
+- **Optimistic Concurrency Control (OCC)** — pipelines check version before writing
+- **Publish Locks** — prevent concurrent deployments to the same output
+- **Idempotent Execution** — deterministic run IDs prevent duplicate processing
+
+## Scheduling
+
+Pipelines can be scheduled for recurring execution:
+
+```json
+{
+  "schedule_cron": "0 2 * * *",
+  "schedule_interval_seconds": null
+}
+```
+
+**Scheduling options:**
+- **Cron expressions** — standard cron format (e.g., `0 2 * * *` for daily at 2 AM)
+- **Interval-based** — execute every N seconds
+
+The **Pipeline Scheduler** is an independent background process that:
+1. Polls the pipeline registry every N seconds
+2. Evaluates cron expressions against current time
+3. Checks pipeline dependencies (upstream pipelines must complete first)
+4. Enqueues jobs to Kafka for worker execution
+
+Schedules can be **paused** and **unpaused** without deleting the configuration.
+
+## Output Types
+
+Pipelines can write to multiple output types:
+
+| Output Kind | Description | Use Case |
+|-------------|-------------|----------|
+| `dataset` | Versioned dataset in LakeFS | Intermediate data, shared datasets |
+| `ontology` | Object type instances | Production objects |
+| `virtual` | Read-only query view | Analytics dashboards |
+| `geotemporal` | Location + time indexed data | Maps, spatial analytics |
+| `media` | Binary artifacts (images, PDFs) | Document processing |
+
+## Pipeline Settings
+
+### Cast Mode
+
+Controls how type mismatches are handled during transforms:
+
+| Mode | Behavior |
+|------|----------|
+| `strict` | Fail on any type mismatch |
+| `lenient` | Attempt automatic type coercion |
+| `best_effort` | Coerce when possible, NULL on failure |
+
+### Parameters
+
+Pipelines support parameterization for reusability:
+
+```json
+{
+  "parameters": {
+    "target_department": {
+      "type": "string",
+      "default": "Engineering"
+    },
+    "min_salary": {
+      "type": "float",
+      "default": 50000
+    }
+  }
+}
+```
+
+Parameters can be referenced in filter expressions and compute assignments.
+
+## Best Practices
+
+### Pipeline Design
+
+1. **Keep transforms focused** — one operation per node for debuggability
+2. **Filter early** — place filters before expensive operations (joins, aggregations)
+3. **Use Preview mode** — always test with Preview before Build
+4. **Add schema expectations** — catch data quality issues early
+5. **Name nodes descriptively** — helps with debugging and monitoring
+
+### Performance
+
+1. **Limit column selection** — use `select` early to reduce data volume
+2. **Deduplicate before joins** — reduces join output size
+3. **Use incremental semantics** — avoid full reprocessing for large datasets
+4. **Avoid cross joins** — they produce O(n*m) output rows
+5. **Keep UDFs simple** — complex logic should be broken into multiple transforms
+
+### Error Handling
+
+1. **Set enforcement to `fail`** — catch problems before they propagate
+2. **Add required_columns expectations** — ensure critical columns exist
+3. **Use normalize before compute** — clean data before operating on it
+4. **Monitor pipeline runs** — check run history for failures and warnings
+
+## Next Steps
+
+- **[Schema Configuration](./schema-config)** — Define target object types
+- **[Import Templates](./import-templates)** — Connect external data sources
+- **[Pipeline Tools Reference](/docs/reference/pipeline-tools)** — Complete transform reference
+- **[Configuration Reference](/docs/reference/config)** — Pipeline environment variables

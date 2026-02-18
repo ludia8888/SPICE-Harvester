@@ -5,30 +5,317 @@ sidebar_position: 1
 
 # Service Monitoring
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks platform administrators through monitoring SPICE Harvester services. You will learn how to use health checks, Docker health monitoring, and logging to ensure platform reliability.
 
-## What This Guide Covers
+## Service Inventory
 
-This guide will walk platform administrators through monitoring SPICE Harvester services, including:
+SPICE Harvester runs as **26 Docker services** organized into layers:
 
-- **Grafana Dashboards** -- Navigating pre-built dashboards for service health, request latency, and throughput
-- **Prometheus Metrics** -- Understanding the key metrics exposed by each service (request rate, error rate, latency percentiles)
-- **Jaeger Tracing** -- Using distributed tracing to debug slow requests and cross-service issues
-- **Log Aggregation** -- Querying logs in Loki/Grafana for troubleshooting
-- **Alert Configuration** -- Setting up AlertManager rules for critical conditions (service down, high error rate, disk full)
-- **Health Check Endpoints** -- Monitoring service health via HTTP endpoints and Docker health checks
-- **Capacity Planning** -- Using metrics to plan scaling decisions
-- **Custom Dashboards** -- Building Grafana dashboards for your specific monitoring needs
+### Core Application Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **bff** | 8080 | Backend for Frontend -- API gateway, 234+ endpoints |
+| **oms** | 8000 | Ontology Management Service -- schema CRUD, search |
+| **agent** | — | Agent service for AI integrations |
+
+### Worker Services
+
+| Service | Description |
+|---------|-------------|
+| **ontology-worker** | Processes ontology schema mutations |
+| **instance-worker** | Manages object instance lifecycle |
+| **action-worker** | Executes validated actions |
+| **action-outbox-worker** | Publishes action events from outbox to Kafka |
+| **pipeline-worker** | Executes data transformation pipelines |
+| **pipeline-scheduler** | Evaluates cron schedules and enqueues pipeline jobs |
+| **objectify-worker** | Converts raw dataset rows into ontology instances |
+| **projection-worker** | Builds denormalized projections from events |
+| **connector-trigger-service** | Triggers data connector imports |
+| **connector-sync-worker** | Synchronizes external data sources |
+| **ingest-reconciler-worker** | Reconciles ingestion transactions |
+| **message-relay** | Relays messages between services |
+| **writeback-materializer-worker** | Materializes writebacks |
+
+### Infrastructure Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **postgres** | 5433 | PostgreSQL 16 -- primary data store |
+| **redis** | 6379 | Redis -- caching and session storage |
+| **elasticsearch** | 9200 | Elasticsearch 8.12 -- search and analytics |
+| **kafka** | 39092 | Apache Kafka -- event streaming |
+| **zookeeper** | 2181 | ZooKeeper -- Kafka coordination |
+| **minio** | 9000/9001 | MinIO -- S3-compatible object storage |
+| **lakefs** | 48080 | lakeFS -- data versioning |
+
+### Initialization Services
+
+| Service | Purpose |
+|---------|---------|
+| **db-migrations** | Runs database schema migrations on startup |
+| **minio-init** | Creates MinIO buckets |
+| **lakefs-init** | Sets up lakeFS repositories |
+
+## Health Check Endpoints
+
+### BFF Health Check
+
+```bash
+# Service metadata
+curl http://localhost:8080/api/
+
+# Response:
+{
+  "service": "Ontology BFF Service",
+  "version": "2.0.0",
+  "description": "..."
+}
+```
+
+```bash
+# Health check with dependency status
+curl http://localhost:8080/api/health
+
+# Response:
+{
+  "data": {
+    "oms_connected": true,
+    "status": "healthy"
+  }
+}
+```
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| `healthy` | All dependencies available | No action needed |
+| `degraded` | OMS unavailable, BFF still serving | Investigate OMS service |
+
+### Docker Health Checks
+
+Each infrastructure service has a built-in Docker health check:
+
+| Service | Health Check | Interval | Retries |
+|---------|-------------|----------|---------|
+| **PostgreSQL** | `pg_isready` | 30s | 5 |
+| **Redis** | Redis ping | 30s | 5 |
+| **Elasticsearch** | Cluster health (yellow threshold) | 30s | 10 |
+| **Kafka** | Topic listing | 30s | 5 |
+| **ZooKeeper** | TCP connection | 30s | 5 |
+| **MinIO** | TCP check on port 9000 | 30s | 5 |
+| **lakeFS** | `GET /api/v1/healthcheck` | 10s | 10 |
+
+### Checking Service Health
+
+```bash
+# Check all service statuses
+docker compose ps
+
+# Check a specific service's health
+docker inspect --format='{{.State.Health.Status}}' spice-harvester-postgres-1
+
+# View health check logs
+docker inspect --format='{{json .State.Health}}' spice-harvester-elasticsearch-1 | jq
+```
+
+## Monitoring with Docker Compose
+
+### Service Logs
+
+```bash
+# Follow all service logs
+docker compose logs -f
+
+# Follow a specific service
+docker compose logs -f bff
+
+# View last 100 lines of a service
+docker compose logs --tail=100 pipeline-worker
+
+# Filter logs for errors
+docker compose logs bff 2>&1 | grep -i error
+```
+
+### Resource Usage
+
+```bash
+# Real-time container resource usage
+docker stats
+
+# Check specific service resources
+docker stats spice-harvester-bff-1 spice-harvester-oms-1
+```
+
+### Service Restart
+
+```bash
+# Restart a single service
+docker compose restart bff
+
+# Restart with fresh container
+docker compose up -d --force-recreate bff
+```
+
+## Key Metrics to Monitor
+
+### BFF Service
+
+| Metric | What to Watch | Warning Threshold |
+|--------|--------------|-------------------|
+| Request latency (p95) | Slow API responses | > 2 seconds |
+| Error rate (5xx) | Server-side failures | > 1% of requests |
+| Active connections | Connection exhaustion | > 80% of max |
+| OMS connectivity | Backend availability | `oms_connected: false` |
+
+### Worker Services
+
+| Metric | What to Watch | Warning Threshold |
+|--------|--------------|-------------------|
+| Queue depth | Kafka consumer lag | Growing continuously |
+| Processing time | Per-event processing latency | > 10 seconds |
+| Error count | Failed event processing | > 0 consecutive |
+| Restart count | Container crashes | > 3 in 5 minutes |
+
+### Infrastructure
+
+| Metric | What to Watch | Warning Threshold |
+|--------|--------------|-------------------|
+| PostgreSQL connections | Connection pool exhaustion | > 80% of max |
+| Elasticsearch cluster status | Node health | Yellow or Red |
+| Kafka consumer lag | Processing backlog | Growing trend |
+| MinIO disk usage | Storage capacity | > 80% used |
+| Redis memory usage | Memory pressure | > 80% of maxmemory |
+
+## Pipeline Scheduler Monitoring
+
+The **Pipeline Scheduler** is a critical background process that requires special attention:
+
+```bash
+# Check scheduler logs
+docker compose logs -f pipeline-scheduler
+
+# Verify scheduler is polling
+docker compose logs pipeline-scheduler 2>&1 | grep "poll"
+```
+
+**What to monitor:**
+- **Poll interval** -- scheduler polls the registry every N seconds
+- **Cron evaluation** -- verify cron expressions are triggering at expected times
+- **Job enqueue** -- confirm jobs are being published to Kafka
+- **Dependency checks** -- upstream pipelines must complete before downstream triggers
+
+## Troubleshooting Common Issues
+
+### Service Won't Start
+
+```bash
+# Check service logs for startup errors
+docker compose logs <service-name>
+
+# Check if dependencies are healthy
+docker compose ps
+
+# Verify environment variables
+docker compose config | grep <variable>
+```
+
+### Elasticsearch Cluster Red
+
+```bash
+# Check cluster health
+curl http://localhost:9200/_cluster/health?pretty
+
+# Check unassigned shards
+curl http://localhost:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason | grep UNASSIGNED
+
+# Force single-node shard allocation
+curl -X PUT http://localhost:9200/_cluster/settings \
+  -H "Content-Type: application/json" \
+  -d '{"persistent": {"cluster.routing.allocation.enable": "all"}}'
+```
+
+### Kafka Consumer Lag
+
+```bash
+# Check consumer group lag (from inside kafka container)
+docker compose exec kafka kafka-consumer-groups \
+  --bootstrap-server localhost:29092 \
+  --describe --all-groups
+```
+
+### PostgreSQL Connection Issues
+
+```bash
+# Check active connections
+docker compose exec postgres psql -U postgres -c "SELECT count(*) FROM pg_stat_activity;"
+
+# Check connection limits
+docker compose exec postgres psql -U postgres -c "SHOW max_connections;"
+
+# Kill idle connections
+docker compose exec postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < now() - interval '10 minutes';"
+```
+
+### lakeFS Issues
+
+```bash
+# Check lakeFS health
+curl http://localhost:48080/api/v1/healthcheck
+
+# List repositories
+curl http://localhost:48080/api/v1/repositories
+```
+
+## Capacity Planning
+
+### Database Growth
+
+Monitor PostgreSQL table sizes:
+
+```bash
+docker compose exec postgres psql -U postgres -c "
+SELECT schemaname, tablename,
+       pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) AS size
+FROM pg_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC
+LIMIT 20;"
+```
+
+### Elasticsearch Index Growth
+
+```bash
+curl http://localhost:9200/_cat/indices?v&s=store.size:desc
+```
+
+### MinIO Storage
+
+```bash
+# Check bucket usage (from MinIO console)
+# Navigate to http://localhost:9001 with MinIO credentials
+
+# Or via mc CLI
+docker compose exec minio mc ls --summarize --recursive /data/
+```
+
+## Best Practices
+
+1. **Monitor health endpoints** -- set up automated checks on `/api/health` with alerts on degraded status
+2. **Watch container restarts** -- repeated restarts indicate persistent failures
+3. **Track Kafka consumer lag** -- growing lag means workers can't keep up with event volume
+4. **Set resource limits** -- configure Docker memory and CPU limits to prevent resource contention
+5. **Rotate logs** -- configure Docker log rotation to prevent disk exhaustion
+6. **Back up PostgreSQL** -- schedule regular pg_dump backups
+7. **Monitor Elasticsearch yellow** -- address yellow cluster status before it turns red
 
 ## Prerequisites
 
-- [Installation Guide](/docs/getting-started/installation) -- Platform must be running with the observability profile
+- [Installation Guide](/docs/getting-started/installation) -- Platform must be running
 - [Service Topology](/docs/architecture/service-topology) -- Understanding of the service inventory
 
-## Related Resources
+## Next Steps
 
-- [Monitoring Operations](/docs/operations/monitoring) -- Operational monitoring reference
-- [Troubleshooting](/docs/operations/troubleshooting) -- Common issues and resolutions
-- [Configuration Reference](/docs/reference/config) -- Observability-related settings
+- **[Troubleshooting](/docs/operations/troubleshooting)** -- Common issues and resolutions
+- **[Monitoring Operations](/docs/operations/monitoring)** -- Operational monitoring reference
+- **[RBAC Guide](./rbac)** -- User and permission management
+- **[Configuration Reference](/docs/reference/config)** -- All environment variables

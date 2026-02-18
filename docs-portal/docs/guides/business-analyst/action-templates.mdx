@@ -5,29 +5,396 @@ sidebar_position: 1
 
 # Action Templates
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks business analysts through creating and using action templates to automate common data operations in SPICE Harvester. Action templates allow you to define reusable, validated business logic without writing code.
 
-## What This Guide Covers
+## What Are Actions?
 
-This guide will walk business analysts through creating and using action templates to automate common data operations, including:
+**Actions** are the write side of the SPICE Harvester platform. Instead of directly mutating data, all changes go through the action system, which provides:
 
-- **Template Concepts** -- What action templates are, when to use them, and how they differ from raw actions
-- **Built-in Templates** -- Pre-configured templates for common operations (onboarding, status updates, bulk edits)
-- **Template Expressions** -- Using `$ref`, `$now`, `$if`, `$switch`, and `$call` to build dynamic logic
-- **Parameter Definitions** -- Defining template parameters with types, defaults, and validation
-- **Conditional Logic** -- Branching based on input values or existing object state
-- **Template Testing** -- Validating templates before deployment using the validate endpoint
-- **Template Versioning** -- Managing template changes without breaking existing workflows
-- **Common Patterns** -- Approval workflows, cascading updates, computed fields
+- **Validation** -- actions are validated against rules before execution
+- **Audit trail** -- every action is logged as an immutable event
+- **Undo support** -- actions can be reversed through compensating actions
+- **Conflict resolution** -- concurrent modifications are detected and resolved
+
+### Action Types
+
+| Action Type | Description | Example |
+|------------|-------------|---------|
+| `createObject` | Create a new instance | Add a new employee |
+| `editObject` | Modify properties | Update department |
+| `deleteObject` | Remove an instance | Deactivate an employee |
+| `createLink` | Create a relationship | Assign employee to project |
+| `deleteLink` | Remove a relationship | Unassign employee |
+| `bulkAction` | Execute multiple actions atomically | Batch onboarding |
+
+## Using Built-in Actions
+
+### Create an Object
+
+```bash
+POST /api/v2/ontologies/acme/actions/createObject
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "properties": {
+      "employeeId": "EMP-099",
+      "fullName": "John Smith",
+      "department": "Marketing",
+      "startDate": "2024-01-15",
+      "status": "ACTIVE"
+    }
+  }
+}
+```
+
+### Edit an Object
+
+```bash
+POST /api/v2/ontologies/acme/actions/editObject
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099",
+    "properties": {
+      "department": "Sales",
+      "status": "ACTIVE"
+    }
+  }
+}
+```
+
+### Delete an Object
+
+```bash
+POST /api/v2/ontologies/acme/actions/deleteObject
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099"
+  }
+}
+```
+
+### Simulate Before Applying
+
+Test an action without making changes:
+
+```bash
+POST /api/v2/ontologies/acme/actions/editObject/simulate
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-042",
+    "properties": { "department": "Research" }
+  }
+}
+```
+
+## Action Templates
+
+An **Action Template** is a reusable action definition with dynamic expressions. Templates are evaluated at execution time and can reference inputs, the current user, timestamps, and existing object properties.
+
+### Template Versions
+
+| Version | Description | Capabilities |
+|---------|-------------|-------------|
+| `template_v1` | Basic templates | `$ref`, `$now` only |
+| `template_v2` | Advanced templates | `$ref`, `$now`, `$if`, `$switch`, `$call` with full expressions |
+| `function_v1` | Function-based | Custom function implementations |
+
+## Template Expressions
+
+### `$ref` -- Reference Values
+
+Reference input parameters, user context, or target object properties:
+
+```json
+{
+  "$ref": "input.department"
+}
+```
+
+| Reference | Description | Example |
+|-----------|-------------|---------|
+| `input.<field>` | Input parameter value | `{"$ref": "input.newStatus"}` |
+| `user.id` | Current user's ID | `{"$ref": "user.id"}` |
+| `user.name` | Current user's name | `{"$ref": "user.name"}` |
+| `target.<field>` | Existing object property | `{"$ref": "target.currentStatus"}` |
+
+### `$now` -- Current Timestamp
+
+Insert the current ISO 8601 datetime:
+
+```json
+{
+  "$now": true
+}
+```
+
+Produces: `"2024-01-15T09:30:00Z"`
+
+### `$if` -- Conditional Logic
+
+Branch based on conditions:
+
+```json
+{
+  "$if": {
+    "cond": { "$gt": [{ "$ref": "input.amount" }, 10000] },
+    "then": "REQUIRES_APPROVAL",
+    "else": "AUTO_APPROVED"
+  }
+}
+```
+
+### `$switch` -- Multi-Branch Conditional
+
+Evaluate multiple conditions in sequence:
+
+```json
+{
+  "$switch": {
+    "cases": [
+      {
+        "when": { "$eq": [{ "$ref": "input.priority" }, "critical"] },
+        "then": "ESCALATED"
+      },
+      {
+        "when": { "$eq": [{ "$ref": "input.priority" }, "high"] },
+        "then": "URGENT"
+      }
+    ],
+    "default": "NORMAL"
+  }
+}
+```
+
+### `$call` -- Function Invocation
+
+Call built-in functions:
+
+```json
+{
+  "$call": {
+    "fn": "upper",
+    "args": [{ "$ref": "input.code" }]
+  }
+}
+```
+
+**Available functions:**
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `upper` | Uppercase text | `upper("hello")` → `"HELLO"` |
+| `lower` | Lowercase text | `lower("HELLO")` → `"hello"` |
+| `concat` | Concatenate strings | `concat("A", "-", "B")` → `"A-B"` |
+| `add` | Add numbers | `add(10, 5)` → `15` |
+| `multiply` | Multiply numbers | `multiply(10, 1.1)` → `11` |
+| `divide` | Divide numbers | `divide(100, 4)` → `25` |
+
+### Comparison Operators (in conditions)
+
+| Operator | Description |
+|----------|-------------|
+| `$eq` | Equal to |
+| `$gt` | Greater than |
+| `$gte` | Greater than or equal |
+| `$lt` | Less than |
+| `$lte` | Less than or equal |
+
+## Template Structure
+
+A complete action template definition:
+
+```json
+{
+  "type": "template_v2",
+  "targets": [
+    {
+      "target": { "from": "input.ticket" },
+      "changes": {
+        "set": {
+          "status": {
+            "$if": {
+              "cond": { "$gt": [{ "$ref": "input.amount" }, 10000] },
+              "then": "REQUIRES_APPROVAL",
+              "else": "AUTO_APPROVED"
+            }
+          },
+          "reviewer": {
+            "$call": {
+              "fn": "upper",
+              "args": [{ "$ref": "user.id" }]
+            }
+          },
+          "reviewedAt": { "$now": true }
+        },
+        "unset": ["rejected_reason"],
+        "link_add": [
+          { "field": "assignees", "value": { "$ref": "input.assigneeId" } }
+        ],
+        "delete": false
+      }
+    }
+  ]
+}
+```
+
+### Change Operations
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `set` | Set property values | `{"set": {"status": "ACTIVE"}}` |
+| `unset` | Remove properties | `{"unset": ["tempField"]}` |
+| `link_add` | Add link relationships | `{"link_add": [{"field": "tags", "value": "urgent"}]}` |
+| `delete` | Delete the target object | `{"delete": true}` |
+
+## Common Patterns
+
+### Employee Onboarding
+
+Automatically set default values and link to a department:
+
+```json
+{
+  "type": "template_v2",
+  "targets": [
+    {
+      "target": { "from": "input.employee" },
+      "changes": {
+        "set": {
+          "status": "ACTIVE",
+          "startDate": { "$now": true },
+          "onboardedBy": { "$ref": "user.id" },
+          "accessLevel": {
+            "$switch": {
+              "cases": [
+                {
+                  "when": { "$eq": [{ "$ref": "input.role" }, "manager"] },
+                  "then": "FULL"
+                },
+                {
+                  "when": { "$eq": [{ "$ref": "input.role" }, "contractor"] },
+                  "then": "LIMITED"
+                }
+              ],
+              "default": "STANDARD"
+            }
+          }
+        },
+        "link_add": [
+          { "field": "department", "value": { "$ref": "input.departmentId" } }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Approval Workflow
+
+Route items based on amount thresholds:
+
+```json
+{
+  "type": "template_v2",
+  "targets": [
+    {
+      "target": { "from": "input.request" },
+      "changes": {
+        "set": {
+          "approvalStatus": {
+            "$if": {
+              "cond": { "$gt": [{ "$ref": "target.amount" }, 50000] },
+              "then": "EXECUTIVE_REVIEW",
+              "else": {
+                "$if": {
+                  "cond": { "$gt": [{ "$ref": "target.amount" }, 10000] },
+                  "then": "MANAGER_REVIEW",
+                  "else": "AUTO_APPROVED"
+                }
+              }
+            }
+          },
+          "lastReviewedAt": { "$now": true },
+          "lastReviewedBy": { "$ref": "user.id" }
+        }
+      }
+    }
+  ]
+}
+```
+
+### Status Transition
+
+Enforce valid status transitions:
+
+```json
+{
+  "type": "template_v2",
+  "targets": [
+    {
+      "target": { "from": "input.ticket" },
+      "changes": {
+        "set": {
+          "status": { "$ref": "input.newStatus" },
+          "statusChangedAt": { "$now": true },
+          "statusChangedBy": { "$ref": "user.id" },
+          "previousStatus": { "$ref": "target.status" }
+        }
+      }
+    }
+  ]
+}
+```
+
+## Batch Actions
+
+Execute multiple actions atomically:
+
+```bash
+POST /api/v2/ontologies/acme/actions/createObject/batch
+
+{
+  "requests": [
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-100", "fullName": "Alice" }
+      }
+    },
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-101", "fullName": "Bob" }
+      }
+    }
+  ]
+}
+```
+
+## Testing Templates
+
+Always simulate before applying:
+
+1. **Simulate** -- test the action without side effects
+2. **Review** -- verify the computed values are correct
+3. **Apply** -- execute the action for real
+
+The simulate endpoint returns what would happen without making changes, letting you verify template expressions produce the expected results.
 
 ## Prerequisites
 
 - [Core Concepts](/docs/getting-started/concepts) -- Actions and action templates
-- [v2 Actions API](/docs/api/v2-actions) -- Action API endpoints and template operators
+- [v2 Actions API](/docs/api/v2-actions) -- Action API endpoints
 
-## Related Resources
+## Next Steps
 
-- [Search Query Guide](./search-query) -- Finding objects to act on
-- [REST API Guide](../integration-developer/rest-api) -- Using templates through the API
+- **[Search & Query Guide](./search-query)** -- Find objects to act on
+- **[REST API Guide](../integration-developer/rest-api)** -- Use templates through the API
+- **[Dashboard Guide](./dashboard)** -- Visualize action results

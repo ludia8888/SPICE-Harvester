@@ -135,18 +135,122 @@ Instances are stored in PostgreSQL (source of truth) and indexed in Elasticsearc
 
 Action templates use a dynamic expression language with operators like `$ref`, `$now`, `$if`, `$switch`, and `$call` to define reusable action logic. Templates are evaluated at execution time and can reference the current user, timestamp, and existing object properties.
 
+## Datasets
+
+A **Dataset** is a versioned, immutable data object stored on LakeFS (backed by MinIO/S3). Datasets power the ontology by providing the raw data that gets objectified into instances.
+
+Key dataset operations:
+- **Branches** -- Git-like branching for parallel data development
+- **Transactions** -- Atomic read-modify-write operations with OPEN/COMMITTED/ABORTED lifecycle
+- **Versioning** -- Every change creates a new version with a LakeFS commit ID
+- **File storage** -- Datasets contain files (CSV, Parquet, etc.) addressable by path
+
+```
+Dataset: "sales-orders"
+├── Branch: main
+│   ├── Version: v3 (commit: abc123)
+│   │   └── data.csv (180,000 rows)
+│   ├── Version: v2 (commit: def456)
+│   └── Version: v1 (commit: ghi789)
+└── Branch: staging
+    └── Version: v1 (commit: jkl012)
+```
+
+Datasets are managed through the **Foundry Datasets v2 API** with 15 endpoints.
+
+## Connections & Connectors
+
+A **Connection** represents a configured link to an external data source. SPICE Harvester supports 6 connector types:
+
+| Connector | Library | Use Case |
+|-----------|---------|----------|
+| **Google Sheets** | gspread | Spreadsheet imports |
+| **PostgreSQL** | asyncpg | Relational databases |
+| **MySQL** | pymysql | Relational databases |
+| **Oracle** | oracledb | Enterprise databases |
+| **Snowflake** | snowflake-connector | Data warehouses |
+| **SQL Server** | pymssql | Enterprise databases |
+
+Each connection stores:
+- **Public configuration** (host, port, database) -- in `connector_sources.config_json`
+- **Secrets** (passwords, connection strings) -- **AES-GCM encrypted** in `connector_connection_secrets`
+
+Connections support three resource types:
+- **Table Imports** -- SQL query-based data ingestion
+- **File Imports** -- File-based data ingestion
+- **Virtual Tables** -- Read-only query views (SNAPSHOT only)
+
+### Sync Modes
+
+When importing data, you choose a sync mode that determines how new data merges with existing data:
+
+| Mode | Strategy | When to Use |
+|------|----------|-------------|
+| **SNAPSHOT** | Replace all data each run | Daily reports, small tables |
+| **APPEND** | Add new rows (deduplicate by hash) | Event logs, growing datasets |
+| **UPDATE** | Upsert by primary key | Customer profiles, status tables |
+| **INCREMENTAL** | Fetch only rows after watermark | Large tables with timestamps |
+| **CDC** | Track changes via database tokens (SCN, binlog) | Real-time replication |
+
 ## Pipelines
 
-A **Pipeline** is a declarative data transformation workflow. Pipelines define how data flows from sources (files, APIs, databases) through a series of transforms into the ontology.
+A **Pipeline** is a declarative data transformation workflow defined as a DAG (directed acyclic graph) of nodes. Pipelines define how data flows from sources through transforms into outputs.
 
-Pipelines support 22+ transform types including:
+### Pipeline Nodes
 
-- **Structural**: `map`, `filter`, `flatten`, `groupBy`, `sort`, `distinct`
-- **Enrichment**: `lookup`, `join`, `geocode`, `resolve`
-- **Validation**: `validate`, `deduplicate`, `normalize`
-- **Output**: `upsertObjects`, `createLinks`, `publishEvent`
+```
+[Input Nodes] → [Transform Nodes] → [Output Nodes]
+```
 
-Pipelines are defined as JSON or YAML configurations and executed by the Pipeline Runner workers.
+- **Input** -- data sources (datasets, JDBC, Kafka, S3)
+- **Transform** -- 38 operations (join, filter, compute, aggregate, window, UDF, etc.)
+- **Output** -- result sinks (dataset, ontology, geotemporal)
+
+### Execution Modes
+
+| Mode | Purpose | Side Effects |
+|------|---------|-------------|
+| **Preview** | In-memory simulation with sample data | None |
+| **Build** | Full execution producing artifacts | Creates artifacts in S3 |
+| **Deploy** | Promotes artifacts to production | Writes to output dataset + ontology |
+
+### User-Defined Functions (UDFs)
+
+UDFs allow custom per-row transformations in a **sandboxed** environment. Only safe Python builtins are allowed -- no imports, loops, or system access.
+
+```python
+def transform(row):
+    return row.get("name", "").upper()
+```
+
+### Proposals
+
+Changes to pipelines on protected branches (`main`, `prod`) require **proposal approval** before deployment. Proposals capture an immutable snapshot of the build output, schema, and ontology state.
+
+## Orchestration & Scheduling
+
+**Orchestration** manages pipeline execution lifecycle through builds, schedules, and runs.
+
+- **Builds** -- create, monitor, cancel pipeline execution jobs
+- **Schedules** -- define cron expressions or intervals for recurring execution
+- **Runs** -- track execution history with status and output
+
+The **Pipeline Scheduler** is an independent background process that polls the registry every N seconds, evaluates cron expressions, checks pipeline dependencies, and enqueues jobs to Kafka.
+
+Schedules can be **paused** and **unpaused** without deleting the configuration.
+
+## Security
+
+SPICE Harvester provides multiple security layers:
+
+| Layer | Protection |
+|-------|-----------|
+| **Secret Encryption** | AES-GCM with AAD (Additional Authenticated Data) per source |
+| **SQL Injection Guard** | All JDBC queries normalized; semicolons and multi-statements rejected |
+| **Query Timeouts** | 300-second timeout on all JDBC adapter operations |
+| **Feature Flags** | JDBC and CDC features gated per database |
+| **Plaintext Block** | Production environments **cannot** store secrets without encryption keys |
+| **UDF Sandbox** | AST validation blocks imports, loops, and system access |
 
 ## Projections
 
@@ -198,31 +302,31 @@ This design provides a complete audit trail, enables time-travel queries, and su
 ## How Concepts Relate
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                     Ontology                        │
-│  ┌──────────────┐    ┌──────────────┐               │
-│  │  ObjectType   │───▶│   LinkType   │               │
-│  │  (blueprint)  │    │ (relationship)│              │
-│  └──────┬───────┘    └──────────────┘               │
-│         │                                           │
-│  ┌──────▼───────┐                                   │
-│  │  Properties   │                                   │
-│  │  (attributes) │                                   │
-│  └──────────────┘                                   │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                         Ontology                            │
+│  ┌──────────────┐    ┌──────────────┐                       │
+│  │  ObjectType   │───▶│   LinkType   │                       │
+│  │  (blueprint)  │    │ (relationship)│                      │
+│  └──────┬───────┘    └──────────────┘                       │
+│         │                                                   │
+│  ┌──────▼───────┐                                           │
+│  │  Properties   │                                           │
+│  │  (attributes) │                                           │
+│  └──────────────┘                                           │
+└─────────────────────────────────────────────────────────────┘
          │ defines structure for
          ▼
-┌─────────────────┐     ┌─────────────┐
-│    Instances     │────▶│   Actions   │
-│  (actual data)   │◀────│  (mutations) │
-└────────┬────────┘     └──────┬──────┘
-         │                     │ emit
-         │              ┌──────▼──────┐
-         │              │   Events    │
-         │              └──────┬──────┘
-         │                     │ consumed by
-         │              ┌──────▼──────┐
-         └─────────────▶│ Projections │
+┌─────────────────┐     ┌─────────────┐     ┌──────────────┐
+│    Instances     │────▶│   Actions   │     │  Connections  │
+│  (actual data)   │◀────│  (mutations) │     │ (ext. sources)│
+└────────┬────────┘     └──────┬──────┘     └──────┬───────┘
+         │                     │ emit               │ import
+         │              ┌──────▼──────┐      ┌──────▼───────┐
+         │              │   Events    │      │   Datasets   │
+         │              └──────┬──────┘      │  (versioned) │
+         │                     │ consumed    └──────┬───────┘
+         │              ┌──────▼──────┐             │
+         └─────────────▶│ Projections │◀────────────┘
                         │  Pipelines  │
                         │  Lineage    │
                         └─────────────┘
@@ -233,3 +337,4 @@ This design provides a complete audit trail, enables time-travel queries, and su
 - **[Architecture Overview](/docs/architecture/overview)** -- See how these concepts map to services
 - **[API Reference](/docs/api/overview)** -- Start interacting with the platform
 - **[Data Engineer Guide](/docs/guides/data-engineer/schema-config)** -- Define your own ontology
+- **[Connectivity Guide](/docs/guides/data-engineer/import-templates)** -- Connect external data sources

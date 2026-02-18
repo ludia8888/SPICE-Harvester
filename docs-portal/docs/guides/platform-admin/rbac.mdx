@@ -5,29 +5,253 @@ sidebar_position: 2
 
 # Role-Based Access Control (RBAC)
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks platform administrators through configuring role-based access control in SPICE Harvester. You will learn how the authorization model works, how to manage users and roles, and how to scope permissions to specific resources.
 
-## What This Guide Covers
+## Authorization Model
 
-This guide will walk platform administrators through configuring role-based access control, including:
+SPICE Harvester uses a layered authorization model:
 
-- **RBAC Model** -- Understanding users, roles, permissions, and policies in SPICE Harvester
-- **Built-in Roles** -- Default roles (Admin, Editor, Viewer) and their permissions
-- **Custom Roles** -- Creating roles with fine-grained permissions per ontology, object type, and operation
-- **User Management** -- Creating, updating, and deactivating user accounts
-- **Permission Scoping** -- Restricting access by ontology, object type, property, and action type
-- **API Token Management** -- Creating and rotating service account tokens
-- **Audit Logging** -- Reviewing access logs and permission changes
-- **SSO Integration** -- Configuring SAML/OIDC for enterprise single sign-on
+```
+User → Roles → Permissions → Resources
+```
+
+- **Users** are identified by their authentication principal (JWT `sub` claim or bearer token)
+- **Roles** are collections of permissions assigned to users
+- **Permissions** define what operations are allowed
+- **Resources** scope permissions to specific ontologies, object types, or datasets
+
+## Authentication Strategies
+
+SPICE Harvester supports multiple authentication methods, each of which maps to an authorization context:
+
+| Strategy | Principal Source | Roles Source |
+|----------|----------------|-------------|
+| Bearer Token | `BFF_EXPECTED_TOKENS` config | Configured per token |
+| User JWT | JWT `sub` claim | JWT `roles` claim |
+| Agent Token | Agent tool registry | Tool policy restrictions |
+| Admin Token | `X-Admin-Token` header | Full admin access |
+
+See the [Auth Flow Guide](../integration-developer/auth-flow) for detailed authentication setup.
+
+## Built-in Roles
+
+| Role | Read | Write | Delete | Admin | Use Case |
+|------|:----:|:-----:|:------:|:-----:|----------|
+| **Admin** | ✅ | ✅ | ✅ | ✅ | Platform administrators |
+| **Editor** | ✅ | ✅ | ✅ | — | Data engineers, analysts |
+| **Viewer** | ✅ | — | — | — | Read-only dashboard users |
+
+### Admin Role
+
+Full access to all platform capabilities:
+- Create/modify/delete ontologies, object types, and instances
+- Manage connections, pipelines, and schedules
+- Access admin endpoints (user management, configuration)
+- View audit logs and lineage data
+
+### Editor Role
+
+Read and write access to data operations:
+- Read all ontology data and metadata
+- Create, edit, and delete object instances
+- Execute actions and run pipelines
+- Cannot access admin endpoints
+
+### Viewer Role
+
+Read-only access:
+- List and search objects
+- View object type definitions and link types
+- Access dashboards and projections
+- Cannot modify any data
+
+## Permission Scoping
+
+Permissions can be scoped to specific resources for fine-grained access control.
+
+### Ontology Scoping
+
+Restrict access to specific ontologies:
+
+```json
+{
+  "role": "editor",
+  "scope": {
+    "ontologies": ["acme-corp", "test-sandbox"]
+  }
+}
+```
+
+### Object Type Scoping
+
+Restrict access to specific object types within an ontology:
+
+```json
+{
+  "role": "editor",
+  "scope": {
+    "ontologies": ["acme-corp"],
+    "objectTypes": ["Employee", "Department"]
+  }
+}
+```
+
+### Operation Scoping
+
+Restrict allowed operations:
+
+```json
+{
+  "role": "custom-reader",
+  "scope": {
+    "operations": ["read", "search"],
+    "ontologies": ["acme-corp"]
+  }
+}
+```
+
+## Agent Tool Policies
+
+For AI agent integrations, SPICE Harvester provides granular **tool policies** that restrict what each agent tool can access:
+
+```json
+{
+  "tool_id": "data-analysis-agent",
+  "allowed_methods": ["GET"],
+  "allowed_path_patterns": ["/api/v2/ontologies/*/objects/*"],
+  "allowed_dataset_ids": ["ri.spice.main.dataset.public-data"],
+  "allowed_pipeline_ids": [],
+  "allowed_ontology_ids": ["acme-corp"],
+  "allowed_db_names": ["acme"],
+  "allowed_branches": ["main"]
+}
+```
+
+Tool policies enforce:
+- **HTTP method restrictions** -- limit to read-only methods
+- **Path pattern matching** -- only allow specific API paths
+- **Resource allowlists** -- restrict to specific datasets, pipelines, ontologies
+- **Branch restrictions** -- limit to specific data branches
+
+## API Token Management
+
+### Bearer Tokens
+
+Configure API tokens via environment variables:
+
+```bash
+# Comma-separated list of valid tokens
+BFF_EXPECTED_TOKENS=token-for-service-a,token-for-service-b,token-for-dashboard
+```
+
+### Token Rotation
+
+To rotate tokens without downtime:
+
+1. Add the new token to the list (keep the old one)
+2. Update all clients to use the new token
+3. Remove the old token from the list
+4. Restart the BFF service
+
+### JWT Configuration
+
+For JWT-based authentication:
+
+```bash
+# HS256 symmetric key
+JWT_SECRET=your-secret-key
+
+# RSA public key
+JWT_RSA_PUBLIC_KEY=/path/to/public.pem
+
+# OIDC/JWKS discovery (preferred for SSO)
+JWT_JWKS_URL=https://your-idp.com/.well-known/jwks.json
+```
+
+## Multi-Tenant Isolation
+
+SPICE Harvester supports multi-tenant deployments:
+
+1. **Tenant ID** is extracted from JWT `tenant_id` claim
+2. All database queries are automatically scoped to the tenant
+3. Cross-tenant access is prevented at the data layer
+4. Default tenant is `"default"` when no tenant claim is present
+
+```
+Tenant A ──→ [BFF Auth] ──→ X-Tenant-ID: tenant-a ──→ [OMS] ──→ tenant_a schema
+Tenant B ──→ [BFF Auth] ──→ X-Tenant-ID: tenant-b ──→ [OMS] ──→ tenant_b schema
+```
+
+## Audit Logging
+
+All authentication and authorization events are logged:
+
+### Logged Events
+
+| Event | Details Captured |
+|-------|-----------------|
+| Successful auth | User ID, auth strategy, timestamp |
+| Failed auth | Reason, token type, IP address |
+| Permission denied | User ID, requested resource, required permission |
+| Token used | Token identifier, endpoint accessed |
+| Agent tool access | Tool ID, session ID, endpoint, policy evaluation result |
+
+### Viewing Audit Logs
+
+```bash
+# BFF authentication logs
+docker compose logs bff | grep -i "auth"
+
+# Filter by user
+docker compose logs bff | grep "X-User-ID: user-123"
+```
+
+## SSO Integration
+
+### OIDC/SAML Setup
+
+1. **Configure your IdP** (Okta, Auth0, Azure AD, Keycloak):
+   - Create a SPICE Harvester application
+   - Set callback URL to your BFF service
+   - Configure JWT claims to include `sub`, `roles`, `tenant_id`
+
+2. **Configure BFF**:
+   ```bash
+   JWT_JWKS_URL=https://your-idp.com/.well-known/jwks.json
+   ```
+
+3. **Map IdP roles to SPICE roles**:
+   - IdP group `spice-admins` → SPICE role `admin`
+   - IdP group `spice-editors` → SPICE role `editor`
+   - IdP group `spice-viewers` → SPICE role `viewer`
+
+### JWT Claim Requirements
+
+| Claim | Required | Description |
+|-------|----------|-------------|
+| `sub` | Yes | Subject identifier (user ID) |
+| `roles` | Recommended | Array of role names |
+| `tenant_id` | For multi-tenant | Tenant isolation key |
+| `org_id` | Optional | Organization identifier |
+| `exp` | Yes | Token expiration |
+
+## Security Best Practices
+
+1. **Use HTTPS** -- always encrypt token transmission in production
+2. **Short token lifetimes** -- configure JWT expiration to 15-60 minutes
+3. **Rotate tokens regularly** -- update bearer tokens on a monthly schedule
+4. **Scope narrowly** -- grant minimum required permissions
+5. **Audit regularly** -- review authentication logs for anomalies
+6. **Disable Dev Master Auth** -- ensure `DEV_MASTER_AUTH_ENABLED` is not set in production
+7. **Use JWKS for SSO** -- dynamic key discovery handles key rotation automatically
 
 ## Prerequisites
 
 - [API Overview](/docs/api/overview) -- Authentication mechanisms
 - [Installation Guide](/docs/getting-started/installation) -- Admin service must be running
 
-## Related Resources
+## Next Steps
 
-- [Auth Flow Guide](../integration-developer/auth-flow) -- Authentication flow details
-- [Configuration Reference](/docs/reference/config) -- Auth-related environment variables
+- **[Auth Flow Guide](../integration-developer/auth-flow)** -- Detailed authentication flow
+- **[Service Monitoring](./service-monitoring)** -- Monitor auth-related metrics
+- **[Configuration Reference](/docs/reference/config)** -- Auth environment variables

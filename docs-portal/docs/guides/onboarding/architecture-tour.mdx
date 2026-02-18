@@ -5,31 +5,367 @@ sidebar_position: 2
 
 # Architecture Tour
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide provides a narrated walkthrough of the SPICE Harvester architecture. Follow along to understand how the system is structured, how data flows through it, and how services interact.
 
-## What This Guide Covers
+## The Big Picture
 
-This guide provides a visual, guided tour through the SPICE Harvester architecture for new team members, including:
+SPICE Harvester is a distributed system with **26 Docker services** organized into four layers:
 
-- **The Big Picture** -- A narrated walkthrough of the system architecture diagram, explaining each layer and its purpose
-- **Request Journey** -- Following a single API request from client to response, seeing every service it touches
-- **Write Path Walkthrough** -- Tracing an action from submission through validation, event creation, Kafka distribution, and read model updates
-- **Search Path Walkthrough** -- Following a search query from the BFF through OMS to Elasticsearch and back
-- **Event Lifecycle** -- Observing an event from creation through the outbox, Kafka, event store, and worker processing
-- **Service Discovery** -- Mapping out which services talk to which, and why
-- **Data Flow Visualization** -- Interactive diagrams showing data movement through the platform
-- **Hands-On Exploration** -- Using health endpoints, Grafana dashboards, and Jaeger traces to observe the running system
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     API Layer                                │
+│                                                             │
+│  ┌─────────────────────┐    ┌──────────────────────┐       │
+│  │     BFF (8080)       │    │    Agent Service      │       │
+│  │  234+ REST endpoints │    │  AI tool integration  │       │
+│  └──────────┬──────────┘    └──────────────────────┘       │
+└─────────────┼───────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Core Services                               │
+│  ┌──────────▼──────────┐                                    │
+│  │     OMS (8000)       │  Ontology Management Service      │
+│  │  Schema + Search     │  Source of truth for schemas      │
+│  └─────────────────────┘                                    │
+└─────────────────────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Worker Layer (13 workers)                    │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ ontology │ │ instance │ │  action  │ │ pipeline │      │
+│  │ worker   │ │ worker   │ │ worker   │ │ worker   │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │projection│ │objectify │ │connector │ │connector │      │
+│  │ worker   │ │ worker   │ │ trigger  │ │  sync    │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ pipeline │ │ ingest   │ │ message  │ │writeback │      │
+│  │scheduler │ │reconciler│ │  relay   │ │ worker   │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐                                               │
+│  │ action   │                                               │
+│  │ outbox   │                                               │
+│  └──────────┘                                               │
+└─────────────────────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Infrastructure                              │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │PostgreSQL│ │Elastic-  │ │  Kafka   │ │  Redis   │      │
+│  │ (5433)   │ │search    │ │ (39092)  │ │ (6379)   │      │
+│  │          │ │ (9200)   │ │          │ │          │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                    │
+│  │  MinIO   │ │  lakeFS  │ │ZooKeeper │                    │
+│  │(9000/01) │ │ (48080)  │ │ (2181)   │                    │
+│  └──────────┘ └──────────┘ └──────────┘                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Layer Responsibilities
+
+| Layer | Responsibility |
+|-------|---------------|
+| **API Layer** | HTTP request handling, authentication, routing |
+| **Core Services** | Business logic, schema management, search |
+| **Worker Layer** | Asynchronous event processing, background tasks |
+| **Infrastructure** | Data storage, messaging, caching, versioning |
+
+## Request Journey: Reading an Object
+
+Follow a `GET /api/v2/ontologies/acme/objectTypes/Employee/objects/EMP-042` request:
+
+```
+1. Client sends HTTP GET
+   │
+2. BFF Auth Middleware
+   ├── Extract Bearer token
+   ├── Validate against expected tokens
+   └── Attach UserPrincipal to request
+   │
+3. BFF Route Handler (foundry_ontology_v2.py)
+   ├── Parse ontology API name → database name
+   ├── Parse object type and primary key
+   └── Forward to OMS
+   │
+4. OMS Route Handler
+   ├── Query Elasticsearch for the object
+   ├── Overlay key specs from PostgreSQL
+   └── Return formatted response
+   │
+5. BFF Response Formatting
+   ├── Convert to Foundry v2 format
+   ├── Add __rid, __primaryKey, __apiName
+   └── Return to client
+```
+
+**Services touched:** BFF → OMS → Elasticsearch (+ PostgreSQL for key specs)
+
+**Typical latency:** 10-50ms
+
+## Write Path: Creating an Object
+
+Follow a `POST /api/v2/ontologies/acme/actions/createObject` request:
+
+```
+1. Client sends action request
+   │
+2. BFF Auth + Validation
+   ├── Authenticate user
+   ├── Validate action parameters
+   └── Check permissions
+   │
+3. BFF Action Handler
+   ├── Build action command
+   ├── Generate idempotency key
+   └── Submit to action pipeline
+   │
+4. Action Processing
+   ├── Validate against ontology schema
+   ├── Create immutable event
+   └── Persist to event store (S3/MinIO)
+   │
+5. Event Distribution (Kafka)
+   ├── Publish event to Kafka topic
+   └── Multiple consumers receive event
+   │
+6. Worker Processing (parallel)
+   │
+   ├── Instance Worker
+   │   └── Write object to PostgreSQL
+   │
+   ├── Elasticsearch Indexer
+   │   └── Index object for search
+   │
+   ├── Projection Worker
+   │   └── Update aggregated views
+   │
+   └── Lineage Worker
+       └── Record provenance edges
+```
+
+**Services touched:** BFF → OMS → Kafka → (Instance Worker → PostgreSQL, ES Indexer → Elasticsearch, Projection Worker → PostgreSQL)
+
+**Typical latency:** ~100ms for acknowledgment, 1-5s for full consistency across all read models
+
+## Search Path: Finding Objects
+
+Follow a `POST /api/v2/ontologies/acme/objectTypes/Employee/objects/search` request:
+
+```
+1. Client sends search query
+   │
+2. BFF Route Handler
+   ├── Parse SearchJsonQueryV2 query
+   ├── Validate operators and nesting depth (max 3)
+   └── Forward to OMS
+   │
+3. OMS Search Handler
+   ├── Convert to Elasticsearch DSL
+   ├── Apply tenant scoping
+   ├── Execute against Elasticsearch
+   └── Format results with __rid, __primaryKey
+   │
+4. BFF Response
+   ├── Add pagination token
+   └── Return to client
+```
+
+**Services touched:** BFF → OMS → Elasticsearch
+
+**Typical latency:** 20-100ms
+
+## Data Import Path
+
+Follow a table import execution:
+
+```
+1. Execute import request
+   │
+2. BFF Connectivity Handler
+   ├── Load connection config
+   ├── Decrypt secrets (AES-GCM)
+   └── Select connector adapter
+   │
+3. Connector Adapter (e.g., PostgreSQL)
+   ├── SQL Query Guard (normalize, inject check)
+   ├── Execute query (300s timeout)
+   └── Return result set
+   │
+4. Sync Mode Processing
+   ├── SNAPSHOT: Replace all data
+   ├── APPEND: Deduplicate and append
+   ├── UPDATE: Upsert by primary key
+   ├── INCREMENTAL: Watermark-based fetch
+   └── CDC: Change token tracking
+   │
+5. Storage
+   ├── Write to lakeFS (versioned commit)
+   ├── Register in Dataset Registry
+   └── Publish completion event to Kafka
+```
+
+**Services touched:** BFF → External Database → LakeFS → MinIO → PostgreSQL → Kafka
+
+## Pipeline Execution Path
+
+Follow a pipeline build:
+
+```
+1. Pipeline build request
+   │
+2. Pipeline Worker receives job (from Kafka)
+   ├── Load pipeline definition
+   ├── Normalize nodes and edges
+   └── Topological sort (DAG order)
+   │
+3. Execute nodes in order
+   │
+   ├── Input Node
+   │   └── Load data from dataset (LakeFS)
+   │
+   ├── Transform Node (22 types)
+   │   ├── filter, compute, join, aggregate...
+   │   ├── UDF (sandboxed Python)
+   │   └── Schema validation at each step
+   │
+   └── Output Node
+       ├── Validate schema contract
+       ├── Check expectations (unique, required, FK)
+       └── Write to dataset / ontology
+   │
+4. Post-processing
+   ├── Record build artifacts in S3
+   ├── Update pipeline registry
+   └── Publish lineage edges
+```
+
+## Event Lifecycle
+
+Every state change follows this lifecycle:
+
+```
+Action Submitted
+      │
+      ▼
+┌─────────────┐
+│  Validated   │  Schema check, permission check
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Event Created│  Immutable, timestamped, actor-tagged
+└──────┬──────┘
+       │
+       ├──────────────────┐
+       ▼                  ▼
+┌─────────────┐    ┌─────────────┐
+│  Kafka Topic│    │ Event Store │  S3/MinIO (durable)
+│  (real-time)│    │ (archive)   │
+└──────┬──────┘    └─────────────┘
+       │
+       ├─────────┬──────────┬──────────┐
+       ▼         ▼          ▼          ▼
+  Instance   Projection  Lineage   Action
+  Worker     Worker      Worker    Outbox
+       │         │          │          │
+       ▼         ▼          ▼          ▼
+  PostgreSQL  PostgreSQL  Event     Kafka
+  (objects)   (views)     Store    (downstream)
+       │
+       ▼
+  Elasticsearch
+  (search index)
+```
+
+## Service Communication Map
+
+| From | To | Protocol | Purpose |
+|------|-----|---------|---------|
+| Client | BFF | HTTP | API requests |
+| BFF | OMS | HTTP | Schema + search operations |
+| BFF | Kafka | Kafka | Event publishing |
+| BFF | Redis | Redis | Caching, rate limiting |
+| BFF | PostgreSQL | SQL | Configuration, registries |
+| BFF | LakeFS | HTTP | Dataset storage |
+| Workers | Kafka | Kafka | Event consumption |
+| Workers | PostgreSQL | SQL | Read model updates |
+| Workers | Elasticsearch | HTTP | Search index updates |
+| Workers | MinIO | S3 | File storage |
+| OMS | PostgreSQL | SQL | Schema storage |
+| OMS | Elasticsearch | HTTP | Search queries |
+
+## Hands-On Exploration
+
+### Verify All Services Are Running
+
+```bash
+docker compose ps
+```
+
+Look for all services showing `Up (healthy)`.
+
+### Check BFF Health
+
+```bash
+curl http://localhost:8080/api/health | jq
+```
+
+### Explore the API
+
+```bash
+# List ontologies
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8080/api/v2/ontologies | jq
+
+# List object types
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8080/api/v2/ontologies/acme/objectTypes | jq
+```
+
+### Monitor Kafka Topics
+
+```bash
+docker compose exec kafka kafka-topics \
+  --bootstrap-server localhost:29092 --list
+```
+
+### Browse MinIO Storage
+
+Open http://localhost:9001 in your browser and log in with MinIO credentials.
+
+### Browse lakeFS
+
+Open http://localhost:48080 in your browser to see data versioning repositories.
+
+### Check Elasticsearch Indices
+
+```bash
+curl http://localhost:9200/_cat/indices?v
+```
+
+## Key Design Patterns
+
+| Pattern | Where Used | Why |
+|---------|-----------|-----|
+| **Event Sourcing** | All write operations | Audit trail, undo, rebuild |
+| **CQRS** | BFF (write) + OMS (read) | Optimized read/write paths |
+| **Outbox Pattern** | Action outbox worker | At-least-once delivery guarantee |
+| **Adapter Pattern** | Connector adapters | Pluggable data source support |
+| **DAG Execution** | Pipeline executor | Deterministic transform ordering |
+| **Sandbox** | UDF runtime | Security isolation for custom code |
 
 ## Prerequisites
 
 - [Quick Start](/docs/getting-started/quick-start) -- Platform should be running locally
 - [Core Concepts](/docs/getting-started/concepts) -- Basic terminology
 
-## Related Resources
+## Next Steps
 
-- [Architecture Overview](/docs/architecture/overview) -- Detailed architecture documentation
-- [Data Flow](/docs/architecture/data-flow) -- Request lifecycle diagrams
-- [Service Topology](/docs/architecture/service-topology) -- Complete service inventory
-- [Event Sourcing](/docs/architecture/event-sourcing) -- Event-driven architecture details
+- **[Architecture Overview](/docs/architecture/overview)** -- Detailed architecture documentation
+- **[Data Flow](/docs/architecture/data-flow)** -- Request lifecycle diagrams
+- **[Service Topology](/docs/architecture/service-topology)** -- Complete service inventory
+- **[Event Sourcing](/docs/architecture/event-sourcing)** -- Event-driven architecture details

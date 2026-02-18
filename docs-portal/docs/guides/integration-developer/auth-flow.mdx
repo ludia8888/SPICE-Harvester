@@ -5,29 +5,240 @@ sidebar_position: 2
 
 # Authentication Flow
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
+This guide walks integration developers through SPICE Harvester's authentication and authorization mechanisms. You will learn how the auth middleware works, the supported authentication strategies, and best practices for securing your integrations.
+
+## Overview
+
+SPICE Harvester's BFF service enforces authentication on all API requests through a middleware layer. The middleware extracts credentials from HTTP headers, validates them against configured strategies, and attaches a **UserPrincipal** to the request context.
+
+```
+Client Request
+    │
+    ▼
+┌─────────────────────────────┐
+│   Auth Middleware            │
+│                             │
+│  1. Check exempt paths      │
+│  2. Extract token           │
+│  3. Try auth strategies     │
+│  4. Attach UserPrincipal    │
+└──────────────┬──────────────┘
+               │
+               ▼
+         Route Handler
+```
+
+### Exempt Paths
+
+The following paths are accessible without authentication:
+
+- `/api/v1/health` -- health check endpoint
+- `/api/v1/` -- service metadata
+
+Additional exempt paths can be configured via environment variables.
+
+## Authentication Strategies
+
+The middleware tries authentication strategies in sequence. The first successful strategy is used.
+
+### Strategy 1: Agent Token with Delegated Auth
+
+For AI agents and automated tools that act on behalf of a user.
+
+**Required headers:**
+```
+Authorization: Bearer <agent-token>
+X-Agent-Tool-ID: <tool-identifier>
+X-Delegated-Authorization: Bearer <user-jwt>
+```
+
+**Optional headers:**
+```
+X-Agent-Session-ID: <session-id>
+X-Agent-Tool-Run-ID: <run-id>
+```
+
+**Flow:**
+1. Validate agent token against configured expected tokens
+2. Extract and verify the delegated user JWT
+3. Look up the tool's policy in the agent tool registry
+4. Enforce policy restrictions (allowed methods, paths, datasets, pipelines)
+5. Attach the delegated user's principal to the request
+
+**Policy enforcement examples:**
+- Restrict tool to read-only: only `GET` methods allowed
+- Limit to specific datasets: `allowed_dataset_ids`
+- Limit to specific pipelines: `allowed_pipeline_ids`
+- Limit to specific ontologies: `allowed_ontology_ids`
+
+### Strategy 2: Bearer Token
+
+The simplest authentication method, suitable for API keys and service accounts.
+
+**Required header:**
+```
+Authorization: Bearer <token>
+```
+
+**Flow:**
+1. Extract token from `Authorization` header
+2. Validate against `bff_expected_tokens` configuration
+3. Attach a service principal to the request
+
+### Strategy 3: User JWT
+
+For SSO/OIDC authenticated users with JSON Web Tokens.
+
+**Required header:**
+```
+Authorization: Bearer <jwt>
+```
+
+**Supported verification methods:**
+
+| Method | Configuration | Description |
+|--------|--------------|-------------|
+| HS256 Secret | `JWT_SECRET` | Symmetric key verification |
+| RSA Public Key | `JWT_RSA_PUBLIC_KEY` | Asymmetric key verification |
+| JWKS URL | `JWT_JWKS_URL` | Dynamic key discovery (for OIDC providers) |
+
+**JWT Claims extracted:**
+
+| Claim | Maps to | Description |
+|-------|---------|-------------|
+| `sub` | `user_id` | Subject identifier |
+| `roles` | `roles` | Array of role names |
+| `tenant_id` | `tenant_id` | Multi-tenant isolation |
+| `org_id` | `org_id` | Organization identifier |
+
+### Strategy 4: Dev Master Auth
+
+**Development only** -- bypasses all authentication when enabled.
+
+```bash
+DEV_MASTER_AUTH_ENABLED=true
+```
+
+:::danger
+Never enable Dev Master Auth in production. It bypasses all security controls.
 :::
 
-## What This Guide Covers
+## UserPrincipal
 
-This guide will walk integration developers through SPICE Harvester's authentication and authorization mechanisms, including:
+After successful authentication, a `UserPrincipal` is attached to the request:
 
-- **Authentication Methods** -- Bearer token authentication, refresh tokens, and service account tokens
-- **Token Lifecycle** -- Obtaining, refreshing, and revoking access tokens
-- **Authorization Model** -- How roles and permissions are evaluated on each request
-- **Service-to-Service Auth** -- Authenticating background services and workers
-- **SSO/OIDC Integration** -- Connecting to enterprise identity providers
-- **Token Security** -- Best practices for storing and transmitting tokens
-- **Multi-Tenant Auth** -- Per-ontology permission scoping
-- **Debugging Auth Issues** -- Common authentication and authorization error codes and resolutions
+```python
+class UserPrincipal:
+    user_id: str          # Unique user identifier
+    user_type: str        # "user", "service", "agent"
+    roles: List[str]      # Role assignments
+    tenant_id: str        # Tenant isolation key
+    org_id: Optional[str] # Organization identifier
+```
 
-## Prerequisites
+The principal is propagated to downstream services via headers:
 
-- [API Overview](/docs/api/overview) -- Authentication header format
-- [Quick Start](/docs/getting-started/quick-start) -- Obtaining initial credentials
+| Header | Value |
+|--------|-------|
+| `X-User-ID` | Principal's user ID |
+| `X-User-Type` | Principal type (user/service/agent) |
+| `X-Principal-Id` | Same as user ID |
+| `X-Principal-Type` | Same as user type |
+| `X-Actor` | Actor identifier |
+| `X-Actor-Type` | Actor type |
+| `X-Tenant-ID` | Tenant ID |
+| `X-Org-ID` | Organization ID |
+| `X-User-Roles` | Comma-separated roles |
 
-## Related Resources
+## Token Management
 
-- [RBAC Guide](../platform-admin/rbac) -- Configuring roles and permissions
-- [Error Codes](/docs/api/error-codes) -- Authentication error codes (`SHV-AUTH-*`)
+### Obtaining Tokens
+
+**Bearer tokens** are configured in the BFF service environment:
+
+```bash
+BFF_EXPECTED_TOKENS=token1,token2,token3
+```
+
+**User JWTs** are issued by your identity provider (IdP) and verified by the BFF.
+
+**Agent tokens** are configured alongside agent tool policies in the agent tool registry.
+
+### Token Security Best Practices
+
+1. **Use HTTPS** -- never transmit tokens over unencrypted connections
+2. **Short-lived tokens** -- configure JWT expiration (15-60 minutes typical)
+3. **Rotate tokens regularly** -- update bearer tokens on a schedule
+4. **Store securely** -- use environment variables or secret managers, never hardcode tokens
+5. **Scope narrowly** -- use agent tool policies to restrict access to minimum required resources
+6. **Audit token usage** -- monitor authentication logs for anomalies
+
+## Service-to-Service Authentication
+
+Internal services (workers, schedulers) authenticate to the BFF using the same bearer token mechanism:
+
+```python
+# Worker configuration
+BFF_INTERNAL_TOKEN=internal-service-token
+
+# Request from worker to BFF
+headers = {"Authorization": f"Bearer {BFF_INTERNAL_TOKEN}"}
+```
+
+Workers include additional context headers:
+
+```
+X-Service-Name: pipeline-worker
+X-Job-ID: job-12345
+```
+
+## Multi-Tenant Isolation
+
+SPICE Harvester supports multi-tenant deployments with per-tenant data isolation:
+
+1. **Tenant extraction** -- tenant ID is extracted from the JWT `tenant_id` claim
+2. **Fallback** -- if no tenant ID is present, defaults to `"default"`
+3. **Query scoping** -- all database queries are automatically scoped to the tenant
+4. **Resource isolation** -- datasets, pipelines, and ontologies are tenant-isolated
+
+## Idempotency Keys
+
+For write operations, clients can include an `Idempotency-Key` header:
+
+```bash
+curl -X POST http://localhost:8080/api/v2/ontologies/acme/actions/createObject \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Idempotency-Key: unique-request-id-12345" \
+  -H "Content-Type: application/json" \
+  -d '{"parameters": {...}}'
+```
+
+If the same idempotency key is sent twice, the second request returns the result of the first without re-executing the action.
+
+## Debugging Authentication Issues
+
+### Common Errors
+
+| Error | HTTP Status | Cause | Resolution |
+|-------|------------|-------|------------|
+| Missing Authorization header | 401 | No token provided | Add `Authorization: Bearer <token>` header |
+| Invalid token | 401 | Token not in expected list | Check `BFF_EXPECTED_TOKENS` configuration |
+| JWT verification failed | 401 | Wrong secret/key or expired token | Check JWT configuration and token expiration |
+| Permission denied | 403 | Role lacks required permission | Add required role to user or adjust RBAC policy |
+| Agent tool not found | 403 | `X-Agent-Tool-ID` not registered | Register tool in agent tool registry |
+| Agent policy violation | 403 | Request violates tool policy | Check tool's allowed methods, paths, and resources |
+
+### Debugging Steps
+
+1. **Check health endpoint** -- verify the BFF is running: `GET /api/health`
+2. **Verify token format** -- ensure `Bearer ` prefix (with space) is present
+3. **Check JWT claims** -- decode JWT at jwt.io to verify claims
+4. **Review auth logs** -- check BFF logs for authentication failures
+5. **Test with Dev Master Auth** -- temporarily enable in development to isolate auth vs. logic issues
+
+## Next Steps
+
+- **[RBAC Guide](../platform-admin/rbac)** -- Configuring roles and permissions
+- **[REST API Guide](./rest-api)** -- Using the authenticated API
+- **[SDK Guide](./sdk-guide)** -- Client libraries handle auth automatically
+- **[Error Codes](/docs/api/error-codes)** -- Authentication error codes

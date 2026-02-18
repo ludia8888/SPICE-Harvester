@@ -5,29 +5,416 @@ sidebar_position: 2
 
 # Search & Query Guide
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
+This guide walks business analysts through searching and querying data in SPICE Harvester using the `SearchJsonQueryV2` query language. You will learn how to build filters, combine conditions, perform text and geospatial searches, and optimize query performance.
+
+## Search Basics
+
+The Search API finds objects by applying filters to their properties. Searches are powered by **Elasticsearch**, providing fast full-text and structured queries.
+
+### Search Endpoint
+
+```bash
+POST /api/v2/ontologies/{ontology}/objectTypes/{objectType}/objects/search
+Content-Type: application/json
+
+{
+  "where": {
+    "type": "eq",
+    "field": "department",
+    "value": "Engineering"
+  },
+  "pageSize": 25
+}
+```
+
+### Search Request Structure
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `where` | No | Filter condition (returns all objects if omitted) |
+| `pageSize` | No | Number of results per page (default: 25, max: 1000) |
+| `pageToken` | No | Cursor for next page |
+| `orderBy` | No | Sort configuration |
+| `select` | No | Properties to include in response |
+
+## Operator Reference
+
+SPICE Harvester supports **23 search operators** organized into categories.
+
+### Comparison Operators
+
+#### Exact Match
+
+```json
+{ "type": "eq", "field": "status", "value": "ACTIVE" }
+```
+
+#### Greater Than / Less Than
+
+```json
+{ "type": "gt", "field": "salary", "value": 50000 }
+{ "type": "gte", "field": "salary", "value": 50000 }
+{ "type": "lt", "field": "age", "value": 65 }
+{ "type": "lte", "field": "age", "value": 65 }
+```
+
+#### Null Check
+
+```json
+{ "type": "isNull", "field": "email", "value": true }
+{ "type": "isNull", "field": "email", "value": false }
+```
+
+### Collection Operators
+
+#### Value in Set
+
+```json
+{ "type": "in", "field": "status", "value": ["ACTIVE", "PENDING", "REVIEW"] }
+```
+
+#### Array Contains
+
+```json
+{ "type": "contains", "field": "tags", "value": "urgent" }
+```
+
+### Text Search Operators
+
+#### Any Term Match
+
+Matches if the field contains **any** of the specified terms:
+
+```json
+{ "type": "containsAnyTerm", "field": "description", "value": "urgent critical important" }
+```
+
+#### All Terms Match
+
+Matches if the field contains **all** of the specified terms (in any order):
+
+```json
+{ "type": "containsAllTerms", "field": "description", "value": "budget approval" }
+```
+
+#### Phrase Match (Ordered Terms)
+
+Matches if the field contains all terms in the specified order:
+
+```json
+{ "type": "containsAllTermsInOrder", "field": "title", "value": "senior software engineer" }
+```
+
+#### Typeahead / Autocomplete
+
+Matches terms in order with prefix matching on the last term -- ideal for search-as-you-type:
+
+```json
+{ "type": "containsAllTermsInOrderPrefixLastTerm", "field": "fullName", "value": "jane d" }
+```
+
+This matches "Jane Doe", "Jane Davis", "Jane Daniels", etc.
+
+#### Prefix Match
+
+```json
+{ "type": "startsWith", "field": "employeeId", "value": "EMP-" }
+```
+
+#### Wildcard Pattern
+
+```json
+{ "type": "wildcard", "field": "email", "value": "*@acme.com" }
+```
+
+`*` matches any sequence of characters.
+
+#### Regular Expression
+
+```json
+{ "type": "regex", "field": "code", "value": "^EMP-\\d{3,6}$" }
+```
+
+### Date and Time
+
+#### Relative Date Range
+
+Find objects within a time window relative to now:
+
+```json
+{
+  "type": "relativeDateRange",
+  "field": "createdAt",
+  "startDuration": "P30D"
+}
+```
+
+Uses ISO 8601 duration format:
+- `P30D` -- last 30 days
+- `P7D` -- last 7 days
+- `PT24H` -- last 24 hours
+- `P1Y` -- last 1 year
+
+### Geospatial (Point Queries)
+
+Find objects by geographic location:
+
+#### Within Distance
+
+```json
+{
+  "type": "withinDistanceOf",
+  "field": "location",
+  "value": {
+    "center": { "lat": 37.7749, "lon": -122.4194 },
+    "distance": { "value": 10, "unit": "km" }
+  }
+}
+```
+
+#### Within Bounding Box
+
+```json
+{
+  "type": "withinBoundingBox",
+  "field": "location",
+  "value": {
+    "topLeft": { "lat": 38.0, "lon": -123.0 },
+    "bottomRight": { "lat": 37.0, "lon": -121.0 }
+  }
+}
+```
+
+#### Within Polygon
+
+```json
+{
+  "type": "withinPolygon",
+  "field": "location",
+  "value": {
+    "coordinates": [
+      [37.8, -122.5], [37.8, -122.3],
+      [37.7, -122.3], [37.7, -122.5]
+    ]
+  }
+}
+```
+
+### Geospatial (Shape Queries)
+
+For `geoshape` properties:
+
+| Operator | Description |
+|----------|-------------|
+| `intersectsBoundingBox` | Shape overlaps rectangle |
+| `intersectsPolygon` | Shape overlaps polygon |
+| `doesNotIntersectBoundingBox` | Shape outside rectangle |
+| `doesNotIntersectPolygon` | Shape outside polygon |
+
+## Combining Filters
+
+### AND -- All Conditions Must Match
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "gte", "field": "salary", "value": 80000 },
+    { "type": "eq", "field": "status", "value": "ACTIVE" }
+  ]
+}
+```
+
+### OR -- Any Condition Matches
+
+```json
+{
+  "type": "or",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "eq", "field": "department", "value": "Research" }
+  ]
+}
+```
+
+### NOT -- Negate a Condition
+
+```json
+{
+  "type": "not",
+  "value": { "type": "eq", "field": "status", "value": "INACTIVE" }
+}
+```
+
+### Nested Combinations
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "status", "value": "ACTIVE" },
+    {
+      "type": "or",
+      "value": [
+        {
+          "type": "and",
+          "value": [
+            { "type": "eq", "field": "department", "value": "Engineering" },
+            { "type": "gte", "field": "level", "value": 5 }
+          ]
+        },
+        { "type": "eq", "field": "role", "value": "Director" }
+      ]
+    }
+  ]
+}
+```
+
+:::caution
+Query nesting is limited to **3 levels** of depth. If you need deeper nesting, restructure your query to flatten conditions.
 :::
 
-## What This Guide Covers
+## Sorting and Pagination
 
-This guide will walk business analysts through searching and querying data in SPICE Harvester, including:
+### Sorting Results
 
-- **Search Basics** -- Using the v2 Search API to find objects by property values
-- **Operator Reference** -- Working with all 13 search operators (`eq`, `gt`, `gte`, `lt`, `lte`, `isNull`, `containsAnyTerm`, `containsAllTerms`, `containsAllTermsInOrder`, `containsAllTermsInOrderPrefixLastTerm`, `startsWith`, `and`, `or`, `not`)
-- **Text Search** -- Full-text search with term matching, phrase matching, and prefix matching
-- **Combining Filters** -- Building complex queries with `and`, `or`, and `not` operators
-- **Sorting and Pagination** -- Ordering results and navigating large result sets
-- **Selective Fields** -- Using `select` to return only the properties you need
-- **Search Performance** -- Tips for writing efficient queries
-- **Common Query Patterns** -- Date ranges, multi-value filters, null checks, and typeahead/autocomplete
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "orderBy": {
+    "fields": [
+      { "field": "salary", "direction": "desc" },
+      { "field": "fullName", "direction": "asc" }
+    ]
+  }
+}
+```
+
+### Paginating Results
+
+Results are paginated with cursor-based tokens:
+
+```json
+// First page
+{
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 50
+}
+
+// Response includes nextPageToken
+{
+  "data": [...],
+  "nextPageToken": "eyJvZmZzZXQiOjUwfQ=="
+}
+
+// Next page
+{
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 50,
+  "pageToken": "eyJvZmZzZXQiOjUwfQ=="
+}
+```
+
+## Selective Fields
+
+Return only the properties you need:
+
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "select": ["employeeId", "fullName", "salary"],
+  "pageSize": 100
+}
+```
+
+This reduces response size and improves performance.
+
+## Common Query Patterns
+
+### Date Range (Last 30 Days)
+
+```json
+{
+  "type": "relativeDateRange",
+  "field": "createdAt",
+  "startDuration": "P30D"
+}
+```
+
+### Multi-Value Filter
+
+```json
+{
+  "type": "in",
+  "field": "department",
+  "value": ["Engineering", "Research", "Design"]
+}
+```
+
+### Null Check (Find Missing Data)
+
+```json
+{
+  "type": "isNull",
+  "field": "email",
+  "value": true
+}
+```
+
+### Typeahead / Autocomplete
+
+```json
+{
+  "type": "containsAllTermsInOrderPrefixLastTerm",
+  "field": "fullName",
+  "value": "jan"
+}
+```
+
+### Number Range
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "gte", "field": "salary", "value": 80000 },
+    { "type": "lte", "field": "salary", "value": 120000 }
+  ]
+}
+```
+
+### Exclude Specific Values
+
+```json
+{
+  "type": "not",
+  "value": {
+    "type": "in",
+    "field": "status",
+    "value": ["DELETED", "ARCHIVED"]
+  }
+}
+```
+
+## Search Performance Tips
+
+1. **Use `eq` over `wildcard`** -- exact matches are much faster
+2. **Filter before sorting** -- reduce the result set before ordering
+3. **Use `select`** -- request only needed fields to reduce payload
+4. **Prefer `in` over multiple `or`** -- the `in` operator is optimized for set membership
+5. **Use `containsAllTermsInOrderPrefixLastTerm`** for autocomplete -- it is optimized for this pattern
+6. **Limit `pageSize`** -- don't request more results than you need (25-100 typical)
+7. **Avoid deep nesting** -- keep queries within 2-3 levels for best performance
+8. **Use indexed properties** -- search is fastest on indexed fields
 
 ## Prerequisites
 
 - [Core Concepts](/docs/getting-started/concepts) -- Object types and properties
 - [v2 Search API](/docs/api/v2-search) -- Search endpoint documentation
 
-## Related Resources
+## Next Steps
 
-- [Action Templates](./action-templates) -- Acting on search results
-- [Dashboard Guide](./dashboard) -- Visualizing query results
+- **[Action Templates](./action-templates)** -- Act on search results
+- **[Dashboard Guide](./dashboard)** -- Visualize query results
+- **[REST API Guide](../integration-developer/rest-api)** -- Complete API integration

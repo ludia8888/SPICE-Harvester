@@ -5,32 +5,480 @@ sidebar_position: 1
 
 # REST API Integration
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
+This guide walks integration developers through building applications that consume the SPICE Harvester REST API. You will learn how to authenticate, query objects, execute actions, handle pagination, and implement robust error handling.
+
+## API Architecture
+
+SPICE Harvester exposes **234+ REST endpoints** through the BFF (Backend for Frontend) service, organized into several API families:
+
+| API Family | Prefix | Description |
+|-----------|--------|-------------|
+| **Foundry Ontology v2** | `/api/v2/ontologies` | Object types, objects, search, actions, link types |
+| **Foundry Datasets v2** | `/api/v2/datasets` | Dataset CRUD, branches, transactions, files |
+| **Foundry Connectivity v2** | `/api/v2/connectivity` | Connections, table imports, file imports |
+| **Foundry Orchestration v2** | `/api/v2/orchestration` | Builds, schedules, jobs |
+| **Internal BFF** | `/api/databases`, `/api/admin` | Database management, admin operations |
+| **Lineage** | `/api/lineage` | Data lineage tracking |
+| **Graph** | `/api/v1` | Graph traversal operations |
+
+### Base URL
+
+```
+http://localhost:8080/api
+```
+
+In production, the BFF service is typically exposed behind a reverse proxy or API gateway.
+
+## Authentication
+
+All API requests (except health checks) require authentication via a Bearer token in the `Authorization` header:
+
+```bash
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  http://localhost:8080/api/v2/ontologies
+```
+
+SPICE Harvester supports multiple authentication strategies:
+
+| Strategy | Header | Use Case |
+|----------|--------|----------|
+| Bearer Token | `Authorization: Bearer <token>` | Standard API access |
+| Agent Token | `Authorization: Bearer <agent-token>` + `X-Agent-Tool-ID` | Agent/tool integrations |
+| User JWT | `Authorization: Bearer <jwt>` | SSO/OIDC authenticated users |
+| Admin Token | `X-Admin-Token: <token>` | Administrative operations |
+
+See the [Auth Flow Guide](./auth-flow) for detailed authentication patterns.
+
+## Object Operations
+
+### List Object Types
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes
+```
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "apiName": "Employee",
+      "displayName": "Employee",
+      "description": "A person employed by the organization",
+      "primaryKey": "employeeId",
+      "properties": {
+        "employeeId": { "dataType": { "type": "string" } },
+        "fullName": { "dataType": { "type": "string" } },
+        "department": { "dataType": { "type": "string" } },
+        "startDate": { "dataType": { "type": "date" } }
+      },
+      "rid": "ri.spice.main.object-type.Employee"
+    }
+  ]
+}
+```
+
+### List Objects
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects?pageSize=25
+```
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "__rid": "ri.spice.main.object.employee-00042",
+      "__primaryKey": "EMP-042",
+      "__apiName": "Employee",
+      "properties": {
+        "employeeId": "EMP-042",
+        "fullName": "Jane Doe",
+        "department": "Engineering",
+        "startDate": "2023-06-15"
+      }
+    }
+  ],
+  "nextPageToken": "eyJvZmZzZXQiOjI1fQ=="
+}
+```
+
+### Get Single Object
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects/{primaryKey}
+```
+
+### Create Object (via Actions)
+
+Objects are created through the Actions API, not direct POST:
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/createObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "properties": {
+      "employeeId": "EMP-099",
+      "fullName": "John Smith",
+      "department": "Marketing",
+      "startDate": "2024-01-15"
+    }
+  }
+}
+```
+
+### Edit Object
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/editObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099",
+    "properties": {
+      "department": "Sales"
+    }
+  }
+}
+```
+
+### Delete Object
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/deleteObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099"
+  }
+}
+```
+
+## Search API
+
+The Search API uses the `SearchJsonQueryV2` query language to filter, sort, and paginate objects.
+
+### Basic Search
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects/search
+Content-Type: application/json
+
+{
+  "where": {
+    "type": "eq",
+    "field": "department",
+    "value": "Engineering"
+  },
+  "pageSize": 25,
+  "orderBy": {
+    "fields": [
+      { "field": "fullName", "direction": "asc" }
+    ]
+  }
+}
+```
+
+### Search Operators
+
+SPICE Harvester supports **23 search operators**:
+
+#### Comparison Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `eq` | Equal to | `{"type": "eq", "field": "status", "value": "ACTIVE"}` |
+| `gt` | Greater than | `{"type": "gt", "field": "salary", "value": 50000}` |
+| `gte` | Greater than or equal | `{"type": "gte", "field": "age", "value": 18}` |
+| `lt` | Less than | `{"type": "lt", "field": "age", "value": 65}` |
+| `lte` | Less than or equal | `{"type": "lte", "field": "score", "value": 100}` |
+
+#### Null Check
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `isNull` | Check if null | `{"type": "isNull", "field": "email", "value": true}` |
+
+#### Collection Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `contains` | Array contains value | `{"type": "contains", "field": "tags", "value": "urgent"}` |
+| `in` | Value in set | `{"type": "in", "field": "status", "value": ["ACTIVE", "PENDING"]}` |
+
+#### Text Search Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `containsAnyTerm` | Contains any term | `{"type": "containsAnyTerm", "field": "name", "value": "jane john"}` |
+| `containsAllTerms` | Contains all terms | `{"type": "containsAllTerms", "field": "bio", "value": "engineer senior"}` |
+| `containsAllTermsInOrder` | Terms in exact order | `{"type": "containsAllTermsInOrder", "field": "title", "value": "senior engineer"}` |
+| `containsAllTermsInOrderPrefixLastTerm` | Prefix match on last term | Ideal for typeahead/autocomplete |
+| `startsWith` | Starts with prefix | `{"type": "startsWith", "field": "name", "value": "Jan"}` |
+| `wildcard` | Wildcard pattern | `{"type": "wildcard", "field": "email", "value": "*@acme.com"}` |
+| `regex` | Regex pattern | `{"type": "regex", "field": "code", "value": "^EMP-\\d{3}$"}` |
+
+#### Date Range
+
+| Operator | Description |
+|----------|-------------|
+| `relativeDateRange` | Relative date range with ISO 8601 durations |
+
+#### Geospatial (Point)
+
+| Operator | Description |
+|----------|-------------|
+| `withinDistanceOf` | Point within radius |
+| `withinBoundingBox` | Point within rectangle |
+| `withinPolygon` | Point within polygon |
+
+#### Geospatial (Shape)
+
+| Operator | Description |
+|----------|-------------|
+| `intersectsBoundingBox` | Shape overlaps rectangle |
+| `intersectsPolygon` | Shape overlaps polygon |
+| `doesNotIntersectBoundingBox` | Shape outside rectangle |
+| `doesNotIntersectPolygon` | Shape outside polygon |
+
+#### Logical Operators
+
+Combine queries with `and`, `or`, and `not`:
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "gte", "field": "salary", "value": 80000 },
+    {
+      "type": "or",
+      "value": [
+        { "type": "eq", "field": "level", "value": "Senior" },
+        { "type": "eq", "field": "level", "value": "Staff" }
+      ]
+    }
+  ]
+}
+```
+
+:::caution
+Query nesting is limited to **3 levels** maximum depth. Deeply nested queries will be rejected.
 :::
 
-## What This Guide Covers
+### Selective Fields
 
-This guide will walk integration developers through building applications that consume the SPICE Harvester REST API, including:
+Request only the properties you need with `select`:
 
-- **Getting Started** -- Obtaining API credentials, making your first authenticated request
-- **Object CRUD** -- Creating, reading, updating, and deleting objects through the v2 API
-- **Search Integration** -- Building search queries with `SearchJsonQueryV2` operators
-- **Pagination Handling** -- Implementing cursor-based pagination with `pageToken`
-- **Error Handling** -- Parsing structured errors, implementing retry logic with exponential backoff
-- **Batch Operations** -- Using bulk endpoints for high-throughput data access
-- **Webhook Integration** -- Receiving real-time notifications when objects change
-- **Rate Limit Management** -- Respecting rate limits and implementing backpressure
-- **API Versioning** -- Handling v1/v2 compatibility and future API evolution
-- **Performance Tips** -- Using `select` for partial responses, caching strategies, connection pooling
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "select": ["employeeId", "fullName", "salary"],
+  "pageSize": 50
+}
+```
 
-## Prerequisites
+## Pagination
 
-- [Quick Start](/docs/getting-started/quick-start) -- Platform must be running
-- [API Overview](/docs/api/overview) -- Authentication and conventions
+SPICE Harvester uses **cursor-based pagination** with opaque page tokens.
 
-## Related Resources
+### Paginating Through Results
 
-- [Auth Flow Guide](./auth-flow) -- Detailed authentication patterns
-- [SDK Guide](./sdk-guide) -- Using the official Python and TypeScript SDKs
-- [Error Codes](/docs/api/error-codes) -- Complete error reference
+```python
+import requests
+
+base_url = "http://localhost:8080/api/v2/ontologies/acme/objectTypes/Employee/objects"
+headers = {"Authorization": "Bearer YOUR_TOKEN"}
+params = {"pageSize": 25}
+
+all_objects = []
+page_token = None
+
+while True:
+    if page_token:
+        params["pageToken"] = page_token
+
+    response = requests.get(base_url, headers=headers, params=params)
+    data = response.json()
+
+    all_objects.extend(data["data"])
+
+    page_token = data.get("nextPageToken")
+    if not page_token:
+        break
+
+print(f"Total objects: {len(all_objects)}")
+```
+
+### Pagination Best Practices
+
+- **Use consistent page sizes** -- don't change `pageSize` between pages
+- **Don't modify data while paginating** -- cursor stability is not guaranteed across mutations
+- **Page tokens are opaque** -- don't parse or construct them manually
+- **Tokens expire** -- re-start pagination if a token becomes invalid
+
+## Link Traversal
+
+Navigate relationships between objects using the Link API:
+
+```bash
+# Get linked objects
+POST /api/v2/ontologies/{ontology}/linkTypes/{linkType}/links
+
+{
+  "sourceObjectRid": "ri.spice.main.object.employee-00042",
+  "pageSize": 25
+}
+```
+
+```bash
+# Search linked objects
+POST /api/v2/ontologies/{ontology}/linkTypes/{linkType}/links/search
+
+{
+  "sourceObjectRid": "ri.spice.main.object.employee-00042",
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 25
+}
+```
+
+## Batch Operations
+
+For high-throughput scenarios, use batch action endpoints:
+
+```bash
+POST /api/v2/ontologies/{ontology}/actions/{actionType}/batch
+
+{
+  "requests": [
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-100", "fullName": "Alice" }
+      }
+    },
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-101", "fullName": "Bob" }
+      }
+    }
+  ]
+}
+```
+
+## Error Handling
+
+### Error Response Format
+
+All errors follow a structured format:
+
+```json
+{
+  "errorCode": "ObjectNotFound",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-999"
+  }
+}
+```
+
+### Common Error Codes
+
+| HTTP Status | Error Code | Description |
+|------------|------------|-------------|
+| 400 | `InvalidRequest` | Malformed request body or parameters |
+| 401 | `Unauthorized` | Missing or invalid authentication |
+| 403 | `PermissionDenied` | Insufficient permissions |
+| 404 | `ObjectNotFound` | Object does not exist |
+| 404 | `ObjectTypeNotFound` | Object type does not exist |
+| 409 | `ConflictError` | Concurrent modification conflict |
+| 429 | `RateLimitExceeded` | Too many requests |
+| 500 | `InternalError` | Server-side error |
+
+### Retry Strategy
+
+Implement exponential backoff for transient errors:
+
+```python
+import time
+import requests
+
+def api_request_with_retry(url, headers, max_retries=3, base_delay=1):
+    for attempt in range(max_retries + 1):
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", base_delay * (2 ** attempt)))
+            time.sleep(retry_after)
+            continue
+
+        if response.status_code >= 500:
+            if attempt < max_retries:
+                time.sleep(base_delay * (2 ** attempt))
+                continue
+
+        return response
+
+    return response
+```
+
+**Retry these status codes:** `429`, `500`, `502`, `503`, `504`
+
+**Do NOT retry:** `400`, `401`, `403`, `404`, `409`
+
+## Health Check
+
+Monitor the API availability:
+
+```bash
+# Service metadata
+GET /api/
+
+# Health check with dependency status
+GET /api/health
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "oms_connected": true,
+    "status": "healthy"
+  }
+}
+```
+
+| Status | Meaning |
+|--------|---------|
+| `healthy` | All dependencies available |
+| `degraded` | OMS unavailable but BFF still serving cached/partial data |
+
+## Performance Tips
+
+1. **Use `select`** -- request only needed properties to reduce payload size
+2. **Set appropriate `pageSize`** -- balance between request count and response size (25-100 typical)
+3. **Cache object type metadata** -- object type definitions change infrequently
+4. **Use search instead of list + filter** -- let the server filter with Elasticsearch
+5. **Batch writes** -- use batch action endpoints for multiple mutations
+6. **Connection pooling** -- reuse HTTP connections for sequential requests
+
+## Next Steps
+
+- **[Auth Flow Guide](./auth-flow)** -- Detailed authentication patterns
+- **[SDK Guide](./sdk-guide)** -- Type-safe client libraries
+- **[v2 Search API](/docs/api/v2-search)** -- Complete search reference
+- **[Error Codes](/docs/api/error-codes)** -- Full error code reference

@@ -5,30 +5,317 @@ sidebar_position: 3
 
 # Dashboard & Visualization
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks business analysts through building dashboards and visualizations with SPICE Harvester data. You will learn how to leverage the Search API, projections, and external tools to create actionable data views.
 
-## What This Guide Covers
+## Data Access Patterns
 
-This guide will walk business analysts through building dashboards and visualizations with SPICE Harvester data, including:
+SPICE Harvester provides several ways to access data for visualization:
 
-- **Dashboard Overview** -- Available dashboard tools and how they connect to SPICE Harvester data
-- **Grafana Dashboards** -- Creating custom Grafana panels that query SPICE Harvester metrics and data
-- **Data Exploration** -- Using the built-in web UI to explore ontology objects and relationships
-- **Search-Powered Views** -- Building filtered views using SearchJsonQueryV2 queries
-- **Projection-Based Analytics** -- Leveraging projections for aggregated and computed views
-- **Charting and Tables** -- Configuring chart types, table columns, and formatting
-- **Filtering and Drill-Down** -- Adding interactive filters to narrow down data
-- **Sharing Dashboards** -- Exporting and sharing dashboard configurations
-- **Embedding** -- Embedding SPICE Harvester visualizations in external applications
+| Pattern | Best For | Data Source |
+|---------|---------|-------------|
+| **Search API** | Real-time object queries | Elasticsearch |
+| **Projections** | Pre-aggregated analytics | Projection workers |
+| **Dataset readTable** | Raw data exploration | LakeFS datasets |
+| **Link traversal** | Relationship graphs | Object graph |
+
+## Search-Powered Views
+
+The most common dashboard pattern is using the Search API to build filtered, sorted views.
+
+### Building a Filtered Table
+
+```bash
+POST /api/v2/ontologies/acme/objectTypes/Employee/objects/search
+
+{
+  "where": {
+    "type": "and",
+    "value": [
+      { "type": "eq", "field": "status", "value": "ACTIVE" },
+      { "type": "eq", "field": "department", "value": "Engineering" }
+    ]
+  },
+  "orderBy": {
+    "fields": [{ "field": "fullName", "direction": "asc" }]
+  },
+  "select": ["employeeId", "fullName", "department", "level", "startDate"],
+  "pageSize": 100
+}
+```
+
+### Dynamic Filtering
+
+Build interactive dashboards by constructing queries dynamically:
+
+```javascript
+// Build query based on user selections
+function buildQuery(filters) {
+  const conditions = [];
+
+  if (filters.department) {
+    conditions.push({
+      type: 'eq', field: 'department', value: filters.department
+    });
+  }
+
+  if (filters.status) {
+    conditions.push({
+      type: 'eq', field: 'status', value: filters.status
+    });
+  }
+
+  if (filters.minSalary) {
+    conditions.push({
+      type: 'gte', field: 'salary', value: filters.minSalary
+    });
+  }
+
+  if (filters.searchText) {
+    conditions.push({
+      type: 'containsAnyTerm', field: 'fullName', value: filters.searchText
+    });
+  }
+
+  return {
+    where: conditions.length > 1
+      ? { type: 'and', value: conditions }
+      : conditions[0] || undefined,
+    pageSize: 100
+  };
+}
+```
+
+### Aggregation Queries
+
+Use search with grouping for chart data:
+
+```bash
+# Get counts by department
+POST /api/v2/ontologies/acme/objectTypes/Employee/objects/search
+
+{
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "select": ["department"],
+  "pageSize": 1000
+}
+```
+
+Then aggregate client-side for charts:
+
+```javascript
+const departmentCounts = {};
+for (const emp of results.data) {
+  const dept = emp.properties.department;
+  departmentCounts[dept] = (departmentCounts[dept] || 0) + 1;
+}
+// Result: { "Engineering": 45, "Marketing": 20, "Sales": 35, ... }
+```
+
+## Projection-Based Analytics
+
+**Projections** are precomputed, denormalized views optimized for specific query patterns. They are built by projection workers from the event stream and provide near-real-time aggregated data.
+
+### Types of Projections
+
+| Projection Type | Description | Example |
+|----------------|-------------|---------|
+| **Count aggregation** | Object counts by dimensions | Employees per department |
+| **Flattened join** | Denormalized cross-link view | Employee with department name |
+| **Time-series rollup** | Temporal aggregations | Actions per hour/day |
+| **Computed metrics** | Derived calculations | Average salary by department |
+
+### Accessing Projections
+
+Projections are accessible as read-only views through the standard Object API:
+
+```bash
+GET /api/v2/ontologies/acme/objectTypes/DepartmentSummary/objects
+```
+
+Projections are **eventually consistent** -- there may be a short delay between a write and its reflection in projections.
+
+## Data Exploration
+
+### Object Explorer
+
+Use the Object API to explore data interactively:
+
+```bash
+# Browse all object types
+GET /api/v2/ontologies/acme/objectTypes
+
+# List objects of a type
+GET /api/v2/ontologies/acme/objectTypes/Employee/objects?pageSize=25
+
+# Get object details
+GET /api/v2/ontologies/acme/objectTypes/Employee/objects/EMP-042
+
+# Follow links
+POST /api/v2/ontologies/acme/linkTypes/manages/links
+{
+  "sourceObjectRid": "ri.spice.main.object.employee-00042"
+}
+```
+
+### Dataset Explorer
+
+Browse raw dataset contents:
+
+```bash
+# List datasets
+GET /api/v2/datasets
+
+# Read dataset as table
+POST /api/v2/datasets/{datasetRid}/readTable
+{
+  "format": "csv",
+  "branchName": "main",
+  "limit": 100
+}
+```
+
+## External Visualization Tools
+
+### Grafana Integration
+
+SPICE Harvester can be queried from Grafana using:
+
+1. **JSON API data source** -- query the Search API directly
+2. **PostgreSQL data source** -- query the underlying PostgreSQL tables
+3. **Elasticsearch data source** -- query Elasticsearch indices directly
+
+**Setting up JSON API data source:**
+
+```
+URL: http://bff:8080/api
+Custom HTTP Headers:
+  Authorization: Bearer YOUR_TOKEN
+```
+
+**Example Grafana panel query:**
+
+```json
+{
+  "url": "/v2/ontologies/acme/objectTypes/Employee/objects/search",
+  "method": "POST",
+  "body": {
+    "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+    "select": ["department", "salary"],
+    "pageSize": 1000
+  }
+}
+```
+
+### Embedding in External Applications
+
+Embed SPICE Harvester data in your own applications:
+
+```html
+<iframe
+  src="https://your-grafana-instance.com/d/dashboard-id?orgId=1&kiosk"
+  width="100%"
+  height="600"
+  frameborder="0">
+</iframe>
+```
+
+Or build custom visualizations using the REST API or SDK:
+
+```typescript
+import { SpiceClient } from '@spice-harvester/sdk';
+
+const client = new SpiceClient({
+  baseUrl: 'http://localhost:8080/api',
+  token: 'your-token',
+});
+
+// Fetch data for chart
+const results = await client.objects.search('acme', 'Employee', {
+  where: { type: 'eq', field: 'status', value: 'ACTIVE' },
+  select: ['department', 'salary'],
+  pageSize: 1000,
+});
+
+// Render with your preferred charting library (Chart.js, D3, Recharts, etc.)
+renderBarChart(aggregateByDepartment(results.data));
+```
+
+## Common Dashboard Patterns
+
+### KPI Dashboard
+
+Show key performance indicators:
+
+```
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Total Active │  │ New This     │  │ Avg Salary   │
+│ Employees    │  │ Month        │  │              │
+│    1,234     │  │      23      │  │   $95,000    │
+└──────────────┘  └──────────────┘  └──────────────┘
+```
+
+**Queries:**
+
+```json
+// Total active employees
+{ "where": { "type": "eq", "field": "status", "value": "ACTIVE" } }
+
+// New this month
+{
+  "where": {
+    "type": "and",
+    "value": [
+      { "type": "relativeDateRange", "field": "startDate", "startDuration": "P30D" },
+      { "type": "eq", "field": "status", "value": "ACTIVE" }
+    ]
+  }
+}
+```
+
+### Drill-Down Table
+
+Start with summary, click to see details:
+
+1. **Level 1** -- Department summary (count, avg salary)
+2. **Level 2** -- Employees in selected department
+3. **Level 3** -- Individual employee details with linked projects
+
+### Timeline View
+
+Track changes over time using action history:
+
+```bash
+# List recent actions
+GET /api/v2/ontologies/acme/actionTypes
+
+# Search for audit events
+POST /api/v2/ontologies/acme/objectTypes/AuditEvent/objects/search
+{
+  "where": {
+    "type": "relativeDateRange",
+    "field": "timestamp",
+    "startDuration": "P7D"
+  },
+  "orderBy": { "fields": [{ "field": "timestamp", "direction": "desc" }] }
+}
+```
+
+## Best Practices
+
+1. **Use `select`** -- always specify which properties you need to minimize payload
+2. **Cache metadata** -- object type definitions rarely change, cache them
+3. **Paginate responsibly** -- don't load all data at once, implement virtual scrolling
+4. **Use projections for aggregations** -- avoid client-side aggregation of large datasets
+5. **Set refresh intervals** -- auto-refresh dashboards at appropriate intervals (30s-5min)
+6. **Handle eventual consistency** -- projections may lag behind writes by a few seconds
 
 ## Prerequisites
 
 - [Search & Query Guide](./search-query) -- Building queries for dashboard data
 - [Core Concepts](/docs/getting-started/concepts) -- Projections and read models
 
-## Related Resources
+## Next Steps
 
-- [Monitoring](/docs/operations/monitoring) -- Grafana setup and pre-built dashboards
-- [Configuration Reference](/docs/reference/config) -- Dashboard-related settings
+- **[Monitoring](/docs/operations/monitoring)** -- Grafana setup and pre-built dashboards
+- **[Action Templates](./action-templates)** -- Act on data from dashboards
+- **[REST API Guide](../integration-developer/rest-api)** -- API integration for custom dashboards

@@ -5,31 +5,518 @@ sidebar_position: 1
 
 # Schema Configuration
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+This guide walks data engineers through defining and managing ontology schemas in SPICE Harvester. You will learn how to create object types, configure properties, establish link types, and evolve schemas safely over time.
 
-## What This Guide Covers
+## Overview
 
-This guide will walk data engineers through configuring ontology schemas in SPICE Harvester, including:
+In SPICE Harvester, the **ontology** is the central schema definition that describes your data model. Every piece of data flowing through the platform — whether imported from external databases, transformed by pipelines, or created via actions — conforms to an ontology schema.
 
-- **Defining Object Types** -- Creating object type definitions with properties, data types, and constraints
-- **Configuring Properties** -- Setting up primary keys, required fields, indexed fields, and default values
-- **Creating Link Types** -- Establishing relationships between object types with appropriate cardinality
-- **Schema Versioning** -- Managing schema evolution without breaking existing data or integrations
-- **Validation Rules** -- Defining constraints and validation logic for property values
-- **Index Configuration** -- Controlling which properties are indexed in Elasticsearch and how they are analyzed
-- **Best Practices** -- Naming conventions, normalization strategies, and performance considerations
+```
+Ontology: "acme-corp"
+├── ObjectType: Employee
+│   ├── Property: employeeId (string, primary key)
+│   ├── Property: fullName (string, title key)
+│   ├── Property: department (string, indexed)
+│   └── Property: startDate (date)
+├── ObjectType: Project
+│   ├── Property: projectId (string, primary key)
+│   ├── Property: name (string, title key)
+│   └── Property: status (string)
+└── LinkType: manages (Employee → Project, ONE_TO_MANY)
+```
 
-## Prerequisites
+## Defining Object Types
 
-Before starting this guide, you should be familiar with:
+An **Object Type** is a schema blueprint similar to a table in a relational database. Each object type is registered in the ontology and defines the structure that all instances of that type must follow.
 
-- [Core Concepts](/docs/getting-started/concepts) -- Ontology, Object Types, Properties, Link Types
-- [API Overview](/docs/api/overview) -- Authentication and API conventions
-- [v2 Object Types API](/docs/api/v2-object-types) -- Object type endpoints
+### Creating an Object Type
 
-## Related Resources
+Object types are created through the OMS Ontology API:
 
-- [Configuration Reference](/docs/reference/config) -- Environment variables for schema-related settings
-- [Pipeline Builder Guide](./pipeline-builder) -- Importing data into your schema
+```bash
+curl -X POST http://localhost:8080/api/databases/acme-corp/ontology \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "Employee",
+    "label": { "en": "Employee", "ko": "직원" },
+    "description": { "en": "A person employed by the organization" },
+    "properties": [
+      {
+        "name": "employeeId",
+        "type": "xsd:string",
+        "label": { "en": "Employee ID" },
+        "primary_key": true,
+        "required": true
+      },
+      {
+        "name": "fullName",
+        "type": "xsd:string",
+        "label": { "en": "Full Name" },
+        "title_key": true,
+        "required": true
+      },
+      {
+        "name": "department",
+        "type": "xsd:string",
+        "label": { "en": "Department" }
+      },
+      {
+        "name": "startDate",
+        "type": "xsd:date",
+        "label": { "en": "Start Date" }
+      },
+      {
+        "name": "salary",
+        "type": "xsd:decimal",
+        "label": { "en": "Salary" },
+        "constraints": { "min": 0 }
+      }
+    ],
+    "relationships": [
+      {
+        "predicate": "manages",
+        "target": "Project",
+        "label": { "en": "Manages" },
+        "cardinality": "1:n"
+      }
+    ]
+  }'
+```
+
+### Object Type Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Optional | Unique identifier. Auto-generated if omitted |
+| `label` | Yes | Human-readable display name (supports i18n) |
+| `description` | No | Detailed description (supports i18n) |
+| `parent_class` | No | Parent object type for inheritance |
+| `abstract` | No | If `true`, cannot have direct instances |
+| `properties` | Yes | List of property definitions |
+| `relationships` | No | List of relationship definitions |
+| `metadata` | No | Arbitrary key-value metadata |
+
+### Foundry v2 API
+
+Object types are also accessible through the Foundry v2 compatible API:
+
+```bash
+# List all object types
+GET /api/v2/ontologies/{ontologyRid}/objectTypes
+
+# Get a specific object type
+GET /api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeRid}
+```
+
+## Configuring Properties
+
+A **Property** is a named, typed attribute on an object type. Properties define what data each instance carries.
+
+### Property Definition
+
+```json
+{
+  "name": "employeeId",
+  "type": "xsd:string",
+  "label": { "en": "Employee ID" },
+  "required": true,
+  "primary_key": true,
+  "description": { "en": "Unique identifier for the employee" },
+  "constraints": {
+    "pattern": "^EMP-\\d{3,6}$"
+  }
+}
+```
+
+### Property Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Property identifier used in API requests |
+| `type` | Yes | Data type (see table below) |
+| `label` | Yes | Display name (string or i18n object) |
+| `required` | No | Whether property must be present on every instance |
+| `primary_key` | No | Marks this as the unique identifier property |
+| `title_key` | No | Marks this as the display name property |
+| `default` | No | Default value for new instances |
+| `description` | No | Human-readable description |
+| `constraints` | No | Validation rules (min, max, pattern, enum, length) |
+| `value_type_ref` | No | Reference to a semantic value type definition |
+| `shared_property_ref` | No | Reference to a reusable property template |
+
+### Supported Data Types
+
+SPICE Harvester supports a comprehensive type system with XSD primitive types, semantic types, and complex types:
+
+#### Primitive Types
+
+| Type | XSD Name | Description | PostgreSQL Mapping |
+|------|----------|-------------|-------------------|
+| String | `xsd:string` | UTF-8 text | `TEXT` |
+| Integer | `xsd:integer` | 64-bit signed integer | `BIGINT` |
+| Long | `xsd:long` | 64-bit signed integer (alias) | `BIGINT` |
+| Float | `xsd:float` | 32-bit floating point | `REAL` |
+| Double | `xsd:double` | 64-bit floating point | `DOUBLE PRECISION` |
+| Decimal | `xsd:decimal` | Arbitrary-precision decimal | `NUMERIC` |
+| Boolean | `xsd:boolean` | True or false | `BOOLEAN` |
+| Date | `xsd:date` | ISO 8601 date | `DATE` |
+| DateTime | `xsd:dateTime` | ISO 8601 datetime | `TIMESTAMP WITH TIME ZONE` |
+| Time | `xsd:time` | ISO 8601 time | `TIME` |
+| Duration | `xsd:duration` | ISO 8601 duration | `INTERVAL` |
+| URI | `xsd:anyURI` | Uniform Resource Identifier | `TEXT` |
+| Base64 Binary | `xsd:base64Binary` | Base64-encoded binary data | `BYTEA` |
+
+#### Semantic Types
+
+Semantic types provide domain-specific meaning while mapping to primitive storage:
+
+| Type | Storage Type | Description | Example |
+|------|-------------|-------------|---------|
+| `email` | string | Email address | `"jane@acme.com"` |
+| `phone` | string | Phone number | `"+1-555-0100"` |
+| `address` | string | Physical address | `"123 Main St"` |
+| `money` | decimal | Monetary amount | `49999.99` |
+| `coordinate` | string | Lat/lng pair | `"37.7749,-122.4194"` |
+| `geopoint` | string | GeoJSON point | `{"lat": 37.7749, "lon": -122.4194}` |
+| `geoshape` | string | GeoJSON geometry | `{"type": "Polygon", ...}` |
+| `marking` | string | Security marking | `"CONFIDENTIAL"` |
+| `cipher` | string | Encrypted text | _(encrypted)_ |
+
+#### Complex Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `array` | Ordered list of values | `["tag1", "tag2"]` |
+| `object` | Nested JSON object | `{"key": "value"}` |
+| `struct` | Structured record | `{"street": "Main", "city": "SF"}` |
+| `vector` | Numerical vector | `[0.1, 0.2, 0.3]` |
+| `enum` | Enumerated string values | `"ACTIVE"` |
+
+### Foundry v2 Type Normalization
+
+When accessed through the Foundry v2 API, types are automatically normalized:
+
+| Input Type | Normalized Output |
+|-----------|-------------------|
+| `xsd:string`, `normalizedstring`, `token` | `string` |
+| `xsd:integer`, `xsd:int` | `integer` |
+| `xsd:long` | `long` |
+| `xsd:double` | `double` |
+| `xsd:boolean` | `boolean` |
+| `xsd:dateTime` | `timestamp` |
+| `xsd:date` | `date` |
+
+### Special Property Roles
+
+#### Primary Key
+
+Every object type must have exactly one **primary key** property that uniquely identifies instances:
+
+```json
+{
+  "name": "employeeId",
+  "type": "xsd:string",
+  "primary_key": true,
+  "required": true
+}
+```
+
+- Always required and indexed
+- If not explicitly set, the system infers it (looks for `{type_id}_id` or `id`)
+- Stored in the `OntologyKeySpecRegistry` for round-trip safety
+
+#### Title Key
+
+The **title key** property is used as the display name in UI components:
+
+```json
+{
+  "name": "fullName",
+  "type": "xsd:string",
+  "title_key": true
+}
+```
+
+- If not set, defaults to `name` property, then falls back to primary key
+- Also stored in the key spec registry
+
+### Constraints
+
+Properties support validation constraints:
+
+```json
+{
+  "name": "age",
+  "type": "xsd:integer",
+  "constraints": {
+    "min": 0,
+    "max": 200
+  }
+}
+```
+
+| Constraint | Type | Description |
+|-----------|------|-------------|
+| `required` | boolean | Must be present |
+| `min` | number | Minimum value |
+| `max` | number | Maximum value |
+| `pattern` | string | Regex pattern |
+| `enum` | array | Allowed values |
+| `length` | object | `{"min": N, "max": N}` for string length |
+| `format` | string | Format hint for semantic types |
+
+### Shared Property Templates
+
+**Shared Property Definitions** allow you to define reusable property templates:
+
+```json
+{
+  "id": "standard_audit_fields",
+  "properties": [
+    { "name": "createdAt", "type": "xsd:dateTime", "required": true },
+    { "name": "updatedAt", "type": "xsd:dateTime" },
+    { "name": "createdBy", "type": "xsd:string" }
+  ]
+}
+```
+
+Reference them in object types:
+
+```json
+{
+  "name": "createdAt",
+  "shared_property_ref": "standard_audit_fields.createdAt"
+}
+```
+
+Shared properties are expanded during validation — the system resolves the reference and applies the template definition.
+
+## Creating Link Types
+
+A **Link Type** defines a directed relationship between two object types. Links are first-class citizens in the ontology and enable graph-style traversal across your data.
+
+### Inline Relationships
+
+The simplest way to define links is inline within an object type definition:
+
+```json
+{
+  "relationships": [
+    {
+      "predicate": "manages",
+      "target": "Project",
+      "label": { "en": "Manages" },
+      "cardinality": "1:n",
+      "inverse_predicate": "managed_by",
+      "inverse_label": { "en": "Managed By" }
+    }
+  ]
+}
+```
+
+### Standalone Link Types
+
+For more control, create link types as standalone resources:
+
+```bash
+curl -X POST http://localhost:8080/api/link-types \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "manages",
+    "label": "Manages",
+    "from": "Employee",
+    "to": "Project",
+    "predicate": "manages",
+    "cardinality": "1:n",
+    "status": "ACTIVE",
+    "relationship_spec": {
+      "type": "foreign_key",
+      "fk_column": "manager_employee_id",
+      "dangling_policy": "ALLOW"
+    }
+  }'
+```
+
+### Cardinality Options
+
+| Cardinality | Shorthand | Description |
+|-------------|-----------|-------------|
+| `1:1` | `one` | One source maps to one target |
+| `1:n` | `many` | One source maps to many targets |
+| `n:1` | — | Many sources map to one target |
+| `n:m` | — | Many sources map to many targets |
+
+### Relationship Implementation Types
+
+Link types support three backing implementations:
+
+#### Foreign Key
+
+The simplest pattern — a column on the source table references the target's primary key:
+
+```json
+{
+  "type": "foreign_key",
+  "fk_column": "manager_employee_id",
+  "target_pk_field": "employeeId",
+  "dangling_policy": "FAIL",
+  "auto_sync": true
+}
+```
+
+- `dangling_policy`: `FAIL` (reject broken refs) or `ALLOW` (permit dangling)
+- `auto_sync`: Automatically sync link when FK value changes
+
+#### Join Table
+
+For many-to-many relationships using a separate bridge table:
+
+```json
+{
+  "type": "join_table",
+  "join_dataset_id": "employee_project_assignments",
+  "source_key_column": "employee_id",
+  "target_key_column": "project_id",
+  "dedupe_policy": "DEDUP",
+  "dangling_policy": "FAIL"
+}
+```
+
+#### Object-Backed
+
+For relationships represented by their own object type (association objects with additional attributes):
+
+```json
+{
+  "type": "object_backed",
+  "relationship_object_type": "ProjectAssignment",
+  "source_key_column": "employee_id",
+  "target_key_column": "project_id"
+}
+```
+
+## Schema Evolution
+
+Schemas evolve as business requirements change. SPICE Harvester provides tools and safeguards for safe schema evolution.
+
+### Safe Changes (Non-breaking)
+
+These changes are safe and can be applied without affecting existing data:
+
+- **Adding new optional properties** — existing instances remain valid
+- **Adding new object types** — no impact on existing types
+- **Adding new link types** — no impact on existing objects
+- **Updating display labels** — metadata-only change
+- **Adding descriptions** — metadata-only change
+- **Relaxing constraints** — making required fields optional
+
+### Breaking Changes (Require Migration)
+
+These changes require careful planning:
+
+- **Removing properties** — existing instances may have data in the removed field
+- **Renaming properties** — API consumers need to update references
+- **Changing data types** — existing values may not be compatible
+- **Tightening constraints** — existing values may violate new constraints
+- **Changing primary keys** — all references and indexes must be updated
+
+### Type Compatibility Rules
+
+When changing property data types, the system checks compatibility:
+
+| From Type | Compatible Target Types |
+|-----------|----------------------|
+| `xsd:string` | `xsd:string` only |
+| `xsd:integer` | `xsd:integer` only |
+| `xsd:decimal` | `xsd:decimal`, `xsd:integer` |
+| `xsd:date` | `xsd:date`, `xsd:dateTime` |
+| `xsd:dateTime` | `xsd:dateTime`, `xsd:date` |
+
+Incompatible type changes are rejected by the validation layer.
+
+### Schema Hash Tracking
+
+SPICE Harvester computes a stable SHA-256 hash of column definitions to detect schema changes. This hash is used by:
+
+- **Pipelines** — to detect if source schema has changed between runs
+- **Datasets** — to version schema alongside data
+- **Import flows** — to validate that incoming data matches the expected schema
+
+### Validation Pipeline
+
+When creating or updating an object type, the system runs a multi-stage validation pipeline:
+
+1. **Input Sanitization** — validates database and class names
+2. **Shared Property Expansion** — resolves template references
+3. **Value Type Validation** — checks semantic value type references
+4. **Group Reference Validation** — verifies group metadata
+5. **Ontology Linting** — structural validation (no duplicate properties, valid cardinality, constraint checks)
+6. **Event Sourcing** — persists the mutation as an immutable event
+
+## Backing Datasources
+
+Every object type can be backed by one or more datasets. The **backing dataset** provides the raw data that gets objectified into instances.
+
+### Dataset Association
+
+When creating an object type through the BFF layer, you can specify:
+
+```json
+{
+  "backing_dataset_id": "ri.spice.main.dataset.sales-data-uuid",
+  "pk_spec": {
+    "primary_key": ["orderId"],
+    "title_key": ["customerName"]
+  },
+  "mapping_spec_id": "mapping-uuid"
+}
+```
+
+- `backing_dataset_id` — the dataset providing raw data
+- `pk_spec` — which columns map to primary key and title key
+- `mapping_spec_id` — optional reference to a column mapping configuration
+
+### Objectification
+
+The process of converting raw dataset rows into ontology instances is called **objectification**. The `ObjectifyRegistry` tracks:
+
+- Which datasets are mapped to which object types
+- The current objectification state (pending, running, completed)
+- Column-to-property mapping rules
+- Last successful objectification timestamp
+
+## Best Practices
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|-----------|---------|
+| Object Type ID | PascalCase | `Employee`, `SalesOrder` |
+| Property Name | camelCase | `fullName`, `startDate` |
+| Link Type Predicate | camelCase verb | `manages`, `belongsTo` |
+| Primary Key | `{type}Id` | `employeeId`, `projectId` |
+
+### Design Guidelines
+
+1. **Choose meaningful primary keys** — use business identifiers (`EMP-042`) over auto-increment integers when possible
+2. **Mark title keys explicitly** — helps UI components display meaningful names
+3. **Use semantic types** — `email` instead of `string` enables type-specific validation and rendering
+4. **Define constraints early** — adding constraints later may reject existing data
+5. **Use shared properties** — for common patterns like audit fields (`createdAt`, `updatedAt`, `createdBy`)
+6. **Plan cardinality carefully** — changing from `1:n` to `n:m` requires a different relationship implementation
+7. **Document with descriptions** — include `description` on every object type and important properties
+8. **Support i18n from the start** — use `{ "en": "...", "ko": "..." }` format for labels even in single-language deployments
+
+### Performance Considerations
+
+- **Index strategically** — mark frequently searched properties as `indexed` for Elasticsearch
+- **Avoid overly wide schemas** — split large types into focused types with link types
+- **Use appropriate data types** — `xsd:integer` is more efficient than `xsd:string` for numeric data
+- **Limit array properties** — large arrays in a single property can impact serialization performance
+
+## Next Steps
+
+- **[Pipeline Builder](./pipeline-builder)** — Transform and load data into your schema
+- **[Import Templates](./import-templates)** — Connect external data sources
+- **[v2 Object Types API](/docs/api/v2-object-types)** — Complete API reference
+- **[Core Concepts](/docs/getting-started/concepts)** — Review foundational concepts

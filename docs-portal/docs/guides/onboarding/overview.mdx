@@ -5,34 +5,184 @@ sidebar_position: 1
 
 # Onboarding Overview
 
-:::info Coming Soon
-This guide is under development. Check back for the full walkthrough.
-:::
+Welcome to SPICE Harvester! This guide provides a structured onboarding path for new team members. Whether you are a data engineer, platform administrator, integration developer, or business analyst, this page will help you get started quickly.
 
-## What This Guide Covers
+## What is SPICE Harvester?
 
-This guide provides a structured onboarding path for new team members joining a SPICE Harvester deployment, including:
+SPICE Harvester is an **enterprise ontology and data platform** inspired by Palantir Foundry. It provides:
 
-- **Role-Based Learning Paths** -- Tailored onboarding tracks for data engineers, platform administrators, integration developers, and business analysts
-- **Platform Overview** -- What SPICE Harvester does, who uses it, and how it fits into the data ecosystem
-- **Key Terminology** -- Essential vocabulary (ontology, object types, properties, instances, actions, events)
-- **First Tasks** -- Hands-on exercises for each role to build familiarity
-- **Common Workflows** -- The most frequent tasks users perform and how to accomplish them
-- **Getting Help** -- Where to find documentation, support channels, and escalation paths
-- **Environment Access** -- Obtaining credentials, configuring development tools, and connecting to the platform
+- **Ontology-driven data model** -- define object types, properties, and relationships in a strongly-typed schema
+- **Data ingestion** -- connect to 6 external data sources (PostgreSQL, MySQL, Oracle, Snowflake, SQL Server, Google Sheets) with 5 sync modes
+- **Pipeline builder** -- transform data with 22 transform types, UDFs, and 3 execution modes (Preview/Build/Deploy)
+- **Foundry v2 API** -- 234+ REST endpoints compatible with Palantir Foundry's API surface
+- **Event sourcing** -- every mutation is captured as an immutable event with full audit trail
+- **Versioned datasets** -- Git-like branching and versioning for data via LakeFS
+
+## Platform Architecture at a Glance
+
+```
+Clients (API / SDK / UI)
+        │
+        ▼
+┌─────────────────────────────────┐
+│       BFF (API Gateway)          │  234+ REST endpoints
+│       Port 8080                  │
+└──────────┬──────────────────────┘
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+┌────────┐  ┌───────────┐
+│  OMS   │  │  Workers  │  13 background worker services
+│Port 8000│  │           │
+└───┬────┘  └─────┬─────┘
+    │             │
+    ▼             ▼
+┌──────────────────────────────────┐
+│         Infrastructure            │
+│  PostgreSQL │ Elasticsearch       │
+│  Kafka      │ Redis               │
+│  LakeFS     │ MinIO               │
+└──────────────────────────────────┘
+```
 
 ## Learning Paths by Role
 
-| Role | Starting Guide | Key Topics |
-|------|---------------|------------|
-| Data Engineer | [Schema Configuration](../data-engineer/schema-config) | Ontology design, pipelines, import templates |
-| Platform Admin | [Service Monitoring](../platform-admin/service-monitoring) | Monitoring, RBAC, migrations |
-| Integration Developer | [REST API](../integration-developer/rest-api) | API integration, authentication, SDKs |
-| Business Analyst | [Search & Query](../business-analyst/search-query) | Search, action templates, dashboards |
+### Data Engineer
 
-## Related Resources
+Build and manage the data model and data pipelines.
 
-- [Quick Start](/docs/getting-started/quick-start) -- Get the platform running locally
-- [Core Concepts](/docs/getting-started/concepts) -- Foundational concepts
-- [Architecture Tour](./architecture-tour) -- Visual walkthrough of the system
-- [Glossary](/docs/reference/glossary) -- Term definitions
+| Step | Guide | What You'll Learn |
+|------|-------|-------------------|
+| 1 | [Core Concepts](/docs/getting-started/concepts) | Ontology, object types, properties, link types, datasets |
+| 2 | [Schema Configuration](../data-engineer/schema-config) | Define object types, configure properties, create link types |
+| 3 | [Import Templates](../data-engineer/import-templates) | Connect external data sources, configure sync modes |
+| 4 | [Pipeline Builder](../data-engineer/pipeline-builder) | Build transformation pipelines, use UDFs, schedule execution |
+
+**First task:** Define an object type with 3 properties and load data from a CSV file.
+
+### Platform Administrator
+
+Deploy, monitor, and secure the platform.
+
+| Step | Guide | What You'll Learn |
+|------|-------|-------------------|
+| 1 | [Installation](/docs/getting-started/installation) | Deploy all 26 services with Docker Compose |
+| 2 | [Architecture Tour](./architecture-tour) | Understand service interactions and data flow |
+| 3 | [Service Monitoring](../platform-admin/service-monitoring) | Health checks, Docker monitoring, troubleshooting |
+| 4 | [RBAC](../platform-admin/rbac) | Users, roles, permissions, multi-tenancy |
+
+**First task:** Deploy the platform locally and verify all health endpoints return healthy.
+
+### Integration Developer
+
+Build applications that consume the SPICE Harvester API.
+
+| Step | Guide | What You'll Learn |
+|------|-------|-------------------|
+| 1 | [Core Concepts](/docs/getting-started/concepts) | Data model and API concepts |
+| 2 | [REST API](../integration-developer/rest-api) | Endpoints, search, pagination, error handling |
+| 3 | [Auth Flow](../integration-developer/auth-flow) | Authentication strategies, JWT, tokens |
+| 4 | [SDK Guide](../integration-developer/sdk-guide) | Python and TypeScript client libraries |
+
+**First task:** Authenticate with a bearer token and list all object types in an ontology.
+
+### Business Analyst
+
+Search, analyze, and act on data.
+
+| Step | Guide | What You'll Learn |
+|------|-------|-------------------|
+| 1 | [Core Concepts](/docs/getting-started/concepts) | Object types, instances, actions |
+| 2 | [Search & Query](../business-analyst/search-query) | 23 search operators, filters, sorting |
+| 3 | [Action Templates](../business-analyst/action-templates) | Reusable action logic with expressions |
+| 4 | [Dashboard](../business-analyst/dashboard) | Data visualization and exploration |
+
+**First task:** Search for objects using the `eq` operator and sort results by name.
+
+## Key Terminology
+
+| Term | Definition |
+|------|-----------|
+| **Ontology** | Top-level container defining your data model |
+| **Object Type** | Schema blueprint (like a database table) |
+| **Property** | Typed attribute on an object type |
+| **Instance** | Concrete record of an object type |
+| **Link Type** | Directed relationship between object types |
+| **Action** | Validated, audited write operation |
+| **Dataset** | Versioned data object stored in LakeFS |
+| **Pipeline** | DAG of transform nodes for data processing |
+| **Connection** | Configured link to an external data source |
+| **Projection** | Precomputed view optimized for queries |
+| **RID** | Resource Identifier (`ri.spice.main.{type}.{id}`) |
+| **Event** | Immutable record of a state change |
+
+## Common Workflows
+
+### Data Ingestion
+
+```
+Create Connection → Configure Import → Choose Sync Mode → Execute → Verify Data
+```
+
+### Schema Design
+
+```
+Define Object Types → Add Properties → Create Link Types → Load Sample Data → Iterate
+```
+
+### Building Integrations
+
+```
+Get Token → Explore API → Build Queries → Handle Pagination → Implement Error Handling
+```
+
+### Data Transformation
+
+```
+Create Pipeline → Add Transforms → Preview → Build → Deploy → Schedule
+```
+
+## Environment Access
+
+### Local Development
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd SPICE-Harvester/backend
+
+# Start all services
+docker compose up -d
+
+# Verify health
+curl http://localhost:8080/api/health
+```
+
+### API Access
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| BFF API | `http://localhost:8080/api` | Primary API gateway |
+| OMS API | `http://localhost:8000` | Ontology management |
+| MinIO Console | `http://localhost:9001` | Object storage UI |
+| lakeFS | `http://localhost:48080` | Data versioning UI |
+| Elasticsearch | `http://localhost:9200` | Search engine |
+
+### Getting Credentials
+
+1. Check `.env` or `docker-compose.yml` for default tokens
+2. For JWT auth, configure your identity provider (see [Auth Flow](../integration-developer/auth-flow))
+3. For development, enable Dev Master Auth (development only)
+
+## Getting Help
+
+- **Documentation** -- this docs site covers all platform capabilities
+- **[Glossary](/docs/reference/glossary)** -- look up unfamiliar terms
+- **[Troubleshooting](/docs/operations/troubleshooting)** -- common issues and resolutions
+- **[Error Codes](/docs/api/error-codes)** -- API error reference
+
+## Next Steps
+
+- **[Architecture Tour](./architecture-tour)** -- Visual walkthrough of the system
+- **[Quick Start](/docs/getting-started/quick-start)** -- Get the platform running
+- **[Core Concepts](/docs/getting-started/concepts)** -- Deep dive into platform concepts
