@@ -1450,6 +1450,295 @@ async def test_foundry_virtual_table_execute_records_build_run(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_foundry_virtual_table_create_rejects_non_snapshot_mode(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-vt-invalid"): SimpleNamespace(
+                    source_id="conn-vt-invalid",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-vt-invalid/virtualTables",
+            params={"preview": "true"},
+            json={
+                "name": "VT-invalid",
+                "importMode": "INCREMENTAL",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "postgreSqlVirtualTableConfig", "query": "select * from orders"},
+            },
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "VirtualTableInvalidConfig"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_file_import_create_rejects_missing_selector_for_google_sheets():
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("google_sheets_connection", "conn-file-invalid"): SimpleNamespace(
+                    source_id="conn-file-invalid",
+                    source_type="google_sheets_connection",
+                    enabled=True,
+                    config_json={"display_name": "gs", "type": "GoogleSheetsConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-file-invalid/fileImports",
+            params={"preview": "true"},
+            json={
+                "displayName": "FI-invalid",
+                "importMode": "SNAPSHOT",
+                "destination": {"ontology": "demo", "branchName": "main", "objectType": "Order"},
+                "config": {"type": "jdbcFileImportConfig"},
+            },
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "FileImportInvalidConfig"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_file_import_execute_rejects_invalid_runtime_config_before_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-fi-exec-invalid"): SimpleNamespace(
+                    source_id="conn-fi-exec-invalid",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                ),
+                ("postgresql_file_import", "fi-1"): SimpleNamespace(
+                    source_id="fi-1",
+                    source_type="postgresql_file_import",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-fi-exec-invalid",
+                        "display_name": "FI",
+                        "import_mode": "SNAPSHOT",
+                        "file_import_config": {"type": "postgreSqlFileImportConfig"},
+                    },
+                    created_at=None,
+                    updated_at=None,
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return SimpleNamespace(
+                target_db_name="sales_db",
+                target_branch="main",
+                target_class_label="Order",
+            )
+
+    async def _should_not_be_called(**kwargs: Any):  # noqa: ANN401
+        raise AssertionError("start_pipelining_file_import should not run when pre-validation fails")
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        foundry_connectivity_v2.data_connector_pipelining_service,
+        "start_pipelining_file_import",
+        _should_not_be_called,
+    )
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_job_queue] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi-exec-invalid/fileImports/ri.spice.main.file-import.fi-1/execute",
+            params={"preview": "true"},
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "FileImportInvalidConfig"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_virtual_table_execute_rejects_invalid_runtime_config_before_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-vt-exec-invalid"): SimpleNamespace(
+                    source_id="conn-vt-exec-invalid",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                ),
+                ("postgresql_virtual_table", "vt-1"): SimpleNamespace(
+                    source_id="vt-1",
+                    source_type="postgresql_virtual_table",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-vt-exec-invalid",
+                        "display_name": "VT",
+                        "import_mode": "INCREMENTAL",
+                        "virtual_table_config": {
+                            "type": "postgreSqlVirtualTableConfig",
+                            "query": "select 1 as id",
+                            "watermarkColumn": "id",
+                        },
+                    },
+                    created_at=None,
+                    updated_at=None,
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return SimpleNamespace(
+                target_db_name="sales_db",
+                target_branch="main",
+                target_class_label="Order",
+            )
+
+    async def _should_not_be_called(**kwargs: Any):  # noqa: ANN401
+        raise AssertionError("start_pipelining_virtual_table should not run when pre-validation fails")
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        foundry_connectivity_v2.data_connector_pipelining_service,
+        "start_pipelining_virtual_table",
+        _should_not_be_called,
+    )
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_job_queue] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-vt-exec-invalid/virtualTables/ri.spice.main.virtual-table.vt-1/execute",
+            params={"preview": "true"},
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["errorCode"] == "INVALID_ARGUMENT"
+    assert payload["errorName"] == "VirtualTableInvalidConfig"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("connection_config", "expected_type", "expected_source_type", "secret_payload"),
     [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any, Dict, Optional
 
@@ -8,6 +9,8 @@ from data_connector.adapters.base import ConnectorAdapter, ConnectorConnectionTe
 from data_connector.adapters.sql_query_guard import normalize_sql_query
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
+_JDBC_THREAD_TIMEOUT_SECONDS = 300
+logger = logging.getLogger(__name__)
 
 
 def _safe_columns(rows: list[Dict[str, Any]]) -> list[str]:
@@ -33,6 +36,13 @@ def _row_value(row: Dict[str, Any], key: str) -> Any:
         if str(candidate).lower() == lower:
             return value
     return None
+
+
+async def _run_blocking_query(fn, *, operation: str) -> Any:
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=_JDBC_THREAD_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise RuntimeError(f"Oracle connector timed out during {operation}") from exc
 
 
 class OracleConnectorService(ConnectorAdapter):
@@ -95,7 +105,7 @@ class OracleConnectorService(ConnectorAdapter):
                 finally:
                     conn.close()
 
-            await asyncio.to_thread(_run)
+            await _run_blocking_query(_run, operation="connection test")
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
         except Exception as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
@@ -134,7 +144,7 @@ class OracleConnectorService(ConnectorAdapter):
             finally:
                 conn.close()
 
-        return await asyncio.to_thread(_run)
+        return await _run_blocking_query(_run, operation="query fetch")
 
     async def snapshot_extract(
         self,
@@ -261,19 +271,26 @@ class OracleConnectorService(ConnectorAdapter):
         token_query_raw = str(cfg.get("tokenQuery") or cfg.get("token_query") or "").strip()
         token_query = normalize_sql_query(token_query_raw, field_name="tokenQuery") if token_query_raw else ""
         if token_query:
-            result = await self._fetch(query=token_query, config=config, secrets=secrets)
-            if result.rows and result.columns:
-                first_col = result.columns[0]
-                value = _row_value(result.rows[0], first_col)
-                return str(value) if value not in (None, "") else None
-            return None
+            try:
+                result = await self._fetch(query=token_query, config=config, secrets=secrets)
+                if result.rows and result.columns:
+                    first_col = result.columns[0]
+                    value = _row_value(result.rows[0], first_col)
+                    return str(value) if value not in (None, "") else None
+                logger.debug("Oracle peek_change_token: tokenQuery returned no rows")
+            except Exception as exc:
+                logger.warning("Oracle peek_change_token tokenQuery failed: %s", exc)
 
         cdc_strategy = str(cfg.get("cdcStrategy") or cfg.get("cdc_strategy") or "").strip().lower()
         if cdc_strategy in {"oracle_scn", "scn"}:
-            result = await self._fetch(query="SELECT CURRENT_SCN AS SCN FROM V$DATABASE", config=config, secrets=secrets)
-            if result.rows:
-                value = _row_value(result.rows[0], "SCN")
-                return str(value) if value not in (None, "") else None
+            try:
+                result = await self._fetch(query="SELECT CURRENT_SCN AS SCN FROM V$DATABASE", config=config, secrets=secrets)
+                if result.rows:
+                    value = _row_value(result.rows[0], "SCN")
+                    return str(value) if value not in (None, "") else None
+                logger.debug("Oracle peek_change_token: SCN query returned no rows")
+            except Exception as exc:
+                logger.warning("Oracle peek_change_token SCN query failed: %s", exc)
 
         token_column_raw = str(
             cfg.get("cdcTokenColumn")
@@ -287,8 +304,13 @@ class OracleConnectorService(ConnectorAdapter):
         if token_column and base_query_raw:
             base_query = normalize_sql_query(base_query_raw, field_name="query")
             query = f"SELECT MAX({token_column}) AS cursor_token FROM ({base_query}) source_rows"
-            result = await self._fetch(query=query, config=config, secrets=secrets)
-            if result.rows:
-                value = _row_value(result.rows[0], "cursor_token")
-                return str(value) if value not in (None, "") else None
+            try:
+                result = await self._fetch(query=query, config=config, secrets=secrets)
+                if result.rows:
+                    value = _row_value(result.rows[0], "cursor_token")
+                    return str(value) if value not in (None, "") else None
+                logger.debug("Oracle peek_change_token: MAX token query returned no rows")
+            except Exception as exc:
+                logger.warning("Oracle peek_change_token MAX token query failed: %s", exc)
+        logger.debug("Oracle peek_change_token: no token strategy produced a value")
         return None

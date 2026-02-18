@@ -26,6 +26,7 @@ from data_connector.adapters.factory import (
     table_import_source_type_for_kind,
     virtual_table_source_type_for_kind,
 )
+from data_connector.adapters.sql_query_guard import normalize_sql_query
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.settings import get_settings
 from shared.dependencies.providers import LineageStoreDep
@@ -569,6 +570,119 @@ def _extract_destination(payload: Dict[str, Any]) -> tuple[str | None, str | Non
     return db_name, branch, object_type
 
 
+_RESOURCE_CONFIG_ERROR_NAMES = {
+    "table_import": "TableImportInvalidConfig",
+    "file_import": "FileImportInvalidConfig",
+    "virtual_table": "VirtualTableInvalidConfig",
+}
+
+
+def _resource_invalid_config_response(
+    *,
+    resource_kind: str,
+    message: str,
+) -> JSONResponse:
+    return _foundry_error(
+        status.HTTP_400_BAD_REQUEST,
+        error_code="INVALID_ARGUMENT",
+        error_name=_RESOURCE_CONFIG_ERROR_NAMES.get(resource_kind, "InvalidArgument"),
+        parameters={"message": str(message or "Invalid configuration")},
+    )
+
+
+def _normalized_query(config: Dict[str, Any], *, field_name: str) -> str:
+    raw_query = str(config.get(field_name) or "").strip()
+    if not raw_query:
+        return ""
+    return normalize_sql_query(raw_query, field_name=field_name)
+
+
+def _normalize_import_mode(raw_mode: Any) -> str:
+    mode = str(raw_mode or "SNAPSHOT").strip().upper()
+    if mode not in _TABLE_IMPORT_MODES:
+        raise ValueError("importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
+    return mode
+
+
+def _validate_jdbc_mode_requirements(
+    *,
+    resource_kind: str,
+    import_mode: str,
+    config: Dict[str, Any],
+) -> None:
+    query = _normalized_query(config, field_name="query")
+    cdc_query = _normalized_query(config, field_name="cdcQuery")
+    watermark = str(config.get("watermarkColumn") or config.get("watermark_column") or "").strip()
+
+    label = resource_kind.replace("_", " ")
+    if import_mode in {"SNAPSHOT", "APPEND", "UPDATE"}:
+        if not query:
+            raise ValueError(f"config.query is required for JDBC {label}s")
+        return
+    if import_mode == "INCREMENTAL":
+        if not query:
+            raise ValueError("config.query is required for INCREMENTAL mode")
+        if not watermark:
+            raise ValueError("watermarkColumn is required for INCREMENTAL mode")
+        return
+    if import_mode == "CDC":
+        if cdc_query:
+            return
+        if not query:
+            raise ValueError("config.cdcQuery or config.query is required for CDC mode")
+        if not watermark:
+            raise ValueError("watermarkColumn is required for CDC mode without cdcQuery")
+        return
+
+
+def _validate_resource_import_config(
+    *,
+    resource_kind: str,
+    connector_kind: str,
+    import_mode: str,
+    config: Dict[str, Any],
+) -> None:
+    if not isinstance(config, dict) or not config:
+        raise ValueError(f"{resource_kind.replace('_', ' ')} config is required")
+
+    if resource_kind == "virtual_table" and import_mode != "SNAPSHOT":
+        raise ValueError("virtual tables support only SNAPSHOT mode")
+
+    if _is_jdbc_connector_kind(connector_kind):
+        _validate_jdbc_mode_requirements(
+            resource_kind=resource_kind,
+            import_mode=import_mode,
+            config=config,
+        )
+        return
+
+    if resource_kind == "file_import":
+        has_selector = any(
+            key in config and config.get(key) not in (None, "", [], {})
+            for key in ("fileImportFilters", "path", "subfolder", "filePattern", "fileFormat")
+        )
+        if not has_selector:
+            raise ValueError(
+                "file import requires at least one selector: fileImportFilters, path, subfolder, filePattern, or fileFormat"
+            )
+
+
+def _resource_import_mode_from_source(*, source_cfg: Dict[str, Any], resource_kind: str) -> str:
+    if resource_kind == "virtual_table":
+        return _normalize_import_mode(source_cfg.get("import_mode") or "SNAPSHOT")
+    return _normalize_import_mode(source_cfg.get("import_mode"))
+
+
+def _resource_import_config_from_source(*, source_cfg: Dict[str, Any], resource_kind: str) -> Dict[str, Any]:
+    config_key = {
+        "table_import": "table_import_config",
+        "file_import": "file_import_config",
+        "virtual_table": "virtual_table_config",
+    }.get(resource_kind, "")
+    raw = source_cfg.get(config_key)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 async def _resolve_dataset_context(
     *,
     payload: Dict[str, Any],
@@ -981,6 +1095,55 @@ def _build_execute_run_output(
     return output
 
 
+def _validated_execute_result_payload(
+    *,
+    result_payload: Any,
+    resource_kind: str,
+) -> Dict[str, Any]:
+    if not isinstance(result_payload, dict):
+        raise RuntimeError(f"{resource_kind} execution returned an invalid payload")
+    status_value = str(result_payload.get("status") or "").strip().lower()
+    if status_value not in {"success", "succeeded", "ok"}:
+        raise RuntimeError(f"{resource_kind} execution did not report success")
+    return result_payload
+
+
+async def _record_execute_failure_run(
+    *,
+    pipeline_registry: PipelineRegistry,
+    pipeline_id: str | None,
+    job_id: str | None,
+    connection_rid: str,
+    resource_rid: str,
+    branch_name: str,
+    requested_by: str,
+    error_detail: str,
+    resource_field: str = "tableImportRid",
+    started_at: Any = None,
+) -> None:
+    if not pipeline_id or not job_id:
+        return
+    try:
+        await pipeline_registry.record_run(
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            mode="build",
+            status="FAILED",
+            output_json=_build_execute_run_output(
+                connection_rid=connection_rid,
+                resource_rid=resource_rid,
+                resource_field=resource_field,
+                branch_name=branch_name,
+                requested_by=requested_by,
+                error_detail=error_detail,
+            ),
+            started_at=started_at or utcnow(),
+            finished_at=utcnow(),
+        )
+    except Exception as record_exc:
+        logger.warning("Failed to record execute failure build run: %s", record_exc)
+
+
 async def _ensure_table_import_pipeline(
     *,
     pipeline_registry: PipelineRegistry,
@@ -1133,14 +1296,10 @@ async def create_table_import_v2(
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
 
-    import_mode = str(payload.get("importMode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC"},
-        )
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode"))
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -1223,6 +1382,12 @@ async def create_table_import_v2(
                     "branch_name": resolved_branch,
                 }
             )
+            _validate_resource_import_config(
+                resource_kind="table_import",
+                connector_kind="google_sheets",
+                import_mode=import_mode,
+                config=cfg.get("table_import_config") if isinstance(cfg.get("table_import_config"), dict) else {},
+            )
             await connector_registry.upsert_source(
                 source_type=source.source_type,
                 source_id=source.source_id,
@@ -1241,26 +1406,22 @@ async def create_table_import_v2(
                     field_mappings=[],
                 )
         except ValueError as exc:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": str(exc)},
-            )
+            return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     else:
         table_import_id = str(payload.get("tableImportId") or uuid4()).strip()
         source_type = table_import_source_type_for_kind(connector_kind)
         display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} import {table_import_id}")
         allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
         table_import_config = _resolve_table_import_config(payload, connector_kind=connector_kind)
-
-        if not table_import_config.get("query") and import_mode in {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL"}:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "config.query is required for JDBC table imports"},
+        try:
+            _validate_resource_import_config(
+                resource_kind="table_import",
+                connector_kind=connector_kind,
+                import_mode=import_mode,
+                config=table_import_config,
             )
+        except ValueError as exc:
+            return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
         await connector_registry.upsert_source(
             source_type=source_type,
@@ -1512,14 +1673,10 @@ async def replace_table_import_v2(
     cfg = dict(source.config_json or {})
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
 
-    import_mode = str(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC"},
-        )
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
@@ -1539,6 +1696,22 @@ async def replace_table_import_v2(
             parameters={"message": "CDC connectivity is disabled for this ontology"},
         )
 
+    table_import_config = _resolve_table_import_config(
+        payload,
+        connector_kind=connector_kind,
+        sheet_url=str(cfg.get("sheet_url") or ""),
+        worksheet_name=str(cfg.get("worksheet_name") or "").strip() or None,
+    )
+    try:
+        _validate_resource_import_config(
+            resource_kind="table_import",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=table_import_config,
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
+
     cfg.update(
         {
             "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} import {table_import_id}"),
@@ -1550,12 +1723,7 @@ async def replace_table_import_v2(
                 if payload.get("allowSchemaChanges") is not None
                 else cfg.get("allow_schema_changes")
             ),
-            "table_import_config": _resolve_table_import_config(
-                payload,
-                connector_kind=connector_kind,
-                sheet_url=str(cfg.get("sheet_url") or ""),
-                worksheet_name=str(cfg.get("worksheet_name") or "").strip() or None,
-            ),
+            "table_import_config": table_import_config,
             "connection_id": connection_id,
         }
     )
@@ -1715,8 +1883,12 @@ async def execute_table_import_v2(
         )
 
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    source_cfg = dict(source.config_json or {})
     target_db = str(mapping.target_db_name or "").strip() or None
-    import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
+    try:
+        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="table_import")
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -1731,11 +1903,23 @@ async def execute_table_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "CDC connectivity is disabled for this ontology"},
         )
+    try:
+        _validate_resource_import_config(
+            resource_kind="table_import",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="table_import"),
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
     branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     table_import_rid = _table_import_rid(source.source_id)
+    pipeline_id: str | None = None
+    job_id: str | None = None
+    started_at: Any = None
 
     try:
         pipeline_id = await _ensure_table_import_pipeline(
@@ -1773,6 +1957,10 @@ async def execute_table_import_v2(
             objectify_job_queue=objectify_job_queue,
             actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
         )
+        result_payload = _validated_execute_result_payload(
+            result_payload=result_payload,
+            resource_kind="table import",
+        )
 
         await pipeline_registry.record_run(
             pipeline_id=pipeline_id,
@@ -1789,27 +1977,33 @@ async def execute_table_import_v2(
             started_at=started_at,
             finished_at=utcnow(),
         )
+    except ValueError as exc:
+        logger.warning("Invalid table import runtime configuration for %s: %s", tableImportRid, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=table_import_rid,
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
+        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     except Exception as exc:
         logger.error("Failed to execute table import %s: %s", tableImportRid, exc)
-        try:
-            if "job_id" in locals() and "pipeline_id" in locals():
-                await pipeline_registry.record_run(
-                    pipeline_id=str(locals().get("pipeline_id")),
-                    job_id=str(locals().get("job_id")),
-                    mode="build",
-                    status="FAILED",
-                    output_json=_build_execute_run_output(
-                        connection_rid=connection_rid,
-                        resource_rid=table_import_rid,
-                        branch_name=branch_name,
-                        requested_by=requested_by,
-                        error_detail=str(exc),
-                    ),
-                    started_at=locals().get("started_at") or utcnow(),
-                    finished_at=utcnow(),
-                )
-        except Exception as record_exc:
-            logger.warning("Failed to record execute_table_import failure build run: %s", record_exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=table_import_rid,
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error_code="INTERNAL",
@@ -1858,14 +2052,10 @@ async def create_file_import_v2(
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
 
-    import_mode = str(payload.get("importMode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC"},
-        )
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode"))
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
     if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -1879,14 +2069,15 @@ async def create_file_import_v2(
     display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} file import {file_import_id}")
     allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
     file_import_config = _resolve_file_import_config(payload, connector_kind=connector_kind)
-
-    if _is_jdbc_connector_kind(connector_kind) and not str(file_import_config.get("query") or "").strip():
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "config.query is required for JDBC file imports"},
+    try:
+        _validate_resource_import_config(
+            resource_kind="file_import",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=file_import_config,
         )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
     try:
         dataset_rid_input, dataset_db_name, dataset_branch = await _resolve_dataset_context(
@@ -2143,14 +2334,10 @@ async def replace_file_import_v2(
 
     cfg = dict(source.config_json or {})
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    import_mode = str(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in _TABLE_IMPORT_MODES:
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "importMode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC"},
-        )
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode"))
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
@@ -2170,6 +2357,15 @@ async def replace_file_import_v2(
         )
 
     file_import_config = _resolve_file_import_config(payload, connector_kind=connector_kind)
+    try:
+        _validate_resource_import_config(
+            resource_kind="file_import",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=file_import_config,
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
     cfg.update(
         {
             "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} file import {file_import_id}"),
@@ -2335,8 +2531,12 @@ async def execute_file_import_v2(
         )
 
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    source_cfg = dict(source.config_json or {})
     target_db = str(mapping.target_db_name or "").strip() or None
-    import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
+    try:
+        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="file_import")
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -2351,11 +2551,23 @@ async def execute_file_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "CDC connectivity is disabled for this ontology"},
         )
+    try:
+        _validate_resource_import_config(
+            resource_kind="file_import",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="file_import"),
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
     branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     file_import_rid = _file_import_rid(source.source_id)
+    pipeline_id: str | None = None
+    job_id: str | None = None
+    started_at: Any = None
 
     try:
         pipeline_id = await _ensure_file_import_pipeline(
@@ -2393,6 +2605,10 @@ async def execute_file_import_v2(
             objectify_job_queue=objectify_job_queue,
             actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
         )
+        result_payload = _validated_execute_result_payload(
+            result_payload=result_payload,
+            resource_kind="file import",
+        )
         await pipeline_registry.record_run(
             pipeline_id=pipeline_id,
             job_id=job_id,
@@ -2409,8 +2625,35 @@ async def execute_file_import_v2(
             started_at=started_at,
             finished_at=utcnow(),
         )
+    except ValueError as exc:
+        logger.warning("Invalid file import runtime configuration for %s: %s", fileImportRid, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=file_import_rid,
+            resource_field="fileImportRid",
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
+        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
     except Exception as exc:
         logger.error("Failed to execute file import %s: %s", fileImportRid, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=file_import_rid,
+            resource_field="fileImportRid",
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error_code="INTERNAL",
@@ -2478,8 +2721,12 @@ async def execute_virtual_table_v2(
         )
 
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    source_cfg = dict(source.config_json or {})
     target_db = str(mapping.target_db_name or "").strip() or None
-    import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
+    try:
+        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="virtual_table")
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -2487,18 +2734,23 @@ async def execute_virtual_table_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
-    if import_mode == "CDC" and not _cdc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "CDC connectivity is disabled for this ontology"},
+    try:
+        _validate_resource_import_config(
+            resource_kind="virtual_table",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="virtual_table"),
         )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
     branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     virtual_table_rid = _virtual_table_rid(source.source_id)
+    pipeline_id: str | None = None
+    job_id: str | None = None
+    started_at: Any = None
 
     try:
         pipeline_id = await _ensure_virtual_table_pipeline(
@@ -2536,6 +2788,10 @@ async def execute_virtual_table_v2(
             objectify_job_queue=objectify_job_queue,
             actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
         )
+        result_payload = _validated_execute_result_payload(
+            result_payload=result_payload,
+            resource_kind="virtual table",
+        )
         await pipeline_registry.record_run(
             pipeline_id=pipeline_id,
             job_id=job_id,
@@ -2552,8 +2808,35 @@ async def execute_virtual_table_v2(
             started_at=started_at,
             finished_at=utcnow(),
         )
+    except ValueError as exc:
+        logger.warning("Invalid virtual table runtime configuration for %s: %s", virtualTableRid, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=virtual_table_rid,
+            resource_field="virtualTableRid",
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
     except Exception as exc:
         logger.error("Failed to execute virtual table %s: %s", virtualTableRid, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=virtual_table_rid,
+            resource_field="virtualTableRid",
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             error_code="INTERNAL",
@@ -2601,9 +2884,23 @@ async def create_virtual_table_v2(
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
 
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode") or "SNAPSHOT")
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
+
     virtual_table_id = str(payload.get("virtualTableId") or uuid4()).strip()
     source_type = virtual_table_source_type_for_kind(connector_kind)
     virtual_table_config = _resolve_virtual_table_config(payload, connector_kind=connector_kind)
+    try:
+        _validate_resource_import_config(
+            resource_kind="virtual_table",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=virtual_table_config,
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
     display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} virtual table {virtual_table_id}")
 
     try:
@@ -2631,13 +2928,14 @@ async def create_virtual_table_v2(
             "connection_id": connection_id,
             "dataset_rid": dataset_rid_input,
             "display_name": display_name,
-            "name": display_name,
-            "parent_rid": _connection_rid(connection_id),
-            "virtual_table_config": virtual_table_config,
-            "branch_name": resolved_branch,
-            "resource_kind": "virtual_table",
-        },
-    )
+                "name": display_name,
+                "parent_rid": _connection_rid(connection_id),
+                "import_mode": import_mode,
+                "virtual_table_config": virtual_table_config,
+                "branch_name": resolved_branch,
+                "resource_kind": "virtual_table",
+            },
+        )
     if resolved_db:
         await connector_registry.upsert_mapping(
             source_type=source_type,
@@ -2859,6 +3157,10 @@ async def replace_virtual_table_v2(
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
+    try:
+        import_mode = _normalize_import_mode(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT")
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -2866,13 +3168,24 @@ async def replace_virtual_table_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
+    virtual_table_config = _resolve_virtual_table_config(payload, connector_kind=connector_kind)
+    try:
+        _validate_resource_import_config(
+            resource_kind="virtual_table",
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=virtual_table_config,
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
     cfg.update(
         {
             "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}"),
             "name": _display_name_from_payload(payload, fallback=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}"),
             "parent_rid": _connection_rid(connection_id),
-            "virtual_table_config": _resolve_virtual_table_config(payload, connector_kind=connector_kind),
+            "import_mode": import_mode,
+            "virtual_table_config": virtual_table_config,
             "connection_id": connection_id,
         }
     )

@@ -8,6 +8,7 @@ from data_connector.adapters.base import ConnectorAdapter, ConnectorConnectionTe
 from data_connector.adapters.sql_query_guard import normalize_sql_query
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
+_JDBC_THREAD_TIMEOUT_SECONDS = 300
 
 
 def _safe_columns(rows: list[Dict[str, Any]]) -> list[str]:
@@ -33,6 +34,13 @@ def _row_value(row: Dict[str, Any], key: str) -> Any:
         if str(candidate).lower() == lower:
             return value
     return None
+
+
+async def _run_blocking_query(fn, *, operation: str) -> Any:
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn), timeout=_JDBC_THREAD_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise RuntimeError(f"SQL Server connector timed out during {operation}") from exc
 
 
 class SqlServerConnectorService(ConnectorAdapter):
@@ -103,7 +111,7 @@ class SqlServerConnectorService(ConnectorAdapter):
                 finally:
                     conn.close()
 
-            await asyncio.to_thread(_run)
+            await _run_blocking_query(_run, operation="connection test")
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
         except Exception as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
@@ -142,7 +150,7 @@ class SqlServerConnectorService(ConnectorAdapter):
             finally:
                 conn.close()
 
-        return await asyncio.to_thread(_run)
+        return await _run_blocking_query(_run, operation="query fetch")
 
     async def snapshot_extract(
         self,
