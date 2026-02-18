@@ -785,7 +785,8 @@ async def test_foundry_connection_create_get_list_delete():
         assert conn_body["rid"].startswith("ri.spice.main.connection.")
         assert conn_body["status"] == "CONNECTED"
         assert conn_body["parentFolderRid"] == "ri.compass.main.folder.connectivity"
-        assert conn_body["exportSettings"]["markingIds"] == ["ri.marking.main.classification.low"]
+        assert conn_body["exportSettings"]["exportsEnabled"] is True
+        assert conn_body["exportSettings"]["exportEnabledWithoutMarkingsValidation"] is False
         assert conn_body["connectionConfiguration"]["type"] == "GoogleSheetsConnectionConfig"
         assert conn_body["connectionConfiguration"]["accountEmail"] == "test@example.com"
         # Backward-compatible alias.
@@ -979,19 +980,19 @@ async def test_foundry_connection_update_export_settings_v2():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         no_preview_resp = await client.post(
             "/api/v2/connectivity/connections/ri.spice.main.connection.conn-export/updateExportSettings",
-            json={"exportSettings": {"markingIds": ["m1"]}},
+            json={"exportSettings": {"exportsEnabled": True}},
         )
         update_resp = await client.post(
             "/api/v2/connectivity/connections/ri.spice.main.connection.conn-export/updateExportSettings",
             params={"preview": "true"},
-            json={"exportSettings": {"markingIds": ["m1"], "sharing": {"scope": "TEAM"}}},
+            json={"exportSettings": {"exportsEnabled": False, "exportEnabledWithoutMarkingsValidation": True}},
         )
 
     assert no_preview_resp.status_code == 400
     assert no_preview_resp.json()["errorName"] == "ApiFeaturePreviewUsageOnly"
     assert update_resp.status_code == 204
-    assert registry.source.config_json["export_settings"]["markingIds"] == ["m1"]
-    assert registry.source.config_json["export_settings"]["sharing"]["scope"] == "TEAM"
+    assert registry.source.config_json["export_settings"]["exportsEnabled"] is False
+    assert registry.source.config_json["export_settings"]["exportEnabledWithoutMarkingsValidation"] is True
 
 
 @pytest.mark.unit
@@ -1065,6 +1066,12 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
     content = b"fake-jar-driver-binary"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        invalid_file_name_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-jdbc/uploadCustomJdbcDrivers",
+            params={"preview": "true", "fileName": "custom-driver.txt"},
+            content=content,
+            headers={"Content-Type": "application/octet-stream"},
+        )
         upload_resp = await client.post(
             "/api/v2/connectivity/connections/ri.spice.main.connection.conn-jdbc/uploadCustomJdbcDrivers",
             params={"preview": "true", "fileName": "custom-driver.jar"},
@@ -1072,6 +1079,8 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
             headers={"Content-Type": "application/octet-stream"},
         )
 
+    assert invalid_file_name_resp.status_code == 400
+    assert invalid_file_name_resp.json()["errorCode"] == "INVALID_ARGUMENT"
     assert upload_resp.status_code == 200
     body = upload_resp.json()
     assert body["rid"] == "ri.spice.main.connection.conn-jdbc"

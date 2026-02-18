@@ -2064,7 +2064,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/updateExportSettings"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
-        body = {"exportSettings": {"markingIds": ["ri.spice.main.marking.smoke"], "sharing": {"scope": "DEFAULT"}}}
+        body = {"exportSettings": {"exportsEnabled": True, "exportEnabledWithoutMarkingsValidation": False}}
         return RequestPlan(op.method, op.path, url, (204, 404, 400), params={"preview": "true"}, json_body=body)
 
     if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers"):

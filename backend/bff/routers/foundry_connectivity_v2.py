@@ -309,25 +309,39 @@ def _require_preview_or_400(preview: bool) -> JSONResponse | None:
 
 def _default_export_settings() -> Dict[str, Any]:
     return {
-        "markingIds": [],
-        "sharing": {"scope": "DEFAULT"},
+        "exportsEnabled": True,
+        "exportEnabledWithoutMarkingsValidation": False,
     }
 
 
 def _normalize_export_settings(value: Any) -> Dict[str, Any]:
     if not isinstance(value, dict):
         return _default_export_settings()
-    marking_ids_raw = value.get("markingIds")
-    marking_ids = []
-    if isinstance(marking_ids_raw, list):
-        marking_ids = [str(item).strip() for item in marking_ids_raw if str(item).strip()]
-    sharing_raw = value.get("sharing") if isinstance(value.get("sharing"), dict) else {}
-    sharing = dict(sharing_raw)
-    if not str(sharing.get("scope") or "").strip():
-        sharing["scope"] = "DEFAULT"
+
+    def _coerce_bool(raw: Any, *, default: bool) -> bool:
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, (int, float)):
+            return bool(raw)
+        text = str(raw or "").strip().lower()
+        if text in {"true", "1", "yes", "on"}:
+            return True
+        if text in {"false", "0", "no", "off"}:
+            return False
+        return default
+
+    exports_enabled_raw = value.get("exportsEnabled")
+    without_markings_raw = value.get("exportEnabledWithoutMarkingsValidation")
+    if exports_enabled_raw is None:
+        # Legacy fallback compatibility: infer enabled from old sharing payload.
+        sharing_raw = value.get("sharing") if isinstance(value.get("sharing"), dict) else {}
+        scope = str(sharing_raw.get("scope") or "").strip().upper()
+        exports_enabled_raw = scope != "DISABLED" if scope else True
+    if without_markings_raw is None:
+        without_markings_raw = False
     return {
-        "markingIds": marking_ids,
-        "sharing": sharing,
+        "exportsEnabled": _coerce_bool(exports_enabled_raw, default=True),
+        "exportEnabledWithoutMarkingsValidation": _coerce_bool(without_markings_raw, default=False),
     }
 
 
@@ -340,6 +354,8 @@ def _normalize_jdbc_driver_file_name(file_name: str) -> str | None:
     if not name:
         return None
     if "." not in name:
+        return None
+    if not name.lower().endswith(".jar"):
         return None
     return name
 

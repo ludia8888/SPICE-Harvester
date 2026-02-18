@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T23:34:27+09:00
+> Generated: 2026-02-18T23:43:32+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **277**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **239158**
+- Total code lines (non-empty, non-comment): **239180**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1100 | 754 | 55317 |
+| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1100 | 754 | 55330 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 412 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 301 | 204/301 (67%) | 105 | 383 | 863 | 1130 | 79879 |
-| `tests` | 283 | 49/283 (17%) | 20 | 51 | 1406 | 1379 | 45635 |
+| `tests` | 283 | 49/283 (17%) | 20 | 51 | 1406 | 1379 | 45644 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -773,7 +773,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=3275 | code_lines=2924 | risk_score=38
+- Source footprint: total_lines=3291 | code_lines=2937 | risk_score=38
 - API surface: public=27 | top-level functions=85 | classes=0 | methods=0
 - Runtime signals: async_functions=42 | try=17 | raise=4 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/85 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12623,7 +12623,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1429 | code_lines=1216 | risk_score=0
+- Source footprint: total_lines=1438 | code_lines=1225 | risk_score=0
 - API surface: public=19 | top-level functions=21 | classes=0 | methods=0
 - Runtime signals: async_functions=85 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/21 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
