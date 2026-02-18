@@ -1,4 +1,3 @@
-import base64
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -998,6 +997,37 @@ async def test_foundry_connection_update_export_settings_v2():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
+    class _Storage:
+        def __init__(self) -> None:
+            self.saved: list[dict[str, Any]] = []
+
+        async def save_bytes(
+            self,
+            bucket: str,
+            key: str,
+            data: bytes,
+            content_type: str = "application/octet-stream",
+            metadata: dict[str, str] | None = None,
+        ) -> str:
+            self.saved.append(
+                {
+                    "bucket": bucket,
+                    "key": key,
+                    "data": bytes(data),
+                    "content_type": content_type,
+                    "metadata": dict(metadata or {}),
+                }
+            )
+            return "checksum"
+
+    class _PipelineRegistry:
+        def __init__(self, storage: _Storage) -> None:
+            self._storage = storage
+
+        async def get_lakefs_storage(self, *, user_id: str | None = None):  # noqa: ANN001
+            _ = user_id
+            return self._storage
+
     class _ConnectorRegistry:
         def __init__(self) -> None:
             self.source = SimpleNamespace(
@@ -1014,21 +1044,11 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
                 created_at=None,
                 updated_at=None,
             )
-            self.secrets: dict[str, Any] = {}
 
         async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
             if source_type == "postgresql_connection" and source_id == "conn-jdbc":
                 return self.source
             return None
-
-        async def get_connection_secrets(self, *, source_type: str, source_id: str):  # noqa: ANN001
-            _ = source_type, source_id
-            return dict(self.secrets)
-
-        async def upsert_connection_secrets(self, *, source_type: str, source_id: str, secrets_json: dict):  # noqa: ANN001
-            _ = source_type, source_id
-            self.secrets = dict(secrets_json)
-            return dict(self.secrets)
 
         async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
             _ = source_type, source_id, enabled
@@ -1037,7 +1057,9 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
 
     app = _build_test_app()
     registry = _ConnectorRegistry()
+    storage = _Storage()
     app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: _PipelineRegistry(storage)
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     content = b"fake-jar-driver-binary"
@@ -1053,12 +1075,14 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
     assert upload_resp.status_code == 200
     body = upload_resp.json()
     assert body["rid"] == "ri.spice.main.connection.conn-jdbc"
-    assert "jdbc_driver_blobs" not in body
-    assert "jdbc_driver_blobs" in registry.secrets
-    stored = registry.secrets["jdbc_driver_blobs"]
-    assert isinstance(stored, dict)
-    assert len(stored) == 1
-    assert next(iter(stored.values())) == base64.b64encode(content).decode("ascii")
+    conn_cfg = body["connectionConfiguration"]
+    assert conn_cfg["type"] == "PostgreSqlConnectionConfig"
+    assert "customJdbcDrivers" in conn_cfg
+    assert conn_cfg["customJdbcDrivers"][0]["fileName"] == "custom-driver.jar"
+    assert len(storage.saved) == 1
+    assert storage.saved[0]["data"] == content
+    assert storage.saved[0]["bucket"] == "pipeline-artifacts"
+    assert "connectivity/jdbc-drivers/conn-jdbc/" in storage.saved[0]["key"]
 
 
 @pytest.mark.unit

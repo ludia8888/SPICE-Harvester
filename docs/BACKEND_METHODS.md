@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-18T20:54:28+09:00
+> Generated: 2026-02-18T23:34:27+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -470,90 +470,91 @@
 
 ### `backend/bff/routers/foundry_connectivity_v2.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 128): no docstring
-  - `_connection_id_from_rid(connection_rid)` (line 146): no docstring
-  - `_connection_rid(connection_id)` (line 158): no docstring
-  - `_table_import_id_from_rid(table_import_rid)` (line 162): no docstring
-  - `_table_import_rid(table_import_id)` (line 174): no docstring
-  - `_file_import_id_from_rid(file_import_rid)` (line 178): no docstring
-  - `_file_import_rid(file_import_id)` (line 190): no docstring
-  - `_virtual_table_id_from_rid(virtual_table_rid)` (line 194): no docstring
-  - `_virtual_table_rid(virtual_table_id)` (line 206): no docstring
-  - `_dataset_id_from_rid(dataset_rid)` (line 210): no docstring
-  - `_dataset_rid(dataset_id)` (line 222): no docstring
-  - `_table_import_pipeline_id(connection_id, source_type, source_id)` (line 226): no docstring
-  - `_table_import_build_job_id(pipeline_id)` (line 230): no docstring
-  - `_file_import_pipeline_id(connection_id, source_type, source_id)` (line 234): no docstring
-  - `_virtual_table_pipeline_id(connection_id, source_type, source_id)` (line 238): no docstring
-  - `_parse_allowlist(raw)` (line 242): no docstring
-  - `_is_flag_or_allowlist_enabled(global_enabled, allowlist_raw, db_name)` (line 246): no docstring
-  - `_jdbc_enabled_for_db(db_name)` (line 255): no docstring
-  - `_cdc_enabled_for_db(db_name)` (line 264): no docstring
-  - `_connection_source_types()` (line 273): no docstring
-  - `_table_import_source_types()` (line 277): no docstring
-  - `_file_import_source_types()` (line 281): no docstring
-  - `_virtual_table_source_types()` (line 285): no docstring
-  - `_connection_kind_from_source(source)` (line 289): no docstring
-  - `_is_jdbc_connector_kind(kind)` (line 296): no docstring
-  - `_require_preview_or_400(preview)` (line 300): no docstring
-  - `_default_export_settings()` (line 311): no docstring
-  - `_normalize_export_settings(value)` (line 318): no docstring
-  - `_normalize_jdbc_driver_file_name(file_name)` (line 335): no docstring
-  - `_upsert_custom_jdbc_driver_metadata(config_json, file_name, sha256_hex, size_bytes, blob_key)` (line 348): no docstring
-  - `_extract_connection_configuration(payload)` (line 379): no docstring
-  - `_display_name_from_payload(payload, fallback)` (line 387): no docstring
-  - `_validate_parent_rid_matches_connection(payload, connection_id)` (line 391): no docstring
-  - `_resolve_table_import_config(payload, connector_kind, sheet_url, worksheet_name)` (line 410): no docstring
-  - `_resolve_file_import_config(payload, connector_kind)` (line 437): no docstring
-  - `_resolve_virtual_table_config(payload, connector_kind)` (line 467): no docstring
-  - `_extract_destination(payload)` (line 491): no docstring
-  - `async _resolve_dataset_context(payload, dataset_registry)` (line 516): no docstring
-  - `async _load_connection_source(connector_registry, connection_id)` (line 539): no docstring
-  - `async _load_connection_source_or_404(connector_registry, connection_rid)` (line 551): no docstring
-  - `async _load_table_import_source(connector_registry, connection_id, table_import_id)` (line 575): no docstring
-  - `async _load_file_import_source(connector_registry, connection_id, file_import_id)` (line 594): no docstring
-  - `async _load_virtual_table_source(connector_registry, connection_id, virtual_table_id)` (line 613): no docstring
-  - `async _resolve_output_dataset_rid(source, mapping, dataset_registry)` (line 632): no docstring
-  - `async _build_table_import_response(connection_id, source, mapping, dataset_registry)` (line 662): no docstring
-  - `async _build_file_import_response(connection_id, source, mapping, dataset_registry)` (line 704): no docstring
-  - `async _build_virtual_table_response(connection_id, source, mapping, dataset_registry)` (line 746): no docstring
-  - `async _connection_configuration(source, connector_adapter_factory)` (line 782): no docstring
-  - `async _connection_response(source, connector_adapter_factory)` (line 795): no docstring
-  - `_iso_timestamp(value)` (line 837): no docstring
-  - `_normalize_connection_config_for_storage(configuration, kind)` (line 845): no docstring
-  - `_extract_secrets_from_configuration(configuration, kind)` (line 867): no docstring
-  - `_extract_secrets_from_payload(payload, kind)` (line 879): no docstring
-  - `_build_execute_run_output(connection_rid, resource_rid, branch_name, requested_by, resource_field, result_payload, error_detail)` (line 897): no docstring
-  - `async _ensure_table_import_pipeline(pipeline_registry, connection_id, source, mapping)` (line 925): no docstring
-  - `async _ensure_file_import_pipeline(pipeline_registry, connection_id, source, mapping)` (line 957): no docstring
-  - `async _ensure_virtual_table_pipeline(pipeline_registry, connection_id, source, mapping)` (line 989): no docstring
-  - `async create_table_import_v2(connectionRid, payload, request, preview, google_sheets_service, connector_registry, dataset_registry, lineage_store)` (line 1023): no docstring
-  - `async get_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, dataset_registry)` (line 1257): no docstring
-  - `async list_table_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 1308): no docstring
-  - `async replace_table_import_v2(connectionRid, tableImportRid, payload, preview, connector_registry, dataset_registry)` (line 1408): no docstring
-  - `async delete_table_import_v2(connectionRid, tableImportRid, preview, connector_registry)` (line 1548): no docstring
-  - `async execute_table_import_v2(connectionRid, tableImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue)` (line 1598): no docstring
-  - `async create_file_import_v2(connectionRid, payload, preview, connector_registry, dataset_registry)` (line 1760): no docstring
-  - `async get_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, dataset_registry)` (line 1896): no docstring
-  - `async list_file_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 1948): no docstring
-  - `async replace_file_import_v2(connectionRid, fileImportRid, payload, preview, connector_registry, dataset_registry)` (line 2035): no docstring
-  - `async delete_file_import_v2(connectionRid, fileImportRid, preview, connector_registry)` (line 2167): no docstring
-  - `async execute_file_import_v2(connectionRid, fileImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue)` (line 2212): no docstring
-  - `async create_virtual_table_v2(connectionRid, payload, preview, connector_registry, dataset_registry)` (line 2355): no docstring
-  - `async get_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, dataset_registry)` (line 2461): no docstring
-  - `async list_virtual_tables_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 2512): no docstring
-  - `async replace_virtual_table_v2(connectionRid, virtualTableRid, payload, preview, connector_registry, dataset_registry)` (line 2599): no docstring
-  - `async delete_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry)` (line 2708): no docstring
-  - `async create_connection_v2(payload, request, preview, connector_registry, connector_adapter_factory)` (line 2753): no docstring
-  - `async get_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 2846): no docstring
-  - `async list_connections_v2(preview, pageSize, pageToken, connector_registry, connector_adapter_factory)` (line 2868): no docstring
-  - `async delete_connection_v2(connectionRid, preview, connector_registry)` (line 2914): no docstring
-  - `async test_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 2941): no docstring
-  - `async get_connection_configuration_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 3000): no docstring
-  - `async get_connection_configuration_batch_v2(payload, preview, connector_registry, connector_adapter_factory)` (line 3032): no docstring
-  - `async update_connection_secrets_v2(connectionRid, payload, preview, connector_registry)` (line 3082): no docstring
-  - `async update_connection_export_settings_v2(connectionRid, payload, preview, connector_registry)` (line 3127): no docstring
-  - `async upload_custom_jdbc_drivers_v2(connectionRid, driverBytes, fileName, preview, connector_registry, connector_adapter_factory)` (line 3161): no docstring
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 127): no docstring
+  - `_connection_id_from_rid(connection_rid)` (line 145): no docstring
+  - `_connection_rid(connection_id)` (line 157): no docstring
+  - `_table_import_id_from_rid(table_import_rid)` (line 161): no docstring
+  - `_table_import_rid(table_import_id)` (line 173): no docstring
+  - `_file_import_id_from_rid(file_import_rid)` (line 177): no docstring
+  - `_file_import_rid(file_import_id)` (line 189): no docstring
+  - `_virtual_table_id_from_rid(virtual_table_rid)` (line 193): no docstring
+  - `_virtual_table_rid(virtual_table_id)` (line 205): no docstring
+  - `_dataset_id_from_rid(dataset_rid)` (line 209): no docstring
+  - `_dataset_rid(dataset_id)` (line 221): no docstring
+  - `_table_import_pipeline_id(connection_id, source_type, source_id)` (line 225): no docstring
+  - `_table_import_build_job_id(pipeline_id)` (line 229): no docstring
+  - `_file_import_pipeline_id(connection_id, source_type, source_id)` (line 233): no docstring
+  - `_virtual_table_pipeline_id(connection_id, source_type, source_id)` (line 237): no docstring
+  - `_parse_allowlist(raw)` (line 241): no docstring
+  - `_is_flag_or_allowlist_enabled(global_enabled, allowlist_raw, db_name)` (line 245): no docstring
+  - `_jdbc_enabled_for_db(db_name)` (line 254): no docstring
+  - `_cdc_enabled_for_db(db_name)` (line 263): no docstring
+  - `_connection_source_types()` (line 272): no docstring
+  - `_table_import_source_types()` (line 276): no docstring
+  - `_file_import_source_types()` (line 280): no docstring
+  - `_virtual_table_source_types()` (line 284): no docstring
+  - `_connection_kind_from_source(source)` (line 288): no docstring
+  - `_is_jdbc_connector_kind(kind)` (line 295): no docstring
+  - `_require_preview_or_400(preview)` (line 299): no docstring
+  - `_default_export_settings()` (line 310): no docstring
+  - `_normalize_export_settings(value)` (line 317): no docstring
+  - `_normalize_jdbc_driver_file_name(file_name)` (line 334): no docstring
+  - `_upsert_custom_jdbc_driver_metadata(config_json, file_name, sha256_hex, size_bytes, repository, object_key)` (line 347): no docstring
+  - `_public_custom_jdbc_driver_metadata(config)` (line 380): no docstring
+  - `_extract_connection_configuration(payload)` (line 406): no docstring
+  - `_display_name_from_payload(payload, fallback)` (line 414): no docstring
+  - `_validate_parent_rid_matches_connection(payload, connection_id)` (line 418): no docstring
+  - `_resolve_table_import_config(payload, connector_kind, sheet_url, worksheet_name)` (line 437): no docstring
+  - `_resolve_file_import_config(payload, connector_kind)` (line 464): no docstring
+  - `_resolve_virtual_table_config(payload, connector_kind)` (line 494): no docstring
+  - `_extract_destination(payload)` (line 518): no docstring
+  - `async _resolve_dataset_context(payload, dataset_registry)` (line 543): no docstring
+  - `async _load_connection_source(connector_registry, connection_id)` (line 566): no docstring
+  - `async _load_connection_source_or_404(connector_registry, connection_rid)` (line 578): no docstring
+  - `async _load_table_import_source(connector_registry, connection_id, table_import_id)` (line 602): no docstring
+  - `async _load_file_import_source(connector_registry, connection_id, file_import_id)` (line 621): no docstring
+  - `async _load_virtual_table_source(connector_registry, connection_id, virtual_table_id)` (line 640): no docstring
+  - `async _resolve_output_dataset_rid(source, mapping, dataset_registry)` (line 659): no docstring
+  - `async _build_table_import_response(connection_id, source, mapping, dataset_registry)` (line 689): no docstring
+  - `async _build_file_import_response(connection_id, source, mapping, dataset_registry)` (line 731): no docstring
+  - `async _build_virtual_table_response(connection_id, source, mapping, dataset_registry)` (line 773): no docstring
+  - `async _connection_configuration(source, connector_adapter_factory)` (line 809): no docstring
+  - `async _connection_response(source, connector_adapter_factory)` (line 825): no docstring
+  - `_iso_timestamp(value)` (line 867): no docstring
+  - `_normalize_connection_config_for_storage(configuration, kind)` (line 875): no docstring
+  - `_extract_secrets_from_configuration(configuration, kind)` (line 897): no docstring
+  - `_extract_secrets_from_payload(payload, kind)` (line 909): no docstring
+  - `_build_execute_run_output(connection_rid, resource_rid, branch_name, requested_by, resource_field, result_payload, error_detail)` (line 927): no docstring
+  - `async _ensure_table_import_pipeline(pipeline_registry, connection_id, source, mapping)` (line 955): no docstring
+  - `async _ensure_file_import_pipeline(pipeline_registry, connection_id, source, mapping)` (line 987): no docstring
+  - `async _ensure_virtual_table_pipeline(pipeline_registry, connection_id, source, mapping)` (line 1019): no docstring
+  - `async create_table_import_v2(connectionRid, payload, request, preview, google_sheets_service, connector_registry, dataset_registry, lineage_store)` (line 1053): no docstring
+  - `async get_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, dataset_registry)` (line 1287): no docstring
+  - `async list_table_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 1338): no docstring
+  - `async replace_table_import_v2(connectionRid, tableImportRid, payload, preview, connector_registry, dataset_registry)` (line 1438): no docstring
+  - `async delete_table_import_v2(connectionRid, tableImportRid, preview, connector_registry)` (line 1578): no docstring
+  - `async execute_table_import_v2(connectionRid, tableImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue)` (line 1628): no docstring
+  - `async create_file_import_v2(connectionRid, payload, preview, connector_registry, dataset_registry)` (line 1790): no docstring
+  - `async get_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, dataset_registry)` (line 1926): no docstring
+  - `async list_file_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 1978): no docstring
+  - `async replace_file_import_v2(connectionRid, fileImportRid, payload, preview, connector_registry, dataset_registry)` (line 2065): no docstring
+  - `async delete_file_import_v2(connectionRid, fileImportRid, preview, connector_registry)` (line 2197): no docstring
+  - `async execute_file_import_v2(connectionRid, fileImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue)` (line 2242): no docstring
+  - `async create_virtual_table_v2(connectionRid, payload, preview, connector_registry, dataset_registry)` (line 2385): no docstring
+  - `async get_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, dataset_registry)` (line 2491): no docstring
+  - `async list_virtual_tables_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry)` (line 2542): no docstring
+  - `async replace_virtual_table_v2(connectionRid, virtualTableRid, payload, preview, connector_registry, dataset_registry)` (line 2629): no docstring
+  - `async delete_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry)` (line 2738): no docstring
+  - `async create_connection_v2(payload, request, preview, connector_registry, connector_adapter_factory)` (line 2783): no docstring
+  - `async get_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 2876): no docstring
+  - `async list_connections_v2(preview, pageSize, pageToken, connector_registry, connector_adapter_factory)` (line 2898): no docstring
+  - `async delete_connection_v2(connectionRid, preview, connector_registry)` (line 2944): no docstring
+  - `async test_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 2971): no docstring
+  - `async get_connection_configuration_v2(connectionRid, preview, connector_registry, connector_adapter_factory)` (line 3030): no docstring
+  - `async get_connection_configuration_batch_v2(payload, preview, connector_registry, connector_adapter_factory)` (line 3062): no docstring
+  - `async update_connection_secrets_v2(connectionRid, payload, preview, connector_registry)` (line 3112): no docstring
+  - `async update_connection_export_settings_v2(connectionRid, payload, preview, connector_registry)` (line 3157): no docstring
+  - `async upload_custom_jdbc_drivers_v2(connectionRid, request, driverBytes, fileName, preview, connector_registry, connector_adapter_factory, pipeline_registry)` (line 3191): no docstring
 
 ### `backend/bff/routers/foundry_datasets_v2.py`
 - **Functions**
@@ -10804,27 +10805,27 @@
 
 ### `backend/tests/unit/openapi/test_foundry_platform_v2_contract.py`
 - **Functions**
-  - `_param_names(schema, path, method)` (line 28): no docstring
-  - `_build_test_app()` (line 33): no docstring
-  - `test_foundry_platform_v2_paths_exist_in_openapi()` (line 41): no docstring
-  - `async test_foundry_orchestration_create_build_returns_foundry_build_shape(monkeypatch)` (line 99): no docstring
-  - `async test_foundry_orchestration_get_batch_jobs_and_cancel_flow()` (line 156): no docstring
-  - `async test_foundry_connectivity_connection_scoped_table_import_create(monkeypatch)` (line 220): no docstring
-  - `async test_foundry_connectivity_get_list_execute_and_delete_table_import(monkeypatch)` (line 354): no docstring
-  - `test_foundry_schedule_paths_exist_in_openapi()` (line 517): no docstring
-  - `async test_foundry_schedule_create_get_pause_unpause_delete()` (line 533): no docstring
-  - `async test_foundry_schedule_not_found_for_missing_pipeline()` (line 624): no docstring
-  - `async test_foundry_schedule_runs_pagination_and_invalid_token()` (line 641): no docstring
-  - `test_foundry_connection_crud_paths_exist_in_openapi()` (line 702): no docstring
-  - `async test_foundry_connection_create_get_list_delete()` (line 726): no docstring
-  - `async test_foundry_connection_get_not_found()` (line 827): no docstring
-  - `async test_foundry_connection_test_endpoint()` (line 848): no docstring
-  - `async test_foundry_connection_update_secrets_keeps_response_non_secret()` (line 888): no docstring
-  - `async test_foundry_connection_update_export_settings_v2()` (line 947): no docstring
-  - `async test_foundry_connection_upload_custom_jdbc_drivers_v2()` (line 1000): no docstring
-  - `async test_foundry_file_import_requires_preview_and_supports_create(monkeypatch)` (line 1066): no docstring
-  - `async test_foundry_virtual_table_supports_foundry_name_and_parent_rid(monkeypatch)` (line 1175): no docstring
-  - `async test_foundry_connection_create_jdbc_kinds(monkeypatch, connection_config, expected_type, expected_source_type, secret_payload)` (line 1315): no docstring
+  - `_param_names(schema, path, method)` (line 27): no docstring
+  - `_build_test_app()` (line 32): no docstring
+  - `test_foundry_platform_v2_paths_exist_in_openapi()` (line 40): no docstring
+  - `async test_foundry_orchestration_create_build_returns_foundry_build_shape(monkeypatch)` (line 98): no docstring
+  - `async test_foundry_orchestration_get_batch_jobs_and_cancel_flow()` (line 155): no docstring
+  - `async test_foundry_connectivity_connection_scoped_table_import_create(monkeypatch)` (line 219): no docstring
+  - `async test_foundry_connectivity_get_list_execute_and_delete_table_import(monkeypatch)` (line 353): no docstring
+  - `test_foundry_schedule_paths_exist_in_openapi()` (line 516): no docstring
+  - `async test_foundry_schedule_create_get_pause_unpause_delete()` (line 532): no docstring
+  - `async test_foundry_schedule_not_found_for_missing_pipeline()` (line 623): no docstring
+  - `async test_foundry_schedule_runs_pagination_and_invalid_token()` (line 640): no docstring
+  - `test_foundry_connection_crud_paths_exist_in_openapi()` (line 701): no docstring
+  - `async test_foundry_connection_create_get_list_delete()` (line 725): no docstring
+  - `async test_foundry_connection_get_not_found()` (line 826): no docstring
+  - `async test_foundry_connection_test_endpoint()` (line 847): no docstring
+  - `async test_foundry_connection_update_secrets_keeps_response_non_secret()` (line 887): no docstring
+  - `async test_foundry_connection_update_export_settings_v2()` (line 946): no docstring
+  - `async test_foundry_connection_upload_custom_jdbc_drivers_v2()` (line 999): no docstring
+  - `async test_foundry_file_import_requires_preview_and_supports_create(monkeypatch)` (line 1090): no docstring
+  - `async test_foundry_virtual_table_supports_foundry_name_and_parent_rid(monkeypatch)` (line 1199): no docstring
+  - `async test_foundry_connection_create_jdbc_kinds(monkeypatch, connection_config, expected_type, expected_source_type, secret_payload)` (line 1339): no docstring
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - **Functions**

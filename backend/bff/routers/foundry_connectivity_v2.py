@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import logging
 from typing import Any, Dict
@@ -351,7 +350,8 @@ def _upsert_custom_jdbc_driver_metadata(
     file_name: str,
     sha256_hex: str,
     size_bytes: int,
-    blob_key: str,
+    repository: str,
+    object_key: str,
 ) -> Dict[str, Any]:
     cfg = dict(config_json or {})
     existing_raw = cfg.get("custom_jdbc_drivers")
@@ -369,11 +369,38 @@ def _upsert_custom_jdbc_driver_metadata(
             "sha256": sha256_hex,
             "sizeBytes": int(size_bytes),
             "uploadedTime": _iso_timestamp(utcnow()),
-            "blobKey": blob_key,
+            "repository": repository,
+            "objectKey": object_key,
         }
     )
     cfg["custom_jdbc_drivers"] = retained
     return cfg
+
+
+def _public_custom_jdbc_driver_metadata(config: Dict[str, Any]) -> list[Dict[str, Any]]:
+    raw = config.get("custom_jdbc_drivers")
+    items = raw if isinstance(raw, list) else []
+    out: list[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        file_name = str(item.get("fileName") or "").strip()
+        if not file_name:
+            continue
+        payload: Dict[str, Any] = {"fileName": file_name}
+        sha256_hex = str(item.get("sha256") or "").strip()
+        if sha256_hex:
+            payload["sha256"] = sha256_hex
+        if item.get("sizeBytes") is not None:
+            try:
+                payload["sizeBytes"] = int(item.get("sizeBytes"))
+            except (TypeError, ValueError):
+                pass
+        uploaded_time = item.get("uploadedTime")
+        if uploaded_time not in (None, ""):
+            payload["uploadedTime"] = str(uploaded_time)
+        out.append(payload)
+    return out
 
 
 def _extract_connection_configuration(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -789,6 +816,9 @@ async def _connection_configuration(
     config = await adapter.get_public_configuration(config=dict(source.config_json or {}))
     if not config.get("type"):
         config["type"] = _KIND_TO_CONNECTION_CONFIG_TYPE.get(kind, "GoogleSheetsConnectionConfig")
+    custom_jdbc_drivers = _public_custom_jdbc_driver_metadata(dict(source.config_json or {}))
+    if custom_jdbc_drivers:
+        config["customJdbcDrivers"] = custom_jdbc_drivers
     return config
 
 
@@ -3160,11 +3190,13 @@ async def update_connection_export_settings_v2(
 @trace_endpoint("bff.foundry_v2_connectivity.upload_custom_jdbc_drivers")
 async def upload_custom_jdbc_drivers_v2(
     connectionRid: str,
+    request: Request,
     driverBytes: bytes = Body(..., media_type="application/octet-stream"),
     fileName: str = Query(...),
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3206,20 +3238,21 @@ async def upload_custom_jdbc_drivers_v2(
         )
 
     sha256_hex = hashlib.sha256(content).hexdigest()
-    blob_key = f"jdbc_driver_blob:{sha256_hex}"
-    existing_secrets = await connector_registry.get_connection_secrets(
-        source_type=source.source_type,
-        source_id=source.source_id,
-    )
-    merged_secrets = dict(existing_secrets)
-    blob_store = merged_secrets.get("jdbc_driver_blobs")
-    blobs = dict(blob_store) if isinstance(blob_store, dict) else {}
-    blobs[blob_key] = base64.b64encode(content).decode("ascii")
-    merged_secrets["jdbc_driver_blobs"] = blobs
-    await connector_registry.upsert_connection_secrets(
-        source_type=source.source_type,
-        source_id=source.source_id,
-        secrets_json=merged_secrets,
+    repository = str(get_settings().storage.lakefs_artifacts_repository or "").strip() or "pipeline-artifacts"
+    object_key = f"connectivity/jdbc-drivers/{connection_id}/{sha256_hex}/{normalized_file_name}"
+    actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+    storage = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+    content_type = str(request.headers.get("Content-Type") or "application/octet-stream").strip() or "application/octet-stream"
+    await storage.save_bytes(
+        repository,
+        f"main/{object_key}",
+        content,
+        content_type=content_type,
+        metadata={
+            "connectionRid": _connection_rid(connection_id),
+            "connectorKind": kind,
+            "sha256": sha256_hex,
+        },
     )
 
     cfg = _upsert_custom_jdbc_driver_metadata(
@@ -3227,7 +3260,8 @@ async def upload_custom_jdbc_drivers_v2(
         file_name=normalized_file_name,
         sha256_hex=sha256_hex,
         size_bytes=len(content),
-        blob_key=blob_key,
+        repository=repository,
+        object_key=object_key,
     )
     updated = await connector_registry.upsert_source(
         source_type=source.source_type,

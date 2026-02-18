@@ -140,6 +140,7 @@ Current status:
 - [x] `fileImports`/`virtualTables` 응답은 Foundry 문서 필드(`name`, `parentRid`, `config`)를 기본 제공하고, 내부 호환을 위해 `displayName`/`connectionRid` alias를 병행 유지합니다.
 - [x] JDBC CDC resume strategy includes connector-optimized token progression (token + tie-breaker state) and strategy-aware token peek (`stream/lsn/binlog/change_tracking` paths).
 - [x] Connectivity secrets are separated from public config via `connector_connection_secrets` and encrypted at rest (field-level encrypted JSON payload).
+- [x] Connectivity custom JDBC driver uploads are stored in artifact object storage (`lakeFS artifacts repository`) and surfaced via public metadata (`connectionConfiguration.customJdbcDrivers`) without embedding driver binary payloads in DB secrets/config responses.
 - [x] Legacy BFF public Google Sheets connector routes (`/api/v1/data-connectors/google-sheets/*`) are code-deleted and absent from OpenAPI.
 - [x] v1 action log/simulation read compatibility endpoints (`GET /api/v1/databases/{db}/actions/logs*`, `GET /api/v1/databases/{db}/actions/simulations*`) are removed from BFF runtime/OpenAPI.
 - [x] Dedicated action log/simulation read routes are not exposed in public `/api/v2/ontologies/*` surface (Foundry action-resource parity).
