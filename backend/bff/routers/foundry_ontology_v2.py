@@ -95,7 +95,7 @@ class BatchApplyActionRequestOptionsV2(BaseModel):
 
 class BatchApplyActionRequestV2(BaseModel):
     options: BatchApplyActionRequestOptionsV2 | None = None
-    requests: list[BatchApplyActionRequestItemV2] = Field(default_factory=list, min_length=1, max_length=500)
+    requests: list[BatchApplyActionRequestItemV2] = Field(default_factory=list, min_length=1, max_length=20)
 
 
 class ExecuteQueryRequestV2(BaseModel):
@@ -379,6 +379,318 @@ async def _resolve_object_set_definition(object_set: Any) -> dict[str, Any]:
     if isinstance(object_set, str):
         return await _load_temporary_object_set(object_set)
     raise ValueError("objectSet is required")
+
+
+def _is_search_around_object_set(object_set: Any) -> bool:
+    if not isinstance(object_set, dict):
+        return False
+    object_set_type = str(object_set.get("type") or "").strip().lower()
+    return object_set_type == "searcharound"
+
+
+def _extract_search_around_link_type(object_set: dict[str, Any]) -> str:
+    link = object_set.get("link")
+    if isinstance(link, str):
+        link_type = link.strip()
+    elif isinstance(link, dict):
+        link_type = str(link.get("apiName") or link.get("linkType") or "").strip()
+    else:
+        link_type = ""
+    if not link_type:
+        raise ValueError("searchAround objectSet requires link")
+    return link_type
+
+
+def _dedupe_rows_by_identity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        object_type = str(
+            row.get("__apiName")
+            or row.get("objectTypeApiName")
+            or row.get("class_id")
+            or ""
+        ).strip()
+        primary_key = str(
+            row.get("__primaryKey")
+            or row.get("primaryKey")
+            or row.get("instance_id")
+            or row.get("id")
+            or ""
+        ).strip()
+        if not object_type or not primary_key:
+            deduped.append(row)
+            continue
+        marker = (object_type, primary_key)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(row)
+    return deduped
+
+
+def _normalize_sort_value(value: Any) -> tuple[int, str]:
+    if value is None:
+        return (0, "")
+    if isinstance(value, bool):
+        return (1, "1" if value else "0")
+    if isinstance(value, (int, float)):
+        return (2, f"{float(value):020.6f}")
+    if isinstance(value, str):
+        return (3, value.casefold())
+    return (4, str(value))
+
+
+def _sort_rows_by_order_by(rows: list[dict[str, Any]], order_by: Any) -> list[dict[str, Any]]:
+    sorted_rows = list(rows)
+    if not isinstance(order_by, dict):
+        sorted_rows.sort(key=lambda row: (str(row.get("class_id") or ""), str(row.get("instance_id") or "")))
+        return sorted_rows
+
+    if str(order_by.get("orderType") or "fields").strip() != "fields":
+        return sorted_rows
+
+    raw_fields = order_by.get("fields")
+    if not isinstance(raw_fields, list) or not raw_fields:
+        return sorted_rows
+
+    # Deterministic tie-breaker first; stable sorts below keep field order precedence.
+    sorted_rows.sort(key=lambda row: str(row.get("instance_id") or ""))
+    for item in reversed(raw_fields):
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "").strip()
+        if not field:
+            continue
+        direction = str(item.get("direction") or "asc").strip().lower()
+        reverse = direction == "desc"
+        sorted_rows.sort(
+            key=lambda row: _normalize_sort_value(_value_by_field(row, field)),
+            reverse=reverse,
+        )
+
+    return sorted_rows
+
+
+async def _resolve_search_around_target_primary_keys(
+    *,
+    oms_client: OMSClient,
+    db_name: str,
+    branch: str,
+    object_set: dict[str, Any],
+) -> tuple[dict[str, list[str]], str]:
+    link_type = _extract_search_around_link_type(object_set)
+    source_object_set = await _resolve_object_set_definition(object_set.get("objectSet"))
+    source_object_types = _collect_object_set_object_types(source_object_set)
+    if not source_object_types:
+        raise ValueError("searchAround.objectSet.objectType is required")
+
+    try:
+        link_payload = await oms_client.get_ontology_resource(
+            db_name,
+            resource_type="link_type",
+            resource_id=link_type,
+            branch=branch,
+        )
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            raise ValueError(f"LinkType not found: {link_type}") from exc
+        raise
+    link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+    if not isinstance(link_resource, dict):
+        raise ValueError(f"LinkType not found: {link_type}")
+
+    link_sides_by_source_type: dict[str, dict[str, Any]] = {}
+    for source_object_type in source_object_types:
+        link_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=source_object_type)
+        if not isinstance(link_side, dict):
+            continue
+        target_object_type = str(link_side.get("objectTypeApiName") or "").strip()
+        if not target_object_type:
+            continue
+        link_sides_by_source_type[source_object_type] = link_side
+
+    if not link_sides_by_source_type:
+        raise ValueError(f"LinkType not found: {link_type}")
+
+    source_search_payload = _build_object_set_search_payload(
+        object_set=source_object_set,
+        payload={"pageSize": 1000},
+        require_select=False,
+    )
+
+    source_rows: list[dict[str, Any]] = []
+    for source_object_type in source_object_types:
+        source_rows.extend(
+            await _load_all_rows_for_object_type(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_type=source_object_type,
+                search_payload=source_search_payload,
+            )
+        )
+
+    target_primary_keys_by_type: dict[str, list[str]] = {}
+    seen_primary_keys_by_type: dict[str, set[str]] = {}
+    default_source_type = source_object_types[0] if len(source_object_types) == 1 else None
+
+    for source_row in source_rows:
+        source_object_type = _resolve_source_object_type_from_row(
+            source_row,
+            fallback_object_type=default_source_type,
+        )
+        if not source_object_type:
+            continue
+        link_side = link_sides_by_source_type.get(source_object_type)
+        if not isinstance(link_side, dict):
+            continue
+
+        target_object_type = str(link_side.get("objectTypeApiName") or "").strip()
+        if not target_object_type:
+            continue
+
+        foreign_key_property = str(link_side.get("foreignKeyPropertyApiName") or "").strip() or None
+        linked_primary_keys = _extract_linked_primary_keys(
+            source_row,
+            link_type=link_type,
+            foreign_key_property=foreign_key_property,
+        )
+        if not linked_primary_keys:
+            continue
+
+        target_primary_keys = target_primary_keys_by_type.setdefault(target_object_type, [])
+        seen_primary_keys = seen_primary_keys_by_type.setdefault(target_object_type, set())
+        for linked_primary_key in linked_primary_keys:
+            if linked_primary_key in seen_primary_keys:
+                continue
+            seen_primary_keys.add(linked_primary_key)
+            target_primary_keys.append(linked_primary_key)
+
+    return target_primary_keys_by_type, link_type
+
+
+async def _load_rows_for_search_around_object_set(
+    *,
+    oms_client: OMSClient,
+    db_name: str,
+    branch: str,
+    object_set: dict[str, Any],
+    payload: dict[str, Any],
+    endpoint_scope: str,
+) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
+    target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
+        oms_client=oms_client,
+        db_name=db_name,
+        branch=branch,
+        object_set=object_set,
+    )
+
+    target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
+    if not target_object_types:
+        return [], "0", None, []
+
+    page_size = _to_int_or_none(payload.get("pageSize"))
+    if page_size is None:
+        page_size = 1000
+    if page_size < 1 or page_size > 1000:
+        raise ValueError("pageSize must be between 1 and 1000")
+
+    search_payload: dict[str, Any] = {"pageSize": 1000}
+    select_values = _normalize_select_values(payload)
+    if select_values:
+        search_payload["select"] = select_values
+
+    order_by = _normalize_object_set_order_by(payload.get("orderBy"))
+    if order_by is not None:
+        search_payload["orderBy"] = order_by
+
+    if "excludeRid" in payload:
+        search_payload["excludeRid"] = bool(payload.get("excludeRid"))
+    if "snapshot" in payload:
+        search_payload["snapshot"] = bool(payload.get("snapshot"))
+
+    all_rows: list[dict[str, Any]] = []
+    for target_object_type in target_object_types:
+        primary_key_values = target_primary_keys_by_type.get(target_object_type) or []
+        if not primary_key_values:
+            continue
+        target_primary_key_field = await _resolve_object_primary_key_field(
+            db_name=db_name,
+            object_type=target_object_type,
+            branch=branch,
+            oms_client=oms_client,
+        )
+        target_search_payload = dict(search_payload)
+        target_search_payload["where"] = _build_primary_key_where(target_primary_key_field, primary_key_values)
+        all_rows.extend(
+            await _load_all_rows_for_object_type(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_type=target_object_type,
+                search_payload=target_search_payload,
+            )
+        )
+
+    deduped_rows = _dedupe_rows_by_identity(all_rows)
+    sorted_rows = _sort_rows_by_order_by(deduped_rows, order_by)
+
+    exclude_rid = bool(payload.get("excludeRid")) if "excludeRid" in payload else False
+    projected_rows = [
+        _project_row_with_required_fields(
+            row,
+            select_fields=select_values if select_values else None,
+            exclude_rid=exclude_rid,
+        )
+        for row in sorted_rows
+    ]
+
+    page_scope = _pagination_scope(
+        endpoint_scope,
+        db_name,
+        branch,
+        link_type,
+        ",".join(sorted(target_object_types)),
+        str(payload.get("objectSet") or ""),
+        str(page_size),
+        ",".join(select_values),
+    )
+    offset = _decode_page_token(payload.get("pageToken"), scope=page_scope)
+    page_rows = projected_rows[offset : offset + page_size]
+    next_offset = offset + len(page_rows)
+    next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(projected_rows) else None
+    return page_rows, str(len(projected_rows)), next_page_token, target_object_types
+
+
+def _object_set_runtime_value_error_response(
+    *,
+    exc: ValueError,
+    ontology: str,
+    parameters: dict[str, Any],
+) -> JSONResponse:
+    message = str(exc or "")
+    if message.startswith("LinkType not found:"):
+        return _not_found_error(
+            "LinkTypeNotFound",
+            ontology=ontology,
+            link_type=message.split(":", 1)[1].strip(),
+            parameters=parameters,
+        )
+    if message.startswith("Object type not found:"):
+        return _not_found_error(
+            "ObjectTypeNotFound",
+            ontology=ontology,
+            object_type=message.split(":", 1)[1].strip(),
+            parameters=parameters,
+        )
+    return _foundry_error(
+        status.HTTP_400_BAD_REQUEST,
+        error_code="INVALID_ARGUMENT",
+        error_name="InvalidArgument",
+        parameters={**parameters, "message": message or "Invalid argument"},
+    )
 
 
 def _extract_object_set_where(object_set: Any) -> Dict[str, Any] | None:
@@ -1695,6 +2007,7 @@ def _normalize_non_foundry_upstream_error(
     *,
     ontology: str,
     parameters: Dict[str, Any] | None = None,
+    action_surface: bool = False,
 ) -> JSONResponse | None:
     response = exc.response
     if response is None:
@@ -1717,6 +2030,13 @@ def _normalize_non_foundry_upstream_error(
         merged_parameters["message"] = message
 
     if status_code in {status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY} or error_code == "REQUEST_VALIDATION_FAILED":
+        if action_surface:
+            return _foundry_error(
+                status.HTTP_400_BAD_REQUEST,
+                error_code="ACTION_VALIDATION_FAILED",
+                error_name="ActionValidationFailed",
+                parameters=merged_parameters,
+            )
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_ARGUMENT",
@@ -1724,6 +2044,13 @@ def _normalize_non_foundry_upstream_error(
             parameters=merged_parameters,
         )
     if status_code == status.HTTP_403_FORBIDDEN:
+        if action_surface:
+            return _foundry_error(
+                status.HTTP_403_FORBIDDEN,
+                error_code="PERMISSION_DENIED",
+                error_name="EditObjectPermissionDenied",
+                parameters=merged_parameters,
+            )
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1731,6 +2058,13 @@ def _normalize_non_foundry_upstream_error(
             parameters=merged_parameters,
         )
     if status_code == status.HTTP_404_NOT_FOUND:
+        if action_surface:
+            return _foundry_error(
+                status.HTTP_404_NOT_FOUND,
+                error_code="NOT_FOUND",
+                error_name="ActionTypeNotFound",
+                parameters=merged_parameters,
+            )
         return _foundry_error(
             status.HTTP_404_NOT_FOUND,
             error_code="NOT_FOUND",
@@ -1748,6 +2082,7 @@ def _upstream_status_error_response(
     not_found_response: JSONResponse | None = None,
     passthrough_payload: bool = False,
     normalize_non_foundry_payload: bool = False,
+    action_surface: bool = False,
 ) -> JSONResponse:
     status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
     if normalize_non_foundry_payload:
@@ -1755,6 +2090,7 @@ def _upstream_status_error_response(
             exc,
             ontology=ontology,
             parameters=parameters,
+            action_surface=action_surface,
         )
         if normalized is not None:
             return normalized
@@ -2622,13 +2958,63 @@ def _resolve_apply_action_mode(*, explicit_mode: str | None) -> str:
     return mode
 
 
-def _foundry_valid_action_validation_payload() -> Dict[str, Any]:
-    return {
-        "validation": {
+def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict[str, Any]:
+    results: Dict[str, Any] = {}
+    if not isinstance(parameters, dict):
+        return results
+    for raw_name in parameters.keys():
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        results[name] = {
+            "required": True,
+            "evaluatedConstraints": [],
             "result": "VALID",
-        },
-        "parameters": {},
-    }
+        }
+    return results
+
+
+def _normalize_apply_action_response_payload(
+    *,
+    response: Any,
+    request_parameters: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    fallback_parameters = _default_action_parameter_results(request_parameters)
+    if not isinstance(response, dict):
+        return {
+            "validation": {"result": "VALID"},
+            "parameters": fallback_parameters,
+        }
+
+    normalized: Dict[str, Any] = dict(response)
+    validation = normalized.get("validation")
+    if not isinstance(validation, dict):
+        validation = {}
+    normalized_validation = dict(validation)
+
+    validation_result = str(normalized_validation.get("result") or "").strip().upper()
+    if validation_result not in {"VALID", "INVALID"}:
+        validation_result = "VALID"
+    normalized_validation["result"] = validation_result
+
+    submission_criteria = normalized_validation.get("submissionCriteria")
+    if not isinstance(submission_criteria, list):
+        submission_criteria = []
+    normalized_validation["submissionCriteria"] = submission_criteria
+
+    nested_parameters = normalized_validation.pop("parameters", None)
+    top_parameters = normalized.get("parameters")
+    if not isinstance(top_parameters, dict):
+        top_parameters = nested_parameters if isinstance(nested_parameters, dict) else None
+    if not isinstance(top_parameters, dict):
+        top_parameters = fallback_parameters
+    elif not top_parameters and fallback_parameters:
+        top_parameters = fallback_parameters
+
+    normalized_validation["parameters"] = top_parameters
+    normalized["validation"] = normalized_validation
+    normalized["parameters"] = top_parameters
+    return normalized
 
 
 @router.post("/{ontology}/actions/{action}/apply")
@@ -2680,13 +3066,11 @@ async def apply_action_v2(
             },
             json=oms_payload,
         )
-        if mode == "VALIDATE_ONLY":
-            if isinstance(response, dict) and isinstance(response.get("validation"), dict):
-                return response
-            return _foundry_valid_action_validation_payload()
-        if isinstance(response, dict):
-            return response
-        return {}
+        normalized_response = _normalize_apply_action_response_payload(
+            response=response,
+            request_parameters=parameters,
+        )
+        return normalized_response
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc,
@@ -2699,6 +3083,7 @@ async def apply_action_v2(
             ),
             passthrough_payload=True,
             normalize_non_foundry_payload=True,
+            action_surface=True,
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(
@@ -2751,6 +3136,8 @@ async def apply_action_batch_v2(
             "requests": [{"parameters": params} for params in parameters_list],
             "metadata": metadata,
         }
+        if body.options and body.options.return_edits:
+            oms_payload["options"] = {"returnEdits": body.options.return_edits}
         response = await oms_client.post(
             f"/api/v2/ontologies/{db_name}/actions/{action_type}/applyBatch",
             params={
@@ -2775,6 +3162,7 @@ async def apply_action_batch_v2(
             ),
             passthrough_payload=True,
             normalize_non_foundry_payload=True,
+            action_surface=True,
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(
@@ -4224,6 +4612,67 @@ async def search_objects_v2(
         )
 
 
+@router.post("/{ontology}/objects/{objectType}/count")
+@trace_endpoint("bff.foundry_v2_ontology.count_objects")
+async def count_objects_v2(
+    ontology: str,
+    objectType: str,
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: str | None = Query(default=None, alias="sdkVersion"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        _ = sdk_package_rid, sdk_version
+        object_type = str(objectType or "").strip()
+        if not object_type:
+            raise ValueError("objectType is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType)},
+        )
+
+    try:
+        result = await oms_client.post(
+            f"/api/v2/ontologies/{db_name}/objects/{object_type}/count",
+            params={
+                "branch": branch,
+                "sdkPackageRid": sdk_package_rid,
+                "sdkVersion": sdk_version,
+            },
+        )
+        if not isinstance(result, dict):
+            return {"count": None}
+        return {"count": result.get("count")}
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        passthrough = _passthrough_upstream_error_payload(exc)
+        if passthrough is not None:
+            return passthrough
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _not_found_error("ObjectTypeNotFound", ontology=db_name, object_type=object_type)
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters={"ontology": db_name, "objectType": object_type},
+        )
+    except Exception as exc:
+        logger.error("Failed to count objects (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"ontology": db_name, "objectType": object_type},
+        )
+
+
 @router.post("/{ontology}/objects/{objectType}/aggregate")
 @trace_endpoint("bff.foundry_v2_ontology.aggregate_objects")
 async def aggregate_objects_v2(
@@ -4298,20 +4747,26 @@ async def load_object_set_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    search_around = False
+    object_type: str | None = None
+    search_payload: dict[str, Any] = {}
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = transaction_id, sdk_package_rid, sdk_version
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
-        object_type = _resolve_object_set_object_type(object_set)
-        if not object_type:
-            raise ValueError("objectSet.objectType is required")
+        search_around = _is_search_around_object_set(object_set)
+        if not search_around:
+            object_type = _resolve_object_set_object_type(object_set)
+            if not object_type:
+                raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
-        search_payload = _build_object_set_search_payload(
-            object_set=object_set,
-            payload=payload,
-            require_select=True,
-        )
+        if not search_around:
+            search_payload = _build_object_set_search_payload(
+                object_set=object_set,
+                payload=payload,
+                require_select=True,
+            )
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -4320,13 +4775,23 @@ async def load_object_set_objects_v2(
         )
 
     try:
-        rows, total_count, next_page_token = await _load_rows_for_single_object_type(
-            oms_client=oms_client,
-            db_name=db_name,
-            branch=branch,
-            object_type=object_type,
-            search_payload=search_payload,
-        )
+        if search_around:
+            rows, total_count, next_page_token, _ = await _load_rows_for_search_around_object_set(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_set=object_set,
+                payload=payload,
+                endpoint_scope="v2/objectSets/loadObjects",
+            )
+        else:
+            rows, total_count, next_page_token = await _load_rows_for_single_object_type(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_type=object_type or "",
+                search_payload=search_payload,
+            )
         response: dict[str, Any] = {
             "data": rows,
             "nextPageToken": next_page_token,
@@ -4335,6 +4800,12 @@ async def load_object_set_objects_v2(
         if payload.get("includeComputeUsage"):
             response["computeUsage"] = 0
         return response
+    except ValueError as exc:
+        return _object_set_runtime_value_error_response(
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectSet": "loadObjects"},
+        )
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
         passthrough = _passthrough_upstream_error_payload(exc)
@@ -4576,6 +5047,11 @@ async def load_object_set_multiple_object_types_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    search_around = False
+    object_types: list[str] = []
+    search_payload: dict[str, Any] = {}
+    request_page_token: str | None = None
+    pagination_scope: str | None = None
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4587,27 +5063,30 @@ async def load_object_set_multiple_object_types_v2(
             endpoint="POST /api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes",
         )
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
-        object_types = _collect_object_set_object_types(object_set)
-        if not object_types:
-            raise ValueError("objectSet.objectType is required")
+        search_around = _is_search_around_object_set(object_set)
+        if not search_around:
+            object_types = _collect_object_set_object_types(object_set)
+            if not object_types:
+                raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
-        search_payload = _build_object_set_search_payload(
-            object_set=object_set,
-            payload=payload,
-            require_select=True,
-        )
-        request_page_token = search_payload.get("pageToken")
-        if request_page_token is not None:
-            request_page_token = str(request_page_token)
-        pagination_scope = _pagination_scope(
-            "v2/objectSets/loadObjectsMultipleObjectTypes",
-            db_name,
-            branch,
-            ",".join(sorted(object_types)),
-            str(payload.get("pageSize") or ""),
-            ",".join(_normalize_select_values(payload)),
-            str(payload.get("snapshot") if "snapshot" in payload else ""),
-        )
+        if not search_around:
+            search_payload = _build_object_set_search_payload(
+                object_set=object_set,
+                payload=payload,
+                require_select=True,
+            )
+            request_page_token = search_payload.get("pageToken")
+            if request_page_token is not None:
+                request_page_token = str(request_page_token)
+            pagination_scope = _pagination_scope(
+                "v2/objectSets/loadObjectsMultipleObjectTypes",
+                db_name,
+                branch,
+                ",".join(sorted(object_types)),
+                str(payload.get("pageSize") or ""),
+                ",".join(_normalize_select_values(payload)),
+                str(payload.get("snapshot") if "snapshot" in payload else ""),
+            )
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -4616,7 +5095,17 @@ async def load_object_set_multiple_object_types_v2(
         )
 
     try:
-        if len(object_types) == 1:
+        if search_around:
+            rows, total_count, next_page_token, resolved_object_types = await _load_rows_for_search_around_object_set(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_set=object_set,
+                payload=payload,
+                endpoint_scope="v2/objectSets/loadObjectsMultipleObjectTypes",
+            )
+            object_types = resolved_object_types
+        elif len(object_types) == 1:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
                 oms_client=oms_client,
                 db_name=db_name,
@@ -4632,7 +5121,7 @@ async def load_object_set_multiple_object_types_v2(
                 object_types=object_types,
                 search_payload=search_payload,
                 page_token=request_page_token,
-                pagination_scope=pagination_scope,
+                pagination_scope=pagination_scope or "",
             )
         response: dict[str, Any] = {
             "data": rows,
@@ -4644,6 +5133,12 @@ async def load_object_set_multiple_object_types_v2(
         if payload.get("includeComputeUsage"):
             response["computeUsage"] = 0
         return response
+    except ValueError as exc:
+        return _object_set_runtime_value_error_response(
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc,
@@ -4682,6 +5177,11 @@ async def load_object_set_objects_or_interfaces_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    search_around = False
+    object_types: list[str] = []
+    search_payload: dict[str, Any] = {}
+    request_page_token: str | None = None
+    pagination_scope: str | None = None
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4693,27 +5193,30 @@ async def load_object_set_objects_or_interfaces_v2(
             endpoint="POST /api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces",
         )
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
-        object_types = _collect_object_set_object_types(object_set)
-        if not object_types:
-            raise ValueError("objectSet.objectType is required")
+        search_around = _is_search_around_object_set(object_set)
+        if not search_around:
+            object_types = _collect_object_set_object_types(object_set)
+            if not object_types:
+                raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
-        search_payload = _build_object_set_search_payload(
-            object_set=object_set,
-            payload=payload,
-            require_select=True,
-        )
-        request_page_token = search_payload.get("pageToken")
-        if request_page_token is not None:
-            request_page_token = str(request_page_token)
-        pagination_scope = _pagination_scope(
-            "v2/objectSets/loadObjectsOrInterfaces",
-            db_name,
-            branch,
-            ",".join(sorted(object_types)),
-            str(payload.get("pageSize") or ""),
-            ",".join(_normalize_select_values(payload)),
-            str(payload.get("snapshot") if "snapshot" in payload else ""),
-        )
+        if not search_around:
+            search_payload = _build_object_set_search_payload(
+                object_set=object_set,
+                payload=payload,
+                require_select=True,
+            )
+            request_page_token = search_payload.get("pageToken")
+            if request_page_token is not None:
+                request_page_token = str(request_page_token)
+            pagination_scope = _pagination_scope(
+                "v2/objectSets/loadObjectsOrInterfaces",
+                db_name,
+                branch,
+                ",".join(sorted(object_types)),
+                str(payload.get("pageSize") or ""),
+                ",".join(_normalize_select_values(payload)),
+                str(payload.get("snapshot") if "snapshot" in payload else ""),
+            )
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -4722,7 +5225,16 @@ async def load_object_set_objects_or_interfaces_v2(
         )
 
     try:
-        if len(object_types) == 1:
+        if search_around:
+            rows, total_count, next_page_token, _ = await _load_rows_for_search_around_object_set(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                object_set=object_set,
+                payload=payload,
+                endpoint_scope="v2/objectSets/loadObjectsOrInterfaces",
+            )
+        elif len(object_types) == 1:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
                 oms_client=oms_client,
                 db_name=db_name,
@@ -4738,13 +5250,19 @@ async def load_object_set_objects_or_interfaces_v2(
                 object_types=object_types,
                 search_payload=search_payload,
                 page_token=request_page_token,
-                pagination_scope=pagination_scope,
+                pagination_scope=pagination_scope or "",
             )
         return {
             "data": rows,
             "nextPageToken": next_page_token,
             "totalCount": total_count,
         }
+    except ValueError as exc:
+        return _object_set_runtime_value_error_response(
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectSet": "loadObjectsOrInterfaces"},
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc,

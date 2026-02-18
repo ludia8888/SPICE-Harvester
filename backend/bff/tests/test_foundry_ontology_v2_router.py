@@ -34,6 +34,8 @@ class _FakeOMSClient:
 
     async def post(self, path, **kwargs):  # noqa: ANN001, ANN003
         self.last_post = (path, kwargs)
+        if path.endswith("/count"):
+            return {"count": 7}
         if path.endswith("/search"):
             payload = kwargs.get("json") if isinstance(kwargs, dict) else None
             where = payload.get("where") if isinstance(payload, dict) else None
@@ -1077,7 +1079,9 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
     finally:
         router_v2._require_domain_role = original_require
 
-    assert response == {}
+    assert response["validation"]["result"] == "VALID"
+    assert response["parameters"]["ticket"]["result"] == "VALID"
+    assert response["parameters"]["ticket"]["required"] is True
     assert fake_client.last_post is not None
     assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
     submit_payload = fake_client.last_post[1]["json"]
@@ -1123,8 +1127,9 @@ async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
         router_v2._require_domain_role = original_require
 
     assert response["validation"]["result"] == "VALID"
-    assert response["parameters"] == {}
-    assert "submissionCriteria" not in response["validation"]
+    assert response["parameters"]["ticket"]["result"] == "VALID"
+    assert response["parameters"]["ticket"]["required"] is True
+    assert response["validation"]["submissionCriteria"] == []
     assert fake_client.last_post is not None
     assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
     simulate_payload = fake_client.last_post[1]["json"]
@@ -1179,6 +1184,67 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
 
 
 @pytest.mark.asyncio
+async def test_apply_action_batch_v2_forwards_return_edits_option():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"service"),
+            ],
+        }
+    )
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        await router_v2.apply_action_batch_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.BatchApplyActionRequestV2(
+                options=router_v2.BatchApplyActionRequestOptionsV2(returnEdits="ALL"),
+                requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
+            ),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert fake_client.last_post is not None
+    submit_payload = fake_client.last_post[1]["json"]
+    assert submit_payload["options"]["returnEdits"] == "ALL"
+
+
+@pytest.mark.asyncio
+async def test_count_objects_v2_forwards_to_oms_count_path():
+    request = Request({"type": "http", "headers": []})
+    fake_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.count_objects_v2(
+            ontology="test_db",
+            objectType="Account",
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert response == {"count": 7}
+    assert fake_client.last_post is not None
+    assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/objects/Account/count"
+    assert fake_client.last_post[1]["params"]["branch"] == "main"
+
+
+@pytest.mark.asyncio
 async def test_apply_action_v2_normalizes_non_foundry_validation_error():
     class _ValidationErrorOMSClient(_FakeOMSClient):
         async def post(self, path, **kwargs):  # noqa: ANN003
@@ -1218,8 +1284,53 @@ async def test_apply_action_v2_normalizes_non_foundry_validation_error():
     assert isinstance(response, JSONResponse)
     assert response.status_code == 400
     payload = json.loads(response.body.decode("utf-8"))
-    assert payload["errorCode"] == "INVALID_ARGUMENT"
-    assert payload["errorName"] == "InvalidArgument"
+    assert payload["errorCode"] == "ACTION_VALIDATION_FAILED"
+    assert payload["errorName"] == "ActionValidationFailed"
+
+
+@pytest.mark.asyncio
+async def test_apply_action_batch_v2_normalizes_non_foundry_validation_error():
+    class _ValidationErrorOMSClient(_FakeOMSClient):
+        async def post(self, path, **kwargs):  # noqa: ANN003
+            self.last_post = (path, kwargs)
+            request = httpx.Request("POST", f"http://test{path}")
+            response = httpx.Response(
+                400,
+                request=request,
+                json={
+                    "code": "REQUEST_VALIDATION_FAILED",
+                    "category": "input",
+                    "message": "invalid batch parameters",
+                    "status": 400,
+                },
+            )
+            raise httpx.HTTPStatusError("validation failed", request=request, response=response)
+
+    request = Request({"type": "http", "headers": []})
+    fake_client = _ValidationErrorOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_batch_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.BatchApplyActionRequestV2(
+                requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
+            ),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 400
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "ACTION_VALIDATION_FAILED"
+    assert payload["errorName"] == "ActionValidationFailed"
 
 
 @pytest.mark.asyncio
@@ -2349,6 +2460,76 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
     assert payload["parameters"]["linkedObjectPrimaryKey"] == "u-404"
     assert fake.last_post is not None
     assert fake.last_post[0].endswith("/ontologies/test_db/objects/Account/search")
+
+
+@pytest.mark.asyncio
+async def test_load_object_set_objects_v2_supports_search_around():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.load_object_set_objects_v2(
+            ontology="test_db",
+            payload={
+                "objectSet": {
+                    "type": "searchAround",
+                    "link": "owned_by",
+                    "objectSet": {
+                        "objectType": "Account",
+                        "where": {"type": "eq", "field": "account_id", "value": "acc-1"},
+                    },
+                },
+                "select": ["user_id", "name"],
+                "pageSize": 10,
+            },
+            request=request,
+            branch="main",
+            transaction_id=None,
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["totalCount"] == "1"
+    assert response["data"][0]["user_id"] == "u-1"
+    assert response["data"][0]["name"] == "Owner User"
+
+
+@pytest.mark.asyncio
+async def test_load_object_set_objects_or_interfaces_v2_search_around_invalid_link_returns_not_found():
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.load_object_set_objects_or_interfaces_v2(
+            ontology="test_db",
+            payload={
+                "objectSet": {
+                    "type": "searchAround",
+                    "link": "contains",
+                    "objectSet": {"objectType": "Account"},
+                },
+                "select": ["user_id"],
+                "pageSize": 10,
+            },
+            request=request,
+            branch="main",
+            preview=True,
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=_FakeOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 404
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "LinkTypeNotFound"
 
 
 @pytest.mark.asyncio

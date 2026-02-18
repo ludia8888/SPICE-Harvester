@@ -233,6 +233,26 @@ def test_foundry_v2_list_objects_includes_foundry_query_params():
 
 
 @pytest.mark.unit
+def test_foundry_v2_count_objects_includes_foundry_query_params():
+    app = FastAPI()
+    app.include_router(foundry_ontology_v2.router, prefix="/api")
+    schema = app.openapi()
+
+    params = _param_names(
+        schema,
+        path="/api/v2/ontologies/{ontology}/objects/{objectType}/count",
+        method="post",
+    )
+
+    assert "branch" in params
+    assert "sdkPackageRid" in params
+    assert "sdkVersion" in params
+    assert "pageSize" not in params
+    assert "pageToken" not in params
+    assert "select" not in params
+
+
+@pytest.mark.unit
 def test_foundry_v2_list_linked_objects_includes_foundry_query_params():
     app = FastAPI()
     app.include_router(foundry_ontology_v2.router, prefix="/api")
@@ -519,6 +539,41 @@ async def test_foundry_v2_load_object_set_objects_requires_object_set(
     body = response.json()
     assert body["errorCode"] == "INVALID_ARGUMENT"
     assert body["errorName"] == "InvalidArgument"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_v2_count_objects_routes_to_oms_count(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+
+    oms_client = AsyncMock()
+    oms_client.post = AsyncMock(return_value={"count": 123})
+    app = _build_router_test_app(oms_client=oms_client)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/ontologies/sales_db/objects/Order/count?branch=main&sdkPackageRid=ri.pkg.1&sdkVersion=2.0.0",
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"count": 123}
+    oms_client.post.assert_awaited_once()
+    called_path = oms_client.post.await_args.args[0]
+    called_params = oms_client.post.await_args.kwargs["params"]
+    assert called_path == "/api/v2/ontologies/sales_db/objects/Order/count"
+    assert called_params == {"branch": "main", "sdkPackageRid": "ri.pkg.1", "sdkVersion": "2.0.0"}
 
 
 @pytest.mark.unit

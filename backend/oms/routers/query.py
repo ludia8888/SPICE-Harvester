@@ -226,6 +226,10 @@ class SearchObjectsResponseV2(BaseModel):
     totalCount: str
 
 
+class CountObjectsResponseV2(BaseModel):
+    count: Optional[int] = None
+
+
 def _foundry_error(
     status_code: int,
     *,
@@ -1558,6 +1562,59 @@ async def search_objects_v2_foundry(
         branch=branch,
         es=es,
     )
+
+
+@foundry_router.post(
+    "/{objectType}/count",
+    response_model=CountObjectsResponseV2,
+)
+@trace_endpoint("oms.query.count_objects_v2")
+async def count_objects_v2_oms(
+    ontology: str,
+    objectType: str = ...,
+    branch: str = Query(default="main"),
+    sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
+    sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
+    es: ElasticsearchServiceDep = ...,
+) -> CountObjectsResponseV2 | JSONResponse:
+    _ = sdk_package_rid, sdk_version
+    try:
+        db_name = validate_db_name(ontology)
+        object_type = validate_class_id(objectType)
+        branch = validate_branch_name(branch)
+
+        query = {
+            "bool": {
+                "must": [
+                    {"term": {"class_id": object_type}},
+                ]
+            }
+        }
+        index_name = get_instances_index_name(db_name, branch=branch)
+        total = await es.count(index=index_name, query=query)
+        return CountObjectsResponseV2(count=int(total))
+    except SecurityViolationError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    except ValueError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+    except Exception as exc:
+        logger.error("Foundry object count failed (%s/%s): %s", ontology, objectType, exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="InternalServerError",
+            parameters={"message": "Failed to count objects"},
+        )
 
 
 # ---------------------------------------------------------------------------

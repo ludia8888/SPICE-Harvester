@@ -187,8 +187,11 @@ async def test_foundry_apply_v2_validate_only_returns_validation_payload(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["validation"]["result"] == "VALID"
-    assert payload["parameters"] == {}
-    assert "submissionCriteria" not in payload["validation"]
+    assert payload["parameters"]["ticket"]["result"] == "VALID"
+    assert payload["parameters"]["ticket"]["required"] is True
+    assert payload["parameters"]["ticket"]["evaluatedConstraints"] == []
+    assert payload["validation"]["submissionCriteria"] == []
+    assert payload["validation"]["parameters"]["ticket"]["result"] == "VALID"
     sim_request = captured.get("request")
     assert isinstance(sim_request, action_async.ActionSimulateRequest)
     assert sim_request.base_branch == "main"
@@ -233,8 +236,11 @@ async def test_foundry_apply_v2_validate_and_execute_returns_validation_payload(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["validation"]["result"] == "VALID"
-    assert payload["parameters"] == {}
-    assert "submissionCriteria" not in payload["validation"]
+    assert payload["parameters"]["ticket"]["result"] == "VALID"
+    assert payload["parameters"]["ticket"]["required"] is True
+    assert payload["parameters"]["ticket"]["evaluatedConstraints"] == []
+    assert payload["validation"]["submissionCriteria"] == []
+    assert payload["validation"]["parameters"]["ticket"]["result"] == "VALID"
     submit_request = captured.get("request")
     assert isinstance(submit_request, action_async.ActionSubmitBatchRequest)
     assert submit_request.base_branch == "main"

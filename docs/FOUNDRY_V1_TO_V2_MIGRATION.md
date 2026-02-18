@@ -60,6 +60,10 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Pagination token compatibility: Foundry v2 page token acceptance window increased from 60 seconds to 24 hours on OMS/BFF v2 read surfaces.
 - Time Series and Attachment Property parity: BFF v2 now exposes Foundry-style proxy routes for first/last/stream points and attachment upload/read paths.
 - Time Series and Attachment Property auth-context parity: BFF forwards actor headers (`X-User-ID`, `X-User-Type`, `X-User-Roles`) to OMS, and OMS applies domain-role enforcement only when actor context is present.
+- Action apply SDK-compat hardening: `POST /api/v2/ontologies/{ontology}/actions/{action}/apply` now normalizes sparse upstream responses into Foundry-compatible `validation + parameters` shape and maps non-Foundry upstream validation/permission/not-found errors to action-specific Foundry error names (`ActionValidationFailed`, `EditObjectPermissionDenied`, `ActionTypeNotFound`).
+- Action request contract hardening: `POST /api/v2/ontologies/{ontology}/actions/{action}/applyBatch` enforces max 20 requests and forwards `options.returnEdits` to OMS runtime.
+- Object count surface parity: `POST /api/v2/ontologies/{ontology}/objects/{objectType}/count` is exposed on BFF/OMS v2 with Foundry-style branch/sdk query params.
+- ObjectSet searchAround parity: `loadObjects*` endpoints now execute `objectSet.type=searchAround` by resolving link metadata and traversing linked primary keys with Foundry error mapping (`LinkTypeNotFound`).
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

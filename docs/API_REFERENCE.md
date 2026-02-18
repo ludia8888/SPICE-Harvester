@@ -22,18 +22,18 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **204**
+- Total documented endpoints: **205**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 159 |
-| `v2` | 45 |
+| `v2` | 46 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `ontologies` | 45 |
+| `ontologies` | 46 |
 | `pipelines` | 29 |
 | `databases` | 15 |
 | `admin` | 13 |
@@ -217,6 +217,7 @@
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}` | Get Outgoing Link Type V2 | `v2` | no | no | `get_outgoing_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__outgoingLinkTypes__linkType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}` | List Objects V2 | `v2` | no | no | `list_objects_v2_api_v2_ontologies__ontology__objects__objectType__get` |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` | Aggregate Objects V2 | `v2` | no | no | `aggregate_objects_v2_api_v2_ontologies__ontology__objects__objectType__aggregate_post` |
+| `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/count` | Count Objects V2 | `v2` | no | no | `count_objects_v2_api_v2_ontologies__ontology__objects__objectType__count_post` |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/search` | Search Objects V2 | `v2` | no | no | `search_objects_v2_api_v2_ontologies__ontology__objects__objectType__search_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | `v2` | no | no | `get_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}` | List Attachment Property V2 | `v2` | no | no | `list_attachment_property_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__get` |

@@ -1,9 +1,9 @@
-### v2 Endpoints (45)
+### v2 Endpoints (46)
 
 | Category | Endpoints | Base Path |
 |----------|-----------|-----------|
 | Ontologies | 12 | `/api/v2/ontologies` |
-| Object Types | 15 | `/api/v2/ontologies/{ontology}/objectTypes` |
+| Object Types | 16 | `/api/v2/ontologies/{ontology}/objectTypes` |
 | Actions | 5 | `/api/v2/ontologies/{ontology}/actionTypes` |
 | Links & Link Types | 5 | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` |
 | Query Types | 2 | `/api/v2/ontologies/{ontology}/queryTypes` |

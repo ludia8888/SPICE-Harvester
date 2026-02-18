@@ -207,8 +207,13 @@ class ApplyActionBatchRequestItemV2(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ApplyActionBatchRequestOptionsV2(BaseModel):
+    return_edits: Optional[str] = Field(default=None, alias="returnEdits")
+
+
 class ApplyActionBatchRequestV2(BaseModel):
-    requests: List[ApplyActionBatchRequestItemV2] = Field(default_factory=list, min_length=1, max_length=500)
+    options: Optional[ApplyActionBatchRequestOptionsV2] = None
+    requests: List[ApplyActionBatchRequestItemV2] = Field(default_factory=list, min_length=1, max_length=20)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     correlation_id: Optional[str] = Field(default=None, alias="correlationId")
 
@@ -237,12 +242,34 @@ def _resolve_v2_apply_mode(*, explicit_mode: Optional[str]) -> str:
     return mode
 
 
-def _foundry_valid_action_validation_payload() -> Dict[str, Any]:
+def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict[str, Any]:
+    results: Dict[str, Any] = {}
+    if not isinstance(parameters, dict):
+        return results
+    for raw_name in parameters.keys():
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        results[name] = {
+            "required": True,
+            "evaluatedConstraints": [],
+            "result": "VALID",
+        }
+    return results
+
+
+def _foundry_valid_action_validation_payload_for_parameters(
+    *,
+    parameters: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    parameter_results = _default_action_parameter_results(parameters)
     return {
         "validation": {
             "result": "VALID",
+            "submissionCriteria": [],
+            "parameters": parameter_results,
         },
-        "parameters": {},
+        "parameters": parameter_results,
     }
 
 
@@ -956,7 +983,7 @@ async def apply_action_v2_oms(
                 include_effects=False,
             ),
         )
-        return _foundry_valid_action_validation_payload()
+        return _foundry_valid_action_validation_payload_for_parameters(parameters=body.parameters)
 
     await submit_action_batch_async(
         db_name=db_name,
@@ -973,7 +1000,7 @@ async def apply_action_v2_oms(
         ),
         event_store=event_store,
     )
-    return _foundry_valid_action_validation_payload()
+    return _foundry_valid_action_validation_payload_for_parameters(parameters=body.parameters)
 
 
 @foundry_router.post(
