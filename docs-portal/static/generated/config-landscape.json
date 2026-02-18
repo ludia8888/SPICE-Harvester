@@ -2805,7 +2805,7 @@
     {
       "name": "SecuritySettings",
       "docstring": "Security configuration settings",
-      "field_count": 12,
+      "field_count": 13,
       "fields": [
         {
           "name": "secret_key",
@@ -2844,6 +2844,16 @@
           "description": "Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS)",
           "env_vars": [
             "DATA_ENCRYPTION_KEYS"
+          ],
+          "required": false
+        },
+        {
+          "name": "allow_plaintext_connector_secrets",
+          "type": "bool",
+          "default": "False",
+          "description": "Allow connector secrets plaintext fallback when DATA_ENCRYPTION_KEYS is unset (ALLOW_PLAINTEXT_CONNECTOR_SECRETS). Use only for local debugging.",
+          "env_vars": [
+            "ALLOW_PLAINTEXT_CONNECTOR_SECRETS"
           ],
           "required": false
         },
@@ -5608,5 +5618,5 @@
       ]
     }
   ],
-  "total_fields": 522
+  "total_fields": 523
 }

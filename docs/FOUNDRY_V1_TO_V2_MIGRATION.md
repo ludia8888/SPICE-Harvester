@@ -80,6 +80,9 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Connectivity expansion (P1): preview-gated connection-scoped `fileImports` and `virtualTables` surfaces are exposed on `/api/v2/connectivity/connections/{connectionRid}/*` with Foundry-style `preview=true` usage policy.
 - Connectivity response contract hardening (P1): connection payloads prioritize Foundry field names (`connectionConfiguration`, `parentFolderRid`, `exportSettings`), and `fileImports`/`virtualTables` payloads prioritize (`name`, `parentRid`, `config`) while preserving alias keys for internal backward compatibility.
 - JDBC CDC hardening (P1): connector-specific CDC resume tokens now support tie-breaker-aware advancement (`token` + `tiebreaker`) and strategy-aware peeking for Snowflake/PostgreSQL/MySQL/SQL Server/Oracle.
+- Connector secret safety hardening (P1): connector secret encryption is mandatory in non-test runtime (`DATA_ENCRYPTION_KEYS` required) unless explicitly overridden via `ALLOW_PLAINTEXT_CONNECTOR_SECRETS=true` for local debugging.
+- Dataset transaction hardening (P1): `POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit` no longer returns synthetic fallback commit IDs when lakeFS commit fails; failure surfaces explicit Foundry error and transaction remains `OPEN`.
+- Dataset read hardening (P1): `POST /api/v2/datasets/{datasetRid}/readTable` now returns Foundry error envelope for lakeFS availability failures when no cached sample exists (silent empty fallback is retained only for not-found source objects).
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

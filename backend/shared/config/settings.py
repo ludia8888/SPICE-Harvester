@@ -2297,6 +2297,13 @@ class SecuritySettings(BaseSettings):
         default="",
         description="Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS)",
     )
+    allow_plaintext_connector_secrets: bool = Field(
+        default=False,
+        description=(
+            "Allow connector secrets plaintext fallback when DATA_ENCRYPTION_KEYS is unset "
+            "(ALLOW_PLAINTEXT_CONNECTOR_SECRETS). Use only for local debugging."
+        ),
+    )
 
     # Input sanitizer limits
     input_sanitizer_max_dict_keys: int = Field(

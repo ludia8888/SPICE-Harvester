@@ -657,7 +657,6 @@ async def commit_transaction_v2(
     # Commit to lakeFS
     repo = _resolve_lakefs_raw_repository()
     branch = dataset.branch or "main"
-    commit_id: str | None = None
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
         commit_id = await lakefs_client.commit(
@@ -667,12 +666,29 @@ async def commit_transaction_v2(
             metadata={"dataset_id": dataset_id, "transaction_id": transaction_id},
         )
     except LakeFSError as exc:
-        logger.warning("lakeFS commit during transaction commit: %s", exc)
-        commit_id = str(uuid4())  # fallback synthetic commit id
+        logger.error("lakeFS commit failed during transaction commit: %s", exc)
+        return _foundry_error(
+            503,
+            error_code="SERVICE_UNAVAILABLE",
+            error_name="TransactionCommitUnavailable",
+            parameters={
+                "transactionRid": transactionRid,
+                "datasetRid": datasetRid,
+                "message": "lakeFS commit failed; transaction remains OPEN",
+            },
+        )
+    except Exception as exc:
+        logger.error("Unexpected transaction commit failure: %s", exc)
+        return _foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="TransactionCommitFailed",
+            parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
+        )
 
     committed_txn = await dataset_registry.mark_ingest_transaction_committed(
         ingest_request_id=txn.ingest_request_id,
-        lakefs_commit_id=commit_id or "",
+        lakefs_commit_id=commit_id,
         artifact_key=None,
     )
     if not committed_txn:
@@ -958,7 +974,22 @@ async def read_table_v2(
                 "rows": data_rows,
                 "totalRowCount": len(all_rows) - 1,
             })
+    except (FileNotFoundError, LakeFSNotFoundError):
+        # Dataset can legitimately exist before any source object is materialized.
+        return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
+    except LakeFSError as exc:
+        logger.error("lakeFS readTable load failed: %s", exc)
+        return _foundry_error(
+            503,
+            error_code="SERVICE_UNAVAILABLE",
+            error_name="DatasetReadUnavailable",
+            parameters={"datasetRid": datasetRid, "message": "lakeFS read failed"},
+        )
     except Exception as exc:
-        logger.warning("Failed to load table from lakeFS: %s", exc)
-
-    return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
+        logger.error("Unexpected readTable load failure: %s", exc)
+        return _foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="DatasetReadFailed",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )

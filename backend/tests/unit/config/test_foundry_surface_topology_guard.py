@@ -37,6 +37,13 @@ def test_default_compose_does_not_publish_funnel_host_port() -> None:
     assert "funnel:8003" not in compose
 
 
+def test_default_compose_includes_pipeline_scheduler_runtime() -> None:
+    root = _repo_root()
+    compose = (root / "backend" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "\n  pipeline-scheduler:\n" in compose
+    assert "dockerfile: ./pipeline_scheduler/Dockerfile" in compose
+
+
 def test_full_compose_bff_does_not_depend_on_funnel_service() -> None:
     root = _repo_root()
     compose = (root / "docker-compose.full.yml").read_text(encoding="utf-8")

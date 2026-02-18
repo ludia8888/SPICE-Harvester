@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **522 settings** total.
+SPICE Harvester uses **45 configuration classes** with **523 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -495,7 +495,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Security configuration settings
 
-**12 settings**
+**13 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -503,6 +503,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `algorithm` | `str` | `HS256` | `ALGORITHM` | JWT algorithm |
 | `access_token_expire_minutes` | `int` | `30` | `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT access token expiry in minutes |
 | `data_encryption_keys` | `str` | `` | `DATA_ENCRYPTION_KEYS` | Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS) |
+| `allow_plaintext_connector_secrets` | `bool` | `False` | `ALLOW_PLAINTEXT_CONNECTOR_SECRETS` | Allow connector secrets plaintext fallback when DATA_ENCRYPTION_KEYS is unset (ALLOW_PLAINTEXT_CONNECTOR_SECRETS). Use only for local debugging. |
 | `input_sanitizer_max_dict_keys` | `int` | `100` | `INPUT_SANITIZER_MAX_DICT_KEYS` | Max dict keys to sanitize (INPUT_SANITIZER_MAX_DICT_KEYS) |
 | `input_sanitizer_max_list_items` | `int` | `1000` | `INPUT_SANITIZER_MAX_LIST_ITEMS` | Max list items to sanitize (INPUT_SANITIZER_MAX_LIST_ITEMS) |
 | `max_search_query_length` | `int` | `100` | `MAX_SEARCH_QUERY_LENGTH` | Maximum search query length (MAX_SEARCH_QUERY_LENGTH) |

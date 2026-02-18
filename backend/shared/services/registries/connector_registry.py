@@ -113,11 +113,26 @@ class ConnectorRegistry(PostgresSchemaRegistry):
             pool_max=resolved_pool_max,
             command_timeout=int(perf.connector_registry_pg_command_timeout_seconds),
         )
-        self._secrets_encryptor = encryptor_from_keys(get_settings().security.data_encryption_keys)
+        cfg = get_settings()
+        self._secrets_encryptor = encryptor_from_keys(cfg.security.data_encryption_keys)
+        self._allow_plaintext_connector_secrets = bool(
+            cfg.security.allow_plaintext_connector_secrets or cfg.is_test or cfg.is_pytest
+        )
 
     @staticmethod
     def _secret_aad(*, source_type: str, source_id: str) -> bytes:
         return f"{source_type}:{source_id}".encode("utf-8")
+
+    def _assert_connector_secret_encryption_ready(self, *, operation: str) -> None:
+        if self._secrets_encryptor is not None:
+            return
+        if self._allow_plaintext_connector_secrets:
+            return
+        raise RuntimeError(
+            "Connector secret encryption is required but DATA_ENCRYPTION_KEYS is not configured "
+            f"(operation={operation}). Set DATA_ENCRYPTION_KEYS or "
+            "ALLOW_PLAINTEXT_CONNECTOR_SECRETS=true for non-production debugging."
+        )
 
     def _encrypt_secrets_payload(
         self,
@@ -126,6 +141,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         source_id: str,
         secrets_json: Dict[str, Any],
     ) -> Dict[str, Any]:
+        self._assert_connector_secret_encryption_ready(operation="encrypt")
         payload: Dict[str, Any] = {}
         aad = self._secret_aad(source_type=source_type, source_id=source_id)
         for key, value in (secrets_json or {}).items():
@@ -142,6 +158,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         source_id: str,
         secrets_json_enc: Dict[str, Any],
     ) -> Dict[str, Any]:
+        self._assert_connector_secret_encryption_ready(operation="decrypt")
         aad = self._secret_aad(source_type=source_type, source_id=source_id)
         payload: Dict[str, Any] = {}
         for key, value in (secrets_json_enc or {}).items():

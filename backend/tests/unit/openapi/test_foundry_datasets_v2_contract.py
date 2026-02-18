@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from bff.routers import foundry_datasets_v2
 from bff.routers.data_connector_deps import get_dataset_registry, get_pipeline_registry
+from shared.services.storage.lakefs_client import LakeFSError
 from shared.utils.time_utils import utcnow
 
 
@@ -195,6 +196,11 @@ class _MockLakeFSClient:
 
     async def commit(self, repository: str, branch: str, message: str, metadata: dict | None = None) -> str:
         return "commit-123"
+
+
+class _FailingLakeFSClient(_MockLakeFSClient):
+    async def commit(self, repository: str, branch: str, message: str, metadata: dict | None = None) -> str:  # noqa: ANN401
+        raise LakeFSError("lakeFS unavailable")
 
 
 class _MockLakeFSStorage:
@@ -606,6 +612,49 @@ async def test_foundry_datasets_transaction_lifecycle(
         assert abort_body["datasetRid"] == dataset_rid
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_transaction_commit_lakefs_failure_keeps_open(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+    pr = _PipelineRegistry(lakefs_client=_FailingLakeFSClient())
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions",
+            json={"transactionType": "APPEND"},
+            headers={"X-User-ID": "user-1"},
+        )
+        assert create_resp.status_code == 200
+        txn_rid = create_resp.json()["rid"]
+
+        commit_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
+            headers={"X-User-ID": "user-1"},
+        )
+        assert commit_resp.status_code == 503
+        body = commit_resp.json()
+        assert body["errorName"] == "TransactionCommitUnavailable"
+
+    txn_id = txn_rid.rsplit(".", 1)[-1]
+    txn = await dr.get_ingest_transaction_by_id(transaction_id=txn_id)
+    assert txn is not None
+    assert txn.status == "OPEN"
+
+
 # ---------------------------------------------------------------------------
 # 7. File operations
 # ---------------------------------------------------------------------------
@@ -831,3 +880,47 @@ async def test_foundry_datasets_read_table_no_version_returns_empty(
     assert table["columns"] == []
     assert table["rows"] == []
     assert table["totalRowCount"] == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_read_table_lakefs_error_returns_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+
+    class _FailingStorage:
+        async def load_bytes(self, repo: str, path: str) -> bytes:
+            raise LakeFSError("lakeFS storage unavailable")
+
+    pr = _PipelineRegistry(lakefs_storage=_FailingStorage())  # type: ignore[arg-type]
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+
+    dr.versions[ds.dataset_id] = SimpleNamespace(
+        version_id=str(uuid.uuid4()),
+        dataset_id=ds.dataset_id,
+        sample_json={},
+        row_count=0,
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        read_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/readTable",
+            json={},
+            headers={"X-User-ID": "user-1"},
+        )
+
+    assert read_resp.status_code == 503
+    body = read_resp.json()
+    assert body["errorName"] == "DatasetReadUnavailable"
