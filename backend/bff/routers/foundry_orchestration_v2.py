@@ -108,9 +108,9 @@ def _to_int(value: Any, *, field_name: str, minimum: int | None = None) -> int:
     return resolved
 
 
-def _iso_timestamp(value: Any) -> str:
+def _iso_timestamp(value: Any) -> str | None:
     if value is None:
-        return utcnow().isoformat()
+        return None
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
@@ -852,15 +852,35 @@ async def list_schedule_runs_v2(
     if pipeline is None:
         return _foundry_error(404, error_code="NOT_FOUND", error_name="ScheduleNotFound", parameters={"scheduleRid": scheduleRid})
 
-    # Load recent runs for this pipeline
+    offset = 0
+    if pageToken:
+        try:
+            offset = int(pageToken)
+        except (TypeError, ValueError):
+            return _foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+        if offset < 0:
+            return _foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+
+    # Load enough runs to materialize the requested page when using an offset token.
+    fetch_limit = min(max(pageSize + offset + 1, pageSize + 1), 5000)
     try:
-        runs = await pipeline_registry.list_runs(pipeline_id=pipeline_id, limit=pageSize)
+        runs = await pipeline_registry.list_runs(pipeline_id=pipeline_id, limit=fetch_limit)
     except Exception:
         runs = []
 
-    offset = int(pageToken) if pageToken.strip().isdigit() else 0
     page = runs[offset: offset + pageSize] if isinstance(runs, list) else []
-    next_token = str(offset + pageSize) if offset + pageSize < len(runs) else None
+    next_offset = offset + len(page)
+    next_token = str(next_offset) if next_offset < len(runs) else None
 
     data = []
     for run_item in page:

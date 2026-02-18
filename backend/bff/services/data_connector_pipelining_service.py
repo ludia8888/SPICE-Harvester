@@ -58,6 +58,38 @@ def _parse_csv_bytes(data: bytes) -> Tuple[List[str], List[List[str]]]:
     return columns, rows
 
 
+def _align_row_to_columns(
+    row: List[Any],
+    *,
+    source_columns: List[str],
+    target_columns: List[str],
+) -> List[Any]:
+    """Project a row from source column order into target column order."""
+    if not target_columns:
+        return list(row)
+    index_by_name = {name: idx for idx, name in enumerate(source_columns)}
+    aligned: List[Any] = []
+    for name in target_columns:
+        idx = index_by_name.get(name)
+        if idx is None or idx >= len(row):
+            aligned.append(None)
+        else:
+            aligned.append(row[idx])
+    return aligned
+
+
+def _align_rows_to_columns(
+    rows: List[List[Any]],
+    *,
+    source_columns: List[str],
+    target_columns: List[str],
+) -> List[List[Any]]:
+    return [
+        _align_row_to_columns(row, source_columns=source_columns, target_columns=target_columns)
+        for row in rows
+    ]
+
+
 def _apply_append_mode(
     existing_columns: List[str],
     existing_rows: List[List[Any]],
@@ -68,11 +100,17 @@ def _apply_append_mode(
     # Use new_columns as canonical if existing is empty
     merged_columns = existing_columns if existing_columns else new_columns
 
+    normalized_new_rows = (
+        _align_rows_to_columns(new_rows, source_columns=new_columns, target_columns=merged_columns)
+        if merged_columns and new_columns and merged_columns != new_columns
+        else new_rows
+    )
+
     # Build hash set of existing rows for O(1) lookup
     existing_hashes = {_row_hash(row) for row in existing_rows}
 
     appended = list(existing_rows)
-    for row in new_rows:
+    for row in normalized_new_rows:
         h = _row_hash(row)
         if h not in existing_hashes:
             appended.append(row)
@@ -95,6 +133,12 @@ def _apply_update_mode(
     """
     merged_columns = existing_columns if existing_columns else new_columns
 
+    normalized_new_rows = (
+        _align_rows_to_columns(new_rows, source_columns=new_columns, target_columns=merged_columns)
+        if merged_columns and new_columns and merged_columns != new_columns
+        else new_rows
+    )
+
     # Resolve PK column index
     pk_col = primary_key_column or (merged_columns[0] if merged_columns else None)
     pk_index = 0
@@ -108,7 +152,7 @@ def _apply_update_mode(
         pk_value = str(row[pk_index]) if pk_index < len(row) else ""
         pk_map[pk_value] = idx
 
-    for row in new_rows:
+    for row in normalized_new_rows:
         pk_value = str(row[pk_index]) if pk_index < len(row) else ""
         if pk_value in pk_map:
             # Update existing row

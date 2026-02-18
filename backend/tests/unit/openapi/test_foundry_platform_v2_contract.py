@@ -564,6 +564,7 @@ async def test_foundry_schedule_create_get_pause_unpause_delete():
         runs_body = runs_resp.json()
         assert len(runs_body["data"]) == 1
         assert runs_body["data"][0]["status"] == "SUCCEEDED"
+        assert runs_body["data"][0]["startedTime"] is None
 
         # Delete schedule
         delete_resp = await client.delete(f"/api/v2/orchestration/schedules/{schedule_rid}")
@@ -585,6 +586,63 @@ async def test_foundry_schedule_not_found_for_missing_pipeline():
         resp = await client.get(f"/api/v2/orchestration/schedules/ri.spice.main.schedule.{uuid.uuid4()}")
     assert resp.status_code == 404
     assert resp.json()["errorCode"] == "NOT_FOUND"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_schedule_runs_pagination_and_invalid_token():
+    pipeline_id = str(uuid.uuid4())
+    schedule_rid = f"ri.spice.main.schedule.{pipeline_id}"
+
+    class _PipelineRegistry:
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                pipeline_id=pipeline_id,
+                branch="main",
+                status="active",
+                schedule_cron="0 0 * * *",
+                schedule_interval_seconds=None,
+                created_at=None,
+            )
+
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25):  # noqa: ANN001
+            data = [
+                {"job_id": f"build-{pipeline_id}-run1", "status": "SUCCESS"},
+                {"job_id": f"build-{pipeline_id}-run2", "status": "RUNNING"},
+                {"job_id": f"build-{pipeline_id}-run3", "status": "FAILED"},
+            ]
+            return data[:limit]
+
+    app = _build_test_app()
+    app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        page1 = await client.get(
+            f"/api/v2/orchestration/schedules/{schedule_rid}/runs",
+            params={"pageSize": 1},
+        )
+        assert page1.status_code == 200
+        body1 = page1.json()
+        assert len(body1["data"]) == 1
+        assert body1["nextPageToken"] == "1"
+
+        page2 = await client.get(
+            f"/api/v2/orchestration/schedules/{schedule_rid}/runs",
+            params={"pageSize": 1, "pageToken": body1["nextPageToken"]},
+        )
+        assert page2.status_code == 200
+        body2 = page2.json()
+        assert len(body2["data"]) == 1
+        assert body2["data"][0]["status"] == "RUNNING"
+        assert body2["nextPageToken"] == "2"
+
+        invalid = await client.get(
+            f"/api/v2/orchestration/schedules/{schedule_rid}/runs",
+            params={"pageToken": "not-a-number"},
+        )
+        assert invalid.status_code == 400
+        assert invalid.json()["errorCode"] == "INVALID_ARGUMENT"
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +722,7 @@ async def test_foundry_connection_create_get_list_delete():
         assert conn_body["rid"].startswith("ri.spice.main.connection.")
         assert conn_body["status"] == "CONNECTED"
         assert conn_body["configuration"]["type"] == "GoogleSheetsConnectionConfig"
+        assert conn_body["configuration"]["accountEmail"] == "test@example.com"
 
         connection_rid = conn_body["rid"]
 
@@ -672,6 +731,7 @@ async def test_foundry_connection_create_get_list_delete():
         assert get_resp.status_code == 200
         assert get_resp.json()["rid"] == connection_rid
         assert get_resp.json()["displayName"] == "My Google Sheets Connection"
+        assert get_resp.json()["configuration"]["accountEmail"] == "test@example.com"
 
         # List connections
         list_resp = await client.get("/api/v2/connectivity/connections")
@@ -679,6 +739,7 @@ async def test_foundry_connection_create_get_list_delete():
         list_body = list_resp.json()
         assert len(list_body["data"]) == 1
         assert list_body["data"][0]["rid"] == connection_rid
+        assert list_body["data"][0]["configuration"]["accountEmail"] == "test@example.com"
 
         # Delete connection
         delete_resp = await client.delete(f"/api/v2/connectivity/connections/{connection_rid}")

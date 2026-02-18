@@ -990,10 +990,12 @@ def _connection_response(source: ConnectorSource) -> dict[str, Any]:
 
     configuration: dict[str, Any] = {"type": config_type}
     # Include non-sensitive config fields
-    if cfg.get("sheet_url"):
-        configuration["sheetUrl"] = str(cfg["sheet_url"])
-    if cfg.get("account_email"):
-        configuration["accountEmail"] = str(cfg["account_email"])
+    sheet_url = cfg.get("sheet_url") or cfg.get("sheetUrl")
+    account_email = cfg.get("account_email") or cfg.get("accountEmail") or cfg.get("accountemail")
+    if sheet_url:
+        configuration["sheetUrl"] = str(sheet_url)
+    if account_email:
+        configuration["accountEmail"] = str(account_email)
     if cfg.get("scopes"):
         configuration["scopes"] = cfg["scopes"]
 
@@ -1043,10 +1045,15 @@ async def create_connection_v2(
         "type": config_type,
         "status": "CONNECTED",
     }
-    # Forward non-sensitive configuration fields
-    for key in ("accountEmail", "sheetUrl", "scopes", "serviceAccountJson"):
-        if configuration.get(key):
-            config_json[key.lower() if key == "accountEmail" else key] = configuration[key]
+    # Forward non-sensitive configuration fields in snake_case for internal consumers.
+    if configuration.get("accountEmail"):
+        config_json["account_email"] = configuration["accountEmail"]
+    if configuration.get("sheetUrl"):
+        config_json["sheet_url"] = configuration["sheetUrl"]
+    if configuration.get("scopes"):
+        config_json["scopes"] = configuration["scopes"]
+    if configuration.get("serviceAccountJson"):
+        config_json["service_account_json"] = configuration["serviceAccountJson"]
 
     # OAuth credentials
     if configuration.get("accessToken"):

@@ -2972,6 +2972,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3232,6 +3233,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3366,6 +3368,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3494,6 +3497,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3638,6 +3642,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3766,6 +3771,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -3901,6 +3907,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -4007,6 +4014,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -5942,6 +5950,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object",
                 "title": "Payload"
               }
@@ -6071,6 +6080,7 @@
             "application/json": {
               "schema": {
                 "items": {
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array",
@@ -6297,6 +6307,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object",
                 "title": "Payload"
               }
@@ -6723,6 +6734,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -6969,6 +6981,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -7152,6 +7165,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -9696,6 +9710,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Cancel Task Api V1 Tasks  Task Id  Delete"
                 }
               }
@@ -9917,6 +9932,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Task Result Api V1 Tasks  Task Id  Result Get"
                 }
               }
@@ -10051,6 +10067,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Replay Result Api V1 Admin Replay Instance State  Task Id  Result Get"
                 }
               }
@@ -10239,6 +10256,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Replay Trace Api V1 Admin Replay Instance State  Task Id  Trace Get"
                 }
               }
@@ -10311,6 +10329,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Cleanup Old Replay Results Api V1 Admin Cleanup Old Replays Post"
                 }
               }
@@ -10445,6 +10464,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Recompute Projection Result Api V1 Admin Recompute Projection  Task Id  Result Get"
                 }
               }
@@ -10539,6 +10559,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Reindex Instances Endpoint Api V1 Admin Reindex Instances Post"
                 }
               }
@@ -10571,6 +10592,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Get System Health Api V1 Admin System Health Get"
                 }
@@ -10619,6 +10641,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response List Lakefs Credentials Api V1 Admin Lakefs Credentials Get"
                 }
@@ -10675,6 +10698,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Upsert Lakefs Credentials Api V1 Admin Lakefs Credentials Post"
                 }
@@ -10779,6 +10803,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Rebuild Instance Index Endpoint Api V1 Admin Databases  Db Name  Rebuild Index Post"
                 }
               }
@@ -10856,6 +10881,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Rebuild Status Api V1 Admin Databases  Db Name  Rebuild Index  Task Id  Status Get"
                 }
               }
@@ -10952,6 +10978,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object",
                 "title": "Payload"
               }
@@ -10965,6 +10992,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Start Google Sheets Oauth Api V1 Data Connectors Google Sheets Oauth Start Post"
                 }
@@ -11096,6 +11124,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response List Google Sheets Connections Api V1 Data Connectors Google Sheets Connections Get"
                 }
@@ -11179,6 +11208,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Delete Google Sheets Connection Api V1 Data Connectors Google Sheets Connections  Connection Id  Delete"
                 }
               }
@@ -11272,6 +11302,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response List Google Sheets Spreadsheets Api V1 Data Connectors Google Sheets Drive Spreadsheets Get"
                 }
               }
@@ -11348,6 +11379,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response List Google Sheets Worksheets Api V1 Data Connectors Google Sheets Spreadsheets  Sheet Id  Worksheets Get"
                 }
               }
@@ -11379,6 +11411,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object",
                 "title": "Sheet Data"
               }
@@ -11392,6 +11425,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Register Google Sheet Api V1 Data Connectors Google Sheets Register Post"
                 }
@@ -11512,6 +11546,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Preview Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Preview Get"
                 }
               }
@@ -11587,6 +11622,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response List Registered Sheets Api V1 Data Connectors Google Sheets Registered Get"
                 }
               }
@@ -11725,6 +11761,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -11737,6 +11774,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Start Pipelining Google Sheet Api V1 Data Connectors Google Sheets  Sheet Id  Start Pipelining Post"
                 }
               }
@@ -14172,6 +14210,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Search Context7 Api V1 Context7 Search Post"
                 }
@@ -14270,6 +14309,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Entity Context Api V1 Context7 Context  Entity Id  Get"
                 }
               }
@@ -14317,6 +14357,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Add Knowledge Api V1 Context7 Knowledge Post"
                 }
@@ -14390,6 +14431,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Create Entity Link Api V1 Context7 Link Post"
                 }
@@ -14463,6 +14505,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Analyze Ontology Api V1 Context7 Analyze Ontology Post"
                 }
@@ -14570,6 +14613,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Ontology Suggestions Api V1 Context7 Suggestions  Db Name   Class Id  Get"
                 }
               }
@@ -14607,6 +14651,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Check Context7 Health Api V1 Context7 Health Get"
                 }
@@ -15062,6 +15107,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Summary Api V1 Summary Get"
                 }
               }
@@ -15174,6 +15220,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15743,6 +15790,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15820,6 +15868,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -15897,6 +15946,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -16022,6 +16072,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -16229,6 +16280,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -16662,7 +16714,8 @@
               "schema": {
                 "anyOf": [
                   {
-                    "type": "object"
+                    "type": "object",
+                    "additionalProperties": true
                   },
                   {
                     "type": "null"
@@ -17088,6 +17141,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -17247,6 +17301,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -17324,6 +17379,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -17401,6 +17457,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Payload"
               }
             }
@@ -17455,6 +17512,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Create Mapping Spec Api V1 Objectify Mapping Specs Post"
                 }
               }
@@ -17562,6 +17620,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response List Mapping Specs Api V1 Objectify Mapping Specs Get"
                 }
               }
@@ -17639,6 +17698,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Run Objectify Api V1 Objectify Datasets  Dataset Id  Run Post"
                 }
               }
@@ -17716,6 +17776,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Run Objectify Dag Api V1 Objectify Databases  Db Name  Run Dag Post"
                 }
               }
@@ -17800,16 +17861,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/DetectRelationshipsRequest"
-                  }
-                ],
+                "$ref": "#/components/schemas/DetectRelationshipsRequest",
                 "default": {
                   "confidence_threshold": 0.6,
                   "include_sample_analysis": true
-                },
-                "title": "Body"
+                }
               }
             }
           }
@@ -17821,6 +17877,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Detect Relationships Api V1 Objectify Databases  Db Name  Datasets  Dataset Id  Detect Relationships Post"
                 }
               }
@@ -17896,16 +17953,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/TriggerIncrementalRequest"
-                  }
-                ],
+                "$ref": "#/components/schemas/TriggerIncrementalRequest",
                 "default": {
                   "execution_mode": "incremental",
                   "force_full_refresh": false
-                },
-                "title": "Body"
+                }
               }
             }
           }
@@ -17917,6 +17969,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Trigger Incremental Objectify Api V1 Objectify Mapping Specs  Mapping Spec Id  Trigger Incremental Post"
                 }
               }
@@ -17995,6 +18048,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Mapping Spec Watermark Api V1 Objectify Mapping Specs  Mapping Spec Id  Watermark Get"
                 }
               }
@@ -19929,6 +19983,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Ops Status Api V1 Ops Status Get"
                 }
@@ -20156,6 +20211,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Execute Simple Graph Query Api V1 Graph Query  Db Name  Simple Post"
                 }
               }
@@ -20251,6 +20307,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": true,
                 "title": "Query"
               }
             }
@@ -20263,6 +20320,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Execute Multi Hop Query Api V1 Graph Query  Db Name  Multi Hop Post"
                 }
               }
@@ -21598,6 +21656,7 @@
           "context": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21677,6 +21736,7 @@
           "llm": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21804,11 +21864,7 @@
             "default": "main"
           },
           "mode": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AIQueryMode"
-              }
-            ],
+            "$ref": "#/components/schemas/AIQueryMode",
             "default": "auto"
           },
           "limit": {
@@ -21856,10 +21912,12 @@
             "$ref": "#/components/schemas/AIQueryPlan"
           },
           "execution": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Execution"
           },
           "llm": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Llm"
           },
@@ -21909,6 +21967,7 @@
             "title": "Subject Id"
           },
           "policy": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Policy"
           },
@@ -22067,6 +22126,7 @@
           "raw": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22097,6 +22157,7 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22168,6 +22229,7 @@
             ]
           },
           "parameters": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           }
@@ -22178,6 +22240,7 @@
       "BatchApplyActionRequestItemV2": {
         "properties": {
           "parameters": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           }
@@ -22452,6 +22515,7 @@
         "properties": {
           "instances": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -22461,6 +22525,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22620,6 +22685,7 @@
           "format_stats": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22643,16 +22709,13 @@
             "description": "명령 ID"
           },
           "status": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CommandStatus"
-              }
-            ],
+            "$ref": "#/components/schemas/CommandStatus",
             "description": "실행 상태"
           },
           "result": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22770,6 +22833,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22952,6 +23016,7 @@
           "options": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -22991,6 +23056,7 @@
           "options": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23117,6 +23183,7 @@
           "filters": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23152,6 +23219,7 @@
           "properties": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23174,12 +23242,14 @@
       "ExecuteQueryRequestV2": {
         "properties": {
           "parameters": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Parameters"
           },
           "options": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23214,6 +23284,7 @@
             "title": "Description"
           },
           "rules": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Rules"
           },
@@ -23258,6 +23329,7 @@
           "provenance": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23332,6 +23404,7 @@
           "display": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23343,6 +23416,7 @@
           "data": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23354,6 +23428,7 @@
           "index_status": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23365,6 +23440,7 @@
           "provenance": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23402,6 +23478,7 @@
           "filters": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23552,6 +23629,7 @@
             "title": "Edges"
           },
           "query": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Query"
           },
@@ -23570,6 +23648,7 @@
           "page": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23582,6 +23661,7 @@
             "anyOf": [
               {
                 "items": {
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -23595,6 +23675,7 @@
           "index_summary": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23630,6 +23711,7 @@
       "InstanceCreateRequest": {
         "properties": {
           "data": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Data",
             "description": "인스턴스 데이터 (Label 키 사용)"
@@ -23637,6 +23719,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23657,6 +23740,7 @@
       "InstanceUpdateRequest": {
         "properties": {
           "data": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Data",
             "description": "수정할 데이터 (Label 키 사용)"
@@ -23664,6 +23748,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23696,6 +23781,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23817,6 +23903,7 @@
           "dataset_sample": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23829,6 +23916,7 @@
           "answers": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -23980,6 +24068,7 @@
             "description": "Class relationships"
           },
           "metadata": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Metadata",
             "description": "Additional metadata"
@@ -24048,6 +24137,7 @@
           "answers": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -24059,6 +24149,7 @@
           "planner_hints": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -24070,6 +24161,7 @@
           "task_spec": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -24410,6 +24502,7 @@
             "default": false
           },
           "constraints": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Constraints",
             "description": "Property constraints"
@@ -24544,6 +24637,7 @@
           "items": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25004,6 +25098,7 @@
           "options": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25039,6 +25134,7 @@
           "filters": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25065,6 +25161,7 @@
           "filters": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25172,6 +25269,7 @@
           "dataset": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25183,6 +25281,7 @@
           "ingest_request": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25194,6 +25293,7 @@
           "version": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25229,6 +25329,7 @@
             "title": "Risk Summary"
           },
           "risk_policy": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Risk Policy"
           }
@@ -25267,6 +25368,7 @@
             "description": "Column name when applicable"
           },
           "evidence": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Evidence",
             "description": "Structured context"
@@ -25391,11 +25493,7 @@
       "TaskMetricsResponse": {
         "properties": {
           "metrics": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TaskMetrics"
-              }
-            ],
+            "$ref": "#/components/schemas/TaskMetrics",
             "description": "Task execution metrics"
           },
           "timestamp": {
@@ -25443,11 +25541,7 @@
             "description": "Task type"
           },
           "status": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TaskStatus"
-              }
-            ],
+            "$ref": "#/components/schemas/TaskStatus",
             "description": "Current status"
           },
           "created_at": {
@@ -25497,6 +25591,7 @@
           "progress": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25509,6 +25604,7 @@
           "result": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25668,6 +25764,7 @@
           "options": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25702,6 +25799,7 @@
           "metadata": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {

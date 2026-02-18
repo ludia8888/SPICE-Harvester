@@ -141,6 +141,23 @@ def test_append_mode_preserves_column_names():
     assert result_cols == existing_columns
 
 
+@pytest.mark.unit
+def test_append_mode_realigns_new_rows_to_existing_column_order():
+    """When column order changes, APPEND aligns new rows before dedup/hash."""
+    existing_columns = ["id", "name"]
+    existing_rows = [["1", "Alice"]]
+    new_columns = ["name", "id"]  # reversed
+    new_rows = [["Alice", "1"], ["Bob", "2"]]
+
+    result_cols, result_rows = _apply_append_mode(
+        existing_columns, existing_rows, new_columns, new_rows
+    )
+
+    assert result_cols == existing_columns
+    # Existing row should not be duplicated after realignment.
+    assert result_rows == [["1", "Alice"], ["2", "Bob"]]
+
+
 # ---------------------------------------------------------------------------
 # _apply_update_mode
 # ---------------------------------------------------------------------------
@@ -202,3 +219,24 @@ def test_update_mode_empty_existing():
     # new_columns become canonical when existing is empty
     assert result_cols == new_columns
     assert result_rows == [["x", "10"], ["y", "20"]]
+
+
+@pytest.mark.unit
+def test_update_mode_realigns_new_rows_when_column_order_changes():
+    """UPDATE should map incoming columns to existing schema before PK upsert."""
+    existing_columns = ["id", "status", "amount"]
+    existing_rows = [["1", "OLD", "100"]]
+    new_columns = ["amount", "id", "status"]  # reordered
+    new_rows = [["110", "1", "NEW"], ["200", "2", "ACTIVE"]]
+
+    result_cols, result_rows = _apply_update_mode(
+        existing_columns,
+        existing_rows,
+        new_columns,
+        new_rows,
+        primary_key_column="id",
+    )
+
+    assert result_cols == existing_columns
+    assert result_rows[0] == ["1", "NEW", "110"]
+    assert result_rows[1] == ["2", "ACTIVE", "200"]

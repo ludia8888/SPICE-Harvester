@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T12:30:28+09:00
+> Generated: 2026-02-18T13:21:33+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **271**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **234496**
+- Total code lines (non-empty, non-comment): **234685**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 228 | 173/228 (75%) | 81 | 462 | 1083 | 747 | 53774 |
+| `bff` | 228 | 173/228 (75%) | 81 | 462 | 1083 | 747 | 53844 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
@@ -41,8 +41,8 @@
 | `pipeline_worker` | 5 | 5/5 (100%) | 3 | 50 | 79 | 3 | 7555 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
-| `shared` | 300 | 204/300 (68%) | 104 | 380 | 853 | 1129 | 79191 |
-| `tests` | 282 | 49/282 (17%) | 20 | 51 | 1361 | 1367 | 44533 |
+| `shared` | 300 | 204/300 (68%) | 104 | 380 | 854 | 1129 | 79222 |
+| `tests` | 282 | 49/282 (17%) | 20 | 51 | 1365 | 1370 | 44621 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -869,7 +869,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=1284 | code_lines=1116 | risk_score=40
+- Source footprint: total_lines=1291 | code_lines=1123 | risk_score=40
 - API surface: public=11 | top-level functions=30 | classes=0 | methods=0
 - Runtime signals: async_functions=16 | try=12 | raise=7 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=6/30 (20%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -885,7 +885,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=965 | code_lines=772 | risk_score=88
+- Source footprint: total_lines=971 | code_lines=778 | risk_score=88
 - API surface: public=16 | top-level functions=29 | classes=0 | methods=0
 - Runtime signals: async_functions=17 | try=18 | raise=0 | broad_except=14 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=16/29 (55%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -917,9 +917,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=876 | code_lines=744 | risk_score=38
+- Source footprint: total_lines=896 | code_lines=763 | risk_score=39
 - API surface: public=11 | top-level functions=32 | classes=1 | methods=0
-- Runtime signals: async_functions=12 | try=16 | raise=8 | broad_except=6 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=12 | try=17 | raise=8 | broad_except=6 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=6/32 (18%) | classes=0/1 (0%) | methods=0/0 (n/a)
 - Internal imports (10): bff.dependencies; bff.routers.pipeline_deps; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.observability.tracing; shared.services.pipeline.pipeline_job_queue; shared.services.registries.dataset_registry (+2 more)
 - External imports (6): dataclasses; fastapi; logging; types; typing; uuid
@@ -2341,10 +2341,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=439 | code_lines=373 | risk_score=31
-- API surface: public=1 | top-level functions=6 | classes=0 | methods=0
+- Source footprint: total_lines=483 | code_lines=411 | risk_score=31
+- API surface: public=1 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=6 | raise=5 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=yes | top-level functions=6/8 (75%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (16): bff.routers.data_connector_ops; bff.routers.pipeline_datasets_ops; data_connector.google_sheets.service; shared.config.app_config; shared.errors.error_types; shared.observability.tracing; shared.security.input_sanitizer; shared.services.events.objectify_job_queue (+8 more)
 - External imports (7): __future__; csv; fastapi; hashlib; io; logging; typing
 - Public API names: start_pipelining_google_sheet
@@ -9325,10 +9325,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=4414 | code_lines=4229 | risk_score=55
-- API surface: public=17 | top-level functions=1 | classes=17 | methods=85
-- Runtime signals: async_functions=73 | try=14 | raise=97 | broad_except=11 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=2/85 (2%)
+- Source footprint: total_lines=4446 | code_lines=4260 | risk_score=55
+- API surface: public=17 | top-level functions=1 | classes=17 | methods=86
+- Runtime signals: async_functions=74 | try=14 | raise=98 | broad_except=11 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/17 (0%) | methods=2/86 (2%)
 - Internal imports (7): shared.config.settings; shared.observability.context_propagation; shared.services.registries.postgres_schema_registry; shared.utils.json_utils; shared.utils.s3_uri; shared.utils.schema_hash; shared.utils.time_utils
 - External imports (7): __future__; asyncpg; dataclasses; datetime; logging; typing; uuid
 - Public API names: AccessPolicyRecord; BackingDatasourceRecord; BackingDatasourceVersionRecord; DatasetIngestOutboxItem; DatasetIngestRequestRecord; DatasetIngestTransactionRecord; DatasetRecord; DatasetRegistry; DatasetVersionRecord; GatePolicyRecord; GateResultRecord; InstanceEditRecord (+5 more)
@@ -12447,10 +12447,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=829 | code_lines=635 | risk_score=0
-- API surface: public=10 | top-level functions=12 | classes=4 | methods=24
-- Runtime signals: async_functions=31 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=2/12 (16%) | classes=0/4 (0%) | methods=0/24 (0%)
+- Source footprint: total_lines=833 | code_lines=641 | risk_score=0
+- API surface: public=10 | top-level functions=12 | classes=4 | methods=25
+- Runtime signals: async_functions=32 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=2/12 (16%) | classes=0/4 (0%) | methods=0/25 (0%)
 - Internal imports (3): bff.routers; bff.routers.data_connector_deps; shared.utils.time_utils
 - External imports (6): fastapi; httpx; pytest; types; typing; uuid
 - Public API names: test_foundry_datasets_branch_operations; test_foundry_datasets_create_and_get; test_foundry_datasets_file_operations; test_foundry_datasets_list_with_pagination; test_foundry_datasets_read_table; test_foundry_datasets_read_table_no_version_returns_empty; test_foundry_datasets_read_table_with_column_selection; test_foundry_datasets_schema_get_and_update; test_foundry_datasets_transaction_lifecycle; test_foundry_datasets_v2_paths_exist_in_openapi
@@ -12479,13 +12479,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=742 | code_lines=614 | risk_score=0
-- API surface: public=12 | top-level functions=14 | classes=0 | methods=0
-- Runtime signals: async_functions=46 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=803 | code_lines=667 | risk_score=0
+- API surface: public=13 | top-level functions=15 | classes=0 | methods=0
+- Runtime signals: async_functions=49 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (5): bff.dependencies; bff.routers; bff.routers.data_connector_deps; bff.routers.pipeline_deps; shared.dependencies.providers
 - External imports (6): fastapi; httpx; pytest; types; typing; uuid
-- Public API names: test_foundry_connection_create_get_list_delete; test_foundry_connection_crud_paths_exist_in_openapi; test_foundry_connection_get_not_found; test_foundry_connection_test_endpoint; test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi; test_foundry_schedule_create_get_pause_unpause_delete; test_foundry_schedule_not_found_for_missing_pipeline; test_foundry_schedule_paths_exist_in_openapi
+- Public API names: test_foundry_connection_create_get_list_delete; test_foundry_connection_crud_paths_exist_in_openapi; test_foundry_connection_get_not_found; test_foundry_connection_test_endpoint; test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi; test_foundry_schedule_create_get_pause_unpause_delete; test_foundry_schedule_not_found_for_missing_pipeline; test_foundry_schedule_paths_exist_in_openapi (+1 more)
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - Module summary: no docstring
@@ -14575,13 +14575,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=204 | code_lines=125 | risk_score=0
-- API surface: public=10 | top-level functions=10 | classes=0 | methods=0
+- Source footprint: total_lines=242 | code_lines=154 | risk_score=0
+- API surface: public=12 | top-level functions=12 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=10/10 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=yes | top-level functions=12/12 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): bff.services.data_connector_pipelining_service
 - External imports (2): hashlib; pytest
-- Public API names: test_append_mode_adds_only_new_rows; test_append_mode_empty_existing; test_append_mode_no_new_rows; test_append_mode_preserves_column_names; test_parse_csv_bytes; test_parse_csv_bytes_empty; test_row_hash_deterministic; test_update_mode_default_pk_first_column; test_update_mode_empty_existing; test_update_mode_updates_existing_rows_by_pk
+- Public API names: test_append_mode_adds_only_new_rows; test_append_mode_empty_existing; test_append_mode_no_new_rows; test_append_mode_preserves_column_names; test_append_mode_realigns_new_rows_to_existing_column_order; test_parse_csv_bytes; test_parse_csv_bytes_empty; test_row_hash_deterministic; test_update_mode_default_pk_first_column; test_update_mode_empty_existing; test_update_mode_realigns_new_rows_when_column_order_changes; test_update_mode_updates_existing_rows_by_pk
 
 ### `backend/tests/unit/services/test_sync_wrapper_service.py`
 - Module summary: no docstring

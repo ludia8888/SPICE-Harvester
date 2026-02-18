@@ -3309,6 +3309,38 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 aborted_at=row["aborted_at"],
             )
 
+    async def get_ingest_transaction_by_id(
+        self,
+        *,
+        transaction_id: str,
+    ) -> Optional[DatasetIngestTransactionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
+                       error, created_at, updated_at, committed_at, aborted_at
+                FROM {self._schema}.dataset_ingest_transactions
+                WHERE transaction_id = $1::uuid
+                """,
+                transaction_id,
+            )
+            if not row:
+                return None
+            return DatasetIngestTransactionRecord(
+                transaction_id=str(row["transaction_id"]),
+                ingest_request_id=str(row["ingest_request_id"]),
+                status=row["status"],
+                lakefs_commit_id=row["lakefs_commit_id"],
+                artifact_key=row["artifact_key"],
+                error=row["error"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                committed_at=row["committed_at"],
+                aborted_at=row["aborted_at"],
+            )
+
     async def create_ingest_transaction(
         self,
         *,

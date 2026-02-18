@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-18T12:30:28+09:00
+> Generated: 2026-02-18T13:21:33+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -521,12 +521,12 @@
   - `async delete_table_import_v2(connectionRid, tableImportRid, connector_registry)` (line 774): no docstring
   - `async execute_table_import_v2(connectionRid, tableImportRid, request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 820): no docstring
   - `_connection_response(source)` (line 968): Build Foundry-shaped Connection response from a ConnectorSource.
-  - `_iso_timestamp(value)` (line 1010): no docstring
-  - `async create_connection_v2(payload, request, connector_registry)` (line 1020): POST /v2/connectivity/connections — Create a connection.
-  - `async get_connection_v2(connectionRid, connector_registry)` (line 1089): GET /v2/connectivity/connections/{connectionRid} — Get a connection.
-  - `async list_connections_v2(pageSize, pageToken, connector_registry)` (line 1119): GET /v2/connectivity/connections — List connections.
-  - `async delete_connection_v2(connectionRid, connector_registry)` (line 1161): DELETE /v2/connectivity/connections/{connectionRid} — Delete connection.
-  - `async test_connection_v2(connectionRid, connector_registry, google_sheets_service)` (line 1196): POST /v2/connectivity/connections/{connectionRid}/test — Test a connection.
+  - `_iso_timestamp(value)` (line 1012): no docstring
+  - `async create_connection_v2(payload, request, connector_registry)` (line 1022): POST /v2/connectivity/connections — Create a connection.
+  - `async get_connection_v2(connectionRid, connector_registry)` (line 1096): GET /v2/connectivity/connections/{connectionRid} — Get a connection.
+  - `async list_connections_v2(pageSize, pageToken, connector_registry)` (line 1126): GET /v2/connectivity/connections — List connections.
+  - `async delete_connection_v2(connectionRid, connector_registry)` (line 1168): DELETE /v2/connectivity/connections/{connectionRid} — Delete connection.
+  - `async test_connection_v2(connectionRid, connector_registry, google_sheets_service)` (line 1203): POST /v2/connectivity/connections/{connectionRid}/test — Test a connection.
 
 ### `backend/bff/routers/foundry_datasets_v2.py`
 - **Functions**
@@ -554,11 +554,11 @@
   - `async delete_branch_v2(datasetRid, branchName, request, dataset_registry, pipeline_registry)` (line 542): DELETE /v2/datasets/{datasetRid}/branches/{branchName} — Delete branch.
   - `async create_transaction_v2(datasetRid, request, dataset_registry)` (line 582): POST /v2/datasets/{datasetRid}/transactions — Create a transaction.
   - `async commit_transaction_v2(datasetRid, transactionRid, request, dataset_registry, pipeline_registry)` (line 629): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit.
-  - `async abort_transaction_v2(datasetRid, transactionRid, dataset_registry)` (line 692): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.
-  - `async list_files_v2(datasetRid, branchName, pageSize, request, dataset_registry, pipeline_registry)` (line 738): GET /v2/datasets/{datasetRid}/files — List files in dataset.
-  - `async get_file_content_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 789): GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.
-  - `async upload_file_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 827): POST /v2/datasets/{datasetRid}/files:upload — Upload file.
-  - `async read_table_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 879): POST /v2/datasets/{datasetRid}/readTable — Read table rows.
+  - `async abort_transaction_v2(datasetRid, transactionRid, dataset_registry)` (line 695): POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.
+  - `async list_files_v2(datasetRid, branchName, pageSize, request, dataset_registry, pipeline_registry)` (line 744): GET /v2/datasets/{datasetRid}/files — List files in dataset.
+  - `async get_file_content_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 795): GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file.
+  - `async upload_file_v2(datasetRid, filePath, branchName, request, dataset_registry, pipeline_registry)` (line 833): POST /v2/datasets/{datasetRid}/files:upload — Upload file.
+  - `async read_table_v2(datasetRid, request, dataset_registry, pipeline_registry)` (line 885): POST /v2/datasets/{datasetRid}/readTable — Read table rows.
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
@@ -1392,10 +1392,12 @@
 - **Functions**
   - `_row_hash(row)` (line 42): Deterministic hash of a row for deduplication.
   - `_parse_csv_bytes(data)` (line 47): Parse CSV bytes into (columns, rows).
-  - `_apply_append_mode(existing_columns, existing_rows, new_columns, new_rows)` (line 61): APPEND mode: add only new rows (by hash) that don't exist in the current dataset.
-  - `_apply_update_mode(existing_columns, existing_rows, new_columns, new_rows, primary_key_column)` (line 84): UPDATE mode: merge/upsert rows by primary key column.
-  - `async _load_existing_csv(dataset, dataset_registry, lakefs_storage_service, repo)` (line 124): Load the latest version's CSV from lakeFS. Returns (columns, rows) or empty if none.
-  - `async start_pipelining_google_sheet(sheet_id, payload, http_request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 160): no docstring
+  - `_align_row_to_columns(row, source_columns, target_columns)` (line 61): Project a row from source column order into target column order.
+  - `_align_rows_to_columns(rows, source_columns, target_columns)` (line 81): no docstring
+  - `_apply_append_mode(existing_columns, existing_rows, new_columns, new_rows)` (line 93): APPEND mode: add only new rows (by hash) that don't exist in the current dataset.
+  - `_apply_update_mode(existing_columns, existing_rows, new_columns, new_rows, primary_key_column)` (line 122): UPDATE mode: merge/upsert rows by primary key column.
+  - `async _load_existing_csv(dataset, dataset_registry, lakefs_storage_service, repo)` (line 168): Load the latest version's CSV from lakeFS. Returns (columns, rows) or empty if none.
+  - `async start_pipelining_google_sheet(sheet_id, payload, http_request, google_sheets_service, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 204): no docstring
 
 ### `backend/bff/services/data_connector_registration_service.py`
 - **Functions**
@@ -8086,21 +8088,22 @@
     - `async get_ingest_request(self, ingest_request_id)` (line 3161): no docstring
     - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 3205): no docstring
     - `async get_ingest_transaction(self, ingest_request_id)` (line 3280): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3312): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3351): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3392): no docstring
-    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3430): no docstring
-    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3495): no docstring
-    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3528): no docstring
-    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3560): no docstring
-    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 3670): no docstring
-    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 3939): no docstring
-    - `async mark_ingest_outbox_published(self, outbox_id)` (line 4016): no docstring
-    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4035): no docstring
-    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4062): no docstring
-    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4082): no docstring
-    - `async get_ingest_outbox_metrics(self)` (line 4112): no docstring
-    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4154): Best-effort reconciliation for ingest atomicity.
+    - `async get_ingest_transaction_by_id(self, transaction_id)` (line 3312): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3344): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3383): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3424): no docstring
+    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3462): no docstring
+    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3527): no docstring
+    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3560): no docstring
+    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3592): no docstring
+    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 3702): no docstring
+    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 3971): no docstring
+    - `async mark_ingest_outbox_published(self, outbox_id)` (line 4048): no docstring
+    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4067): no docstring
+    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4094): no docstring
+    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4114): no docstring
+    - `async get_ingest_outbox_metrics(self)` (line 4144): no docstring
+    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4186): Best-effort reconciliation for ingest atomicity.
 
 ### `backend/shared/services/registries/lineage_store.py`
 - **Functions**
@@ -10536,46 +10539,47 @@
 ### `backend/tests/unit/openapi/test_foundry_datasets_v2_contract.py`
 - **Functions**
   - `_build_test_app()` (line 27): no docstring
-  - `_override_deps(app, dataset_registry, pipeline_registry)` (line 226): no docstring
-  - `test_foundry_datasets_v2_paths_exist_in_openapi()` (line 243): no docstring
-  - `async test_foundry_datasets_create_and_get(monkeypatch)` (line 288): no docstring
-  - `async test_foundry_datasets_list_with_pagination(monkeypatch)` (line 341): no docstring
-  - `async test_foundry_datasets_schema_get_and_update(monkeypatch)` (line 403): no docstring
-  - `async test_foundry_datasets_branch_operations(monkeypatch)` (line 466): no docstring
-  - `async test_foundry_datasets_transaction_lifecycle(monkeypatch)` (line 541): no docstring
-  - `async test_foundry_datasets_file_operations(monkeypatch)` (line 611): no docstring
-  - `async test_foundry_datasets_read_table(monkeypatch)` (line 683): no docstring
-  - `async test_foundry_datasets_read_table_with_column_selection(monkeypatch)` (line 739): readTable respects the ``columns`` request field to project columns.
-  - `async test_foundry_datasets_read_table_no_version_returns_empty(monkeypatch)` (line 794): readTable returns empty result when no version exists and lakeFS fallback fails.
+  - `_override_deps(app, dataset_registry, pipeline_registry)` (line 230): no docstring
+  - `test_foundry_datasets_v2_paths_exist_in_openapi()` (line 247): no docstring
+  - `async test_foundry_datasets_create_and_get(monkeypatch)` (line 292): no docstring
+  - `async test_foundry_datasets_list_with_pagination(monkeypatch)` (line 345): no docstring
+  - `async test_foundry_datasets_schema_get_and_update(monkeypatch)` (line 407): no docstring
+  - `async test_foundry_datasets_branch_operations(monkeypatch)` (line 470): no docstring
+  - `async test_foundry_datasets_transaction_lifecycle(monkeypatch)` (line 545): no docstring
+  - `async test_foundry_datasets_file_operations(monkeypatch)` (line 615): no docstring
+  - `async test_foundry_datasets_read_table(monkeypatch)` (line 687): no docstring
+  - `async test_foundry_datasets_read_table_with_column_selection(monkeypatch)` (line 743): readTable respects the ``columns`` request field to project columns.
+  - `async test_foundry_datasets_read_table_no_version_returns_empty(monkeypatch)` (line 798): readTable returns empty result when no version exists and lakeFS fallback fails.
 - **Classes**
   - `_DatasetRegistry` (line 37): no docstring
     - `__init__(self)` (line 38): no docstring
-    - `async create_dataset(self, **kwargs)` (line 43): no docstring
-    - `async get_dataset(self, dataset_id)` (line 60): no docstring
-    - `async list_datasets(self, db_name, **kwargs)` (line 63): no docstring
-    - `async update_schema(self, dataset_id, schema_json)` (line 83): no docstring
-    - `async get_latest_version(self, dataset_id)` (line 88): no docstring
-    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, **kwargs)` (line 93): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 113): no docstring
-    - `async get_ingest_transaction(self, ingest_request_id)` (line 140): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 143): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 157): no docstring
-  - `_MockLakeFSClient` (line 171): no docstring
-    - `async list_branches(self, repository, **kwargs)` (line 172): no docstring
-    - `async create_branch(self, repository, name, source)` (line 178): no docstring
-    - `async get_branch_head_commit_id(self, repository, branch)` (line 181): no docstring
-    - `async delete_branch(self, repository, name)` (line 184): no docstring
-    - `async list_objects(self, repository, ref, prefix, amount)` (line 187): no docstring
-    - `async commit(self, repository, branch, message, metadata)` (line 192): no docstring
-  - `_MockLakeFSStorage` (line 196): no docstring
-    - `__init__(self)` (line 197): no docstring
-    - `async load_bytes(self, repo, path)` (line 200): no docstring
-    - `async save_bytes(self, repo, path, data, content_type)` (line 203): no docstring
-  - `_PipelineRegistry` (line 207): no docstring
-    - `__init__(self, lakefs_client, lakefs_storage)` (line 208): no docstring
-    - `async get_pipeline(self, pipeline_id)` (line 216): no docstring
-    - `async get_lakefs_client(self, user_id)` (line 219): no docstring
-    - `async get_lakefs_storage(self, user_id)` (line 222): no docstring
+    - `async create_dataset(self, **kwargs)` (line 44): no docstring
+    - `async get_dataset(self, dataset_id)` (line 61): no docstring
+    - `async list_datasets(self, db_name, **kwargs)` (line 64): no docstring
+    - `async update_schema(self, dataset_id, schema_json)` (line 84): no docstring
+    - `async get_latest_version(self, dataset_id)` (line 89): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, **kwargs)` (line 94): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 114): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 138): no docstring
+    - `async get_ingest_transaction_by_id(self, transaction_id)` (line 144): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 147): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 161): no docstring
+  - `_MockLakeFSClient` (line 175): no docstring
+    - `async list_branches(self, repository, **kwargs)` (line 176): no docstring
+    - `async create_branch(self, repository, name, source)` (line 182): no docstring
+    - `async get_branch_head_commit_id(self, repository, branch)` (line 185): no docstring
+    - `async delete_branch(self, repository, name)` (line 188): no docstring
+    - `async list_objects(self, repository, ref, prefix, amount)` (line 191): no docstring
+    - `async commit(self, repository, branch, message, metadata)` (line 196): no docstring
+  - `_MockLakeFSStorage` (line 200): no docstring
+    - `__init__(self)` (line 201): no docstring
+    - `async load_bytes(self, repo, path)` (line 204): no docstring
+    - `async save_bytes(self, repo, path, data, content_type)` (line 207): no docstring
+  - `_PipelineRegistry` (line 211): no docstring
+    - `__init__(self, lakefs_client, lakefs_storage)` (line 212): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 220): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 223): no docstring
+    - `async get_lakefs_storage(self, user_id)` (line 226): no docstring
 
 ### `backend/tests/unit/openapi/test_foundry_ontology_v2_contract.py`
 - **Functions**
@@ -10631,11 +10635,12 @@
   - `async test_foundry_connectivity_get_list_execute_and_delete_table_import(monkeypatch)` (line 307): no docstring
   - `test_foundry_schedule_paths_exist_in_openapi()` (line 469): no docstring
   - `async test_foundry_schedule_create_get_pause_unpause_delete()` (line 485): no docstring
-  - `async test_foundry_schedule_not_found_for_missing_pipeline()` (line 575): no docstring
-  - `test_foundry_connection_crud_paths_exist_in_openapi()` (line 596): no docstring
-  - `async test_foundry_connection_create_get_list_delete()` (line 610): no docstring
-  - `async test_foundry_connection_get_not_found()` (line 695): no docstring
-  - `async test_foundry_connection_test_endpoint()` (line 712): no docstring
+  - `async test_foundry_schedule_not_found_for_missing_pipeline()` (line 576): no docstring
+  - `async test_foundry_schedule_runs_pagination_and_invalid_token()` (line 593): no docstring
+  - `test_foundry_connection_crud_paths_exist_in_openapi()` (line 654): no docstring
+  - `async test_foundry_connection_create_get_list_delete()` (line 668): no docstring
+  - `async test_foundry_connection_get_not_found()` (line 756): no docstring
+  - `async test_foundry_connection_test_endpoint()` (line 773): no docstring
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - **Functions**
@@ -12191,9 +12196,11 @@
   - `test_append_mode_empty_existing()` (line 101): When there are no existing rows, all new rows are added.
   - `test_append_mode_no_new_rows()` (line 114): When all new rows already exist, nothing changes.
   - `test_append_mode_preserves_column_names()` (line 129): Existing column names take precedence over new column names.
-  - `test_update_mode_updates_existing_rows_by_pk()` (line 150): Rows with a matching PK are updated; new PKs are appended.
-  - `test_update_mode_default_pk_first_column()` (line 172): When no primary_key_column is specified, the first column is used.
-  - `test_update_mode_empty_existing()` (line 193): When there is no existing data, the result is just the new data.
+  - `test_append_mode_realigns_new_rows_to_existing_column_order()` (line 145): When column order changes, APPEND aligns new rows before dedup/hash.
+  - `test_update_mode_updates_existing_rows_by_pk()` (line 167): Rows with a matching PK are updated; new PKs are appended.
+  - `test_update_mode_default_pk_first_column()` (line 189): When no primary_key_column is specified, the first column is used.
+  - `test_update_mode_empty_existing()` (line 210): When there is no existing data, the result is just the new data.
+  - `test_update_mode_realigns_new_rows_when_column_order_changes()` (line 225): UPDATE should map incoming columns to existing schema before PK upsert.
 
 ### `backend/tests/unit/services/test_sync_wrapper_service.py`
 - **Functions**

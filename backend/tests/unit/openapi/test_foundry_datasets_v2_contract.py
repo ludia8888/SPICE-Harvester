@@ -38,7 +38,8 @@ class _DatasetRegistry:
     def __init__(self) -> None:
         self.datasets: dict[str, Any] = {}
         self.versions: dict[str, Any] = {}
-        self.transactions: dict[str, Any] = {}  # keyed by ingest_request_id
+        self.transactions_by_id: dict[str, Any] = {}
+        self.transaction_id_by_ingest_request_id: dict[str, str] = {}
 
     async def create_dataset(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         dataset_id = str(uuid.uuid4())
@@ -130,15 +131,18 @@ class _DatasetRegistry:
             artifact_key=None,
             error=None,
         )
-        # Key by both ingest_request_id and transaction_id because the router
-        # returns the transaction_id in the RID but looks up via the
-        # ingest_request_id parameter (passing the extracted transaction_id).
-        self.transactions[ingest_request_id] = txn
-        self.transactions[transaction_id] = txn
+        self.transactions_by_id[transaction_id] = txn
+        self.transaction_id_by_ingest_request_id[ingest_request_id] = transaction_id
         return txn
 
     async def get_ingest_transaction(self, *, ingest_request_id: str) -> SimpleNamespace | None:  # noqa: ANN001
-        return self.transactions.get(ingest_request_id)
+        transaction_id = self.transaction_id_by_ingest_request_id.get(ingest_request_id)
+        if not transaction_id:
+            return None
+        return self.transactions_by_id.get(transaction_id)
+
+    async def get_ingest_transaction_by_id(self, *, transaction_id: str) -> SimpleNamespace | None:  # noqa: ANN001
+        return self.transactions_by_id.get(transaction_id)
 
     async def mark_ingest_transaction_committed(
         self,
@@ -147,7 +151,7 @@ class _DatasetRegistry:
         lakefs_commit_id: str,
         artifact_key: str | None,
     ) -> SimpleNamespace | None:
-        txn = self.transactions.get(ingest_request_id)
+        txn = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
         if txn:
             txn.status = "COMMITTED"
             txn.lakefs_commit_id = lakefs_commit_id
@@ -160,7 +164,7 @@ class _DatasetRegistry:
         ingest_request_id: str,
         error: str,
     ) -> SimpleNamespace | None:
-        txn = self.transactions.get(ingest_request_id)
+        txn = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
         if txn:
             txn.status = "ABORTED"
             txn.error = error
