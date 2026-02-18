@@ -2783,7 +2783,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT p.pipeline_id, p.db_name, p.pipeline_type, p.schedule_interval_seconds,
+                SELECT p.pipeline_id, p.db_name, p.pipeline_type, p.status, p.schedule_interval_seconds,
                        p.schedule_cron, p.last_scheduled_at, p.last_build_status, p.last_build_at, p.name, p.branch,
                        v.lakefs_commit_id AS latest_commit_id, v.definition_json
                 FROM {self._schema}.pipelines p

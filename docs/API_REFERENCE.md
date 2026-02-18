@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **248**
+- Total documented endpoints: **249**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 148 |
-| `v2` | 100 |
+| `v2` | 101 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 46 |
 | `pipelines` | 29 |
-| `connectivity` | 27 |
+| `connectivity` | 28 |
 | `datasets` | 16 |
 | `databases` | 15 |
 | `admin` | 13 |
@@ -201,6 +201,7 @@
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Get Virtual Table V2 | `v2` | no | no | `get_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__get` |
 | `PUT` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Replace Virtual Table V2 | `v2` | no | no | `replace_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__put` |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Delete Virtual Table V2 | `v2` | no | no | `delete_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__delete` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute` | Execute Virtual Table V2 | `v2` | no | no | `execute_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__execute_post` |
 
 ### Foundry Datasets v2
 

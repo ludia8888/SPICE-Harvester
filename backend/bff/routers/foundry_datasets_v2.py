@@ -788,9 +788,21 @@ async def list_files_v2(
                 "updatedTime": obj.get("mtime") or None,
             })
     except LakeFSError as exc:
-        logger.warning("Failed to list objects from lakeFS: %s", exc)
-    except Exception:
-        logger.warning("Exception fallback listing files", exc_info=True)
+        logger.error("lakeFS list_files failed: %s", exc)
+        return _foundry_error(
+            503,
+            error_code="SERVICE_UNAVAILABLE",
+            error_name="DatasetFilesUnavailable",
+            parameters={"datasetRid": datasetRid, "message": "lakeFS list failed"},
+        )
+    except Exception as exc:
+        logger.error("Unexpected list_files failure: %s", exc)
+        return _foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="DatasetFilesListFailed",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
 
     return JSONResponse(content={"data": files, "nextPageToken": None})
 

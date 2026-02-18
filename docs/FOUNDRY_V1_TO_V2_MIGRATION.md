@@ -78,11 +78,17 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Connectivity binary handling hardening (P1): `uploadCustomJdbcDrivers` persists bytes to artifact object storage (lakeFS artifacts repository) and returns only public driver metadata on connection configuration (`customJdbcDrivers`).
 - Connectivity export settings hardening (P1): `updateExportSettings` and connection payload `exportSettings` are normalized to Foundry document fields (`exportsEnabled`, `exportEnabledWithoutMarkingsValidation`).
 - Connectivity expansion (P1): preview-gated connection-scoped `fileImports` and `virtualTables` surfaces are exposed on `/api/v2/connectivity/connections/{connectionRid}/*` with Foundry-style `preview=true` usage policy.
+- Connectivity execute parity (P1): `POST /api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute` now uses a dedicated file-import runtime path (no table-import handler reuse), and `POST /api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute` is exposed with orchestration build run persistence.
 - Connectivity response contract hardening (P1): connection payloads prioritize Foundry field names (`connectionConfiguration`, `parentFolderRid`, `exportSettings`), and `fileImports`/`virtualTables` payloads prioritize (`name`, `parentRid`, `config`) while preserving alias keys for internal backward compatibility.
+- Connectivity config-key normalization (P1): `fileImports` now persist and read `file_import_config` as the canonical key only; legacy `table_import_config` aliasing is removed from runtime and backfilled via DB migration `019_file_import_config_key_cleanup.sql`.
+- Connectivity source-type strictness hardening (P1): connector runtime now resolves connector kind/import-config key with strict `source_type` validation; unknown source types are rejected instead of silently defaulting to Google Sheets paths.
 - JDBC CDC hardening (P1): connector-specific CDC resume tokens now support tie-breaker-aware advancement (`token` + `tiebreaker`) and strategy-aware peeking for Snowflake/PostgreSQL/MySQL/SQL Server/Oracle.
 - Connector secret safety hardening (P1): connector secret encryption is mandatory in non-test runtime (`DATA_ENCRYPTION_KEYS` required) unless explicitly overridden via `ALLOW_PLAINTEXT_CONNECTOR_SECRETS=true` for local debugging.
+- Connectivity delete hardening (P1): `DELETE /api/v2/connectivity/connections/{connectionRid}` and import delete endpoints now perform strict source hard-delete (FK cascade) with no runtime soft-disable fallback.
 - Dataset transaction hardening (P1): `POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit` no longer returns synthetic fallback commit IDs when lakeFS commit fails; failure surfaces explicit Foundry error and transaction remains `OPEN`.
 - Dataset read hardening (P1): `POST /api/v2/datasets/{datasetRid}/readTable` now returns Foundry error envelope for lakeFS availability failures when no cached sample exists (silent empty fallback is retained only for not-found source objects).
+- Dataset files hardening (P1): `GET /api/v2/datasets/{datasetRid}/files` now returns Foundry error envelope on lakeFS availability failures instead of silent empty-list fallback.
+- Scheduler pause hardening (P1): paused pipelines are excluded from scheduler execution ticks (`status=paused` is respected by runtime scheduler loop).
 
 ## Deprecation Policy
 - v2 successor가 있는 legacy read/query compat 엔드포인트는 코드에서 완전 제거되었습니다.

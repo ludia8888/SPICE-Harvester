@@ -294,10 +294,18 @@ def _virtual_table_source_types() -> tuple[str, ...]:
 
 
 def _connection_kind_from_source(source: ConnectorSource) -> str:
-    inferred = connector_kind_from_source_type(source.source_type)
-    if inferred in SUPPORTED_CONNECTOR_KINDS:
-        return inferred
-    return resolve_connector_kind_from_connection_config(source.config_json or {})
+    try:
+        return connector_kind_from_source_type(source.source_type, strict=True)
+    except ValueError:
+        inferred = resolve_connector_kind_from_connection_config(source.config_json or {})
+        if inferred in SUPPORTED_CONNECTOR_KINDS:
+            logger.warning(
+                "Unknown connection source_type '%s'; inferred connector kind '%s' from connection configuration",
+                source.source_type,
+                inferred,
+            )
+            return inferred
+        raise
 
 
 def _is_jdbc_connector_kind(kind: str) -> bool:
@@ -341,10 +349,7 @@ def _normalize_export_settings(value: Any) -> Dict[str, Any]:
     exports_enabled_raw = value.get("exportsEnabled")
     without_markings_raw = value.get("exportEnabledWithoutMarkingsValidation")
     if exports_enabled_raw is None:
-        # Legacy fallback compatibility: infer enabled from old sharing payload.
-        sharing_raw = value.get("sharing") if isinstance(value.get("sharing"), dict) else {}
-        scope = str(sharing_raw.get("scope") or "").strip().upper()
-        exports_enabled_raw = scope != "DISABLED" if scope else True
+        exports_enabled_raw = True
     if without_markings_raw is None:
         without_markings_raw = False
     return {
@@ -718,7 +723,7 @@ async def _build_table_import_response(
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
     cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
     import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
@@ -760,14 +765,14 @@ async def _build_file_import_response(
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
     cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
     import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
     if import_mode not in _TABLE_IMPORT_MODES:
         import_mode = "SNAPSHOT"
 
-    file_import_config = cfg.get("table_import_config") if isinstance(cfg.get("table_import_config"), dict) else {}
+    file_import_config = cfg.get("file_import_config") if isinstance(cfg.get("file_import_config"), dict) else {}
     if not file_import_config:
         file_import_config = _resolve_file_import_config({}, connector_kind=connector_kind)
 
@@ -802,7 +807,7 @@ async def _build_virtual_table_response(
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
     cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
     virtual_table_config = cfg.get("virtual_table_config") if isinstance(cfg.get("virtual_table_config"), dict) else {}
@@ -1505,7 +1510,7 @@ async def replace_table_import_v2(
         )
 
     cfg = dict(source.config_json or {})
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
 
     import_mode = str(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT").strip().upper()
     if import_mode not in _TABLE_IMPORT_MODES:
@@ -1639,11 +1644,17 @@ async def delete_table_import_v2(
             parameters={"connectionRid": connectionRid, "tableImportRid": tableImportRid},
         )
 
-    await connector_registry.set_source_enabled(
+    deleted = await connector_registry.delete_source(
         source_type=source.source_type,
         source_id=source.source_id,
-        enabled=False,
     )
+    if not deleted:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="TableImportNotFound",
+            parameters={"connectionRid": connectionRid, "tableImportRid": tableImportRid},
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1703,7 +1714,7 @@ async def execute_table_import_v2(
             parameters={"message": "table import mapping is incomplete; target ontology is required"},
         )
 
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     target_db = str(mapping.target_db_name or "").strip() or None
     import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
@@ -1906,8 +1917,7 @@ async def create_file_import_v2(
             "parent_rid": _connection_rid(connection_id),
             "import_mode": import_mode,
             "allow_schema_changes": allow_schema_changes,
-            # Keep execution path unified with table import runtime.
-            "table_import_config": file_import_config,
+            "file_import_config": file_import_config,
             "branch_name": resolved_branch,
             "resource_kind": "file_import",
         },
@@ -2132,7 +2142,7 @@ async def replace_file_import_v2(
         )
 
     cfg = dict(source.config_json or {})
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     import_mode = str(payload.get("importMode") or cfg.get("import_mode") or "SNAPSHOT").strip().upper()
     if import_mode not in _TABLE_IMPORT_MODES:
         return _foundry_error(
@@ -2171,7 +2181,7 @@ async def replace_file_import_v2(
                 if payload.get("allowSchemaChanges") is not None
                 else cfg.get("allow_schema_changes")
             ),
-            "table_import_config": file_import_config,
+            "file_import_config": file_import_config,
             "connection_id": connection_id,
         }
     )
@@ -2257,7 +2267,14 @@ async def delete_file_import_v2(
             error_name="FileImportNotFound",
             parameters={"connectionRid": connectionRid, "fileImportRid": fileImportRid},
         )
-    await connector_registry.set_source_enabled(source_type=source.source_type, source_id=source.source_id, enabled=False)
+    deleted = await connector_registry.delete_source(source_type=source.source_type, source_id=source.source_id)
+    if not deleted:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="FileImportNotFound",
+            parameters={"connectionRid": connectionRid, "fileImportRid": fileImportRid},
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -2317,7 +2334,7 @@ async def execute_file_import_v2(
             parameters={"message": "file import mapping is incomplete; target ontology is required"},
         )
 
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     target_db = str(mapping.target_db_name or "").strip() or None
     import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
@@ -2364,7 +2381,7 @@ async def execute_file_import_v2(
             started_at=started_at,
         )
 
-        result_payload = await data_connector_pipelining_service.start_pipelining_table_import(
+        result_payload = await data_connector_pipelining_service.start_pipelining_file_import(
             source=source,
             mapping=mapping,
             google_sheets_service=google_sheets_service,
@@ -2399,6 +2416,149 @@ async def execute_file_import_v2(
             error_code="INTERNAL",
             error_name="Internal",
             parameters={"message": "Failed to execute file import"},
+        )
+
+    return f"ri.spice.main.build.{job_id}"
+
+
+@router.post("/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute")
+@trace_endpoint("bff.foundry_v2_connectivity.execute_virtual_table")
+async def execute_virtual_table_v2(
+    connectionRid: str,
+    virtualTableRid: str,
+    request: Request,
+    preview: bool = Query(default=False),
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+):
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+
+    connection_id = _connection_id_from_rid(connectionRid)
+    if not connection_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "connectionRid is invalid"},
+        )
+    virtual_table_id = _virtual_table_id_from_rid(virtualTableRid)
+    if not virtual_table_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "virtualTableRid is invalid"},
+        )
+
+    source, mapping = await _load_virtual_table_source(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        virtual_table_id=virtual_table_id,
+    )
+    if source is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="VirtualTableNotFound",
+            parameters={"connectionRid": connectionRid, "virtualTableRid": virtualTableRid},
+        )
+    if mapping is None or not str(mapping.target_db_name or "").strip():
+        return _foundry_error(
+            status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+            error_name="VirtualTableNotReady",
+            parameters={"message": "virtual table mapping is incomplete; target ontology is required"},
+        )
+
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    target_db = str(mapping.target_db_name or "").strip() or None
+    import_mode = str((source.config_json or {}).get("import_mode") or "SNAPSHOT").strip().upper()
+    if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
+        return _foundry_error(
+            status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED",
+            error_name="ConnectivityFeatureDisabled",
+            parameters={"message": "JDBC connectivity is disabled for this ontology"},
+        )
+    if import_mode == "CDC" and not _cdc_enabled_for_db(target_db):
+        return _foundry_error(
+            status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED",
+            error_name="ConnectivityFeatureDisabled",
+            parameters={"message": "CDC connectivity is disabled for this ontology"},
+        )
+
+    branch_name = str(mapping.target_branch or "").strip() or "main"
+    requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
+    connection_rid = _connection_rid(connection_id)
+    virtual_table_rid = _virtual_table_rid(source.source_id)
+
+    try:
+        pipeline_id = await _ensure_virtual_table_pipeline(
+            pipeline_registry=pipeline_registry,
+            connection_id=connection_id,
+            source=source,
+            mapping=mapping,
+        )
+        job_id = _table_import_build_job_id(pipeline_id=pipeline_id)
+        started_at = utcnow()
+        await pipeline_registry.record_run(
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            mode="build",
+            status="RUNNING",
+            output_json=_build_execute_run_output(
+                connection_rid=connection_rid,
+                resource_rid=virtual_table_rid,
+                resource_field="virtualTableRid",
+                branch_name=branch_name,
+                requested_by=requested_by,
+            ),
+            started_at=started_at,
+        )
+
+        result_payload = await data_connector_pipelining_service.start_pipelining_virtual_table(
+            source=source,
+            mapping=mapping,
+            google_sheets_service=google_sheets_service,
+            connector_adapter_factory=connector_adapter_factory,
+            connector_registry=connector_registry,
+            pipeline_registry=pipeline_registry,
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+            objectify_job_queue=objectify_job_queue,
+            actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
+        )
+        await pipeline_registry.record_run(
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            mode="build",
+            status="SUCCESS",
+            output_json=_build_execute_run_output(
+                connection_rid=connection_rid,
+                resource_rid=virtual_table_rid,
+                resource_field="virtualTableRid",
+                branch_name=branch_name,
+                requested_by=requested_by,
+                result_payload=result_payload if isinstance(result_payload, dict) else None,
+            ),
+            started_at=started_at,
+            finished_at=utcnow(),
+        )
+    except Exception as exc:
+        logger.error("Failed to execute virtual table %s: %s", virtualTableRid, exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"message": "Failed to execute virtual table"},
         )
 
     return f"ri.spice.main.build.{job_id}"
@@ -2696,7 +2856,7 @@ async def replace_virtual_table_v2(
         )
 
     cfg = dict(source.config_json or {})
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or (mapping.target_db_name if mapping else None)
     if _is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
@@ -2798,7 +2958,14 @@ async def delete_virtual_table_v2(
             error_name="VirtualTableNotFound",
             parameters={"connectionRid": connectionRid, "virtualTableRid": virtualTableRid},
         )
-    await connector_registry.set_source_enabled(source_type=source.source_type, source_id=source.source_id, enabled=False)
+    deleted = await connector_registry.delete_source(source_type=source.source_type, source_id=source.source_id)
+    if not deleted:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="VirtualTableNotFound",
+            parameters={"connectionRid": connectionRid, "virtualTableRid": virtualTableRid},
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -2982,11 +3149,19 @@ async def delete_connection_v2(
     assert connection_id is not None
     assert source is not None
 
-    await connector_registry.set_source_enabled(
-        source_type=source.source_type,
-        source_id=connection_id,
-        enabled=False,
+    deleted = bool(
+        await connector_registry.delete_source(
+            source_type=source.source_type,
+            source_id=connection_id,
+        )
     )
+    if not deleted:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ConnectionNotFound",
+            parameters={"connectionRid": connectionRid},
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

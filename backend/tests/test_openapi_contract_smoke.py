@@ -2143,6 +2143,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing', 'virtualTableRid': 'ri.spice.main.virtual-table.smoke-missing'})}"
         return RequestPlan(op.method, op.path, url, (204, 404, 400), params={"preview": "true"})
 
+    if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing', 'virtualTableRid': 'ri.spice.main.virtual-table.smoke-missing'})}"
+        return RequestPlan(op.method, op.path, url, (200, 404, 409, 400, 403, 500), params={"preview": "true"})
+
     # ---------- Datasets v2 ----------
     if key == ("GET", "/api/v2/datasets"):
         url = f"{BFF_URL}{op.path}"

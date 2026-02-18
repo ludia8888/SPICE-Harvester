@@ -25,6 +25,7 @@ from data_connector.adapters.factory import (
     SUPPORTED_CONNECTOR_KINDS,
     connector_kind_from_source_type,
     file_import_source_type_for_kind,
+    import_config_key_for_source_type,
     table_import_source_type_for_kind,
 )
 from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
@@ -156,18 +157,17 @@ class ConnectorTriggerService:
     async def _poll_with_adapter(self, source: ConnectorSource) -> None:
         if not self.registry or not self.adapter_factory:
             return
-        connector_kind = connector_kind_from_source_type(source.source_type)
+        connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
         adapter = self.adapter_factory.get_adapter(connector_kind)
         config, secrets = await resolve_source_runtime_credentials(
             connector_registry=self.registry,
             source_type=source.source_type,
             source_config=dict(source.config_json or {}),
         )
-        import_config = (
-            source.config_json.get("table_import_config")
-            if isinstance((source.config_json or {}).get("table_import_config"), dict)
-            else None
-        )
+        import_config_key = import_config_key_for_source_type(source.source_type, strict=True)
+        import_config = (source.config_json or {}).get(import_config_key)
+        if not isinstance(import_config, dict):
+            import_config = None
         cursor = await adapter.peek_change_token(
             config=config,
             secrets=secrets,

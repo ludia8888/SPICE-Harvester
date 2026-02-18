@@ -134,6 +134,14 @@ FORBIDDEN_PATH_LITERALS: tuple[ForbiddenPathLiteral, ...] = (
         needle="/api/v1/branch/",
         reason="Legacy branch-control v1 runtime path must remain removed",
     ),
+    ForbiddenPathLiteral(
+        needle="set_source_enabled(",
+        reason="Legacy connector soft-disable API must not be reintroduced in runtime code",
+    ),
+    ForbiddenPathLiteral(
+        needle="defaulting to google_sheets adapter",
+        reason="Unknown connector source_type fallback must not be reintroduced in runtime code",
+    ),
 )
 
 

@@ -24,7 +24,7 @@ async def resolve_source_runtime_credentials(
     if not connection_id:
         return source_cfg, {}
 
-    connector_kind = connector_kind_from_source_type(source_type)
+    connector_kind = connector_kind_from_source_type(source_type, strict=True)
     connection_source = await connector_registry.get_source(
         source_type=connection_source_type_for_kind(connector_kind),
         source_id=connection_id,

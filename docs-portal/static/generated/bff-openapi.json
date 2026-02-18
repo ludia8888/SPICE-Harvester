@@ -7735,6 +7735,88 @@
         }
       }
     },
+    "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute": {
+      "post": {
+        "tags": [
+          "Foundry Connectivity v2"
+        ],
+        "summary": "Execute Virtual Table V2",
+        "operationId": "execute_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__execute_post",
+        "parameters": [
+          {
+            "name": "connectionRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connectionrid"
+            }
+          },
+          {
+            "name": "virtualTableRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Virtualtablerid"
+            }
+          },
+          {
+            "name": "preview",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Preview"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/connectivity/connections/{connectionRid}/virtualTables": {
       "post": {
         "tags": [

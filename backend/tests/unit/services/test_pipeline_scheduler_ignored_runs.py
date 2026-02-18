@@ -240,6 +240,47 @@ async def test_scheduler_triggers_interval_schedule_when_due(monkeypatch: pytest
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_scheduler_skips_paused_pipeline_even_when_schedule_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    last_run = datetime(2025, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
+
+    pipeline_id = "12121212-1212-1212-1212-121212121212"
+    registry = _Registry(
+        pipelines=[
+            {
+                "pipeline_id": pipeline_id,
+                "db_name": "db",
+                "pipeline_type": "batch",
+                "status": "paused",
+                "schedule_interval_seconds": 60,
+                "schedule_cron": None,
+                "last_scheduled_at": last_run,
+                "last_build_status": "DEPLOYED",
+                "last_build_at": last_run,
+                "name": "p",
+                "branch": "main",
+                "output_dataset_name": "pipeline_output",
+                "definition_json": {},
+            }
+        ],
+        records={},
+    )
+    queue = _Queue()
+
+    scheduler = PipelineScheduler(registry, queue, poll_seconds=1)
+    await scheduler._tick()
+
+    assert queue.published == []
+    assert registry.schedule_ticks == []
+    assert registry.runs == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_scheduler_triggers_cron_schedule_when_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     last_run = datetime(2025, 1, 1, 11, 59, 0, tzinfo=timezone.utc)

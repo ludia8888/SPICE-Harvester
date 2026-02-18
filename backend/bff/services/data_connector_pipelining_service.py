@@ -502,7 +502,96 @@ async def start_pipelining_table_import(
     objectify_job_queue: ObjectifyJobQueue,
     actor_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    connector_kind = connector_kind_from_source_type(source.source_type)
+    return await _start_pipelining_connector_import(
+        source=source,
+        mapping=mapping,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        actor_user_id=actor_user_id,
+        import_config_key="table_import_config",
+        execution_label="Table import execution completed",
+    )
+
+
+async def start_pipelining_file_import(
+    *,
+    source: ConnectorSource,
+    mapping: ConnectorMapping,
+    google_sheets_service: GoogleSheetsService,
+    connector_adapter_factory: Optional[ConnectorAdapterFactory],
+    connector_registry: ConnectorRegistry,
+    pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+    objectify_job_queue: ObjectifyJobQueue,
+    actor_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await _start_pipelining_connector_import(
+        source=source,
+        mapping=mapping,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        actor_user_id=actor_user_id,
+        import_config_key="file_import_config",
+        execution_label="File import execution completed",
+    )
+
+
+async def start_pipelining_virtual_table(
+    *,
+    source: ConnectorSource,
+    mapping: ConnectorMapping,
+    google_sheets_service: GoogleSheetsService,
+    connector_adapter_factory: Optional[ConnectorAdapterFactory],
+    connector_registry: ConnectorRegistry,
+    pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+    objectify_job_queue: ObjectifyJobQueue,
+    actor_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    return await _start_pipelining_connector_import(
+        source=source,
+        mapping=mapping,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        actor_user_id=actor_user_id,
+        import_config_key="virtual_table_config",
+        execution_label="Virtual table execution completed",
+    )
+
+
+async def _start_pipelining_connector_import(
+    *,
+    source: ConnectorSource,
+    mapping: ConnectorMapping,
+    google_sheets_service: GoogleSheetsService,
+    connector_adapter_factory: Optional[ConnectorAdapterFactory],
+    connector_registry: ConnectorRegistry,
+    pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+    objectify_job_queue: ObjectifyJobQueue,
+    actor_user_id: Optional[str],
+    import_config_key: str,
+    execution_label: str,
+) -> Dict[str, Any]:
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     adapter_factory = connector_adapter_factory or ConnectorAdapterFactory(google_sheets_service=google_sheets_service)
     adapter = adapter_factory.get_adapter(connector_kind)
 
@@ -512,7 +601,7 @@ async def start_pipelining_table_import(
         source_config=dict(source.config_json or {}),
     )
     source_cfg = dict(source.config_json or {})
-    import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}
+    import_config = source_cfg.get(import_config_key) if isinstance(source_cfg.get(import_config_key), dict) else {}
     import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
 
     sync_state = await connector_registry.get_sync_state(source_type=source.source_type, source_id=source.source_id)
@@ -585,7 +674,7 @@ async def start_pipelining_table_import(
 
     return {
         "status": "success",
-        "message": "Table import execution completed",
+        "message": execution_label,
         "data": {
             "dataset": ingest_result.get("dataset") if isinstance(ingest_result, dict) else {},
             "version": ingest_result.get("version") if isinstance(ingest_result, dict) else {},

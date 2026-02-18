@@ -60,6 +60,7 @@ def test_foundry_platform_v2_paths_exist_in_openapi():
         "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute",
         "/api/v2/connectivity/connections/{connectionRid}/virtualTables",
         "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute",
     }
     for path in expected_paths:
         assert path in schema.get("paths", {})
@@ -268,12 +269,8 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
             _ = enabled, limit
             return [v for (kind, _), v in self.sources.items() if kind == source_type]
 
-        async def set_source_enabled(self, *, source_type: str, source_id: str, enabled: bool):  # noqa: ANN001
-            src = self.sources.get((source_type, source_id))
-            if src is None:
-                return False
-            src.enabled = enabled
-            return True
+        async def delete_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.pop((source_type, source_id), None) is not None
 
     class _DatasetRegistry:
         async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
@@ -408,12 +405,8 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
             _ = enabled, limit
             return [v for (kind, _), v in self.sources.items() if kind == source_type]
 
-        async def set_source_enabled(self, *, source_type: str, source_id: str, enabled: bool):  # noqa: ANN001
-            src = self.sources.get((source_type, source_id))
-            if src is None:
-                return False
-            src.enabled = enabled
-            return True
+        async def delete_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.pop((source_type, source_id), None) is not None
 
     class _DatasetRegistry:
         async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
@@ -467,8 +460,9 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
             }
 
     app = _build_test_app()
+    registry = _ConnectorRegistry()
     pipeline_registry = _PipelineRegistry()
-    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
     app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
     app.dependency_overrides[get_connector_pipeline_registry] = lambda: pipeline_registry
@@ -505,6 +499,7 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
     assert orchestration_get_resp.json()["status"] == "SUCCEEDED"
 
     assert delete_resp.status_code == 204
+    assert ("google_sheets", "sheet-123") not in registry.sources
 
 
 # ---------------------------------------------------------------------------
@@ -715,6 +710,7 @@ def test_foundry_connection_crud_paths_exist_in_openapi():
         "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute",
         "/api/v2/connectivity/connections/{connectionRid}/virtualTables",
         "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}",
+        "/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute",
     }
     for path in expected_connection_paths:
         assert path in schema.get("paths", {}), f"Missing path: {path}"
@@ -748,12 +744,8 @@ async def test_foundry_connection_create_get_list_delete():
                 if kind == source_type and (enabled is None or v.enabled == enabled)
             ]
 
-        async def set_source_enabled(self, *, source_type: str, source_id: str, enabled: bool):  # noqa: ANN001
-            src = self.sources.get((source_type, source_id))
-            if src is None:
-                return False
-            src.enabled = enabled
-            return True
+        async def delete_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.pop((source_type, source_id), None) is not None
 
     app = _build_test_app()
     registry = _ConnectorRegistry()
@@ -774,8 +766,8 @@ async def test_foundry_connection_create_get_list_delete():
                 },
                 "parentFolderRid": "ri.compass.main.folder.connectivity",
                 "exportSettings": {
-                    "markingIds": ["ri.marking.main.classification.low"],
-                    "sharing": {"scope": "DEFAULT"},
+                    "exportsEnabled": True,
+                    "exportEnabledWithoutMarkingsValidation": False,
                 },
             },
         )
@@ -830,7 +822,8 @@ async def test_foundry_connection_get_not_found():
             return None
 
     app = _build_test_app()
-    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     transport = ASGITransport(app=app)
@@ -867,7 +860,8 @@ async def test_foundry_connection_test_endpoint():
             return {}
 
     app = _build_test_app()
-    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     transport = ASGITransport(app=app)
@@ -919,7 +913,8 @@ async def test_foundry_connection_update_secrets_keeps_response_non_secret():
             return dict(self.secrets)
 
     app = _build_test_app()
-    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
     transport = ASGITransport(app=app)
@@ -993,6 +988,23 @@ async def test_foundry_connection_update_export_settings_v2():
     assert update_resp.status_code == 204
     assert registry.source.config_json["export_settings"]["exportsEnabled"] is False
     assert registry.source.config_json["export_settings"]["exportEnabledWithoutMarkingsValidation"] is True
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        legacy_shape_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-export/updateExportSettings",
+            params={"preview": "true"},
+            json={"exportSettings": {"sharing": {"scope": "DISABLED"}}},
+        )
+
+    assert legacy_shape_resp.status_code == 204
+    assert registry.source.config_json["export_settings"]["exportsEnabled"] is True
+    assert registry.source.config_json["export_settings"]["exportEnabledWithoutMarkingsValidation"] is False
+    assert "sharing" not in registry.source.config_json["export_settings"]
+    assert set(registry.source.config_json["export_settings"].keys()) == {
+        "exportsEnabled",
+        "exportEnabledWithoutMarkingsValidation",
+    }
 
 
 @pytest.mark.unit
@@ -1167,7 +1179,8 @@ async def test_foundry_file_import_requires_preview_and_supports_create(
             return None
 
     app = _build_test_app()
-    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
     app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
     app.dependency_overrides[get_google_sheets_service] = lambda: object()
 
@@ -1201,6 +1214,12 @@ async def test_foundry_file_import_requires_preview_and_supports_create(
         assert payload["parentRid"] == "ri.spice.main.connection.conn-fi"
         assert payload["connectionRid"] == "ri.spice.main.connection.conn-fi"
         assert payload["rid"].startswith("ri.spice.main.file-import.")
+        file_import_id = payload["rid"].split(".")[-1]
+        source = registry.sources.get(("postgresql_file_import", file_import_id))
+        assert source is not None
+        cfg = source.config_json or {}
+        assert isinstance(cfg.get("file_import_config"), dict)
+        assert "table_import_config" not in cfg
 
 
 @pytest.mark.unit
@@ -1310,6 +1329,123 @@ async def test_foundry_virtual_table_supports_foundry_name_and_parent_rid(
         assert payload["displayName"] == "VT-Orders"
         assert payload["parentRid"] == "ri.spice.main.connection.conn-vt"
         assert payload["rid"].startswith("ri.spice.main.virtual-table.")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_virtual_table_execute_records_build_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    runs: dict[tuple[str, str], dict[str, Any]] = {}
+
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-vt-exec"): SimpleNamespace(
+                    source_id="conn-vt-exec",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                ),
+                ("postgresql_virtual_table", "vt-1"): SimpleNamespace(
+                    source_id="vt-1",
+                    source_type="postgresql_virtual_table",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-vt-exec",
+                        "display_name": "Orders virtual table",
+                        "virtual_table_config": {
+                            "type": "postgreSqlVirtualTableConfig",
+                            "query": "SELECT 1 AS id",
+                        },
+                    },
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return SimpleNamespace(
+                target_db_name="sales_db",
+                target_branch="main",
+                target_class_label="Order",
+            )
+
+    class _PipelineRegistry:
+        def __init__(self) -> None:
+            self.pipelines: dict[str, Any] = {}
+
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return self.pipelines.get(pipeline_id)
+
+        async def create_pipeline(self, **kwargs: Any):  # noqa: ANN401
+            pipeline = SimpleNamespace(
+                pipeline_id=kwargs["pipeline_id"],
+                branch=kwargs.get("branch", "main"),
+            )
+            self.pipelines[kwargs["pipeline_id"]] = pipeline
+            return pipeline
+
+        async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
+            return runs.get((pipeline_id, job_id))
+
+        async def record_run(self, **kwargs: Any):  # noqa: ANN401
+            runs[(kwargs["pipeline_id"], kwargs["job_id"])] = {
+                "pipeline_id": kwargs["pipeline_id"],
+                "job_id": kwargs["job_id"],
+                "status": kwargs["status"],
+                "mode": kwargs["mode"],
+                "output_json": kwargs.get("output_json") or {},
+                "started_at": kwargs.get("started_at"),
+                "finished_at": kwargs.get("finished_at"),
+            }
+
+    async def _fake_start_pipelining_virtual_table(**kwargs: Any):  # noqa: ANN401
+        _ = kwargs
+        return {"status": "success", "data": {"dataset": {"dataset_id": "dataset-vt-1"}}}
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        foundry_connectivity_v2.data_connector_pipelining_service,
+        "start_pipelining_virtual_table",
+        _fake_start_pipelining_virtual_table,
+    )
+
+    app = _build_test_app()
+    pipeline_registry = _PipelineRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: pipeline_registry
+    app.dependency_overrides[get_pipeline_registry] = lambda: pipeline_registry
+    app.dependency_overrides[get_objectify_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_job_queue] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        execute_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-vt-exec/virtualTables/ri.spice.main.virtual-table.vt-1/execute",
+            params={"preview": "true"},
+        )
+        assert execute_resp.status_code == 200
+        build_rid = execute_resp.json()
+        assert build_rid.startswith("ri.spice.main.build.build-")
+
+        orchestration_get_resp = await client.get(f"/api/v2/orchestration/builds/{build_rid}")
+        assert orchestration_get_resp.status_code == 200
+        assert orchestration_get_resp.json()["status"] == "SUCCEEDED"
 
 
 @pytest.mark.unit

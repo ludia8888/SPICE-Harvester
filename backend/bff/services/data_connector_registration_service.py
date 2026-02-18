@@ -83,7 +83,7 @@ async def register_google_sheet(
             polling_interval,
         )
 
-        access_token, refresh_token, expires_at = await _resolve_tokens(
+        access_token, _, _ = await _resolve_tokens(
             connector_registry=connector_registry,
             connection_id=str(connection_id) if connection_id else None,
         )
@@ -109,9 +109,6 @@ async def register_google_sheet(
                 "polling_interval": int(polling_interval),
                 "max_import_rows": int(max_import_rows) if max_import_rows is not None else None,
                 "connection_id": str(connection_id) if connection_id else None,
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "expires_at": expires_at,
             },
         )
 
@@ -227,7 +224,7 @@ async def preview_google_sheet(
 
         config = source.config_json or {}
         default_ws = config.get("worksheet_name")
-        access_token = config.get("access_token")
+        access_token = None
         connection_id = config.get("connection_id")
         if connection_id:
             oauth_client = _build_google_oauth_client()
@@ -317,22 +314,9 @@ async def unregister_google_sheet(*, sheet_id: str, connector_registry: Connecto
     try:
         logger.info("Unregistering Google Sheet: %s", sheet_id)
 
-        ok = await connector_registry.set_source_enabled(source_type="google_sheets", source_id=sheet_id, enabled=False)
-        if not ok:
+        deleted = await connector_registry.delete_source(source_type="google_sheets", source_id=sheet_id)
+        if not deleted:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Sheet is not registered", code=ErrorCode.RESOURCE_NOT_FOUND)
-
-        existing_mapping = await connector_registry.get_mapping(source_type="google_sheets", source_id=sheet_id)
-        if existing_mapping:
-            await connector_registry.upsert_mapping(
-                source_type="google_sheets",
-                source_id=sheet_id,
-                enabled=False,
-                status=existing_mapping.status,
-                target_db_name=existing_mapping.target_db_name,
-                target_branch=existing_mapping.target_branch,
-                target_class_label=existing_mapping.target_class_label,
-                field_mappings=existing_mapping.field_mappings,
-            )
 
         return ApiResponse.success(
             message="Google Sheet unregistered successfully",

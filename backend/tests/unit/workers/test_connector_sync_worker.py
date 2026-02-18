@@ -19,7 +19,11 @@ class _FakeTracing:
 
 
 class _FakeAdapter:
+    def __init__(self) -> None:
+        self.last_import_config = None
+
     async def snapshot_extract(self, *, config, secrets, import_config):  # noqa: ANN001, ANN003
+        self.last_import_config = import_config
         _ = config, secrets, import_config
         from data_connector.adapters.base import ConnectorExtractResult
 
@@ -245,6 +249,65 @@ async def test_sync_worker_process_connector_update_snapshot() -> None:
     assert call["source_id"] == "sheet-1"
     assert registry.sync_state_updates
     assert registry.sync_state_updates[0]["sync_state_json"] == {"watermark": 2}
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_process_connector_update_file_import_uses_file_config_key() -> None:
+    worker = ConnectorSyncWorker()
+    registry = _FakeRegistry()
+    ingest = _FakeIngestService()
+    adapter_factory = _FakeAdapterFactory()
+
+    registry.source = ConnectorSource(
+        source_type="mysql_file_import",
+        source_id="file-1",
+        enabled=True,
+        config_json={
+            "connection_id": "conn-1",
+            "import_mode": "SNAPSHOT",
+            "file_import_config": {"type": "jdbcImportConfig", "query": "SELECT * FROM file_source"},
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.connection_source = ConnectorSource(
+        source_type="mysql_connection",
+        source_id="conn-1",
+        enabled=True,
+        config_json={"type": "MySqlConnectionConfig", "host": "localhost", "database": "demo"},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.mapping = ConnectorMapping(
+        mapping_id="map-file-1",
+        source_type="mysql_file_import",
+        source_id="file-1",
+        status="active",
+        enabled=True,
+        target_db_name="demo",
+        target_branch="main",
+        target_class_label="User",
+        field_mappings=[],
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    worker.registry = registry
+    worker.adapter_factory = adapter_factory
+    worker.ingest_service = ingest
+    worker.tracing = _FakeTracing()
+
+    envelope = EventEnvelope.from_connector_update(
+        source_type="mysql_file_import",
+        source_id="file-1",
+        cursor="cursor-2",
+        data={"source_type": "mysql_file_import", "source_id": "file-1"},
+    )
+
+    version_id = await worker._process_connector_update(envelope)
+
+    assert version_id == "version-1"
+    assert adapter_factory.adapter.last_import_config == {"type": "jdbcImportConfig", "query": "SELECT * FROM file_source"}
 
 
 @pytest.mark.asyncio

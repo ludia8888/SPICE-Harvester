@@ -87,11 +87,15 @@ class _FakeSheets:
 
 
 class _FakeAdapter:
+    def __init__(self) -> None:
+        self.last_import_config = None
+
     async def peek_change_token(self, *, config, secrets, import_config=None):  # noqa: ANN001, ANN003
-        _ = import_config
+        self.last_import_config = import_config
         if config.get("force_none"):
             return None
-        return f"token:{config.get('sheet_url') or config.get('query') or 'default'}:{bool(secrets)}"
+        query = (import_config or {}).get("query") if isinstance(import_config, dict) else None
+        return f"token:{config.get('sheet_url') or query or config.get('query') or 'default'}:{bool(secrets)}"
 
 
 class _FakeAdapterFactory:
@@ -217,6 +221,50 @@ async def test_trigger_service_poll_source_uses_adapter_and_records_change(monke
     )
     await service._poll_with_adapter(source)
     assert registry.poll_envelope is not None
+
+
+@pytest.mark.asyncio
+async def test_trigger_service_file_import_uses_file_import_config_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
+    monkeypatch.setattr(trigger_module, "ConnectorAdapterFactory", _FakeAdapterFactory)
+
+    service = ConnectorTriggerService()
+    registry = _FakeRegistry()
+    sheets = _FakeSheets()
+    service.registry = registry
+    service.sheets = sheets
+    service.adapter_factory = _FakeAdapterFactory(google_sheets_service=sheets)
+
+    source = ConnectorSource(
+        source_type="mysql_file_import",
+        source_id="import-1",
+        enabled=True,
+        config_json={
+            "connection_id": "conn-1",
+            "file_import_config": {"query": "SELECT * FROM mysql_file_import"},
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    connection = ConnectorSource(
+        source_type="mysql_connection",
+        source_id="conn-1",
+        enabled=True,
+        config_json={"type": "MySqlConnectionConfig", "host": "localhost", "database": "demo"},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    registry.sources = [source, connection]
+    registry.poll_envelope = EventEnvelope.from_connector_update(
+        source_type="mysql_file_import",
+        source_id="import-1",
+        cursor="cursor-1",
+    )
+
+    await service._poll_with_adapter(source)
+
+    assert service.adapter_factory.adapter.last_import_config == {"query": "SELECT * FROM mysql_file_import"}
 
 
 @pytest.mark.asyncio

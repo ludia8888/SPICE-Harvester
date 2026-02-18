@@ -333,23 +333,25 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 updated_at=row["updated_at"],
             )
 
-    async def set_source_enabled(self, *, source_type: str, source_id: str, enabled: bool) -> bool:
+    async def delete_source(self, *, source_type: str, source_id: str) -> bool:
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
         st = (source_type or "").strip()
         sid = (source_id or "").strip()
+        if not st:
+            raise ValueError("source_type is required")
+        if not sid:
+            raise ValueError("source_id is required")
         async with self._pool.acquire() as conn:
             res = await conn.execute(
                 f"""
-                UPDATE {self._schema}.connector_sources
-                SET enabled = $3, updated_at = NOW()
+                DELETE FROM {self._schema}.connector_sources
                 WHERE source_type = $1 AND source_id = $2
                 """,
                 st,
                 sid,
-                bool(enabled),
             )
-            return res.upper().startswith("UPDATE ") and not res.endswith(" 0")
+            return res.upper().startswith("DELETE ") and not res.endswith(" 0")
 
     async def get_source(self, *, source_type: str, source_id: str) -> Optional[ConnectorSource]:
         if not self._pool:

@@ -183,16 +183,12 @@ class ConnectorIngestService:
         object_key: str,
     ) -> str:
         client = await self._pipeline_registry.get_lakefs_client()
-        try:
-            return await client.commit(
-                repository=repository,
-                branch=branch,
-                message=message,
-                metadata=metadata,
-            )
-        except Exception:
-            # When commit is a no-op/predicate conflict, fall back to head commit reference.
-            return await client.get_branch_head_commit_id(repository=repository, branch=branch)
+        return await client.commit(
+            repository=repository,
+            branch=branch,
+            message=message,
+            metadata=metadata,
+        )
 
     async def _load_existing_csv(
         self,

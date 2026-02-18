@@ -21,6 +21,7 @@ from data_connector.adapters.factory import (
     SUPPORTED_CONNECTOR_KINDS,
     connector_kind_from_source_type,
     file_import_source_type_for_kind,
+    import_config_key_for_source_type,
     table_import_source_type_for_kind,
 )
 from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
@@ -327,11 +328,12 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             logger.info("Skipping auto-import (target DB not configured) for %s:%s", source_type, source_id)
             return None
 
-        connector_kind = connector_kind_from_source_type(source_type)
+        connector_kind = connector_kind_from_source_type(source_type, strict=True)
         adapter = self.adapter_factory.get_adapter(connector_kind)
         source_cfg = dict(source.config_json or {})
         import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-        import_config = source_cfg.get("table_import_config") if isinstance(source_cfg.get("table_import_config"), dict) else {}
+        import_config_key = import_config_key_for_source_type(source_type, strict=True)
+        import_config = source_cfg.get(import_config_key) if isinstance(source_cfg.get(import_config_key), dict) else {}
 
         runtime_config, secrets = await resolve_source_runtime_credentials(
             connector_registry=self.registry,

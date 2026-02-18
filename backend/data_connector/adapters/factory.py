@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict
 
 from data_connector.adapters.base import ConnectorAdapter
@@ -49,9 +48,6 @@ _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND = {
     "oracle": "oracle_virtual_table",
 }
 
-logger = logging.getLogger(__name__)
-
-
 def connection_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
     return _CONNECTION_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_connection")
@@ -72,7 +68,7 @@ def virtual_table_source_type_for_kind(connector_kind: str) -> str:
     return _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_virtual_table")
 
 
-def connector_kind_from_source_type(source_type: str, *, strict: bool = False) -> str:
+def connector_kind_from_source_type(source_type: str, *, strict: bool = True) -> str:
     st = str(source_type or "").strip().lower()
     for kind, mapped in _CONNECTION_SOURCE_TYPE_BY_KIND.items():
         if mapped == st:
@@ -86,11 +82,18 @@ def connector_kind_from_source_type(source_type: str, *, strict: bool = False) -
     for kind, mapped in _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.items():
         if mapped == st:
             return kind
-    if strict and st:
-        raise ValueError(f"Unknown connector source_type: {st}")
-    if st:
-        logger.warning("Unknown connector source_type '%s'; defaulting to google_sheets adapter", st)
-    return "google_sheets"
+    raise ValueError(f"Unknown connector source_type: {st}")
+
+
+def import_config_key_for_source_type(source_type: str, *, strict: bool = True) -> str:
+    st = str(source_type or "").strip().lower()
+    if st in _TABLE_IMPORT_SOURCE_TYPE_BY_KIND.values():
+        return "table_import_config"
+    if st in _FILE_IMPORT_SOURCE_TYPE_BY_KIND.values():
+        return "file_import_config"
+    if st in _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.values():
+        return "virtual_table_config"
+    raise ValueError(f"Unknown connector source_type: {st}")
 
 
 def resolve_connector_kind_from_connection_config(configuration: Dict[str, Any]) -> str:

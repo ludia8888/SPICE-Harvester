@@ -116,6 +116,11 @@ class PipelineScheduler:
                 logger.warning("PipelineScheduler: scheduled pipeline missing pipeline_id (row=%s)", pipeline)
                 continue
 
+            pipeline_status = str(pipeline.get("status") or "").strip().lower()
+            if pipeline_status == "paused":
+                logger.debug("PipelineScheduler: skipping paused pipeline (pipeline_id=%s)", pipeline_id)
+                continue
+
             interval = pipeline.get("schedule_interval_seconds")
             cron = pipeline.get("schedule_cron")
             last_run = pipeline.get("last_scheduled_at")

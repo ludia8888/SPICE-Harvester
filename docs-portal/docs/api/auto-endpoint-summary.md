@@ -1,4 +1,4 @@
-### v2 Endpoints (100)
+### v2 Endpoints (101)
 
 | Category | Endpoints | Base Path |
 |----------|-----------|-----------|
@@ -10,7 +10,7 @@
 | Interface Types | 2 | `/api/v2/ontologies/{ontology}/interfaceTypes` |
 | Shared Property Types | 2 | `/api/v2/ontologies/{ontology}/sharedPropertyTypes` |
 | Value Types | 2 | `/api/v2/ontologies/{ontology}/valueTypes` |
-| Other v2 Endpoints | 54 | `/api/v2/...` |
+| Other v2 Endpoints | 55 | `/api/v2/...` |
 
 ### v1 Endpoints (148)
 

@@ -203,6 +203,11 @@ class _FailingLakeFSClient(_MockLakeFSClient):
         raise LakeFSError("lakeFS unavailable")
 
 
+class _FailingLakeFSListClient(_MockLakeFSClient):
+    async def list_objects(self, repository: str, ref: str, prefix: str = "", amount: int = 100) -> list[dict[str, Any]]:  # noqa: ANN401
+        raise LakeFSError("lakeFS unavailable")
+
+
 class _MockLakeFSStorage:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -725,6 +730,39 @@ async def test_foundry_datasets_file_operations(
         )
         assert content_resp.status_code == 200
         assert content_resp.content == b"Hello, World!"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_list_files_returns_503_when_lakefs_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+    pr = _PipelineRegistry(lakefs_client=_FailingLakeFSListClient())
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        list_resp = await client.get(
+            f"/api/v2/datasets/{dataset_rid}/files",
+            params={"branchName": "main"},
+            headers={"X-User-ID": "user-1"},
+        )
+
+    assert list_resp.status_code == 503
+    body = list_resp.json()
+    assert body["errorCode"] == "SERVICE_UNAVAILABLE"
+    assert body["errorName"] == "DatasetFilesUnavailable"
 
 
 # ---------------------------------------------------------------------------
