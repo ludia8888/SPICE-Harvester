@@ -1,1 +1,702 @@
 classDiagram
+    %% SPICE HARVESTER Full System Class Diagram
+    %% Generated from codebase analysis
+    %% Last Updated: 2025-07-20
+
+    %% =========================================================
+    %% SECTION 1: Core Application Layer
+    %% =========================================================
+
+    class BFFApplication {
+        +FastAPI app
+        +ServiceContainer container
+        +ApplicationSettings settings
+        +startup() Task
+        +shutdown() Task
+        +include_routers() None
+    }
+
+    class OMSApplication {
+        +FastAPI app
+        +PostgreSQL db_pool
+        +startup() Task
+        +shutdown() Task
+    }
+
+    class AgentApplication {
+        +FastAPI app
+        +AgentRegistry registry
+        +startup() Task
+        +shutdown() Task
+    }
+
+    %% =========================================================
+    %% SECTION 2: Domain Models
+    %% =========================================================
+
+    class OntologyBase {
+        +str id
+        +LocalizedText label
+        +Optional~LocalizedText~ description
+        +List~Property~ properties
+        +List~Relationship~ relationships
+        +int version
+        +datetime created_at
+        +validate_label() LocalizedText
+        +validate_id() str
+    }
+
+    class Property {
+        +str name
+        +str type
+        +LocalizedText label
+        +bool required
+        +bool primary_key
+        +bool title_key
+        +Optional~str~ shared_property_ref
+        +Dict constraints
+        +validate_name() str
+        +validate_type() str
+    }
+
+    class Relationship {
+        +str predicate
+        +str target
+        +LocalizedText label
+        +str cardinality
+        +Optional~str~ inverse_predicate
+        +validate_cardinality() str
+    }
+
+    class DataType {
+        <<enumeration>>
+        STRING
+        INTEGER
+        FLOAT
+        DOUBLE
+        BOOLEAN
+        DATE
+        DATETIME
+        URI
+        ARRAY
+        OBJECT
+        +from_python_type() DataType
+        +is_numeric() bool
+        +is_temporal() bool
+    }
+
+    class Cardinality {
+        <<enumeration>>
+        ONE_TO_ONE
+        ONE_TO_MANY
+        MANY_TO_ONE
+        MANY_TO_MANY
+    }
+
+    %% =========================================================
+    %% SECTION 3: Ontology Resource Models
+    %% =========================================================
+
+    class OntologyResourceBase {
+        +str id
+        +LocalizedText label
+        +Dict spec
+        +Dict metadata
+        +datetime created_at
+        +datetime updated_at
+    }
+
+    class SharedPropertyDefinition {
+        +List~Property~ properties
+    }
+
+    class ValueTypeDefinition {
+        +Optional~str~ base_type
+        +Optional~str~ format
+        +Optional~str~ unit
+        +Dict constraints
+    }
+
+    class InterfaceDefinition {
+        +List~Property~ required_properties
+        +List~Relationship~ required_relationships
+    }
+
+    class LinkTypeDefinition {
+        +str from_ref
+        +str to_ref
+        +str predicate
+        +Optional~str~ cardinality
+    }
+
+    class ActionTypeDefinition {
+        +Dict input_schema
+        +Dict output_schema
+        +Dict permission_policy
+        +Dict writeback_target
+        +List validation_rules
+    }
+
+    OntologyResourceBase <|-- SharedPropertyDefinition
+    OntologyResourceBase <|-- ValueTypeDefinition
+    OntologyResourceBase <|-- InterfaceDefinition
+    OntologyResourceBase <|-- LinkTypeDefinition
+    OntologyResourceBase <|-- ActionTypeDefinition
+
+    %% =========================================================
+    %% SECTION 4: Pipeline Models
+    %% =========================================================
+
+    class PipelineJob {
+        +str job_id
+        +str pipeline_id
+        +str db_name
+        +str pipeline_type
+        +Dict definition_json
+        +str mode
+        +Optional~int~ schedule_interval_seconds
+        +datetime requested_at
+        +build_dedupe_key() str
+    }
+
+    class PipelinePlan {
+        +List~PipelinePlanOutput~ outputs
+        +List~PipelinePlanAssociation~ associations
+        +PipelinePlanDataScope scope
+    }
+
+    class PipelinePlanOutput {
+        +str output_name
+        +PipelinePlanOutputKind output_kind
+        +Optional~str~ target_class_id
+        +Optional~str~ source_class_id
+        +Optional~str~ link_type_id
+    }
+
+    class PipelineTaskSpec {
+        +PipelineTaskScope scope
+        +PipelineTaskIntent intent
+        +bool allow_join
+        +bool allow_cleansing
+        +float confidence
+        +List~str~ notes
+    }
+
+    class ObjectifyJob {
+        +str job_id
+        +str db_name
+        +str dataset_id
+        +str target_class_id
+        +ExecutionMode execution_mode
+        +Optional~str~ watermark_column
+        +Optional~str~ base_commit_id
+    }
+
+    PipelinePlan --> PipelinePlanOutput : contains
+
+    %% =========================================================
+    %% SECTION 5: BFF Services
+    %% =========================================================
+
+    class OMSClient {
+        +str base_url
+        +AsyncClient client
+        +async get() Dict
+        +async post() Dict
+        +async check_health() bool
+    }
+
+    class InstancesService {
+        +ElasticsearchService es_service
+        +DatasetRegistry dataset_registry
+        +async get_instance() Dict
+        +async search_instances() List
+    }
+
+    class OntologyCrudService {
+        +OMSClient oms_client
+        +LabelMapper label_mapper
+        +async create_ontology() JSONResponse
+        +async update_ontology() JSONResponse
+    }
+
+    class PipelineExecutionService {
+        +DatasetRegistry dataset_registry
+        +PipelineRegistry pipeline_registry
+        +async deploy_pipeline() Dict
+        +async run_pipeline_preview() PipelineRunResult
+    }
+
+    class DataConnectorPipeliningService {
+        +ConnectorRegistry connector_registry
+        +DatasetRegistry dataset_registry
+        +async sync_connector_data() ConnectorExtractResult
+        +async enqueue_connector_ingest() str
+    }
+
+    class DataConnectorRegistrationService {
+        +ConnectorRegistry connector_registry
+        +async register_connector() ConnectorSource
+        +async test_connector_connection() ConnectorConnectionTestResult
+    }
+
+    class AIService {
+        +HttpClient llm_client
+        +Dict prompt_templates
+        +async generate_pipeline_plan() PipelinePlan
+        +async classify_task() PipelineTaskSpec
+    }
+
+    class GovernanceService {
+        +async validate_proposal() ValidationResult
+        +async approve_proposal() bool
+    }
+
+    %% =========================================================
+    %% SECTION 6: Registry Layer (PostgresSchemaRegistry family)
+    %% =========================================================
+
+    class PostgresSchemaRegistry {
+        <<abstract>>
+        +str _dsn
+        +str _schema
+        +Optional~Pool~ _pool
+        +int _pool_min
+        +int _pool_max
+        +async initialize() None
+        +async connect() None
+        +async close() None
+        +async health_check() bool
+        +async _ensure_tables()* None
+    }
+
+    class DatasetRegistry {
+        +async create_dataset() str
+        +async create_version() str
+        +async get_dataset() DatasetRecord
+        +async list_datasets() List
+        +async create_ingest_transaction() str
+        +async mark_ingest_transaction_committed() None
+    }
+
+    class PipelineRegistry {
+        +async create_pipeline() str
+        +async update_pipeline() Dict
+        +async get_pipeline() Dict
+        +async list_pipelines() List
+        +async delete_pipeline() bool
+    }
+
+    class ConnectorRegistry {
+        +async create_source() ConnectorSource
+        +async create_mapping() ConnectorMapping
+        +async get_sync_state() SyncState
+        +async update_sync_state() None
+        +async list_sources() List
+    }
+
+    class ObjectifyRegistry {
+        +async create_mapping_spec() str
+        +async create_job() ObjectifyJobRecord
+        +async update_job_status() None
+    }
+
+    class PipelinePlanRegistry {
+        +async create_plan() str
+        +async get_plan() Dict
+    }
+
+    class LineageStore {
+        +async record_lineage() None
+        +async get_lineage_graph() Dict
+    }
+
+    class AgentRegistry {
+        +async create_run() AgentRunRecord
+        +async create_step() AgentStepRecord
+        +async create_approval() AgentApprovalRecord
+    }
+
+    class AgentSessionRegistry {
+        +async create_session() str
+        +async add_message() str
+        +async update_session_status() None
+    }
+
+    class AgentPolicyRegistry {
+        +async create_policy() str
+        +async get_policy() Dict
+    }
+
+    class AgentToolRegistry {
+        +async register_tool() bool
+        +async get_allowed_tools() List
+    }
+
+    class DatasetProfileRegistry {
+        +async create_profile() str
+        +async get_profile() Dict
+    }
+
+    PostgresSchemaRegistry <|-- DatasetRegistry
+    PostgresSchemaRegistry <|-- PipelineRegistry
+    PostgresSchemaRegistry <|-- ConnectorRegistry
+    PostgresSchemaRegistry <|-- ObjectifyRegistry
+    PostgresSchemaRegistry <|-- PipelinePlanRegistry
+    PostgresSchemaRegistry <|-- LineageStore
+    PostgresSchemaRegistry <|-- AgentRegistry
+    PostgresSchemaRegistry <|-- AgentSessionRegistry
+    PostgresSchemaRegistry <|-- AgentPolicyRegistry
+    PostgresSchemaRegistry <|-- AgentToolRegistry
+    PostgresSchemaRegistry <|-- DatasetProfileRegistry
+
+    %% =========================================================
+    %% SECTION 7: Pipeline Execution Engine
+    %% =========================================================
+
+    class PipelineExecutor {
+        +DatasetRegistry _dataset_registry
+        +Optional~PipelineRegistry~ _pipeline_registry
+        +Optional~PipelineArtifactStore~ _artifact_store
+        +Optional~StorageService~ _storage_service
+        +str _cast_mode
+        +async preview() PipelineRunResult
+        +async build() PipelineRunResult
+        +async execute_operation() PipelineTable
+    }
+
+    class PipelineTable {
+        <<dataclass>>
+        +List~str~ columns
+        +List~Dict~ rows
+        +limited_rows() List
+    }
+
+    class PipelineRunResult {
+        <<dataclass>>
+        +Dict~str, PipelineTable~ tables
+        +List~str~ output_nodes
+    }
+
+    class PipelineArtifactStore {
+        +Path base_path
+        +save_table() str
+    }
+
+    class PipelineScheduler {
+        +async schedule_pipeline() str
+        +async execute_scheduled_runs() None
+    }
+
+    PipelineExecutor --> PipelineTable : produces
+    PipelineExecutor --> PipelineRunResult : returns
+    PipelineExecutor --> PipelineArtifactStore : stores to
+    PipelineExecutor --> DatasetRegistry : reads from
+
+    %% =========================================================
+    %% SECTION 8: Connector Adapter System
+    %% =========================================================
+
+    class ConnectorAdapter {
+        <<abstract>>
+        +str connector_kind
+        +async test_connection()* ConnectorConnectionTestResult
+        +async get_public_configuration()* Dict
+        +async snapshot_extract()* ConnectorExtractResult
+        +async incremental_extract()* ConnectorExtractResult
+        +async cdc_extract()* ConnectorExtractResult
+        +async peek_change_token()* Optional~str~
+    }
+
+    class GoogleSheetsConnectorAdapter {
+        +str connector_kind = google_sheets
+    }
+
+    class PostgreSQLConnectorAdapter {
+        +str connector_kind = postgresql
+    }
+
+    class MySQLConnectorAdapter {
+        +str connector_kind = mysql
+    }
+
+    class OracleConnectorAdapter {
+        +str connector_kind = oracle
+    }
+
+    class SnowflakeConnectorAdapter {
+        +str connector_kind = snowflake
+    }
+
+    class SqlServerConnectorAdapter {
+        +str connector_kind = sqlserver
+    }
+
+    class ConnectorAdapterFactory {
+        +create_adapter() ConnectorAdapter
+        +connection_source_type_for_kind() str
+        +table_import_source_type_for_kind() str
+    }
+
+    class ConnectorConnectionTestResult {
+        <<dataclass>>
+        +bool ok
+        +str message
+        +Dict details
+    }
+
+    class ConnectorExtractResult {
+        <<dataclass>>
+        +List~str~ columns
+        +List~Dict~ rows
+        +Dict next_state
+    }
+
+    ConnectorAdapter <|-- GoogleSheetsConnectorAdapter
+    ConnectorAdapter <|-- PostgreSQLConnectorAdapter
+    ConnectorAdapter <|-- MySQLConnectorAdapter
+    ConnectorAdapter <|-- OracleConnectorAdapter
+    ConnectorAdapter <|-- SnowflakeConnectorAdapter
+    ConnectorAdapter <|-- SqlServerConnectorAdapter
+    ConnectorAdapterFactory --> ConnectorAdapter : creates
+
+    %% =========================================================
+    %% SECTION 9: Storage Services
+    %% =========================================================
+
+    class StorageService {
+        +str endpoint_url
+        +async create_bucket() bool
+        +async bucket_exists() bool
+        +async put_object() bool
+        +async get_object() bytes
+        +async list_objects() List
+    }
+
+    class LakeFSStorageService {
+        +str endpoint_url
+    }
+
+    class LakeFSClient {
+        +LakeFSConfig _config
+        +AsyncClient _http_client
+        +async create_branch() str
+        +async merge_branch() str
+        +async commit() str
+        +async get_commit() Dict
+    }
+
+    class LakeFSConfig {
+        <<dataclass>>
+        +str api_url
+        +str access_key_id
+        +str secret_access_key
+    }
+
+    class ElasticsearchService {
+        +str host
+        +int port
+        +Optional~AsyncElasticsearch~ _client
+        +async connect() None
+        +async index_document() bool
+        +async search() Dict
+        +async bulk_index() bool
+    }
+
+    class RedisService {
+        +str host
+        +int port
+        +async connect() None
+        +async get() Optional~Any~
+        +async set() None
+        +async publish() int
+    }
+
+    StorageService <|-- LakeFSStorageService
+    LakeFSClient --> LakeFSConfig : uses
+
+    %% =========================================================
+    %% SECTION 10: Security
+    %% =========================================================
+
+    class DataEncryptor {
+        <<dataclass>>
+        +list~bytes~ keys
+        +encrypt_text() str
+        +decrypt_text() str
+        +encrypt_json() Dict
+        +decrypt_json() Dict
+    }
+
+    %% =========================================================
+    %% SECTION 11: Workers
+    %% =========================================================
+
+    class PipelineWorker {
+        +PipelineRegistry pipeline_registry
+        +PipelineExecutor executor
+        +async process_job() None
+    }
+
+    class ObjectifyWorker {
+        +ObjectifyRegistry objectify_registry
+        +ElasticsearchService es_service
+        +async process_job() None
+    }
+
+    class StrictInstanceWorker {
+        +ElasticsearchService es_service
+        +async process_event() None
+    }
+
+    class ActionWorker {
+        +async process_action() None
+    }
+
+    class OntologyWorker {
+        +ElasticsearchService es_service
+        +async process_schema_change() None
+    }
+
+    class ConnectorSyncWorker {
+        +ConnectorRegistry connector_registry
+        +ConnectorAdapterFactory adapter_factory
+        +async process_sync() None
+    }
+
+    %% =========================================================
+    %% SECTION 12: Configuration
+    %% =========================================================
+
+    class ApplicationSettings {
+        +DatabaseSettings database
+        +StorageSettings storage
+        +ServiceSettings services
+        +SecuritySettings security
+        +WorkerSettings workers
+        +PipelineSettings pipeline
+        +AgentSettings agent
+    }
+
+    class DatabaseSettings {
+        +str postgres_host
+        +int postgres_port
+        +str postgres_user
+        +str postgres_db
+    }
+
+    class StorageSettings {
+        +str lakefs_api_url
+        +str s3_endpoint
+        +str access_key
+        +str secret_key
+    }
+
+    class ServiceSettings {
+        +str oms_base_url
+        +int timeout_seconds
+    }
+
+    class SecuritySettings {
+        +List~str~ encryption_keys
+        +str auth_provider
+    }
+
+    ApplicationSettings --> DatabaseSettings : contains
+    ApplicationSettings --> StorageSettings : contains
+    ApplicationSettings --> ServiceSettings : contains
+    ApplicationSettings --> SecuritySettings : contains
+
+    %% =========================================================
+    %% SECTION 13: Registry Record Types
+    %% =========================================================
+
+    class DatasetRecord {
+        <<dataclass>>
+        +str dataset_id
+        +str db_name
+        +str name
+        +str source_type
+        +Dict schema_json
+        +datetime created_at
+    }
+
+    class DatasetVersionRecord {
+        <<dataclass>>
+        +str version_id
+        +str dataset_id
+        +str lakefs_commit_id
+        +str artifact_key
+        +int row_count
+    }
+
+    class ConnectorSource {
+        <<dataclass>>
+        +str source_type
+        +str source_id
+        +bool enabled
+        +Dict config_json
+    }
+
+    class ConnectorMapping {
+        <<dataclass>>
+        +str mapping_id
+        +str source_type
+        +str source_id
+        +str status
+        +List field_mappings
+    }
+
+    %% =========================================================
+    %% SECTION 14: Cross-Layer Relationships
+    %% =========================================================
+
+    %% Application Layer
+    BFFApplication --> OMSClient : communicates with OMS
+    BFFApplication --> InstancesService : uses
+    BFFApplication --> OntologyCrudService : uses
+    BFFApplication --> PipelineExecutionService : uses
+    BFFApplication --> DataConnectorPipeliningService : uses
+    BFFApplication --> DataConnectorRegistrationService : uses
+    BFFApplication --> AIService : uses
+    BFFApplication --> GovernanceService : uses
+    BFFApplication --> ApplicationSettings : configured by
+
+    %% Service to Registry
+    InstancesService --> ElasticsearchService : queries
+    InstancesService --> DatasetRegistry : reads
+    OntologyCrudService --> OMSClient : delegates to
+    PipelineExecutionService --> PipelineRegistry : manages
+    PipelineExecutionService --> DatasetRegistry : reads
+    DataConnectorPipeliningService --> ConnectorRegistry : reads
+    DataConnectorRegistrationService --> ConnectorRegistry : writes
+
+    %% Pipeline System
+    PipelineWorker --> PipelineExecutor : delegates to
+    PipelineWorker --> PipelineRegistry : reads jobs from
+
+    %% Connector System
+    ConnectorSyncWorker --> ConnectorAdapterFactory : uses
+    ConnectorSyncWorker --> ConnectorRegistry : reads state from
+    DataConnectorPipeliningService --> LakeFSStorageService : stores data
+
+    %% Objectify System
+    ObjectifyWorker --> ObjectifyRegistry : reads jobs from
+    ObjectifyWorker --> ElasticsearchService : indexes to
+
+    %% Storage Layer
+    PipelineExecutor --> LakeFSStorageService : reads data
+    LakeFSStorageService --> LakeFSClient : delegates to
+
+    %% Security
+    BFFApplication --> DataEncryptor : encrypts secrets
+
+    %% Domain Model Relationships
+    OntologyBase --> Property : has many
+    OntologyBase --> Relationship : has many
+    Property --> DataType : typed by
+    Relationship --> Cardinality : constrained by
+    DatasetRegistry --> DatasetRecord : manages
+    DatasetRegistry --> DatasetVersionRecord : versions
+    ConnectorRegistry --> ConnectorSource : manages
+    ConnectorRegistry --> ConnectorMapping : maps
