@@ -30,6 +30,8 @@ INSTANCE_INDEX_MAPPING: Dict[str, Any] = {
                     },
                 },
                 "type": {"type": "keyword"},
+                "geo_point": {"type": "geo_point", "ignore_malformed": True},
+                "geo_shape": {"type": "geo_shape", "ignore_malformed": True},
             },
         },
         "data": {"enabled": False},

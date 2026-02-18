@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **613**, functions **5613**, classes **856**, internal cross-imports **1464**
+- Population: files **615**, functions **5678**, classes **856**, internal cross-imports **1472**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1464 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1472 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/92 (3.26%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 49/613 (7.99%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 52/613 (8.48%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 295/5613 (5.26%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 5 | 파일 응집도 저하 | 50/615 (8.13%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 54/615 (8.78%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 297/5678 (5.23%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
 | 8 | 연속 상속 깊이(>=3) | 15/856 (1.75%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 660/5613 (11.76%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 372/5613 (6.63%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 9 | 복잡도 과다(CC>=15) | 666/5678 (11.73%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 376/5678 (6.62%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -359,14 +359,16 @@ flowchart LR
 
 ## Router Inventory (OMS)
 
-- Routers detected: **10**
+- Routers detected: **13**
 - Distinct prefixes: **4**
-- Routers with explicit tags: **10**
-- Routers with resolved source files: **10**
+- Routers with explicit tags: **13**
+- Routers with resolved source files: **13**
 
 | Router | Prefix | Tags | Source File |
 | --- | --- | --- | --- |
 | `action_async.foundry_router` | `/api` | foundry-actions-v2 | `backend/oms/routers/action_async.py` |
+| `attachments.attachments_property_router` | `/api` | foundry-attachments-v2 | `backend/oms/routers/attachments.py` |
+| `attachments.attachments_upload_router` | `/api` | foundry-attachments-v2 | `backend/oms/routers/attachments.py` |
 | `command_status.router` | `/api/v1` | command-status | `backend/oms/routers/command_status.py` |
 | `config_monitoring.router` | `/api/v1/config` | config-monitoring | `backend/shared/routers/config_monitoring.py` |
 | `database.router` | `/api/v1` | database | `backend/oms/routers/database.py` |
@@ -376,6 +378,7 @@ flowchart LR
 | `ontology.router` | `/api/v1` | ontology | `backend/oms/routers/ontology.py` |
 | `ontology_extensions.router` | `/api/v1` | ontology | `backend/oms/routers/ontology_extensions.py` |
 | `query.foundry_router` | `/api` | foundry-object-search-v2 | `backend/oms/routers/query.py` |
+| `timeseries.timeseries_router` | `/api` | foundry-timeseries-v2 | `backend/oms/routers/timeseries.py` |
 
 ## Router Inventory (Funnel)
 

@@ -12,13 +12,14 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
 from bff.routers.link_types_read import (
     _extract_resources as _extract_link_resources,
     _normalize_object_ref,
+    _to_foundry_incoming_link_type,
     _to_foundry_outgoing_link_type,
 )
 from bff.routers.object_types import (
@@ -540,6 +541,9 @@ def _project_row_with_required_fields(
     return projected
 
 
+_MAX_ROWS_LOAD_ALL = 50_000
+
+
 async def _load_all_rows_for_object_type(
     *,
     oms_client: OMSClient,
@@ -570,6 +574,13 @@ async def _load_all_rows_for_object_type(
             search_payload=payload,
         )
         rows.extend(_get_result_rows(result))
+
+        if len(rows) > _MAX_ROWS_LOAD_ALL:
+            logger.warning(
+                "_load_all_rows_for_object_type exceeded %d row limit for %s/%s, truncating",
+                _MAX_ROWS_LOAD_ALL, db_name, object_type,
+            )
+            break
 
         candidate = _get_next_page_token(result)
         if candidate is None:
@@ -785,149 +796,8 @@ def _value_by_field(row: dict[str, Any], field: str | None) -> Any:
     return row.get(text)
 
 
-def _metric_name(clause: dict[str, Any], index: int) -> str:
-    explicit = str(clause.get("name") or "").strip()
-    if explicit:
-        return explicit
-    metric_type = str(clause.get("type") or f"metric_{index}").strip() or f"metric_{index}"
-    return f"{metric_type}_{index}"
-
-
-def _to_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return None
-    return None
-
-
-def _compute_aggregation_metric(
-    *,
-    rows: list[dict[str, Any]],
-    clause: dict[str, Any],
-) -> Any:
-    metric_type = str(clause.get("type") or "").strip()
-    field = str(clause.get("field") or "").strip() or None
-
-    if metric_type == "count":
-        return len(rows)
-
-    values = [_value_by_field(row, field) for row in rows] if field else []
-    non_null_values = [value for value in values if value is not None]
-
-    if metric_type in {"exactDistinct", "approximateDistinct"}:
-        return len({str(value) for value in non_null_values})
-
-    numeric_values = [value for value in (_to_float(v) for v in non_null_values) if value is not None]
-
-    if metric_type == "sum":
-        return float(sum(numeric_values))
-    if metric_type == "avg":
-        if not numeric_values:
-            return None
-        return float(sum(numeric_values) / len(numeric_values))
-    if metric_type == "min":
-        if not numeric_values:
-            return None
-        return min(numeric_values)
-    if metric_type == "max":
-        if not numeric_values:
-            return None
-        return max(numeric_values)
-    if metric_type == "approximatePercentile":
-        if not numeric_values:
-            return None
-        percentile = _to_float(clause.get("approximatePercentile"))
-        if percentile is None:
-            raise ValueError("approximatePercentile aggregation requires approximatePercentile")
-        percentile = max(0.0, min(1.0, percentile))
-        ordered = sorted(numeric_values)
-        idx = int(round((len(ordered) - 1) * percentile))
-        return ordered[idx]
-
-    raise ValueError(f"Unsupported aggregation type: {metric_type}")
-
-
-def _group_rows_for_aggregation(
-    rows: list[dict[str, Any]],
-    group_by: list[dict[str, Any]],
-) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    if not group_by:
-        return [({}, rows)]
-
-    buckets: dict[tuple[Any, ...], tuple[dict[str, Any], list[dict[str, Any]]]] = {}
-    for row in rows:
-        group_values: dict[str, Any] = {}
-        key_parts: list[Any] = []
-        for clause in group_by:
-            clause_type = str(clause.get("type") or "").strip()
-            if clause_type != "exact":
-                raise ValueError("Only exact groupBy is supported")
-            field = str(clause.get("field") or "").strip()
-            if not field:
-                raise ValueError("groupBy.field is required")
-            value = _value_by_field(row, field)
-            group_values[field] = value
-            key_parts.append(value)
-        key = tuple(key_parts)
-        if key not in buckets:
-            buckets[key] = (group_values, [])
-        buckets[key][1].append(row)
-
-    return list(buckets.values())
-
-
-def _build_aggregate_objects_response(
-    *,
-    rows: list[dict[str, Any]],
-    aggregation: list[dict[str, Any]],
-    group_by: list[dict[str, Any]],
-    accuracy_request: str | None,
-    include_compute_usage: Any,
-) -> dict[str, Any]:
-    grouped_rows = _group_rows_for_aggregation(rows, group_by)
-    data: list[dict[str, Any]] = []
-
-    for group_values, group_rows in grouped_rows:
-        metrics: list[dict[str, Any]] = []
-        for idx, clause in enumerate(aggregation):
-            metric_value = _compute_aggregation_metric(rows=group_rows, clause=clause)
-            metrics.append({"name": _metric_name(clause, idx), "value": metric_value})
-        data.append({"group": group_values, "metrics": metrics})
-
-    out = {
-        "accuracy": "APPROXIMATE" if str(accuracy_request or "").strip() == "ALLOW_APPROXIMATE" else "ACCURATE",
-        "data": data,
-        "excludedItems": 0,
-    }
-    if include_compute_usage:
-        out["computeUsage"] = 0
-    return out
-
-
-def _parse_aggregation_clauses(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    aggregation = payload.get("aggregation")
-    group_by = payload.get("groupBy")
-    if not isinstance(aggregation, list) or not aggregation:
-        raise ValueError("aggregation is required")
-    if not isinstance(group_by, list):
-        raise ValueError("groupBy is required")
-
-    aggregation_clauses = [clause for clause in aggregation if isinstance(clause, dict)]
-    group_by_clauses = [clause for clause in group_by if isinstance(clause, dict)]
-    if len(aggregation_clauses) != len(aggregation):
-        raise ValueError("aggregation must be an array of objects")
-    if len(group_by_clauses) != len(group_by):
-        raise ValueError("groupBy must be an array of objects")
-    return aggregation_clauses, group_by_clauses
+# Legacy Python aggregate functions removed.
+# Aggregation is now delegated to OMS ES-native engine via oms_client.aggregate_objects_v2().
 
 
 def _pagination_scope(*parts: Any) -> str:
@@ -1957,6 +1827,32 @@ def _group_outgoing_link_types_by_source(resources: list[dict[str, Any]]) -> dic
     return grouped
 
 
+def _group_incoming_link_types_by_target(resources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Group incoming link types by their *target* object type.
+
+    This is the inverse of ``_group_outgoing_link_types_by_source``.  For each
+    link-type resource whose ``to`` (target) field is object type *T*, we
+    produce a ``LinkTypeSideV2`` entry and group it under *T*.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for resource in resources:
+        spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+        target = _normalize_object_ref(spec.get("to"))
+        if not target:
+            target = _normalize_object_ref(resource.get("to"))
+        if not target:
+            relationship_spec = spec.get("relationship_spec") if isinstance(spec.get("relationship_spec"), dict) else {}
+            if isinstance(relationship_spec, dict):
+                target = _normalize_object_ref(relationship_spec.get("target_object_type"))
+        if not target:
+            continue
+        mapped = _to_foundry_incoming_link_type(resource, target_object_type=target)
+        if mapped is None:
+            continue
+        grouped.setdefault(target, []).append(mapped)
+    return grouped
+
+
 _INTERFACE_REF_KEYS = (
     "implementsInterfaces",
     "implements_interfaces",
@@ -2417,6 +2313,7 @@ async def get_full_metadata_v2(
         )
 
         link_types_by_source = _group_outgoing_link_types_by_source(link_resources)
+        link_types_by_target = _group_incoming_link_types_by_target(link_resources)
 
         object_type_ids: list[str] = []
         for resource in object_resources:
@@ -2444,10 +2341,20 @@ async def get_full_metadata_v2(
             object_type_id = str(resource.get("id") or "").strip()
             if not object_type_id:
                 continue
+            # Merge outgoing + incoming link types for fullMetadata.
+            outgoing_lt = link_types_by_source.get(object_type_id) or []
+            incoming_lt = link_types_by_target.get(object_type_id) or []
+            seen_lt: set[tuple[str, str]] = set()
+            merged_lt: list[dict[str, Any]] = []
+            for lt in outgoing_lt + incoming_lt:
+                key = (lt.get("apiName", ""), lt.get("objectTypeApiName", ""))
+                if key not in seen_lt:
+                    seen_lt.add(key)
+                    merged_lt.append(lt)
             mapped = _to_foundry_object_type_full_metadata(
                 resource,
                 ontology_payload=ontology_payload_by_object_type.get(object_type_id),
-                link_types=link_types_by_source.get(object_type_id) or [],
+                link_types=merged_lt,
             )
             if strict_compat:
                 mapped, object_fixes, object_dropped = _strictify_object_type_full_metadata(
@@ -3759,11 +3666,23 @@ async def get_object_type_full_metadata_v2(
             resource_type="link_type",
             oms_client=oms_client,
         )
-        link_types = _group_outgoing_link_types_by_source(link_resources).get(object_type) or []
+        outgoing = _group_outgoing_link_types_by_source(link_resources).get(object_type) or []
+        incoming = _group_incoming_link_types_by_target(link_resources).get(object_type) or []
+        # Foundry ObjectTypeFullMetadata.linkTypes includes both directions.
+        # Deduplicate by apiName to avoid showing the same link type twice when
+        # from == to (self-referencing link types).
+        seen_api_names: set[str] = set()
+        merged_link_types: list[dict[str, Any]] = []
+        for lt in outgoing + incoming:
+            api_name = lt.get("apiName", "")
+            key = (api_name, lt.get("objectTypeApiName", ""))
+            if key not in seen_api_names:
+                seen_api_names.add(key)
+                merged_link_types.append(lt)
         out = _to_foundry_object_type_full_metadata(
             resource,
             ontology_payload=ontology_payload,
-            link_types=link_types,
+            link_types=merged_link_types,
         )
         if strict_compat:
             out, strict_fix_count, strict_dropped_count = _strictify_object_type_full_metadata(
@@ -4010,6 +3929,221 @@ async def get_outgoing_link_type_v2(
         )
 
 
+# ---------------------------------------------------------------------------
+# Incoming Link Types — Foundry v2 ``LinkTypeSideV2`` (incoming perspective)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{ontology}/objectTypes/{objectType}/incomingLinkTypes")
+@trace_endpoint("bff.foundry_v2_ontology.list_incoming_link_types")
+async def list_incoming_link_types_v2(
+    ontology: str,
+    objectType: str,
+    request: Request,
+    page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
+    page_token: str | None = Query(default=None, alias="pageToken"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    strict_compat = False
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        target_object_type = str(objectType or "").strip()
+        if not target_object_type:
+            raise ValueError("objectType is required")
+        await _require_domain_role(request, db_name=db_name)
+        page_scope = _pagination_scope("v2/incomingLinkTypes", db_name, branch, target_object_type, page_size)
+        offset = _decode_page_token(page_token, scope=page_scope)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType)},
+        )
+
+    try:
+        scan_limit = min(max(page_size, 500), 1000)
+        scan_offset = 0
+        filtered_index = 0
+        data: list[dict] = []
+        has_more = False
+        strict_fix_count = 0
+        strict_dropped_count = 0
+
+        while not has_more:
+            payload = await oms_client.list_ontology_resources(
+                db_name,
+                resource_type="link_type",
+                branch=branch,
+                limit=scan_limit,
+                offset=scan_offset,
+            )
+            resources = _extract_link_resources(payload)
+            if not resources:
+                break
+            for resource in resources:
+                mapped = _to_foundry_incoming_link_type(resource, target_object_type=target_object_type)
+                if mapped is None:
+                    continue
+                if strict_compat:
+                    mapped, fixes, is_resolved = _strictify_outgoing_link_type(
+                        mapped,
+                        db_name=db_name,
+                        source_object_type=target_object_type,
+                    )
+                    strict_fix_count += fixes
+                    if not is_resolved:
+                        strict_dropped_count += 1
+                        continue
+                if filtered_index < offset:
+                    filtered_index += 1
+                    continue
+                if len(data) < page_size:
+                    data.append(mapped)
+                    filtered_index += 1
+                    continue
+                has_more = True
+                break
+            scan_offset += len(resources)
+            if len(resources) < scan_limit:
+                break
+
+        if strict_compat:
+            _log_strict_compat_summary(
+                route="list_incoming_link_types_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+                dropped=strict_dropped_count,
+            )
+
+        next_offset = offset + len(data)
+        next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
+        return {"data": data, "nextPageToken": next_page_token}
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _not_found_error(
+                "OntologyNotFound",
+                ontology=db_name,
+                parameters={"objectType": target_object_type},
+            )
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters={"ontology": db_name, "objectType": target_object_type},
+        )
+    except Exception as exc:
+        logger.error("Failed to list incoming link types (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"ontology": db_name, "objectType": target_object_type},
+        )
+
+
+@router.get("/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}")
+@trace_endpoint("bff.foundry_v2_ontology.get_incoming_link_type")
+async def get_incoming_link_type_v2(
+    ontology: str,
+    objectType: str,
+    linkType: str,
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    strict_compat = False
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
+        target_object_type = str(objectType or "").strip()
+        link_type = str(linkType or "").strip()
+        if not target_object_type:
+            raise ValueError("objectType is required")
+        if not link_type:
+            raise ValueError("linkType is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType), "linkType": str(linkType)},
+        )
+
+    try:
+        payload = await oms_client.get_ontology_resource(
+            db_name,
+            resource_type="link_type",
+            resource_id=link_type,
+            branch=branch,
+        )
+        resource = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(resource, dict):
+            return _not_found_error(
+                "LinkTypeNotFound",
+                ontology=db_name,
+                object_type=target_object_type,
+                link_type=link_type,
+            )
+        mapped = _to_foundry_incoming_link_type(resource, target_object_type=target_object_type)
+        if mapped is None:
+            return _not_found_error(
+                "LinkTypeNotFound",
+                ontology=db_name,
+                object_type=target_object_type,
+                link_type=link_type,
+            )
+        if strict_compat:
+            mapped, strict_fix_count, is_resolved = _strictify_outgoing_link_type(
+                mapped,
+                db_name=db_name,
+                source_object_type=target_object_type,
+            )
+            _log_strict_compat_summary(
+                route="get_incoming_link_type_v2",
+                db_name=db_name,
+                branch=branch,
+                fixes=strict_fix_count,
+                dropped=0 if is_resolved else 1,
+            )
+            if not is_resolved:
+                return _not_found_error(
+                    "LinkTypeNotFound",
+                    ontology=db_name,
+                    object_type=target_object_type,
+                    link_type=link_type,
+                )
+        return mapped
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+        if status_code == status.HTTP_404_NOT_FOUND:
+            return _not_found_error(
+                "LinkTypeNotFound",
+                ontology=db_name,
+                object_type=target_object_type,
+                link_type=link_type,
+            )
+        return _foundry_error(
+            status_code,
+            error_code="UPSTREAM_ERROR",
+            error_name="UpstreamError",
+            parameters={"ontology": db_name, "objectType": target_object_type, "linkType": link_type},
+        )
+    except Exception as exc:
+        logger.error("Failed to get incoming link type (v2): %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"ontology": db_name, "objectType": target_object_type, "linkType": link_type},
+        )
+
+
 @router.post("/{ontology}/objects/{objectType}/search")
 @trace_endpoint("bff.foundry_v2_ontology.search_objects")
 async def search_objects_v2(
@@ -4087,6 +4221,7 @@ async def aggregate_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    """Delegate aggregation to OMS ES-native aggregate engine."""
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4094,22 +4229,7 @@ async def aggregate_objects_v2(
         _ = transaction_id, sdk_package_rid, sdk_version
         if not object_type:
             raise ValueError("objectType is required")
-        aggregation_clauses, group_by_clauses = _parse_aggregation_clauses(payload)
         await _require_domain_role(request, db_name=db_name)
-
-        search_payload: dict[str, Any] = {"pageSize": 1000}
-        where_clause = payload.get("where")
-        if where_clause is not None:
-            if not isinstance(where_clause, dict):
-                raise ValueError("where must be an object")
-            search_payload["where"] = where_clause
-        filter_clause = payload.get("filter")
-        if "where" not in search_payload and filter_clause is not None:
-            if not isinstance(filter_clause, dict):
-                raise ValueError("filter must be an object")
-            search_payload["where"] = filter_clause
-        if "snapshot" in payload:
-            search_payload["snapshot"] = bool(payload.get("snapshot"))
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -4118,19 +4238,11 @@ async def aggregate_objects_v2(
         )
 
     try:
-        rows = await _load_all_rows_for_object_type(
-            oms_client=oms_client,
-            db_name=db_name,
+        return await oms_client.aggregate_objects_v2(
+            db_name,
+            object_type,
+            payload,
             branch=branch,
-            object_type=object_type,
-            search_payload=search_payload,
-        )
-        return _build_aggregate_objects_response(
-            rows=rows,
-            aggregation=aggregation_clauses,
-            group_by=group_by_clauses,
-            accuracy_request=str(payload.get("accuracy") or "").strip() or None,
-            include_compute_usage=payload.get("includeComputeUsage"),
         )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
@@ -4655,6 +4767,7 @@ async def aggregate_object_set_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    """Delegate objectSet aggregate to OMS ES-native aggregate engine."""
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4663,23 +4776,7 @@ async def aggregate_object_set_v2(
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
-        aggregation_clauses, group_by_clauses = _parse_aggregation_clauses(payload)
         await _require_domain_role(request, db_name=db_name)
-        search_payload = _build_object_set_search_payload(
-            object_set=object_set,
-            payload={"pageSize": 1000, "snapshot": True},
-            require_select=False,
-        )
-        rows: list[dict[str, Any]] = []
-        for object_type in object_types:
-            object_rows = await _load_all_rows_for_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=object_type,
-                search_payload=search_payload,
-            )
-            rows.extend(object_rows)
     except Exception as exc:
         return _preflight_error_response(
             exc,
@@ -4688,16 +4785,52 @@ async def aggregate_object_set_v2(
         )
 
     try:
-        return _build_aggregate_objects_response(
-            rows=rows,
-            aggregation=aggregation_clauses,
-            group_by=group_by_clauses,
-            accuracy_request=str(payload.get("accuracy") or "").strip() or None,
-            include_compute_usage=payload.get("includeComputeUsage"),
+        # Build the aggregate payload with the objectSet's where clause merged in
+        aggregate_payload = dict(payload)
+        aggregate_payload.pop("objectSet", None)
+
+        # Extract where from objectSet filter if present
+        object_set_filter = _extract_object_set_where(object_set)
+        if object_set_filter is not None:
+            existing_where = aggregate_payload.get("where")
+            if existing_where is not None:
+                # Combine objectSet filter with payload where via AND
+                aggregate_payload["where"] = {
+                    "type": "and",
+                    "value": [object_set_filter, existing_where],
+                }
+            else:
+                aggregate_payload["where"] = object_set_filter
+
+        # Delegate to the first objectType (most objectSets are single-type)
+        object_type = object_types[0]
+        return await oms_client.aggregate_objects_v2(
+            db_name,
+            object_type,
+            aggregate_payload,
+            branch=branch,
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"objectSet": "aggregate"},
+            not_found_response=_not_found_error(
+                "ObjectTypeNotFound",
+                ontology=db_name,
+                parameters={"objectSet": "aggregate"},
+            ),
+            passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"objectSet": "aggregate"},
         )
     except Exception as exc:
-        return _preflight_error_response(
-            exc,
+        return _internal_error_response(
+            log_message="Failed to aggregate objectSet (v2)",
+            exc=exc,
             ontology=db_name,
             parameters={"objectSet": "aggregate"},
         )
@@ -5512,4 +5645,274 @@ async def get_linked_object_v2(
             error_code="INTERNAL",
             error_name="Internal",
             parameters=error_parameters,
+        )
+
+
+# =====================================================================
+# Time Series Property endpoints (Foundry v2 — proxy to OMS)
+# =====================================================================
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint")
+async def get_timeseries_first_point_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> JSONResponse:
+    """Get the first (earliest) point of a time series property."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        result = await oms_client.get_timeseries_first_point(
+            db_name, objectType, primaryKey, property, branch=branch,
+        )
+        return JSONResponse(content=result)
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get timeseries firstPoint (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint")
+async def get_timeseries_last_point_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> JSONResponse:
+    """Get the last (most recent) point of a time series property."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        result = await oms_client.get_timeseries_last_point(
+            db_name, objectType, primaryKey, property, branch=branch,
+        )
+        return JSONResponse(content=result)
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get timeseries lastPoint (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+@router.post("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints", response_model=None)
+async def stream_timeseries_points_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    request: Request,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> StreamingResponse | JSONResponse:
+    """Stream all points of a time series property with optional range filter."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        body = await request.json() if await request.body() else {}
+        response = await oms_client.stream_timeseries_points(
+            db_name, objectType, primaryKey, property, body, branch=branch,
+        )
+        return StreamingResponse(
+            content=iter([response.content]),
+            media_type=response.headers.get("content-type", "application/x-ndjson"),
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to stream timeseries points (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+# =====================================================================
+# Attachment Property endpoints (Foundry v2 — proxy to OMS)
+# =====================================================================
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}")
+async def list_attachment_property_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> JSONResponse:
+    """List attachment metadata for a property (single or multiple)."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        result = await oms_client.list_property_attachments(
+            db_name, objectType, primaryKey, property, branch=branch,
+        )
+        return JSONResponse(content=result)
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to list attachment property (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}")
+async def get_attachment_by_rid_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    attachmentRid: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> JSONResponse:
+    """Get metadata for a specific attachment by its RID."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+        "attachmentRid": attachmentRid,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        result = await oms_client.get_attachment_by_rid(
+            db_name, objectType, primaryKey, property, attachmentRid, branch=branch,
+        )
+        return JSONResponse(content=result)
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get attachment by RID (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content", response_model=None)
+async def get_attachment_content_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> Response | JSONResponse:
+    """Get the content of a single-valued attachment property."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        response = await oms_client.get_attachment_content(
+            db_name, objectType, primaryKey, property, branch=branch,
+        )
+        return Response(
+            content=response.content,
+            media_type=response.headers.get("content-type", "application/octet-stream"),
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get attachment content (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
+        )
+
+
+@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content", response_model=None)
+async def get_attachment_content_by_rid_v2(
+    ontology: str,
+    objectType: str,
+    primaryKey: str,
+    property: str,
+    attachmentRid: str,
+    branch: str = Query("main"),
+    oms_client: OMSClient = OMSClientDep,
+) -> Response | JSONResponse:
+    """Get the content of an attachment by its RID."""
+    error_parameters: Dict[str, Any] = {
+        "ontology": ontology,
+        "objectType": objectType,
+        "primaryKey": primaryKey,
+        "property": property,
+        "attachmentRid": attachmentRid,
+    }
+    try:
+        db_name = await _resolve_ontology_db_name(ontology, oms_client=oms_client, branch=branch)
+        response = await oms_client.get_attachment_content_by_rid(
+            db_name, objectType, primaryKey, property, attachmentRid, branch=branch,
+        )
+        return Response(
+            content=response.content,
+            media_type=response.headers.get("content-type", "application/octet-stream"),
+        )
+    except httpx.HTTPStatusError as exc:
+        return _upstream_status_error_response(
+            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
+        )
+    except httpx.HTTPError:
+        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to get attachment content by RID (v2)", exc=exc,
+            ontology=ontology, parameters=error_parameters,
         )

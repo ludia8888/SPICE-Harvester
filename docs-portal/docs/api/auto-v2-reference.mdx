@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 35**
+**Total v2 endpoints: 44**
 
 ### Ontologies (11 endpoints)
 
@@ -29,17 +29,25 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | No |
 
-### Object Types (7 endpoints)
+### Object Types (15 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes` | List Object Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes` | List Incoming Link Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}` | List Objects V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` | Aggregate Objects V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/search` | Search Objects V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}` | List Attachment Property V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content` | Get Attachment Content V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}` | Get Attachment By Rid V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content` | Get Attachment Content By Rid V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint` | Get Timeseries First Point V2 | No |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint` | Get Timeseries Last Point V2 | No |
+| `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints` | Stream Timeseries Points V2 | No |
 
 ### Actions (5 endpoints)
 
@@ -51,10 +59,11 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/apply` | Apply Action V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/actions/{action}/applyBatch` | Apply Action Batch V2 | No |
 
-### Links & Link Types (4 endpoints)
+### Links & Link Types (5 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
+| `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}` | Get Incoming Link Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` | List Outgoing Link Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}` | Get Outgoing Link Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` | List Linked Objects V2 | No |

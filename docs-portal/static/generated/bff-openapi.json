@@ -2667,6 +2667,211 @@
         }
       }
     },
+    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "List Incoming Link Types V2",
+        "operationId": "list_incoming_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes_get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pagetoken"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Incoming Link Type V2",
+        "operationId": "get_incoming_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes__linkType__get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "linkType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Linktype"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Ontology branch name or branch RID",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Ontology branch name or branch RID"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/ontologies/{ontology}/objects/{objectType}/search": {
       "post": {
         "tags": [
@@ -2801,6 +3006,7 @@
           "Foundry Ontologies v2"
         ],
         "summary": "Aggregate Objects V2",
+        "description": "Delegate aggregation to OMS ES-native aggregate engine.",
         "operationId": "aggregate_objects_v2_api_v2_ontologies__ontology__objects__objectType__aggregate_post",
         "parameters": [
           {
@@ -3483,6 +3689,7 @@
           "Foundry Ontologies v2"
         ],
         "summary": "Aggregate Object Set V2",
+        "description": "Delegate objectSet aggregate to OMS ES-native aggregate engine.",
         "operationId": "aggregate_object_set_v2_api_v2_ontologies__ontology__objectSets_aggregate_post",
         "parameters": [
           {
@@ -4521,6 +4728,731 @@
                 }
               ],
               "title": "Sdkversion"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Timeseries First Point V2",
+        "description": "Get the first (earliest) point of a time series property.",
+        "operationId": "get_timeseries_first_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__firstPoint_get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Timeseries Last Point V2",
+        "description": "Get the last (most recent) point of a time series property.",
+        "operationId": "get_timeseries_last_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__lastPoint_get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints": {
+      "post": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Stream Timeseries Points V2",
+        "description": "Stream all points of a time series property with optional range filter.",
+        "operationId": "stream_timeseries_points_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__streamPoints_post",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "List Attachment Property V2",
+        "description": "List attachment metadata for a property (single or multiple).",
+        "operationId": "list_attachment_property_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Attachment By Rid V2",
+        "description": "Get metadata for a specific attachment by its RID.",
+        "operationId": "get_attachment_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "attachmentRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attachmentrid"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Attachment Content V2",
+        "description": "Get the content of a single-valued attachment property.",
+        "operationId": "get_attachment_content_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__content_get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content": {
+      "get": {
+        "tags": [
+          "Foundry Ontologies v2"
+        ],
+        "summary": "Get Attachment Content By Rid V2",
+        "description": "Get the content of an attachment by its RID.",
+        "operationId": "get_attachment_content_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__content_get",
+        "parameters": [
+          {
+            "name": "ontology",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ontology"
+            }
+          },
+          {
+            "name": "objectType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Objecttype"
+            }
+          },
+          {
+            "name": "primaryKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Primarykey"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Property"
+            }
+          },
+          {
+            "name": "attachmentRid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attachmentrid"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "main",
+              "title": "Branch"
             }
           },
           {

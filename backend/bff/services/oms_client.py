@@ -485,6 +485,186 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"Foundry object search failed ({db_name}/{object_type}): {e}")
             raise
 
+    async def aggregate_objects_v2(
+        self,
+        db_name: str,
+        object_type: str,
+        payload: Dict[str, Any],
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Foundry Aggregate Objects API v2 proxy — delegates to OMS ES-native engine."""
+        try:
+            response = await self.client.post(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/aggregate",
+                params={"branch": branch},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Foundry object aggregate failed ({db_name}/{object_type}): {e}")
+            raise
+
+    # ------------------------------------------------------------------
+    # Time Series Property proxy
+    # ------------------------------------------------------------------
+
+    async def get_timeseries_first_point(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Proxy GET firstPoint to OMS Time Series router."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/firstPoint",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Timeseries firstPoint failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
+            raise
+
+    async def get_timeseries_last_point(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Proxy GET lastPoint to OMS Time Series router."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/lastPoint",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Timeseries lastPoint failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
+            raise
+
+    async def stream_timeseries_points(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        payload: Dict[str, Any],
+        *,
+        branch: str = "main",
+    ) -> httpx.Response:
+        """Proxy POST streamPoints to OMS (returns raw response for streaming)."""
+        try:
+            response = await self.client.post(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/streamPoints",
+                params={"branch": branch},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            logger.error(f"Timeseries streamPoints failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
+            raise
+
+    # ------------------------------------------------------------------
+    # Attachment Property proxy
+    # ------------------------------------------------------------------
+
+    async def list_property_attachments(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Proxy GET list attachment property metadata."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"List attachments failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
+            raise
+
+    async def get_attachment_by_rid(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        attachment_rid: str,
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Proxy GET attachment metadata by RID."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Get attachment by RID failed ({attachment_rid}): {e}")
+            raise
+
+    async def get_attachment_content(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        *,
+        branch: str = "main",
+    ) -> httpx.Response:
+        """Proxy GET attachment content (returns raw response for binary data)."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/content",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            logger.error(f"Get attachment content failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
+            raise
+
+    async def get_attachment_content_by_rid(
+        self,
+        db_name: str,
+        object_type: str,
+        primary_key: str,
+        property_name: str,
+        attachment_rid: str,
+        *,
+        branch: str = "main",
+    ) -> httpx.Response:
+        """Proxy GET attachment content by RID (returns raw response for binary data)."""
+        try:
+            response = await self.client.get(
+                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}/content",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response
+        except Exception as e:
+            logger.error(f"Get attachment content by RID failed ({attachment_rid}): {e}")
+            raise
+
     async def database_exists(self, db_name: str) -> bool:
         """데이터베이스 존재 여부 확인"""
         try:

@@ -60,7 +60,8 @@ from oms.database.postgres import db as postgres_db
 # Router imports
 from oms.routers import (
     database, ontology, ontology_extensions,
-    instance_async, instance, query, command_status, action_async
+    instance_async, instance, query, command_status, action_async,
+    timeseries, attachments,
 )
 
 # Monitoring and observability routers
@@ -598,6 +599,9 @@ app.include_router(query.foundry_router, prefix="/api", tags=["foundry-object-se
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(action_async.foundry_router, prefix="/api", tags=["foundry-actions-v2"])
+app.include_router(timeseries.timeseries_router, prefix="/api", tags=["foundry-timeseries-v2"])
+app.include_router(attachments.attachments_upload_router, prefix="/api", tags=["foundry-attachments-v2"])
+app.include_router(attachments.attachments_property_router, prefix="/api", tags=["foundry-attachments-v2"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 logger.info("Deprecated /branch and /version routers are permanently disabled (Foundry-style profile)")
 logger.info("Legacy pull-request router is disabled (Foundry-aligned public surface)")

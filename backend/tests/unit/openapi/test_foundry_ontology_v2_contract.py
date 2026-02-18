@@ -630,6 +630,11 @@ async def test_foundry_v2_load_object_set_links_returns_locator_payload(
 async def test_foundry_v2_aggregate_object_set_returns_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """
+    objectSets/aggregate now delegates to OMS aggregate_objects_v2.
+    Mock the aggregate method to return a pre-computed Foundry response.
+    """
+
     async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
         _ = ontology, oms_client
         return "sales_db"
@@ -642,15 +647,27 @@ async def test_foundry_v2_aggregate_object_set_returns_metrics(
     monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
 
     oms_client = AsyncMock()
-    oms_client.post = AsyncMock(
+    oms_client.aggregate_objects_v2 = AsyncMock(
         return_value={
+            "accuracy": "ACCURATE",
             "data": [
-                {"id": "1", "status": "ACTIVE", "amount": 10},
-                {"id": "2", "status": "ACTIVE", "amount": 20},
-                {"id": "3", "status": "INACTIVE", "amount": 5},
+                {
+                    "group": {"status": "ACTIVE"},
+                    "metrics": [
+                        {"name": "rowCount", "value": 2},
+                        {"name": "amountSum", "value": 30.0},
+                    ],
+                },
+                {
+                    "group": {"status": "INACTIVE"},
+                    "metrics": [
+                        {"name": "rowCount", "value": 1},
+                        {"name": "amountSum", "value": 5.0},
+                    ],
+                },
             ],
-            "nextPageToken": None,
-            "totalCount": "3",
+            "excludedItems": 0,
+            "computeUsage": 0,
         }
     )
     app = _build_router_test_app(oms_client=oms_client)
@@ -680,13 +697,16 @@ async def test_foundry_v2_aggregate_object_set_returns_metrics(
     assert groups["ACTIVE"]["metrics"][0]["value"] == 2
     assert groups["ACTIVE"]["metrics"][1]["name"] == "amountSum"
     assert groups["ACTIVE"]["metrics"][1]["value"] == 30.0
+    oms_client.aggregate_objects_v2.assert_awaited_once()
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_foundry_v2_aggregate_object_set_reads_all_pages(
+async def test_foundry_v2_aggregate_object_set_delegates_to_oms(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """Verify objectSets/aggregate delegates to OMS (not multi-page Python loop)."""
+
     async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
         _ = ontology, oms_client
         return "sales_db"
@@ -699,19 +719,20 @@ async def test_foundry_v2_aggregate_object_set_reads_all_pages(
     monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
 
     oms_client = AsyncMock()
-    oms_client.post = AsyncMock(
-        side_effect=[
-            {
-                "data": [{"id": "1", "status": "ACTIVE", "amount": 10}],
-                "nextPageToken": "token-2",
-                "totalCount": "2",
-            },
-            {
-                "data": [{"id": "2", "status": "ACTIVE", "amount": 20}],
-                "nextPageToken": None,
-                "totalCount": "2",
-            },
-        ]
+    oms_client.aggregate_objects_v2 = AsyncMock(
+        return_value={
+            "accuracy": "ACCURATE",
+            "data": [
+                {
+                    "group": {"status": "ACTIVE"},
+                    "metrics": [
+                        {"name": "rowCount", "value": 2},
+                        {"name": "amountSum", "value": 30.0},
+                    ],
+                },
+            ],
+            "excludedItems": 0,
+        }
     )
     app = _build_router_test_app(oms_client=oms_client)
 
@@ -734,7 +755,8 @@ async def test_foundry_v2_aggregate_object_set_reads_all_pages(
     groups = {item["group"]["status"]: item for item in body["data"]}
     assert groups["ACTIVE"]["metrics"][0]["value"] == 2
     assert groups["ACTIVE"]["metrics"][1]["value"] == 30.0
-    assert oms_client.post.await_count == 2
+    # Only ONE call to OMS aggregate (no multi-page search loop)
+    oms_client.aggregate_objects_v2.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -742,6 +764,8 @@ async def test_foundry_v2_aggregate_object_set_reads_all_pages(
 async def test_foundry_v2_aggregate_objects_route_returns_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """per-objectType aggregate now delegates to OMS aggregate_objects_v2."""
+
     async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
         _ = ontology, oms_client
         return "sales_db"
@@ -754,14 +778,16 @@ async def test_foundry_v2_aggregate_objects_route_returns_metrics(
     monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
 
     oms_client = AsyncMock()
-    oms_client.post = AsyncMock(
+    oms_client.aggregate_objects_v2 = AsyncMock(
         return_value={
+            "accuracy": "ACCURATE",
             "data": [
-                {"id": "1", "status": "ACTIVE", "amount": 10},
-                {"id": "2", "status": "ACTIVE", "amount": 20},
+                {
+                    "group": {"status": "ACTIVE"},
+                    "metrics": [{"name": "amountSum", "value": 30.0}],
+                },
             ],
-            "nextPageToken": None,
-            "totalCount": "2",
+            "excludedItems": 0,
         }
     )
     app = _build_router_test_app(oms_client=oms_client)
@@ -781,9 +807,11 @@ async def test_foundry_v2_aggregate_objects_route_returns_metrics(
     body = response.json()
     assert body["data"][0]["metrics"][0]["name"] == "amountSum"
     assert body["data"][0]["metrics"][0]["value"] == 30.0
-    oms_client.post.assert_awaited()
-    called_path = oms_client.post.await_args.args[0]
-    assert called_path == "/api/v2/ontologies/sales_db/objects/Order/search"
+    oms_client.aggregate_objects_v2.assert_awaited_once()
+    # Verify the correct path was called: db_name, object_type, payload
+    call_args = oms_client.aggregate_objects_v2.await_args
+    assert call_args.args[0] == "sales_db"
+    assert call_args.args[1] == "Order"
 
 
 @pytest.mark.unit

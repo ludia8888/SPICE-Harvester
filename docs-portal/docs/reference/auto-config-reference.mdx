@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **516 settings** total.
+SPICE Harvester uses **45 configuration classes** with **518 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -444,7 +444,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Storage configuration settings
 
-**21 settings**
+**23 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -468,6 +468,8 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `lakefs_artifacts_repository` | `str` | `pipeline-artifacts` | `LAKEFS_ARTIFACTS_REPOSITORY` | lakeFS repository for pipeline artifacts (LAKEFS_ARTIFACTS_REPOSITORY) |
 | `event_store_bucket` | `str` | `spice-event-store` | `EVENT_STORE_BUCKET` | S3 bucket for immutable event store (EVENT_STORE_BUCKET) |
 | `instance_bucket` | `str` | `instance-events` | `INSTANCE_BUCKET` | S3 bucket for instance events |
+| `timeseries_bucket` | `str` | `timeseries-data` | `TIMESERIES_BUCKET` | S3 bucket for time series property data (TIMESERIES_BUCKET) |
+| `attachments_bucket` | `str` | `attachments-data` | `ATTACHMENTS_BUCKET` | S3 bucket for attachment property files (ATTACHMENTS_BUCKET) |
 | `label_mappings_db_path` | `str` | `data/label_mappings.db` | `LABEL_MAPPINGS_DB_PATH` | SQLite path for label mappings (LABEL_MAPPINGS_DB_PATH) |
 
 ## CacheSettings

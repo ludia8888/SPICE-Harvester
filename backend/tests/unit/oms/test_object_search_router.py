@@ -269,17 +269,17 @@ async def test_search_objects_v2_accepts_contains_any_term_operator(mock_es):
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_rejects_non_foundry_in_operator():
+async def test_search_objects_v2_in_operator_valid_list_accepted(mock_es):
+    """``in`` operator with a non-empty list should be accepted (previously rejected)."""
     payload = {
         "where": {"type": "in", "field": "status", "value": ["ACTIVE", "PENDING"]},
+        "pageSize": 10,
     }
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
 
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body["errorCode"] == "INVALID_ARGUMENT"
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -399,3 +399,228 @@ async def test_search_objects_v2_accepts_foundry_branch_rid(mock_es):
     search_call = mock_es.search.call_args
     index_name = search_call.kwargs["index"]
     assert index_name.startswith("test_db_instances__br_")
+
+
+# ---------------------------------------------------------------------------
+# ``in`` operator
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_v2_in_operator_generates_terms_query(mock_es):
+    payload = {
+        "where": {"type": "in", "field": "status", "value": ["ACTIVE", "PENDING"]},
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    terms_clause = must[1]
+    assert "terms" in terms_clause
+    assert terms_clause["terms"]["data.status"] == ["ACTIVE", "PENDING"]
+
+
+@pytest.mark.asyncio
+async def test_search_v2_in_operator_rejects_empty_list():
+    payload = {
+        "where": {"type": "in", "field": "status", "value": []},
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# ``interval`` operator
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_v2_interval_operator_generates_intervals_query(mock_es):
+    payload = {
+        "where": {
+            "type": "interval",
+            "field": "description",
+            "rule": {"match": {"query": "quick fox", "maxGaps": 0, "ordered": True}},
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    interval_clause = must[1]
+    assert "intervals" in interval_clause
+    match_spec = interval_clause["intervals"]["data.description"]["match"]
+    assert match_spec["query"] == "quick fox"
+    assert match_spec["max_gaps"] == 0
+    assert match_spec["ordered"] is True
+
+
+# ---------------------------------------------------------------------------
+# Geo-spatial operators
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_v2_within_distance_of_generates_nested_geo_query(mock_es):
+    payload = {
+        "where": {
+            "type": "withinDistanceOf",
+            "field": "location",
+            "value": {
+                "center": {"type": "Point", "coordinates": [126.978, 37.566]},
+                "distance": {"value": 10, "unit": "KILOMETERS"},
+            },
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    geo_clause = must[1]
+    # Should be wrapped in nested
+    assert "nested" in geo_clause
+    assert geo_clause["nested"]["path"] == "properties"
+    inner_must = geo_clause["nested"]["query"]["bool"]["must"]
+    # Name filter
+    assert inner_must[0] == {"term": {"properties.name": "location"}}
+    # Geo distance query
+    assert "geo_distance" in inner_must[1]
+    assert inner_must[1]["geo_distance"]["distance"] == "10km"
+
+
+@pytest.mark.asyncio
+async def test_search_v2_within_bounding_box_generates_nested_geo_query(mock_es):
+    payload = {
+        "where": {
+            "type": "withinBoundingBox",
+            "field": "location",
+            "value": {
+                "topLeft": {"latitude": 37.6, "longitude": 126.9},
+                "bottomRight": {"latitude": 37.5, "longitude": 127.1},
+            },
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    geo_clause = must[1]
+    assert "nested" in geo_clause
+    inner_must = geo_clause["nested"]["query"]["bool"]["must"]
+    assert "geo_bounding_box" in inner_must[1]
+
+
+@pytest.mark.asyncio
+async def test_search_v2_within_polygon_generates_nested_geo_query(mock_es):
+    polygon_coords = [[[126.9, 37.5], [127.1, 37.5], [127.1, 37.6], [126.9, 37.6], [126.9, 37.5]]]
+    payload = {
+        "where": {
+            "type": "withinPolygon",
+            "field": "area",
+            "value": {"type": "Polygon", "coordinates": polygon_coords},
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    geo_clause = must[1]
+    assert "nested" in geo_clause
+    inner_must = geo_clause["nested"]["query"]["bool"]["must"]
+    assert "geo_shape" in inner_must[1]
+    assert inner_must[1]["geo_shape"]["properties.geo_point"]["relation"] == "within"
+
+
+@pytest.mark.asyncio
+async def test_search_v2_intersects_bounding_box_generates_geo_shape_query(mock_es):
+    payload = {
+        "where": {
+            "type": "intersectsBoundingBox",
+            "field": "coverage",
+            "value": {
+                "topLeft": {"lat": 37.6, "lon": 126.9},
+                "bottomRight": {"lat": 37.5, "lon": 127.1},
+            },
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    geo_clause = must[1]
+    assert "nested" in geo_clause
+    inner_must = geo_clause["nested"]["query"]["bool"]["must"]
+    geo_shape = inner_must[1]
+    assert "geo_shape" in geo_shape
+    assert geo_shape["geo_shape"]["properties.geo_shape"]["relation"] == "intersects"
+
+
+@pytest.mark.asyncio
+async def test_search_v2_does_not_intersect_polygon_generates_disjoint_query(mock_es):
+    polygon_coords = [[[126.9, 37.5], [127.1, 37.5], [127.1, 37.6], [126.9, 37.6], [126.9, 37.5]]]
+    payload = {
+        "where": {
+            "type": "doesNotIntersectPolygon",
+            "field": "coverage",
+            "value": {"type": "Polygon", "coordinates": polygon_coords},
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    search_call = mock_es.search.call_args
+    must = search_call.kwargs["query"]["bool"]["must"]
+    geo_clause = must[1]
+    assert "nested" in geo_clause
+    inner_must = geo_clause["nested"]["query"]["bool"]["must"]
+    geo_shape = inner_must[1]
+    assert "geo_shape" in geo_shape
+    assert geo_shape["geo_shape"]["properties.geo_shape"]["relation"] == "disjoint"
+
+
+@pytest.mark.asyncio
+async def test_search_v2_geo_operator_rejects_non_dict_value():
+    payload = {
+        "where": {
+            "type": "withinDistanceOf",
+            "field": "location",
+            "value": "invalid",
+        },
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 400

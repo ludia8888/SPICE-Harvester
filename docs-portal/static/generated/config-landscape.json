@@ -2459,7 +2459,7 @@
     {
       "name": "StorageSettings",
       "docstring": "Storage configuration settings",
-      "field_count": 21,
+      "field_count": 23,
       "fields": [
         {
           "name": "minio_endpoint_url",
@@ -2660,6 +2660,26 @@
           "description": "S3 bucket for instance events",
           "env_vars": [
             "INSTANCE_BUCKET"
+          ],
+          "required": false
+        },
+        {
+          "name": "timeseries_bucket",
+          "type": "str",
+          "default": "timeseries-data",
+          "description": "S3 bucket for time series property data (TIMESERIES_BUCKET)",
+          "env_vars": [
+            "TIMESERIES_BUCKET"
+          ],
+          "required": false
+        },
+        {
+          "name": "attachments_bucket",
+          "type": "str",
+          "default": "attachments-data",
+          "description": "S3 bucket for attachment property files (ATTACHMENTS_BUCKET)",
+          "env_vars": [
+            "ATTACHMENTS_BUCKET"
           ],
           "required": false
         },
@@ -5548,5 +5568,5 @@
       ]
     }
   ],
-  "total_fields": 516
+  "total_fields": 518
 }

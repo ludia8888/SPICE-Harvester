@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-17T21:43:32+09:00
+> Generated: 2026-02-17T21:59:46+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **962**
-- Modules with module docstring: **538/962**
-- Modules with broad `except Exception`: **267**
+- Modules scanned: **966**
+- Modules with module docstring: **542/966**
+- Modules with broad `except Exception`: **268**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **225853**
+- Total code lines (non-empty, non-comment): **228812**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 225 | 172/225 (76%) | 78 | 411 | 987 | 677 | 49167 |
+| `bff` | 225 | 172/225 (76%) | 78 | 430 | 1010 | 697 | 50002 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 13 | 1 | 456 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 305 |
@@ -34,22 +34,22 @@
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
 | `objectify_worker` | 4 | 4/4 (100%) | 2 | 26 | 49 | 7 | 4351 |
-| `oms` | 48 | 36/48 (75%) | 17 | 86 | 141 | 178 | 13230 |
+| `oms` | 50 | 38/50 (76%) | 18 | 88 | 154 | 187 | 14819 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1190 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
 | `pipeline_worker` | 5 | 5/5 (100%) | 3 | 50 | 79 | 3 | 7555 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
-| `shared` | 300 | 204/300 (68%) | 104 | 380 | 850 | 1129 | 79055 |
-| `tests` | 277 | 45/277 (16%) | 20 | 51 | 1245 | 1295 | 42496 |
+| `shared` | 300 | 204/300 (68%) | 104 | 380 | 850 | 1129 | 79065 |
+| `tests` | 279 | 47/279 (16%) | 20 | 51 | 1275 | 1327 | 43021 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
 
 | Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend/bff/routers/foundry_ontology_v2.py` | 385 | 74 | 0 | 0 | 86 | 71 | 5010 |
+| `backend/bff/routers/foundry_ontology_v2.py` | 457 | 85 | 0 | 0 | 96 | 64 | 5379 |
 | `backend/pipeline_worker/main.py` | 235 | 47 | 0 | 0 | 64 | 83 | 6352 |
 | `backend/bff/main.py` | 214 | 40 | 0 | 0 | 42 | 28 | 820 |
 | `backend/instance_worker/main.py` | 180 | 36 | 0 | 0 | 43 | 69 | 2299 |
@@ -60,10 +60,10 @@
 | `backend/projection_worker/main.py` | 131 | 26 | 0 | 0 | 29 | 28 | 1793 |
 | `backend/shared/services/kafka/processed_event_worker.py` | 123 | 22 | 0 | 0 | 29 | 16 | 1391 |
 | `backend/objectify_worker/main.py` | 120 | 24 | 0 | 0 | 32 | 36 | 3914 |
+| `backend/bff/services/oms_client.py` | 120 | 24 | 0 | 0 | 25 | 26 | 604 |
 | `backend/shared/services/storage/event_store.py` | 108 | 20 | 0 | 0 | 24 | 16 | 1048 |
 | `backend/bff/services/ai_service.py` | 105 | 21 | 0 | 0 | 25 | 25 | 1571 |
 | `backend/bff/services/graph_query_service.py` | 88 | 17 | 0 | 0 | 18 | 15 | 877 |
-| `backend/bff/services/oms_client.py` | 80 | 16 | 0 | 0 | 17 | 18 | 440 |
 
 ## Entrypoint Risk Map
 
@@ -80,7 +80,7 @@
 | `backend/instance_worker/main.py` | 27 | 36 | 43 | 69 | 2299 |
 | `backend/message_relay/main.py` | 10 | 13 | 22 | 10 | 664 |
 | `backend/objectify_worker/main.py` | 42 | 24 | 32 | 36 | 3914 |
-| `backend/oms/main.py` | 15 | 13 | 13 | 5 | 453 |
+| `backend/oms/main.py` | 15 | 13 | 13 | 5 | 457 |
 | `backend/ontology_worker/main.py` | 15 | 28 | 30 | 28 | 1190 |
 | `backend/pipeline_scheduler/main.py` | 1 | 0 | 0 | 0 | 26 |
 | `backend/pipeline_worker/main.py` | 79 | 47 | 64 | 83 | 6352 |
@@ -102,18 +102,18 @@
 | 6 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
 | 7 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
 | 8 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 9 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
-| 10 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 11 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
-| 12 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
-| 13 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
-| 14 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
-| 15 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 16 | `backend/bff/main.py` | entrypoint lifecycle |
-| 17 | `backend/message_relay/main.py` | entrypoint lifecycle |
-| 18 | `backend/oms/main.py` | entrypoint lifecycle |
-| 19 | `backend/connector_trigger_service/main.py` | entrypoint lifecycle |
-| 20 | `backend/action_outbox_worker/main.py` | entrypoint lifecycle |
+| 9 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
+| 10 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
+| 11 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 12 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
+| 13 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
+| 14 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
+| 15 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
+| 16 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
+| 17 | `backend/bff/main.py` | entrypoint lifecycle |
+| 18 | `backend/message_relay/main.py` | entrypoint lifecycle |
+| 19 | `backend/oms/main.py` | entrypoint lifecycle |
+| 20 | `backend/connector_trigger_service/main.py` | entrypoint lifecycle |
 
 ## action_outbox_worker
 
@@ -869,13 +869,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=5515 | code_lines=5010 | risk_score=385
-- API surface: public=45 | top-level functions=146 | classes=10 | methods=0
-- Runtime signals: async_functions=49 | try=86 | raise=71 | broad_except=74 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/146 (0%) | classes=0/10 (0%) | methods=0/0 (n/a)
+- Source footprint: total_lines=5918 | code_lines=5379 | risk_score=457
+- API surface: public=54 | top-level functions=150 | classes=10 | methods=0
+- Runtime signals: async_functions=58 | try=96 | raise=64 | broad_except=85 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=11/150 (7%) | classes=0/10 (0%) | methods=0/0 (n/a)
 - Internal imports (8): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.services.oms_client; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer; shared.utils.foundry_page_token
 - External imports (8): asyncio; fastapi; httpx; logging; pydantic; time; typing; uuid
-- Public API names: ApiFeaturePreviewUsageOnlyError; ApplyActionRequestOptionsV2; ApplyActionRequestV2; BatchApplyActionRequestItemV2; BatchApplyActionRequestOptionsV2; BatchApplyActionRequestV2; ExecuteQueryRequestV2; ObjectSetNotFoundError; OntologyNotFoundError; PermissionDeniedError; aggregate_object_set_v2; aggregate_objects_v2 (+33 more)
+- Public API names: ApiFeaturePreviewUsageOnlyError; ApplyActionRequestOptionsV2; ApplyActionRequestV2; BatchApplyActionRequestItemV2; BatchApplyActionRequestOptionsV2; BatchApplyActionRequestV2; ExecuteQueryRequestV2; ObjectSetNotFoundError; OntologyNotFoundError; PermissionDeniedError; aggregate_object_set_v2; aggregate_objects_v2 (+42 more)
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -965,10 +965,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=115 | code_lines=92 | risk_score=0
-- API surface: public=0 | top-level functions=6 | classes=0 | methods=0
+- Source footprint: total_lines=195 | code_lines=154 | risk_score=0
+- API surface: public=0 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/6 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=yes | top-level functions=2/8 (25%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
 - External imports (0): not documented
 - Public API names: not documented
@@ -2725,10 +2725,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=503 | code_lines=440 | risk_score=80
-- API surface: public=2 | top-level functions=0 | classes=2 | methods=26
-- Runtime signals: async_functions=24 | try=17 | raise=18 | broad_except=16 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=22/26 (84%)
+- Source footprint: total_lines=683 | code_lines=604 | risk_score=120
+- API surface: public=2 | top-level functions=0 | classes=2 | methods=34
+- Runtime signals: async_functions=32 | try=25 | raise=26 | broad_except=24 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=2/2 (100%) | methods=30/34 (88%)
 - Internal imports (2): bff.services.base_http_client; shared.config.settings
 - External imports (4): dataclasses; httpx; logging; typing
 - Public API names: OMSClient; OntologyRef
@@ -3397,13 +3397,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=2238 | code_lines=2010 | risk_score=48
-- API surface: public=60 | top-level functions=61 | classes=10 | methods=17
-- Runtime signals: async_functions=79 | try=54 | raise=6 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/61 (0%) | classes=0/10 (0%) | methods=0/17 (0%)
+- Source footprint: total_lines=2404 | code_lines=2152 | risk_score=54
+- API surface: public=66 | top-level functions=67 | classes=10 | methods=17
+- Runtime signals: async_functions=85 | try=60 | raise=6 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=4/67 (5%) | classes=0/10 (0%) | methods=0/17 (0%)
 - Internal imports (2): bff.routers; shared.utils.foundry_page_token
 - External imports (6): __future__; fastapi; httpx; json; pytest; starlette
-- Public API names: test_apply_action_batch_v2_forwards_requests_to_submit_batch; test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path; test_apply_action_v2_normalizes_non_foundry_validation_error; test_apply_action_v2_validate_only_maps_to_oms_v2_apply; test_execute_query_v2_missing_required_parameter_returns_invalid_argument; test_execute_query_v2_prefers_canonical_object_type_field_over_fallback; test_execute_query_v2_runs_function_query_and_returns_value_envelope; test_execute_query_v2_without_execution_spec_returns_invalid_argument; test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_requires_preview_true (+48 more)
+- Public API names: test_apply_action_batch_v2_forwards_requests_to_submit_batch; test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path; test_apply_action_v2_normalizes_non_foundry_validation_error; test_apply_action_v2_validate_only_maps_to_oms_v2_apply; test_execute_query_v2_missing_required_parameter_returns_invalid_argument; test_execute_query_v2_prefers_canonical_object_type_field_over_fallback; test_execute_query_v2_runs_function_query_and_returns_value_envelope; test_execute_query_v2_without_execution_spec_returns_invalid_argument; test_get_action_type_by_rid_v2_returns_foundry_raw_shape; test_get_action_type_v2_returns_foundry_raw_shape; test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavailable; test_get_full_metadata_v2_requires_preview_true (+54 more)
 
 ### `backend/bff/tests/test_funnel_client_runtime_mode.py`
 - Module summary: no docstring
@@ -3557,13 +3557,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=57 | code_lines=51 | risk_score=0
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
+- Source footprint: total_lines=179 | code_lines=149 | risk_score=0
+- API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=3/8 (37%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): bff.routers.link_types_read
 - External imports (1): pytest
-- Public API names: test_extract_resources_unwraps_nested_data; test_to_foundry_outgoing_link_type_filters_non_matching_source; test_to_foundry_outgoing_link_type_maps_link_type_fields
+- Public API names: test_extract_resources_unwraps_nested_data; test_invert_cardinality; test_to_foundry_incoming_link_type_filters_non_matching_target; test_to_foundry_incoming_link_type_maps_fields; test_to_foundry_incoming_link_type_no_foreign_key; test_to_foundry_incoming_link_type_one_to_many_inverts_to_one; test_to_foundry_outgoing_link_type_filters_non_matching_source; test_to_foundry_outgoing_link_type_maps_link_type_fields
 
 ### `backend/bff/tests/test_mapping_suggestion_service.py`
 - Module summary: no docstring
@@ -5183,7 +5183,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=612 | code_lines=453 | risk_score=73
+- Source footprint: total_lines=616 | code_lines=457 | risk_score=73
 - API surface: public=5 | top-level functions=6 | classes=1 | methods=15
 - Runtime signals: async_functions=15 | try=13 | raise=5 | broad_except=13 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=1/1 (100%) | methods=14/15 (93%)
@@ -5270,6 +5270,22 @@
 - Internal imports (25): oms.dependencies; oms.services.action_simulation_service; oms.services.action_submit_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types (+17 more)
 - External imports (7): __future__; datetime; fastapi; logging; pydantic; typing; uuid
 - Public API names: ActionSimulateAssumptions; ActionSimulateObservedBaseOverrides; ActionSimulateRequest; ActionSimulateScenarioRequest; ActionSimulateStatePatch; ActionSimulateTargetAssumption; ActionSubmitBatchDependencyRequest; ActionSubmitBatchItemRequest; ActionSubmitBatchItemResponse; ActionSubmitBatchRequest; ActionSubmitBatchResponse; ActionSubmitRequest (+10 more)
+
+### `backend/oms/routers/attachments.py`
+- Module summary: Foundry v2 Attachment Property Router (OMS).
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=518 | code_lines=430 | risk_score=13
+- API surface: public=5 | top-level functions=14 | classes=0 | methods=0
+- Runtime signals: async_functions=6 | try=8 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=12/14 (85%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (4): shared.config.search_config; shared.dependencies.providers; shared.observability.tracing; shared.security.input_sanitizer
+- External imports (6): fastapi; json; logging; mimetypes; typing; uuid
+- Public API names: get_attachment_by_rid; get_attachment_content; get_attachment_content_by_rid; list_property_attachments; upload_attachment
 
 ### `backend/oms/routers/command_status.py`
 - Module summary: Command status router (read-only).
@@ -5375,13 +5391,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=623 | code_lines=521 | risk_score=5
-- API surface: public=4 | top-level functions=19 | classes=3 | methods=3
-- Runtime signals: async_functions=2 | try=1 | raise=18 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/19 (5%) | classes=1/3 (33%) | methods=0/3 (0%)
+- Source footprint: total_lines=1651 | code_lines=1330 | risk_score=10
+- API surface: public=5 | top-level functions=43 | classes=3 | methods=3
+- Runtime signals: async_functions=3 | try=5 | raise=60 | broad_except=2 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=24/43 (55%) | classes=1/3 (33%) | methods=0/3 (0%)
 - Internal imports (5): shared.config.search_config; shared.dependencies.providers; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.foundry_page_token
-- External imports (8): fastapi; hashlib; json; logging; pydantic; re; typing; uuid
-- Public API names: SearchJsonQueryV2; SearchObjectsRequestV2; SearchObjectsResponseV2; search_objects_v2_foundry
+- External imports (10): datetime; fastapi; hashlib; json; logging; math; pydantic; re (+2 more)
+- Public API names: SearchJsonQueryV2; SearchObjectsRequestV2; SearchObjectsResponseV2; aggregate_objects_v2_oms; search_objects_v2_foundry
 
 ### `backend/oms/routers/tasks.py`
 - Module summary: OMS Background Task Management Router
@@ -5398,6 +5414,22 @@
 - Internal imports (4): shared.dependencies.providers; shared.errors.error_types; shared.models.background_task; shared.observability.tracing
 - External imports (2): fastapi; typing
 - Public API names: cleanup_old_tasks; get_active_tasks; get_internal_task_status; task_service_health
+
+### `backend/oms/routers/timeseries.py`
+- Module summary: Foundry v2 Time Series Property Router (OMS).
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=423 | code_lines=346 | risk_score=4
+- API surface: public=3 | top-level functions=12 | classes=0 | methods=0
+- Runtime signals: async_functions=6 | try=4 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=8/12 (66%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (4): shared.config.search_config; shared.dependencies.providers; shared.observability.tracing; shared.security.input_sanitizer
+- External imports (6): datetime; fastapi; json; logging; typing; uuid
+- Public API names: get_first_point; get_last_point; stream_points
 
 ### `backend/oms/services/__init__.py`
 - Module summary: no docstring
@@ -6349,7 +6381,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=67 | code_lines=61 | risk_score=0
+- Source footprint: total_lines=69 | code_lines=63 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6445,7 +6477,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=4371 | code_lines=3807 | risk_score=14
+- Source footprint: total_lines=4379 | code_lines=3815 | risk_score=14
 - API surface: public=53 | top-level functions=18 | classes=46 | methods=205
 - Runtime signals: async_functions=0 | try=13 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/18 (33%) | classes=46/46 (100%) | methods=16/205 (7%)
@@ -12135,6 +12167,22 @@
 - External imports (6): __future__; fastapi; httpx; pytest; types; typing
 - Public API names: action_async_app; test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable; test_simulate_use_branch_head_no_longer_requires_terminus; test_submit_batch_returns_403_for_datasource_derived_without_data_engineer_role; test_submit_batch_returns_403_when_target_class_misses_required_interface; test_submit_batch_returns_503_when_target_edit_access_is_unverifiable
 
+### `backend/tests/unit/oms/test_attachments_router.py`
+- Module summary: Tests for OMS Foundry-style Attachment Property router.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=258 | code_lines=183 | risk_score=0
+- API surface: public=13 | top-level functions=13 | classes=0 | methods=0
+- Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): oms.routers.attachments; shared.dependencies.providers
+- External imports (6): __future__; fastapi; httpx; json; pytest; unittest
+- Public API names: mock_es; mock_storage; override_deps; test_get_attachment_by_rid_not_found; test_get_attachment_by_rid_returns_metadata; test_get_attachment_content_404_when_s3_missing; test_get_attachment_content_by_rid_returns_binary; test_get_attachment_content_returns_binary; test_list_property_attachments_404_not_found; test_list_property_attachments_multiple; test_list_property_attachments_single; test_upload_attachment_rejects_empty_body (+1 more)
+
 ### `backend/tests/unit/oms/test_database_router_backend_profile.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -12239,13 +12287,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=401 | code_lines=333 | risk_score=0
-- API surface: public=20 | top-level functions=20 | classes=0 | methods=0
-- Runtime signals: async_functions=19 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/20 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=626 | code_lines=513 | risk_score=0
+- API surface: public=29 | top-level functions=29 | classes=0 | methods=0
+- Runtime signals: async_functions=28 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/29 (3%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (3): oms.routers.query; shared.dependencies.providers; shared.utils.foundry_page_token
 - External imports (5): __future__; fastapi; httpx; pytest; unittest
-- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_deprecated_startswith_alias; test_search_objects_v2_accepts_foundry_branch_rid; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_accepts_scope_matched_page_token; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_expired_page_token_returns_foundry_error; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_is_null_false_maps_to_exists_clause; test_search_objects_v2_rejects_excessive_nesting_depth (+8 more)
+- Public API names: mock_es; override_deps; test_search_objects_v2_accepts_contains_any_term_operator; test_search_objects_v2_accepts_deprecated_startswith_alias; test_search_objects_v2_accepts_foundry_branch_rid; test_search_objects_v2_accepts_non_deprecated_operator; test_search_objects_v2_accepts_scope_matched_page_token; test_search_objects_v2_allows_missing_where_with_match_all_fallback; test_search_objects_v2_expired_page_token_returns_foundry_error; test_search_objects_v2_in_operator_valid_list_accepted; test_search_objects_v2_invalid_page_token_returns_foundry_error; test_search_objects_v2_is_null_false_maps_to_exists_clause (+17 more)
 
 ### `backend/tests/unit/oms/test_ontology_extensions_occ.py`
 - Module summary: no docstring
@@ -12311,6 +12359,22 @@
 - External imports (1): __future__
 - Public API names: test_oms_foundry_action_surface_is_apply_only; test_oms_legacy_routes_removed_from_openapi
 
+### `backend/tests/unit/oms/test_timeseries_router.py`
+- Module summary: Tests for OMS Foundry-style Time Series Property router.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=199 | code_lines=139 | risk_score=0
+- API surface: public=10 | top-level functions=10 | classes=0 | methods=0
+- Runtime signals: async_functions=9 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (2): oms.routers.timeseries; shared.dependencies.providers
+- External imports (6): __future__; fastapi; httpx; json; pytest; unittest
+- Public API names: mock_es; mock_storage; override_deps; test_get_first_point_404_when_instance_not_found; test_get_first_point_404_when_property_not_timeseries; test_get_first_point_returns_earliest_point; test_get_last_point_returns_latest_point; test_stream_points_404_when_no_ts_data; test_stream_points_returns_all_points; test_stream_points_with_absolute_range
+
 ### `backend/tests/unit/openapi/test_architecture_quality_docs_guard.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -12335,13 +12399,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1218 | code_lines=1011 | risk_score=0
+- Source footprint: total_lines=1246 | code_lines=1034 | risk_score=0
 - API surface: public=34 | top-level functions=36 | classes=0 | methods=0
 - Runtime signals: async_functions=63 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/36 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=3/36 (8%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): bff.dependencies; bff.routers
 - External imports (4): fastapi; httpx; pytest; unittest
-- Public API names: test_foundry_v2_aggregate_object_set_reads_all_pages; test_foundry_v2_aggregate_object_set_returns_metrics; test_foundry_v2_aggregate_objects_keeps_foundry_query_params; test_foundry_v2_aggregate_objects_route_returns_metrics; test_foundry_v2_create_temporary_and_get_object_set_roundtrip; test_foundry_v2_execute_query_keeps_foundry_query_params; test_foundry_v2_full_metadata_branch_contract; test_foundry_v2_list_linked_objects_includes_foundry_query_params; test_foundry_v2_list_objects_includes_foundry_query_params; test_foundry_v2_load_object_set_links_requires_preview; test_foundry_v2_load_object_set_links_returns_locator_payload; test_foundry_v2_load_object_set_multiple_object_types_requires_preview (+22 more)
+- Public API names: test_foundry_v2_aggregate_object_set_delegates_to_oms; test_foundry_v2_aggregate_object_set_returns_metrics; test_foundry_v2_aggregate_objects_keeps_foundry_query_params; test_foundry_v2_aggregate_objects_route_returns_metrics; test_foundry_v2_create_temporary_and_get_object_set_roundtrip; test_foundry_v2_execute_query_keeps_foundry_query_params; test_foundry_v2_full_metadata_branch_contract; test_foundry_v2_list_linked_objects_includes_foundry_query_params; test_foundry_v2_list_objects_includes_foundry_query_params; test_foundry_v2_load_object_set_links_requires_preview; test_foundry_v2_load_object_set_links_returns_locator_payload; test_foundry_v2_load_object_set_multiple_object_types_requires_preview (+22 more)
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - Module summary: no docstring

@@ -2141,6 +2141,14 @@ class StorageSettings(BaseSettings):
         default="instance-events",
         description="S3 bucket for instance events"
     )
+    timeseries_bucket: str = Field(
+        default="timeseries-data",
+        description="S3 bucket for time series property data (TIMESERIES_BUCKET)",
+    )
+    attachments_bucket: str = Field(
+        default="attachments-data",
+        description="S3 bucket for attachment property files (ATTACHMENTS_BUCKET)",
+    )
 
     # Local SQLite / filesystem paths
     label_mappings_db_path: str = Field(

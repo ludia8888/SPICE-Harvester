@@ -22,18 +22,18 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **194**
+- Total documented endpoints: **203**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 159 |
-| `v2` | 35 |
+| `v2` | 44 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `ontologies` | 35 |
+| `ontologies` | 44 |
 | `pipelines` | 29 |
 | `databases` | 15 |
 | `admin` | 13 |
@@ -210,14 +210,23 @@
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes` | List Object Types V2 | `v2` | no | no | `list_object_types_v2_api_v2_ontologies__ontology__objectTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | `v2` | no | no | `get_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | `v2` | no | no | `get_object_type_full_metadata_v2_api_v2_ontologies__ontology__objectTypes__objectType__fullMetadata_get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes` | List Incoming Link Types V2 | `v2` | no | no | `list_incoming_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes_get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}` | Get Incoming Link Type V2 | `v2` | no | no | `get_incoming_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes__linkType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes` | List Outgoing Link Types V2 | `v2` | no | no | `list_outgoing_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__outgoingLinkTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}` | Get Outgoing Link Type V2 | `v2` | no | no | `get_outgoing_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__outgoingLinkTypes__linkType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}` | List Objects V2 | `v2` | no | no | `list_objects_v2_api_v2_ontologies__ontology__objects__objectType__get` |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate` | Aggregate Objects V2 | `v2` | no | no | `aggregate_objects_v2_api_v2_ontologies__ontology__objects__objectType__aggregate_post` |
 | `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/search` | Search Objects V2 | `v2` | no | no | `search_objects_v2_api_v2_ontologies__ontology__objects__objectType__search_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}` | Get Object V2 | `v2` | no | no | `get_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}` | List Attachment Property V2 | `v2` | no | no | `list_attachment_property_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content` | Get Attachment Content V2 | `v2` | no | no | `get_attachment_content_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__content_get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}` | Get Attachment By Rid V2 | `v2` | no | no | `get_attachment_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content` | Get Attachment Content By Rid V2 | `v2` | no | no | `get_attachment_content_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__content_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}` | List Linked Objects V2 | `v2` | no | no | `list_linked_objects_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}` | Get Linked Object V2 | `v2` | no | no | `get_linked_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType___linkedObjectPrimaryKey__get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint` | Get Timeseries First Point V2 | `v2` | no | no | `get_timeseries_first_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__firstPoint_get` |
+| `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint` | Get Timeseries Last Point V2 | `v2` | no | no | `get_timeseries_last_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__lastPoint_get` |
+| `POST` | `/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints` | Stream Timeseries Points V2 | `v2` | no | no | `stream_timeseries_points_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__streamPoints_post` |
 | `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | `v2` | no | no | `execute_query_v2_api_v2_ontologies__ontology__queries__queryApiName__execute_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/queryTypes` | List Query Types V2 | `v2` | no | no | `list_query_types_v2_api_v2_ontologies__ontology__queryTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}` | Get Query Type V2 | `v2` | no | no | `get_query_type_v2_api_v2_ontologies__ontology__queryTypes__queryApiName__get` |
