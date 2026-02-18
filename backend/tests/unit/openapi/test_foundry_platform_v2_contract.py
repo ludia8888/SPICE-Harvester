@@ -1,3 +1,4 @@
+import base64
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -50,6 +51,8 @@ def test_foundry_platform_v2_paths_exist_in_openapi():
         "/api/v2/connectivity/connections/{connectionRid}/getConfiguration",
         "/api/v2/connectivity/connections/getConfigurationBatch",
         "/api/v2/connectivity/connections/{connectionRid}/updateSecrets",
+        "/api/v2/connectivity/connections/{connectionRid}/updateExportSettings",
+        "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute",
@@ -706,6 +709,8 @@ def test_foundry_connection_crud_paths_exist_in_openapi():
         "/api/v2/connectivity/connections/{connectionRid}/getConfiguration",
         "/api/v2/connectivity/connections/getConfigurationBatch",
         "/api/v2/connectivity/connections/{connectionRid}/updateSecrets",
+        "/api/v2/connectivity/connections/{connectionRid}/updateExportSettings",
+        "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers",
         "/api/v2/connectivity/connections/{connectionRid}/fileImports",
         "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}",
         "/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute",
@@ -935,6 +940,125 @@ async def test_foundry_connection_update_secrets_keeps_response_non_secret():
     cfg = get_cfg_resp.json()["configuration"]
     assert cfg["type"] == "PostgreSqlConnectionConfig"
     assert "password" not in cfg
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_update_export_settings_v2():
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.source = SimpleNamespace(
+                source_id="conn-export",
+                source_type="postgresql_connection",
+                enabled=True,
+                config_json={
+                    "display_name": "PG Conn",
+                    "type": "PostgreSqlConnectionConfig",
+                    "host": "localhost",
+                    "database": "demo",
+                },
+                created_at=None,
+                updated_at=None,
+            )
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            if source_type == "postgresql_connection" and source_id == "conn-export":
+                return self.source
+            return None
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            _ = source_type, source_id, enabled
+            self.source.config_json = dict(config_json)
+            return self.source
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        no_preview_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-export/updateExportSettings",
+            json={"exportSettings": {"markingIds": ["m1"]}},
+        )
+        update_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-export/updateExportSettings",
+            params={"preview": "true"},
+            json={"exportSettings": {"markingIds": ["m1"], "sharing": {"scope": "TEAM"}}},
+        )
+
+    assert no_preview_resp.status_code == 400
+    assert no_preview_resp.json()["errorName"] == "ApiFeaturePreviewUsageOnly"
+    assert update_resp.status_code == 204
+    assert registry.source.config_json["export_settings"]["markingIds"] == ["m1"]
+    assert registry.source.config_json["export_settings"]["sharing"]["scope"] == "TEAM"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.source = SimpleNamespace(
+                source_id="conn-jdbc",
+                source_type="postgresql_connection",
+                enabled=True,
+                config_json={
+                    "display_name": "PG Conn",
+                    "type": "PostgreSqlConnectionConfig",
+                    "host": "localhost",
+                    "database": "demo",
+                    "username": "demo_user",
+                },
+                created_at=None,
+                updated_at=None,
+            )
+            self.secrets: dict[str, Any] = {}
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            if source_type == "postgresql_connection" and source_id == "conn-jdbc":
+                return self.source
+            return None
+
+        async def get_connection_secrets(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return dict(self.secrets)
+
+        async def upsert_connection_secrets(self, *, source_type: str, source_id: str, secrets_json: dict):  # noqa: ANN001
+            _ = source_type, source_id
+            self.secrets = dict(secrets_json)
+            return dict(self.secrets)
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            _ = source_type, source_id, enabled
+            self.source.config_json = dict(config_json)
+            return self.source
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    content = b"fake-jar-driver-binary"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        upload_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-jdbc/uploadCustomJdbcDrivers",
+            params={"preview": "true", "fileName": "custom-driver.jar"},
+            content=content,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert upload_resp.status_code == 200
+    body = upload_resp.json()
+    assert body["rid"] == "ri.spice.main.connection.conn-jdbc"
+    assert "jdbc_driver_blobs" not in body
+    assert "jdbc_driver_blobs" in registry.secrets
+    stored = registry.secrets["jdbc_driver_blobs"]
+    assert isinstance(stored, dict)
+    assert len(stored) == 1
+    assert next(iter(stored.values())) == base64.b64encode(content).decode("ascii")
 
 
 @pytest.mark.unit

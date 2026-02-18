@@ -2062,6 +2062,23 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = {"secrets": {"password": "smoke-secret"}}
         return RequestPlan(op.method, op.path, url, (204, 404, 400), params={"preview": "true"}, json_body=body)
 
+    if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/updateExportSettings"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
+        body = {"exportSettings": {"markingIds": ["ri.spice.main.marking.smoke"], "sharing": {"scope": "DEFAULT"}}}
+        return RequestPlan(op.method, op.path, url, (204, 404, 400), params={"preview": "true"}, json_body=body)
+
+    if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
+        body = {"content": "smoke-driver"}
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 404, 400, 422),
+            params={"preview": "true", "fileName": "smoke-driver.jar"},
+            json_body=body,
+        )
+
     if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/tableImports"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
         body = {

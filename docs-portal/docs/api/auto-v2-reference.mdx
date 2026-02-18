@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 98**
+**Total v2 endpoints: 100**
 
 ### Ontologies (12 endpoints)
 
@@ -99,7 +99,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes` | List Value Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes/{valueType}` | Get Value Type V2 | No |
 
-### Other v2 Endpoints (52 endpoints)
+### Other v2 Endpoints (54 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -122,7 +122,9 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/test` | Test Connection V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateExportSettings` | Update Connection Export Settings V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateSecrets` | Update Connection Secrets V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers` | Upload Custom Jdbc Drivers V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | List Virtual Tables V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | Create Virtual Table V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Get Virtual Table V2 | No |

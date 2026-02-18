@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **246**
+- Total documented endpoints: **248**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 148 |
-| `v2` | 98 |
+| `v2` | 100 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 46 |
 | `pipelines` | 29 |
-| `connectivity` | 25 |
+| `connectivity` | 27 |
 | `datasets` | 16 |
 | `databases` | 15 |
 | `admin` | 13 |
@@ -193,7 +193,9 @@
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}` | Delete Table Import V2 | `v2` | no | no | `delete_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__delete` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute` | Execute Table Import V2 | `v2` | no | no | `execute_table_import_v2_api_v2_connectivity_connections__connectionRid__tableImports__tableImportRid__execute_post` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/test` | Test Connection V2 | `v2` | no | no | `test_connection_v2_api_v2_connectivity_connections__connectionRid__test_post` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateExportSettings` | Update Connection Export Settings V2 | `v2` | no | no | `update_connection_export_settings_v2_api_v2_connectivity_connections__connectionRid__updateExportSettings_post` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/updateSecrets` | Update Connection Secrets V2 | `v2` | no | no | `update_connection_secrets_v2_api_v2_connectivity_connections__connectionRid__updateSecrets_post` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers` | Upload Custom Jdbc Drivers V2 | `v2` | no | no | `upload_custom_jdbc_drivers_v2_api_v2_connectivity_connections__connectionRid__uploadCustomJdbcDrivers_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | List Virtual Tables V2 | `v2` | no | no | `list_virtual_tables_v2_api_v2_connectivity_connections__connectionRid__virtualTables_get` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables` | Create Virtual Table V2 | `v2` | no | no | `create_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}` | Get Virtual Table V2 | `v2` | no | no | `get_virtual_table_v2_api_v2_connectivity_connections__connectionRid__virtualTables__virtualTableRid__get` |

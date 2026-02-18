@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import logging
 from typing import Any, Dict
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -328,6 +330,50 @@ def _normalize_export_settings(value: Any) -> Dict[str, Any]:
         "markingIds": marking_ids,
         "sharing": sharing,
     }
+
+
+def _normalize_jdbc_driver_file_name(file_name: str) -> str | None:
+    text = str(file_name or "").strip()
+    if not text:
+        return None
+    name = text.rsplit("/", 1)[-1]
+    name = name.rsplit("\\", 1)[-1]
+    if not name:
+        return None
+    if "." not in name:
+        return None
+    return name
+
+
+def _upsert_custom_jdbc_driver_metadata(
+    *,
+    config_json: Dict[str, Any],
+    file_name: str,
+    sha256_hex: str,
+    size_bytes: int,
+    blob_key: str,
+) -> Dict[str, Any]:
+    cfg = dict(config_json or {})
+    existing_raw = cfg.get("custom_jdbc_drivers")
+    existing_items = existing_raw if isinstance(existing_raw, list) else []
+    retained: list[Dict[str, Any]] = []
+    for item in existing_items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("fileName") or "").strip() == file_name:
+            continue
+        retained.append(dict(item))
+    retained.append(
+        {
+            "fileName": file_name,
+            "sha256": sha256_hex,
+            "sizeBytes": int(size_bytes),
+            "uploadedTime": _iso_timestamp(utcnow()),
+            "blobKey": blob_key,
+        }
+    )
+    cfg["custom_jdbc_drivers"] = retained
+    return cfg
 
 
 def _extract_connection_configuration(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -3074,3 +3120,122 @@ async def update_connection_secrets_v2(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/connections/{connectionRid}/updateExportSettings")
+@trace_endpoint("bff.foundry_v2_connectivity.update_connection_export_settings")
+async def update_connection_export_settings_v2(
+    connectionRid: str,
+    payload: Dict[str, Any],
+    preview: bool = Query(default=False),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+):
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+    connection_id, source, error = await _load_connection_source_or_404(
+        connector_registry=connector_registry,
+        connection_rid=connectionRid,
+    )
+    if error is not None:
+        return error
+    assert connection_id is not None
+    assert source is not None
+
+    settings_payload = payload.get("exportSettings") if isinstance(payload.get("exportSettings"), dict) else payload
+    export_settings = _normalize_export_settings(settings_payload)
+
+    cfg = dict(source.config_json or {})
+    cfg["export_settings"] = export_settings
+    await connector_registry.upsert_source(
+        source_type=source.source_type,
+        source_id=source.source_id,
+        enabled=source.enabled,
+        config_json=cfg,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/connections/{connectionRid}/uploadCustomJdbcDrivers")
+@trace_endpoint("bff.foundry_v2_connectivity.upload_custom_jdbc_drivers")
+async def upload_custom_jdbc_drivers_v2(
+    connectionRid: str,
+    driverBytes: bytes = Body(..., media_type="application/octet-stream"),
+    fileName: str = Query(...),
+    preview: bool = Query(default=False),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+):
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+    connection_id, source, error = await _load_connection_source_or_404(
+        connector_registry=connector_registry,
+        connection_rid=connectionRid,
+    )
+    if error is not None:
+        return error
+    assert connection_id is not None
+    assert source is not None
+
+    kind = _connection_kind_from_source(source)
+    if not _is_jdbc_connector_kind(kind):
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "uploadCustomJdbcDrivers is only supported for JDBC connections"},
+        )
+
+    normalized_file_name = _normalize_jdbc_driver_file_name(fileName)
+    if not normalized_file_name:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "fileName is invalid"},
+        )
+
+    content = bytes(driverBytes or b"")
+    if not content:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Request body must contain driver bytes"},
+        )
+
+    sha256_hex = hashlib.sha256(content).hexdigest()
+    blob_key = f"jdbc_driver_blob:{sha256_hex}"
+    existing_secrets = await connector_registry.get_connection_secrets(
+        source_type=source.source_type,
+        source_id=source.source_id,
+    )
+    merged_secrets = dict(existing_secrets)
+    blob_store = merged_secrets.get("jdbc_driver_blobs")
+    blobs = dict(blob_store) if isinstance(blob_store, dict) else {}
+    blobs[blob_key] = base64.b64encode(content).decode("ascii")
+    merged_secrets["jdbc_driver_blobs"] = blobs
+    await connector_registry.upsert_connection_secrets(
+        source_type=source.source_type,
+        source_id=source.source_id,
+        secrets_json=merged_secrets,
+    )
+
+    cfg = _upsert_custom_jdbc_driver_metadata(
+        config_json=dict(source.config_json or {}),
+        file_name=normalized_file_name,
+        sha256_hex=sha256_hex,
+        size_bytes=len(content),
+        blob_key=blob_key,
+    )
+    updated = await connector_registry.upsert_source(
+        source_type=source.source_type,
+        source_id=source.source_id,
+        enabled=source.enabled,
+        config_json=cfg,
+    )
+    return await _connection_response(
+        source=updated,
+        connector_adapter_factory=connector_adapter_factory,
+    )

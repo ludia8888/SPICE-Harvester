@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-18T20:23:30+09:00
+> Generated: 2026-02-18T20:54:28+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **277**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **238831**
+- Total code lines (non-empty, non-comment): **239104**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 15 | 41 | 2 | 2405 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2768 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1098 | 752 | 55135 |
+| `bff` | 222 | 167/222 (75%) | 81 | 460 | 1100 | 754 | 55285 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 412 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 26 | 1 | 1793 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 23 | 20 | 41 | 2366 |
 | `shared` | 301 | 204/301 (67%) | 105 | 383 | 863 | 1130 | 79879 |
-| `tests` | 283 | 49/283 (17%) | 20 | 51 | 1398 | 1377 | 45490 |
+| `tests` | 283 | 49/283 (17%) | 20 | 51 | 1406 | 1379 | 45613 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -773,13 +773,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=3076 | code_lines=2742 | risk_score=37
-- API surface: public=25 | top-level functions=80 | classes=0 | methods=0
-- Runtime signals: async_functions=40 | try=16 | raise=4 | broad_except=5 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/80 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=3241 | code_lines=2892 | risk_score=37
+- API surface: public=27 | top-level functions=84 | classes=0 | methods=0
+- Runtime signals: async_functions=42 | try=16 | raise=4 | broad_except=5 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/84 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (13): bff.routers.data_connector_deps; bff.services; data_connector.adapters.factory; data_connector.google_sheets.service; shared.config.settings; shared.dependencies.providers; shared.observability.tracing; shared.services.events.objectify_job_queue (+5 more)
-- External imports (4): fastapi; logging; typing; uuid
-- Public API names: create_connection_v2; create_file_import_v2; create_table_import_v2; create_virtual_table_v2; delete_connection_v2; delete_file_import_v2; delete_table_import_v2; delete_virtual_table_v2; execute_file_import_v2; execute_table_import_v2; get_connection_configuration_batch_v2; get_connection_configuration_v2 (+13 more)
+- External imports (6): base64; fastapi; hashlib; logging; typing; uuid
+- Public API names: create_connection_v2; create_file_import_v2; create_table_import_v2; create_virtual_table_v2; delete_connection_v2; delete_file_import_v2; delete_table_import_v2; delete_virtual_table_v2; execute_file_import_v2; execute_table_import_v2; get_connection_configuration_batch_v2; get_connection_configuration_v2 (+15 more)
 
 ### `backend/bff/routers/foundry_datasets_v2.py`
 - Module summary: Foundry Datasets API v2 — Palantir-compatible dataset lifecycle.
@@ -11567,7 +11567,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=3177 | code_lines=2693 | risk_score=60
+- Source footprint: total_lines=3194 | code_lines=2708 | risk_score=60
 - API surface: public=4 | top-level functions=27 | classes=3 | methods=3
 - Runtime signals: async_functions=9 | try=16 | raise=37 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/27 (25%) | classes=0/3 (0%) | methods=0/3 (0%)
@@ -12623,13 +12623,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1281 | code_lines=1086 | risk_score=0
-- API surface: public=17 | top-level functions=19 | classes=0 | methods=0
-- Runtime signals: async_functions=77 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/19 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=1405 | code_lines=1194 | risk_score=0
+- API surface: public=19 | top-level functions=21 | classes=0 | methods=0
+- Runtime signals: async_functions=85 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/21 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (5): bff.dependencies; bff.routers; bff.routers.data_connector_deps; bff.routers.pipeline_deps; shared.dependencies.providers
-- External imports (6): fastapi; httpx; pytest; types; typing; uuid
-- Public API names: test_foundry_connection_create_get_list_delete; test_foundry_connection_create_jdbc_kinds; test_foundry_connection_crud_paths_exist_in_openapi; test_foundry_connection_get_not_found; test_foundry_connection_test_endpoint; test_foundry_connection_update_secrets_keeps_response_non_secret; test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_file_import_requires_preview_and_supports_create; test_foundry_orchestration_create_build_returns_foundry_build_shape; test_foundry_orchestration_get_batch_jobs_and_cancel_flow; test_foundry_platform_v2_paths_exist_in_openapi (+5 more)
+- External imports (7): base64; fastapi; httpx; pytest; types; typing; uuid
+- Public API names: test_foundry_connection_create_get_list_delete; test_foundry_connection_create_jdbc_kinds; test_foundry_connection_crud_paths_exist_in_openapi; test_foundry_connection_get_not_found; test_foundry_connection_test_endpoint; test_foundry_connection_update_export_settings_v2; test_foundry_connection_update_secrets_keeps_response_non_secret; test_foundry_connection_upload_custom_jdbc_drivers_v2; test_foundry_connectivity_connection_scoped_table_import_create; test_foundry_connectivity_get_list_execute_and_delete_table_import; test_foundry_file_import_requires_preview_and_supports_create; test_foundry_orchestration_create_build_returns_foundry_build_shape (+7 more)
 
 ### `backend/tests/unit/openapi/test_openapi_command_status_parser.py`
 - Module summary: no docstring
