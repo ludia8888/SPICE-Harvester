@@ -307,32 +307,18 @@ class _FakeDatasetRegistry:
 
 
 class _FakeFunnelClient:
+    """Mock FunnelClient for Excel structure analysis tests.
+
+    NOTE: Legacy analyze_dataset() method removed.
+    Palantir Foundry style: CSV upload no longer calls FunnelClient.
+    Only Excel upload uses FunnelClient for structure analysis.
+    """
+
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
-
-    async def analyze_dataset(self, payload, *, timeout_seconds=None):  # noqa: ARG002
-        return {
-            "columns": [
-                {
-                    "column_name": "id",
-                    "inferred_type": {
-                        "type": "xsd:integer",
-                        "confidence": 0.9,
-                        "reason": "ok",
-                    },
-                    "total_count": len(payload.get("data") or []),
-                    "non_empty_count": len(payload.get("data") or []),
-                    "sample_values": ["1"],
-                    "null_count": 0,
-                    "unique_count": 1,
-                    "null_ratio": 0.0,
-                    "unique_ratio": 1.0,
-                }
-            ]
-        }
 
     async def excel_to_structure_preview_stream(self, *args, **kwargs):
         preview = {
@@ -346,13 +332,15 @@ class _FakeFunnelClient:
 
 
 class _FailingFunnelClient:
+    """Mock FunnelClient that raises on any call."""
+
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def analyze_dataset(self, payload, *, timeout_seconds=None):  # noqa: ARG002
+    async def excel_to_structure_preview_stream(self, *args, **kwargs):
         raise RuntimeError("funnel down")
 
 
@@ -399,12 +387,11 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
     async def _noop_flush(**_):
         return None
 
-    import bff.services.funnel_client as funnel_client
-
+    # NOTE: FunnelClient monkeypatch removed — CSV upload no longer uses FunnelClient.
+    # Foundry style: all columns default to xsd:string (no type inference).
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
-    monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
 
     pipeline_registry = _FakePipelineRegistry()
     dataset_registry = _FakeDatasetRegistry()
@@ -441,25 +428,23 @@ async def test_upload_csv_dataset_creates_version(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
+async def test_upload_csv_dataset_all_columns_string_type(monkeypatch):
+    """Foundry style: CSV upload produces all-string schema without FunnelClient."""
     async def _noop_flush(**_):
         return None
-
-    import bff.services.funnel_client as funnel_client
 
     monkeypatch.setenv("PIPELINE_LOCKS_ENABLED", "false")
     monkeypatch.setenv("PIPELINE_LOCKS_REQUIRED", "false")
     monkeypatch.setattr(pipeline_datasets_ops, "flush_dataset_ingest_outbox", _noop_flush)
-    monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
 
     pipeline_registry = _FakePipelineRegistry()
     dataset_registry = _FakeDatasetRegistry()
 
-    csv_bytes = b"id,name\n1,Ada\n2,Ben\n"
+    csv_bytes = b"id,name,amount\n1,Ada,100.5\n2,Ben,200.3\n"
     upload = UploadFile(filename="people.csv", file=io.BytesIO(csv_bytes))
     request = _build_request(
         {
-            "Idempotency-Key": "idem-fallback",
+            "Idempotency-Key": "idem-all-string",
             "X-DB-Name": "core-db",
             "X-User-ID": "user-1",
         }
@@ -482,14 +467,10 @@ async def test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch):
     )
 
     assert response["status"] == "success"
-    tabular_analysis = response["data"]["tabular_analysis"]
-    assert tabular_analysis.get("columns"), "Expected fallback columns when Funnel is unavailable"
-    codes = {
-        item.get("code")
-        for item in (tabular_analysis.get("risk_summary") or [])
-        if isinstance(item, dict)
-    }
-    assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
+    schema_columns = response["data"]["version"]["schema_json"]["columns"]
+    # Foundry style: all columns should be xsd:string
+    for col in schema_columns:
+        assert col["type"] == "xsd:string", f"Column {col['name']} should be xsd:string, got {col['type']}"
 
 
 @pytest.mark.asyncio
@@ -580,10 +561,7 @@ async def test_approve_dataset_schema_updates_dataset():
 
 @pytest.mark.asyncio
 async def test_get_ingest_request_includes_tabular_analysis(monkeypatch):
-    import bff.services.funnel_client as funnel_client
-
-    monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
-
+    # NOTE: FunnelClient monkeypatch removed — tabular analysis no longer calls FunnelClient.
     dataset_registry = _FakeDatasetRegistry()
     dataset = await dataset_registry.create_dataset(
         db_name="core-db",
@@ -619,11 +597,8 @@ async def test_get_ingest_request_includes_tabular_analysis(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_ingest_request_tabular_analysis_failure_uses_fallback(monkeypatch):
-    import bff.services.funnel_client as funnel_client
-
-    monkeypatch.setattr(funnel_client, "FunnelClient", _FailingFunnelClient)
-
+async def test_get_ingest_request_tabular_analysis_returns_string_columns(monkeypatch):
+    """Foundry style: tabular analysis returns all-string columns without FunnelClient."""
     dataset_registry = _FakeDatasetRegistry()
     dataset = await dataset_registry.create_dataset(
         db_name="core-db",
@@ -638,9 +613,9 @@ async def test_get_ingest_request_tabular_analysis_failure_uses_fallback(monkeyp
         dataset_id=dataset.dataset_id,
         db_name=dataset.db_name,
         branch=dataset.branch,
-        idempotency_key="idem-read-fallback",
+        idempotency_key="idem-read-string",
         request_fingerprint="fingerprint",
-        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+        schema_json={"columns": [{"name": "id", "type": "xsd:string"}]},
         sample_json={"columns": [{"name": "id"}], "rows": [{"id": "1"}, {"id": "2"}]},
         row_count=2,
         source_metadata={"source_type": "csv"},
@@ -655,13 +630,8 @@ async def test_get_ingest_request_tabular_analysis_failure_uses_fallback(monkeyp
 
     assert response["status"] == "success"
     tabular_analysis = response["data"]["tabular_analysis"]
-    assert tabular_analysis.get("columns"), "Expected fallback analysis columns"
-    codes = {
-        item.get("code")
-        for item in (tabular_analysis.get("risk_summary") or [])
-        if isinstance(item, dict)
-    }
-    assert "TABULAR_ANALYSIS_UNAVAILABLE" in codes
+    assert tabular_analysis.get("columns"), "Expected tabular analysis columns"
+    assert tabular_analysis["risk_policy"]["suggestion_only"] is True
 
 
 @pytest.mark.asyncio

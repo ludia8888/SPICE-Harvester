@@ -60,7 +60,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 # Shared models and utilities
 from shared.utils.label_mapper import LabelMapper
-from shared.dependencies import configure_type_inference_service
+# NOTE: configure_type_inference_service removed (legacy type inference engine deleted)
 from shared.services.storage.redis_service import create_redis_service
 from shared.services.core.websocket_service import get_notification_service
 from shared.services.core.schema_change_monitor import SchemaChangeMonitor, MonitorConfig
@@ -70,7 +70,6 @@ from shared.services.core.schema_drift_detector import SchemaDriftDetector
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
 
 # BFF specific imports
-from bff.services.funnel_type_inference_adapter import InProcessTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
 
 # Data connector imports
@@ -142,14 +141,11 @@ class BFFServiceContainer:
         
         # 1. Initialize OMS Client
         await self._initialize_oms_client()
-        
+
         # 2. Initialize Label Mapper
         await self._initialize_label_mapper()
-        
-        # 3. Initialize Type Inference Service
-        await self._initialize_type_inference()
-        
-        # 4. Initialize WebSocket Notification Service
+
+        # 3. Initialize WebSocket Notification Service
         await self._initialize_websocket_service()
         
         # 5. Initialize Rate Limiter
@@ -220,20 +216,10 @@ class BFFServiceContainer:
         self._bff_services['label_mapper'] = label_mapper
         logger.info("Label mapper initialized")
     
-    async def _initialize_type_inference(self) -> None:
-        """Initialize type inference service"""
-        try:
-            logger.info("Configuring type inference service...")
-            type_inference_adapter = InProcessTypeInferenceAdapter()
-            configure_type_inference_service(type_inference_adapter)
-            
-            self._bff_services['type_inference_adapter'] = type_inference_adapter
-            logger.info("Type inference service configured successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to configure type inference service: {e}")
-            # Continue without type inference
-    
+    # NOTE: _initialize_type_inference() removed.
+    # Palantir Foundry style: all columns default to xsd:string.
+    # Type coercion happens at objectify/write time via coerce_value().
+
     async def _initialize_websocket_service(self) -> None:
         """Initialize WebSocket notification service"""
         try:
@@ -441,15 +427,6 @@ class BFFServiceContainer:
                 logger.info("Redis service disconnected")
             except Exception as e:
                 logger.error(f"Error disconnecting Redis service: {e}")
-        
-        if 'type_inference_adapter' in self._bff_services:
-            try:
-                adapter = self._bff_services['type_inference_adapter']
-                if hasattr(adapter, "close"):
-                    await adapter.close()
-                logger.info("Type inference adapter closed")
-            except Exception as e:
-                logger.error(f"Error closing type inference adapter: {e}")
         
         if 'oms_client' in self._bff_services:
             try:

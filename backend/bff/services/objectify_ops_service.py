@@ -8,26 +8,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from bff.services.link_types_mapping_service import extract_ontology_properties, extract_ontology_relationships
-from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import resolve_import_type
 from shared.utils.payload_utils import unwrap_data_payload
-from shared.utils.schema_type_compatibility import is_type_compatible
 from shared.utils.schema_columns import (
     extract_schema_column_names as _extract_schema_column_names_raw,
     extract_schema_type_map as _extract_schema_type_map_raw,
 )
 from shared.utils.schema_hash import compute_schema_hash_from_sample
 from shared.utils.objectify_outputs import match_output_name as _match_output_name_raw
-
-_ALLOWED_SOURCE_TYPES = {
-    "xsd:string",
-    "xsd:integer",
-    "xsd:decimal",
-    "xsd:boolean",
-    "xsd:date",
-    "xsd:dateTime",
-    "xsd:time",
-}
 
 
 def _match_output_name(output: Dict[str, Any], name: str) -> bool:
@@ -40,10 +28,6 @@ def _compute_schema_hash_from_sample(sample_json: Any) -> Optional[str]:
 
 def _extract_schema_columns(schema: Any) -> List[str]:
     return _extract_schema_column_names_raw(schema)
-
-
-def _extract_schema_types(schema: Any) -> Dict[str, str]:
-    return _extract_schema_type_map_raw(schema, normalizer=normalize_schema_type)
 
 
 def _normalize_mapping_pair(item: Any) -> Optional[tuple[str, str]]:
@@ -115,10 +99,6 @@ def _extract_ontology_fields(payload: Any) -> tuple[Dict[str, Dict[str, Any]], D
 
 def _resolve_import_type(raw_type: Any) -> Optional[str]:
     return resolve_import_type(raw_type)
-
-
-def _is_type_compatible(source_type: str, target_type: str) -> bool:
-    return is_type_compatible(source_type, target_type)
 
 
 def _unwrap_data_payload(payload: Any) -> Dict[str, Any]:

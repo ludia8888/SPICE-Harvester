@@ -166,35 +166,31 @@ async def _compute_tabular_analysis_from_sample(sample_json: Any) -> Dict[str, A
     rows = _extract_sample_rows(sample_json, columns)
     if not columns and not rows:
         return _build_tabular_analysis_payload(None, [])
-    try:
-        from bff.services.funnel_client import FunnelClient
-
-        settings = get_settings()
-        async with FunnelClient() as funnel_client:
-            analysis = await funnel_client.analyze_dataset(
-                {
-                    "data": rows,
-                    "columns": columns,
-                    "sample_size": min(len(rows), 500) if rows else 0,
-                    "include_complex_types": True,
-                },
-                timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
-            )
-        analysis_payload = analysis if isinstance(analysis, dict) else None
-        inferred_schema = (analysis_payload or {}).get("columns") or []
-        return _build_tabular_analysis_payload(analysis_payload, inferred_schema)
-    except Exception as exc:
-        logger.warning("Tabular analysis failed: %s", exc)
-        from shared.services.pipeline.pipeline_funnel_fallback import build_tabular_analysis_fallback
-
-        fallback = build_tabular_analysis_fallback(
-            columns=columns,
-            rows=rows,
-            include_complex_types=True,
-            error=str(exc),
-            stage="bff",
-        )
-        return _build_tabular_analysis_payload(fallback, fallback.get("columns") or [])
+    # Palantir Foundry style: all columns default to xsd:string (inferSchema=False).
+    inferred_schema = [
+        {
+            "column_name": col,
+            "inferred_type": {
+                "type": "xsd:string",
+                "confidence": 1.0,
+                "reason": "Default string type (Foundry-style inferSchema=False)",
+            },
+            "total_count": len(rows) if rows else 0,
+            "non_empty_count": 0,
+            "sample_values": [],
+            "null_count": 0,
+            "unique_count": 0,
+            "null_ratio": 0.0,
+            "unique_ratio": 0.0,
+        }
+        for col in columns
+    ]
+    analysis_payload: Dict[str, Any] = {
+        "columns": inferred_schema,
+        "risk_summary": [],
+        "risk_policy": {"stage": "tabular_inference", "suggestion_only": True, "hard_gate": False},
+    }
+    return _build_tabular_analysis_payload(analysis_payload, inferred_schema)
 
 
 def _select_sample_row(

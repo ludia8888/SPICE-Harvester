@@ -135,20 +135,9 @@ async def upload_excel_dataset(
             columns = [str(col) for col in (preview.get("columns") or []) if str(col)]
             preview_rows = preview.get("sample_data") or []
             inferred_schema = preview.get("inferred_schema") or []
-            if columns and preview_rows:
-                try:
-                    analysis = await funnel_client.analyze_dataset(
-                        {
-                            "data": preview_rows,
-                            "columns": columns,
-                            "sample_size": min(len(preview_rows), 500),
-                            "include_complex_types": True,
-                        },
-                        timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
-                    )
-                    analysis_payload = analysis if isinstance(analysis, dict) else None
-                except Exception as exc:
-                    logger.warning("Excel type inference risk assessment failed: %s", exc)
+            # Palantir Foundry style: skip type inference at upload time.
+            # Type coercion happens at objectify/write time via coerce_value().
+            _ = columns  # columns are used below for schema_columns
 
         schema_columns = _build_schema_columns(columns, inferred_schema)
         schema_json = {"columns": schema_columns}

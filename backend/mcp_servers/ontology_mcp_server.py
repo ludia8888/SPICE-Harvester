@@ -883,27 +883,53 @@ class OntologyMCPServer:
         return {"status": "success", "message": f"Removed relationship '{predicate}'", "relationship_count": len(new_rels)}
 
     async def _tool_ontology_infer_schema_from_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Infer schema from sample data using FunnelClient."""
+        """Infer schema from sample data.
+
+        Palantir Foundry style: all columns default to xsd:string.
+        No type inference is performed at upload time.
+        """
         columns = _normalize_string_list(args.get("columns"))
         data = args.get("data")
-        class_name = _normalize_string(args.get("class_name"))
+        class_name = _normalize_string(args.get("class_name")) or "NewClass"
 
         if not columns or not isinstance(data, list):
             return _build_error_response("ontology_infer_schema_from_data", "columns and data are required")
 
         try:
-            from bff.services.funnel_client import FunnelClient
-            async with FunnelClient() as client:
-                result = await client.analyze_and_suggest_schema(
-                    data=data,
-                    columns=columns,
-                    class_name=class_name or None,
-                )
-                return {
-                    "status": "success",
-                    "analysis": result.get("analysis"),
-                    "schema_suggestion": result.get("schema_suggestion"),
+            # Foundry style: all columns are xsd:string by default.
+            # Type coercion happens at objectify/write time via coerce_value().
+            analysis_columns = [
+                {
+                    "column_name": col,
+                    "inferred_type": {
+                        "type": "xsd:string",
+                        "confidence": 1.0,
+                        "reason": "Default string type (Foundry-style inferSchema=False)",
+                    },
+                    "total_count": len(data),
+                    "non_empty_count": sum(1 for row in data if len(row) > i and row[i] is not None and str(row[i]).strip()),
+                    "sample_values": [str(row[i]) for row in data[:5] if len(row) > i and row[i] is not None][:5],
                 }
+                for i, col in enumerate(columns)
+            ]
+            schema_properties = [
+                {
+                    "name": col.lower().replace(" ", "_").replace("-", "_"),
+                    "label": col,
+                    "type": "xsd:string",
+                    "required": False,
+                }
+                for col in columns
+            ]
+            return {
+                "status": "success",
+                "analysis": {"columns": analysis_columns},
+                "schema_suggestion": {
+                    "id": class_name,
+                    "label": class_name,
+                    "properties": schema_properties,
+                },
+            }
         except Exception as exc:
             logger.warning("Ontology tool failed: ontology_infer_schema_from_data err=%s", exc, exc_info=True)
             return _build_error_response("ontology_infer_schema_from_data", str(exc))

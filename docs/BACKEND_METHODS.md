@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-19T02:05:33+09:00
+> Generated: 2026-02-19T02:22:51+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -255,56 +255,55 @@
 
 ### `backend/bff/main.py`
 - **Functions**
-  - `async lifespan(app)` (line 634): Modern application lifecycle management
-  - `async get_oms_client()` (line 879): Get OMS client from BFF container
-  - `async get_label_mapper()` (line 890): Get label mapper from BFF container
-  - `async get_google_sheets_service()` (line 901): Get Google Sheets service from BFF container
-  - `async get_connector_registry()` (line 912): Get ConnectorRegistry from BFF container
-  - `async get_dataset_registry()` (line 923): Get DatasetRegistry from BFF container
-  - `async get_dataset_profile_registry()` (line 934): Get DatasetProfileRegistry from BFF container
-  - `async get_pipeline_registry()` (line 945): Get PipelineRegistry from BFF container
-  - `async get_pipeline_plan_registry()` (line 963): Get PipelinePlanRegistry from BFF container
-  - `async get_objectify_registry()` (line 974): no docstring
-  - `async get_agent_registry()` (line 979): no docstring
-  - `async get_agent_session_registry()` (line 985): no docstring
-  - `async get_agent_policy_registry()` (line 991): no docstring
-  - `async get_pipeline_executor()` (line 997): Get PipelineExecutor from BFF container
+  - `async lifespan(app)` (line 611): Modern application lifecycle management
+  - `async get_oms_client()` (line 856): Get OMS client from BFF container
+  - `async get_label_mapper()` (line 867): Get label mapper from BFF container
+  - `async get_google_sheets_service()` (line 878): Get Google Sheets service from BFF container
+  - `async get_connector_registry()` (line 889): Get ConnectorRegistry from BFF container
+  - `async get_dataset_registry()` (line 900): Get DatasetRegistry from BFF container
+  - `async get_dataset_profile_registry()` (line 911): Get DatasetProfileRegistry from BFF container
+  - `async get_pipeline_registry()` (line 922): Get PipelineRegistry from BFF container
+  - `async get_pipeline_plan_registry()` (line 940): Get PipelinePlanRegistry from BFF container
+  - `async get_objectify_registry()` (line 951): no docstring
+  - `async get_agent_registry()` (line 956): no docstring
+  - `async get_agent_session_registry()` (line 962): no docstring
+  - `async get_agent_policy_registry()` (line 968): no docstring
+  - `async get_pipeline_executor()` (line 974): Get PipelineExecutor from BFF container
 - **Classes**
-  - `BFFServiceContainer` (line 126): BFF-specific service container to manage BFF services
-    - `__init__(self, container, settings)` (line 134): no docstring
-    - `async initialize_bff_services(self)` (line 139): Initialize BFF-specific services
-    - `async _initialize_oms_client(self)` (line 196): Initialize OMS client with health check
-    - `async _initialize_label_mapper(self)` (line 217): Initialize label mapper
-    - `async _initialize_type_inference(self)` (line 223): Initialize type inference service
-    - `async _initialize_websocket_service(self)` (line 237): Initialize WebSocket notification service
-    - `async _initialize_rate_limiter(self)` (line 259): Initialize rate limiting service
-    - `async _initialize_connector_registry(self)` (line 263): Initialize Postgres-backed connector registry.
-    - `async _initialize_dataset_registry(self)` (line 275): Initialize Postgres-backed dataset registry.
-    - `async _initialize_dataset_profile_registry(self)` (line 286): Initialize Postgres-backed dataset profile registry.
-    - `async _initialize_pipeline_registry(self)` (line 297): Initialize Postgres-backed pipeline registry.
-    - `async _initialize_pipeline_plan_registry(self)` (line 308): Initialize Postgres-backed pipeline plan registry.
-    - `async _initialize_objectify_registry(self)` (line 319): Initialize Postgres-backed objectify registry.
-    - `async _initialize_agent_registry(self)` (line 330): Initialize Postgres-backed agent registry.
-    - `async _initialize_agent_session_registry(self)` (line 341): Initialize Postgres-backed agent session registry.
-    - `async _initialize_agent_policy_registry(self)` (line 352): Initialize Postgres-backed agent policy registry.
-    - `async _initialize_agent_tool_registry(self)` (line 363): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
-    - `async _initialize_pipeline_executor(self)` (line 382): Initialize pipeline executor (preview/build engine).
-    - `async _initialize_google_sheets_service(self)` (line 400): Initialize Google Sheets service (connector library)
-    - `async shutdown_bff_services(self)` (line 419): Shutdown BFF-specific services
-    - `get_oms_client(self)` (line 544): Get OMS client instance
-    - `get_label_mapper(self)` (line 550): Get label mapper instance
-    - `get_google_sheets_service(self)` (line 556): Get Google Sheets service instance
-    - `get_connector_registry(self)` (line 562): Get connector registry instance
-    - `get_dataset_registry(self)` (line 568): Get dataset registry instance
-    - `get_dataset_profile_registry(self)` (line 574): Get dataset profile registry instance
-    - `get_pipeline_registry(self)` (line 580): Get pipeline registry instance
-    - `get_pipeline_plan_registry(self)` (line 586): Get pipeline plan registry instance
-    - `get_objectify_registry(self)` (line 592): Get objectify registry instance
-    - `get_agent_registry(self)` (line 598): Get agent registry instance
-    - `get_agent_session_registry(self)` (line 604): Get agent session registry instance
-    - `get_agent_policy_registry(self)` (line 610): Get agent policy registry instance
-    - `get_agent_tool_registry(self)` (line 616): Get agent tool registry instance
-    - `get_pipeline_executor(self)` (line 622): Get pipeline executor instance
+  - `BFFServiceContainer` (line 125): BFF-specific service container to manage BFF services
+    - `__init__(self, container, settings)` (line 133): no docstring
+    - `async initialize_bff_services(self)` (line 138): Initialize BFF-specific services
+    - `async _initialize_oms_client(self)` (line 192): Initialize OMS client with health check
+    - `async _initialize_label_mapper(self)` (line 213): Initialize label mapper
+    - `async _initialize_websocket_service(self)` (line 223): Initialize WebSocket notification service
+    - `async _initialize_rate_limiter(self)` (line 245): Initialize rate limiting service
+    - `async _initialize_connector_registry(self)` (line 249): Initialize Postgres-backed connector registry.
+    - `async _initialize_dataset_registry(self)` (line 261): Initialize Postgres-backed dataset registry.
+    - `async _initialize_dataset_profile_registry(self)` (line 272): Initialize Postgres-backed dataset profile registry.
+    - `async _initialize_pipeline_registry(self)` (line 283): Initialize Postgres-backed pipeline registry.
+    - `async _initialize_pipeline_plan_registry(self)` (line 294): Initialize Postgres-backed pipeline plan registry.
+    - `async _initialize_objectify_registry(self)` (line 305): Initialize Postgres-backed objectify registry.
+    - `async _initialize_agent_registry(self)` (line 316): Initialize Postgres-backed agent registry.
+    - `async _initialize_agent_session_registry(self)` (line 327): Initialize Postgres-backed agent session registry.
+    - `async _initialize_agent_policy_registry(self)` (line 338): Initialize Postgres-backed agent policy registry.
+    - `async _initialize_agent_tool_registry(self)` (line 349): Initialize Postgres-backed agent tool registry (internal allowlist/policy).
+    - `async _initialize_pipeline_executor(self)` (line 368): Initialize pipeline executor (preview/build engine).
+    - `async _initialize_google_sheets_service(self)` (line 386): Initialize Google Sheets service (connector library)
+    - `async shutdown_bff_services(self)` (line 405): Shutdown BFF-specific services
+    - `get_oms_client(self)` (line 521): Get OMS client instance
+    - `get_label_mapper(self)` (line 527): Get label mapper instance
+    - `get_google_sheets_service(self)` (line 533): Get Google Sheets service instance
+    - `get_connector_registry(self)` (line 539): Get connector registry instance
+    - `get_dataset_registry(self)` (line 545): Get dataset registry instance
+    - `get_dataset_profile_registry(self)` (line 551): Get dataset profile registry instance
+    - `get_pipeline_registry(self)` (line 557): Get pipeline registry instance
+    - `get_pipeline_plan_registry(self)` (line 563): Get pipeline plan registry instance
+    - `get_objectify_registry(self)` (line 569): Get objectify registry instance
+    - `get_agent_registry(self)` (line 575): Get agent registry instance
+    - `get_agent_session_registry(self)` (line 581): Get agent session registry instance
+    - `get_agent_policy_registry(self)` (line 587): Get agent policy registry instance
+    - `get_agent_tool_registry(self)` (line 593): Get agent tool registry instance
+    - `get_pipeline_executor(self)` (line 599): Get pipeline executor instance
 
 ### `backend/bff/middleware/__init__.py`
 
@@ -1027,7 +1026,7 @@
   - `_extract_sample_columns(sample_json)` (line 103): no docstring
   - `_extract_sample_rows(sample_json, columns)` (line 134): no docstring
   - `async _compute_tabular_analysis_from_sample(sample_json)` (line 164): no docstring
-  - `_select_sample_row(sample_json, filename, file_index)` (line 200): no docstring
+  - `_select_sample_row(sample_json, filename, file_index)` (line 196): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_ops_ingest.py`
 - **Functions**
@@ -1507,40 +1506,19 @@
     - `_build_internal_client(self)` (line 30): no docstring
     - `_resolve_excel_timeout_seconds()` (line 42): no docstring
     - `async check_health(self)` (line 45): Funnel 서비스 상태 확인
-    - `async analyze_dataset(self, request_data, timeout_seconds)` (line 62): 데이터셋 타입 분석
-    - `async suggest_schema(self, analysis_results, class_name)` (line 89): 분석 결과를 기반으로 OMS 스키마 제안
-    - `async preview_google_sheets(self, sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types)` (line 116): Google Sheets 데이터 미리보기와 타입 추론
-    - `async analyze_and_suggest_schema(self, data, columns, class_name, sample_size, include_complex_types)` (line 159): 데이터 분석과 스키마 제안을 한 번에 실행
-    - `async google_sheets_to_schema(self, sheet_url, worksheet_name, class_name, api_key, connection_id, table_id, table_bbox)` (line 199): Google Sheets에서 직접 스키마 생성
-    - `async google_sheets_to_structure_preview(self, sheet_url, worksheet_name, api_key, connection_id, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 291): Google Sheets URL → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async analyze_google_sheets_structure(self, sheet_url, worksheet_name, api_key, connection_id, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 335): Analyze sheet structure via Funnel (Google Sheets URL → grid/merged_cells → structure analysis).
-    - `async excel_to_structure_preview(self, xlsx_bytes, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 371): Excel bytes → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async excel_to_structure_preview_stream(self, fileobj, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 412): Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async analyze_excel_structure(self, xlsx_bytes, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 449): Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
-    - `async analyze_excel_structure_stream(self, fileobj, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 494): Analyze sheet structure via Funnel (streaming Excel upload).
-    - `_select_primary_table(structure)` (line 576): Choose a single "primary" table for schema suggestion.
-    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 610): Select a table from structure analysis output.
-    - `_normalize_bbox_dict(bbox)` (line 658): no docstring
-    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 669): no docstring
-    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 722): no docstring
-    - `async excel_to_schema(self, xlsx_bytes, filename, sheet_name, class_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 768): Excel 업로드에서 직접 스키마 생성 (구조 분석 기반).
-    - `async __aenter__(self)` (line 827): no docstring
-    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 830): no docstring
-
-### `backend/bff/services/funnel_type_inference_adapter.py`
-- **Classes**
-  - `InProcessTypeInferenceAdapter` (line 15): In-process Funnel 런타임을 TypeInferenceInterface로 어댑트한다.
-    - `__init__(self, funnel_client)` (line 18): no docstring
-    - `async infer_column_type(self, column_data, column_name, include_complex_types, context_columns, metadata)` (line 21): 단일 컬럼 데이터의 타입을 추론합니다.
-    - `async analyze_dataset(self, data, columns, sample_size, include_complex_types, metadata)` (line 67): 전체 데이터셋을 분석하여 모든 컬럼의 타입을 추론합니다.
-    - `async infer_type_with_confidence(self, values, check_complex)` (line 84): 값 리스트에서 타입을 추론하고 신뢰도를 반환합니다.
-    - `async infer_single_value_type(self, value, context)` (line 96): 단일 값의 타입을 추론합니다.
-    - `async _analyze_single_column(self, data, headers, include_complex_types)` (line 117): 단일 컬럼 분석을 위한 비동기 헬퍼 메서드
-    - `async _analyze_dataset_async(self, data, headers, include_complex_types, sample_size)` (line 130): 데이터셋 분석을 위한 비동기 헬퍼 메서드
-    - `_build_analysis_request(data, headers, include_complex_types, sample_size)` (line 148): no docstring
-    - `async _analyze_with_fallback(self, data, headers, include_complex_types, sample_size)` (line 162): no docstring
-    - `_convert_funnel_column_result(self, funnel_result)` (line 200): Funnel 서비스 응답을 Interface 형식으로 변환
-    - `async close(self)` (line 216): 클라이언트 연결 종료
+    - `async google_sheets_to_structure_preview(self, sheet_url, worksheet_name, api_key, connection_id, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 67): Google Sheets URL → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async analyze_google_sheets_structure(self, sheet_url, worksheet_name, api_key, connection_id, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 111): Analyze sheet structure via Funnel (Google Sheets URL → grid/merged_cells → structure analysis).
+    - `async excel_to_structure_preview(self, xlsx_bytes, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 147): Excel bytes → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async excel_to_structure_preview_stream(self, fileobj, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 188): Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async analyze_excel_structure(self, xlsx_bytes, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 225): Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
+    - `async analyze_excel_structure_stream(self, fileobj, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 270): Analyze sheet structure via Funnel (streaming Excel upload).
+    - `_select_primary_table(structure)` (line 352): Choose a single "primary" table for schema suggestion.
+    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 386): Select a table from structure analysis output.
+    - `_normalize_bbox_dict(bbox)` (line 434): no docstring
+    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 445): no docstring
+    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 498): no docstring
+    - `async __aenter__(self)` (line 548): no docstring
+    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 551): no docstring
 
 ### `backend/bff/services/governance_service.py`
 - **Functions**
@@ -1698,31 +1676,31 @@
 
 ### `backend/bff/services/link_types_mapping_service.py`
 - **Functions**
-  - `extract_schema_columns(schema)` (line 44): no docstring
-  - `extract_schema_types(schema)` (line 48): no docstring
-  - `compute_schema_hash(schema)` (line 52): no docstring
-  - `build_join_schema(source_key_column, target_key_column, source_key_type, target_key_type)` (line 56): no docstring
-  - `extract_ontology_properties(payload)` (line 71): no docstring
-  - `extract_ontology_relationships(payload)` (line 85): no docstring
-  - `normalize_spec_type(value)` (line 99): no docstring
-  - `normalize_policy(value, default)` (line 103): no docstring
-  - `normalize_pk_fields(value)` (line 110): no docstring
-  - `async resolve_object_type_contract(oms_client, db_name, class_id, branch)` (line 115): no docstring
-  - `async resolve_dataset_and_version(dataset_registry, dataset_id, dataset_version_id)` (line 136): no docstring
-  - `async ensure_join_dataset(dataset_registry, request, db_name, join_dataset_id, join_dataset_version_id, join_dataset_name, join_dataset_branch, auto_create, default_name, source_key_column, target_key_column, source_key_type, target_key_type)` (line 161): no docstring
-  - `resolve_property_type(prop_map, field)` (line 246): no docstring
-  - `_extract_pk_fields(contract, props)` (line 254): no docstring
-  - `async build_mapping_request(db_name, request, oms_client, dataset_registry, relationship_spec_id, link_type_id, source_class, target_class, predicate, cardinality, branch, source_props, target_props, source_contract, target_contract, spec_payload)` (line 589): no docstring
+  - `extract_schema_columns(schema)` (line 45): no docstring
+  - `extract_schema_types(schema)` (line 49): no docstring
+  - `compute_schema_hash(schema)` (line 53): no docstring
+  - `build_join_schema(source_key_column, target_key_column, source_key_type, target_key_type)` (line 57): no docstring
+  - `extract_ontology_properties(payload)` (line 72): no docstring
+  - `extract_ontology_relationships(payload)` (line 86): no docstring
+  - `normalize_spec_type(value)` (line 100): no docstring
+  - `normalize_policy(value, default)` (line 104): no docstring
+  - `normalize_pk_fields(value)` (line 111): no docstring
+  - `async resolve_object_type_contract(oms_client, db_name, class_id, branch)` (line 116): no docstring
+  - `async resolve_dataset_and_version(dataset_registry, dataset_id, dataset_version_id)` (line 137): no docstring
+  - `async ensure_join_dataset(dataset_registry, request, db_name, join_dataset_id, join_dataset_version_id, join_dataset_name, join_dataset_branch, auto_create, default_name, source_key_column, target_key_column, source_key_type, target_key_type)` (line 162): no docstring
+  - `resolve_property_type(prop_map, field)` (line 247): no docstring
+  - `_extract_pk_fields(contract, props)` (line 255): no docstring
+  - `async build_mapping_request(db_name, request, oms_client, dataset_registry, relationship_spec_id, link_type_id, source_class, target_class, predicate, cardinality, branch, source_props, target_props, source_contract, target_contract, spec_payload)` (line 590): no docstring
 - **Classes**
-  - `_MappingContext` (line 260): no docstring
-  - `_MappingResult` (line 279): no docstring
-  - `_ForeignKeyMappingStrategy` (line 286): no docstring
-    - `async build(self, ctx, fk_spec, source_pk_fields, target_pk_fields)` (line 287): no docstring
-  - `_JoinTableMappingStrategy` (line 409): no docstring
-    - `async build(self, ctx, join_spec, source_pk_fields, target_pk_fields, spec_type, relationship_kind, relationship_object_type)` (line 410): no docstring
-  - `_ObjectBackedMappingStrategy` (line 525): no docstring
-    - `__init__(self, join_strategy)` (line 526): no docstring
-    - `async build(self, ctx, object_backed_spec, source_pk_fields, target_pk_fields)` (line 529): no docstring
+  - `_MappingContext` (line 261): no docstring
+  - `_MappingResult` (line 280): no docstring
+  - `_ForeignKeyMappingStrategy` (line 287): no docstring
+    - `async build(self, ctx, fk_spec, source_pk_fields, target_pk_fields)` (line 288): no docstring
+  - `_JoinTableMappingStrategy` (line 410): no docstring
+    - `async build(self, ctx, join_spec, source_pk_fields, target_pk_fields, spec_type, relationship_kind, relationship_object_type)` (line 411): no docstring
+  - `_ObjectBackedMappingStrategy` (line 526): no docstring
+    - `__init__(self, join_strategy)` (line 527): no docstring
+    - `async build(self, ctx, object_backed_spec, source_pk_fields, target_pk_fields)` (line 530): no docstring
 
 ### `backend/bff/services/mapping_suggestion_service.py`
 - **Classes**
@@ -1797,20 +1775,18 @@
 
 ### `backend/bff/services/objectify_mapping_spec_service.py`
 - **Functions**
-  - `async create_mapping_spec(body, request, dataset_registry, objectify_registry, oms_client)` (line 45): Create an objectify mapping spec with full validation.
+  - `async create_mapping_spec(body, request, dataset_registry, objectify_registry, oms_client)` (line 42): Create an objectify mapping spec with full validation.
 
 ### `backend/bff/services/objectify_ops_service.py`
 - **Functions**
-  - `_match_output_name(output, name)` (line 33): no docstring
-  - `_compute_schema_hash_from_sample(sample_json)` (line 37): no docstring
-  - `_extract_schema_columns(schema)` (line 41): no docstring
-  - `_extract_schema_types(schema)` (line 45): no docstring
-  - `_normalize_mapping_pair(item)` (line 49): no docstring
-  - `_build_mapping_change_summary(previous_mappings, new_mappings)` (line 59): no docstring
-  - `_extract_ontology_fields(payload)` (line 112): no docstring
-  - `_resolve_import_type(raw_type)` (line 116): no docstring
-  - `_is_type_compatible(source_type, target_type)` (line 120): no docstring
-  - `_unwrap_data_payload(payload)` (line 124): no docstring
+  - `_match_output_name(output, name)` (line 21): no docstring
+  - `_compute_schema_hash_from_sample(sample_json)` (line 25): no docstring
+  - `_extract_schema_columns(schema)` (line 29): no docstring
+  - `_normalize_mapping_pair(item)` (line 33): no docstring
+  - `_build_mapping_change_summary(previous_mappings, new_mappings)` (line 43): no docstring
+  - `_extract_ontology_fields(payload)` (line 96): no docstring
+  - `_resolve_import_type(raw_type)` (line 100): no docstring
+  - `_unwrap_data_payload(payload)` (line 104): no docstring
 
 ### `backend/bff/services/objectify_run_service.py`
 - **Functions**
@@ -2475,10 +2451,6 @@
   - `_LinkedPaginationOMSClient` (line 658): no docstring
     - `async post(self, path, **kwargs)` (line 659): no docstring
 
-### `backend/bff/tests/test_funnel_client_runtime_mode.py`
-- **Functions**
-  - `async test_funnel_client_internal_mode_uses_inprocess_asgi()` (line 7): no docstring
-
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - **Classes**
   - `TestFunnelClientStructureSelection` (line 4): no docstring
@@ -2693,9 +2665,9 @@
   - `test_mapping_spec_primary_key_missing_is_rejected()` (line 337): no docstring
   - `test_mapping_spec_unsupported_type_is_rejected()` (line 358): no docstring
   - `test_mapping_spec_target_type_mismatch_is_rejected()` (line 384): no docstring
-  - `test_mapping_spec_source_type_incompatible_is_rejected()` (line 403): no docstring
-  - `test_mapping_spec_source_type_unsupported_is_rejected()` (line 433): no docstring
-  - `test_mapping_spec_change_summary_is_recorded()` (line 456): no docstring
+  - `test_mapping_spec_source_type_incompatible_now_succeeds()` (line 403): Foundry style: type compatibility is NOT checked at mapping spec creation.
+  - `test_mapping_spec_source_type_unsupported_now_succeeds()` (line 426): Foundry style: unsupported source types are NOT rejected at mapping spec creation.
+  - `test_mapping_spec_change_summary_is_recorded()` (line 449): no docstring
 - **Classes**
   - `_FakeDatasetRegistry` (line 12): no docstring
     - `__init__(self, dataset, latest_version, key_spec)` (line 13): no docstring
@@ -2899,16 +2871,16 @@
 
 ### `backend/bff/tests/test_pipeline_router_uploads.py`
 - **Functions**
-  - `_build_request(headers)` (line 359): no docstring
-  - `test_pipeline_helpers_normalize_inputs(monkeypatch)` (line 369): no docstring
-  - `async test_upload_csv_dataset_creates_version(monkeypatch)` (line 398): no docstring
-  - `async test_upload_csv_dataset_funnel_failure_uses_fallback(monkeypatch)` (line 444): no docstring
-  - `async test_upload_excel_dataset_commits_preview(monkeypatch)` (line 496): no docstring
-  - `async test_approve_dataset_schema_updates_dataset()` (line 544): no docstring
-  - `async test_get_ingest_request_includes_tabular_analysis(monkeypatch)` (line 582): no docstring
-  - `async test_get_ingest_request_tabular_analysis_failure_uses_fallback(monkeypatch)` (line 622): no docstring
-  - `async test_upload_media_dataset_stores_files(monkeypatch)` (line 668): no docstring
-  - `async test_maybe_enqueue_objectify_job()` (line 708): no docstring
+  - `_build_request(headers)` (line 347): no docstring
+  - `test_pipeline_helpers_normalize_inputs(monkeypatch)` (line 357): no docstring
+  - `async test_upload_csv_dataset_creates_version(monkeypatch)` (line 386): no docstring
+  - `async test_upload_csv_dataset_all_columns_string_type(monkeypatch)` (line 431): Foundry style: CSV upload produces all-string schema without FunnelClient.
+  - `async test_upload_excel_dataset_commits_preview(monkeypatch)` (line 477): no docstring
+  - `async test_approve_dataset_schema_updates_dataset()` (line 525): no docstring
+  - `async test_get_ingest_request_includes_tabular_analysis(monkeypatch)` (line 563): no docstring
+  - `async test_get_ingest_request_tabular_analysis_returns_string_columns(monkeypatch)` (line 600): Foundry style: tabular analysis returns all-string columns without FunnelClient.
+  - `async test_upload_media_dataset_stores_files(monkeypatch)` (line 638): no docstring
+  - `async test_maybe_enqueue_objectify_job()` (line 678): no docstring
 - **Classes**
   - `_FakeLakeFSStorage` (line 19): no docstring
     - `__init__(self)` (line 20): no docstring
@@ -2941,15 +2913,14 @@
     - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 265): no docstring
     - `async mark_ingest_failed(self, ingest_request_id, error)` (line 298): no docstring
     - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 303): no docstring
-  - `_FakeFunnelClient` (line 309): no docstring
-    - `async __aenter__(self)` (line 310): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 313): no docstring
-    - `async analyze_dataset(self, payload, timeout_seconds)` (line 316): no docstring
-    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 337): no docstring
-  - `_FailingFunnelClient` (line 348): no docstring
-    - `async __aenter__(self)` (line 349): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 352): no docstring
-    - `async analyze_dataset(self, payload, timeout_seconds)` (line 355): no docstring
+  - `_FakeFunnelClient` (line 309): Mock FunnelClient for Excel structure analysis tests.
+    - `async __aenter__(self)` (line 317): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 320): no docstring
+    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 323): no docstring
+  - `_FailingFunnelClient` (line 334): Mock FunnelClient that raises on any call.
+    - `async __aenter__(self)` (line 337): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 340): no docstring
+    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 343): no docstring
 
 ### `backend/bff/tests/test_query_foundry_adapter.py`
 - **Functions**
@@ -3285,57 +3256,24 @@
 
 ### `backend/funnel/main.py`
 - **Functions**
-  - `async lifespan(app)` (line 25): 애플리케이션 시작/종료 이벤트
-  - `async root()` (line 60): 루트 엔드포인트
-  - `async health_check()` (line 78): 서비스 상태 확인
+  - `async lifespan(app)` (line 26): Application lifecycle.
+  - `async root()` (line 60): Root endpoint.
+  - `async health_check()` (line 78): Service health check.
 
 ### `backend/funnel/routers/__init__.py`
 
 ### `backend/funnel/routers/type_inference_router.py`
 - **Functions**
-  - `async get_data_processor()` (line 35): 데이터 프로세서 의존성.
-  - `async analyze_dataset(request, processor)` (line 46): 데이터셋을 분석하여 각 컬럼의 타입을 추론합니다.
-  - `async analyze_sheet_structure(request)` (line 77): Raw sheet grid(엑셀/스프레드시트)의 구조를 분석합니다.
-  - `async analyze_excel_structure(file, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options_json)` (line 126): Excel(.xlsx/.xlsm) 파일을 업로드 받아 grid + merged_cells로 파싱한 뒤,
-  - `async analyze_google_sheets_structure(request, processor)` (line 240): Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
-  - `async upsert_structure_patch(patch)` (line 339): Store/update a structure-analysis patch for a given sheet_signature.
-  - `async get_structure_patch(sheet_signature)` (line 351): no docstring
-  - `async delete_structure_patch(sheet_signature)` (line 363): no docstring
-  - `async preview_google_sheets_with_inference(sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types, processor)` (line 369): Google Sheets 데이터를 미리보기하고 타입을 추론합니다.
-  - `async suggest_schema(analysis_results, class_name, processor)` (line 412): 분석 결과를 기반으로 OMS 스키마를 제안합니다.
-  - `async health_check()` (line 443): Funnel 서비스 상태 확인
+  - `async analyze_sheet_structure(request)` (line 34): Raw sheet grid(엑셀/스프레드시트)의 구조를 분석합니다.
+  - `async analyze_excel_structure(file, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options_json)` (line 83): Excel(.xlsx/.xlsm) 파일을 업로드 받아 grid + merged_cells로 파싱한 뒤,
+  - `async analyze_google_sheets_structure(request)` (line 197): Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
+  - `async upsert_structure_patch(patch)` (line 297): Store/update a structure-analysis patch for a given sheet_signature.
+  - `async get_structure_patch(sheet_signature)` (line 309): no docstring
+  - `async delete_structure_patch(sheet_signature)` (line 321): no docstring
+  - `async health_check()` (line 334): Funnel 서비스 상태 확인
+  - `async _resolve_optional_access_token(connection_id)` (line 339): Resolve OAuth access token for a Google Sheets connection (if configured).
 
 ### `backend/funnel/services/__init__.py`
-
-### `backend/funnel/services/data_processor.py`
-- **Functions**
-  - `_attach_risks_and_profiles(results, column_risks, column_profiles)` (line 352): no docstring
-  - `_copy_model(model, update)` (line 371): no docstring
-- **Classes**
-  - `FunnelDataProcessor` (line 25): 🔥 THINK ULTRA! 데이터 처리 파이프라인
-    - `__init__(self, connector_registry)` (line 35): no docstring
-    - `async initialize(self)` (line 41): no docstring
-    - `async close(self)` (line 49): no docstring
-    - `async _get_connector_registry(self)` (line 54): no docstring
-    - `async resolve_optional_access_token(self, connection_id)` (line 59): no docstring
-    - `_normalize_preview_response(preview)` (line 110): no docstring
-    - `async process_google_sheets_preview(self, sheet_url, worksheet_name, api_key, connection_id, infer_types, include_complex_types)` (line 127): Google Sheets 데이터를 처리하고 타입을 추론합니다.
-    - `async analyze_dataset(self, request)` (line 202): 데이터셋을 분석하고 타입을 추론합니다.
-    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 242): 분석 결과를 기반으로 스키마를 제안합니다.
-    - `_normalize_property_name(self, column_name)` (line 341): 컬럼 이름을 속성 이름으로 정규화
-    - `_generate_class_id(self, class_name)` (line 345): 클래스 ID 생성
-
-### `backend/funnel/services/risk_assessor.py`
-- **Functions**
-  - `assess_dataset_risks(data, columns, analysis_results)` (line 24): no docstring
-  - `_build_column_data_map(data, columns)` (line 78): no docstring
-  - `_append_name_collision_risks(columns, risks)` (line 89): no docstring
-  - `_assess_column_risks(column_name, result)` (line 112): no docstring
-  - `_build_column_profile(values, result)` (line 257): no docstring
-  - `_compute_length_stats(values)` (line 275): no docstring
-  - `_compute_numeric_stats(values, metadata)` (line 289): no docstring
-  - `_extract_format_stats(metadata)` (line 333): no docstring
-  - `_is_key_like(name)` (line 339): no docstring
 
 ### `backend/funnel/services/schema_utils.py`
 - **Functions**
@@ -3343,74 +3281,74 @@
 
 ### `backend/funnel/services/structure_analysis.py`
 - **Classes**
-  - `_CellInfo` (line 49): no docstring
-  - `FunnelStructureAnalyzer` (line 63): Structure analyzer for sheet-like 2D grids.
-    - `_is_blank(value)` (line 82): no docstring
-    - `_cache_get(cls, key)` (line 90): no docstring
-    - `_cache_set(cls, key, payload, ttl_seconds, max_entries)` (line 102): no docstring
-    - `_safe_json_dumps(value)` (line 134): no docstring
-    - `_hash_grid(cls, grid)` (line 142): no docstring
-    - `_hash_style_hints(cls, style_hints)` (line 157): no docstring
-    - `_hash_merges(cls, merged_cells)` (line 174): no docstring
-    - `_make_cache_key(cls, grid, merged_cells, style_hints, include_complex_types, max_tables, options)` (line 187): no docstring
-    - `_compute_sheet_signature(cls, grid, merged_cells, style_hints, opts)` (line 219): Compute a "sheet_signature" designed to be stable across repeated uploads of the same template.
-    - `_compute_coarse_strides(rows, cols, target_cells)` (line 312): Choose downsampling strides so that coarse_rows * coarse_cols ~= target_cells.
-    - `_downsample_grid(cls, grid, row_stride, col_stride)` (line 332): no docstring
-    - `_map_coarse_bbox_to_full(cls, coarse, row_stride, col_stride, rows, cols, margin_rows, margin_cols)` (line 353): no docstring
-    - `_score_cells_in_bbox(cls, grid, bbox, include_complex_types, style_hints)` (line 382): Score only cells inside a bbox (used by coarse-to-fine mode).
-    - `_analyze_coarse_to_fine(cls, grid, style_hints, include_complex_types, merged_cells, max_tables, opts)` (line 457): no docstring
-    - `analyze(cls, grid, include_complex_types, merged_cells, cell_style_hints, max_tables, options)` (line 576): no docstring
-    - `analyze_bbox(cls, grid, bbox, include_complex_types, merged_cells, cell_style_hints, options, table_id, override_mode, override_header_rows, override_header_cols)` (line 762): Analyze a single bbox (used for patch re-evaluation / UI corrections).
-    - `_detect_data_islands(cls, grid, cell_map, row_stats, max_tables, opts, style_hints)` (line 937): no docstring
-    - `_bbox_quality_score(cls, grid, bbox, cell_map)` (line 1053): no docstring
-    - `_split_bbox_by_row_separators(cls, grid, bbox, cell_map, opts, style_hints)` (line 1075): Split a bbox into multiple bboxes when internal separator rows exist.
-    - `_split_bbox_by_row_profile(cls, grid, bbox, opts)` (line 1203): Split hybrid blocks where top rows are narrow (key-value) and bottom rows are wide (table).
-    - `_expand_bbox_to_dense_region(cls, grid, bbox, cell_map, expand_threshold, max_header_scan)` (line 1253): Expand a bbox derived from "core" cells to cover adjacent string/header cells that
-    - `_analyze_island(cls, grid, cell_map, bbox, include_complex_types, table_id, opts, merged_cells)` (line 1339): no docstring
-    - `_detect_preamble_skip(cls, grid, bbox, cell_map, opts)` (line 1515): Detect leading "title/description" rows inside a detected bbox.
-    - `_rank_header_row_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1618): no docstring
-    - `_rank_header_col_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1808): no docstring
-    - `_score_property_mode(cls, sub, bbox, cell_map)` (line 1971): no docstring
-    - `_best_header_row_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2044): no docstring
-    - `_best_header_col_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2070): no docstring
-    - `_header_row_score(cls, sub, bbox, cell_map, header_rows)` (line 2096): no docstring
-    - `_header_col_score(cls, sub, bbox, cell_map, header_cols)` (line 2129): no docstring
-    - `_axis_type_consistency(cls, sequences, include_complex_types)` (line 2164): no docstring
-    - `_string_sequence_consistency(cls, values)` (line 2189): Estimate how "table-like" a string-only sequence is.
-    - `_flatten_merged_cells(cls, grid, merged_cells, include_complex_types, fill_boxes)` (line 2240): no docstring
-    - `_should_fill_merge(cls, value, mr, include_complex_types)` (line 2266): no docstring
-    - `_bboxes_intersect(a, b)` (line 2287): no docstring
-    - `_extract_key_values(cls, grid, cell_map, exclude_boxes, include_complex_types, opts)` (line 2300): no docstring
-    - `_looks_like_kv_label(cls, text)` (line 2422): no docstring
-    - `_looks_like_explicit_kv_label(cls, text)` (line 2436): Strict label detector used to avoid pairing label-to-label in KV extraction.
-    - `_looks_like_data_value_text(cls, text)` (line 2447): Heuristic: some strings are much more likely to be data values than headers/labels.
-    - `_find_nearest_label(cls, cell_map, row, col, radius)` (line 2464): no docstring
-    - `_extract_property_table_kv(cls, sub, bbox, cell_map)` (line 2501): no docstring
-    - `_pivot_transposed(cls, sub, header_cols)` (line 2540): no docstring
-    - `_build_table_column_provenance(cls, headers, bbox, header_rows)` (line 2576): no docstring
-    - `_build_transposed_column_provenance(cls, headers, bbox, header_cols, field_row_offsets)` (line 2601): no docstring
-    - `_extract_table(cls, sub, header_rows)` (line 2630): no docstring
-    - `_build_header_tree(cls, header_grid)` (line 2666): Build a hierarchical header tree from a multi-row header grid.
-    - `_collect_cell_evidence(cls, cell_map, bbox, limit)` (line 2721): Collect a small sample of "evidence" cells for explainability.
-    - `_infer_schema(cls, headers, rows, include_complex_types)` (line 2769): no docstring
-    - `_dedupe_headers(cls, headers)` (line 2788): no docstring
-    - `_normalize_grid(cls, grid)` (line 2804): no docstring
-    - `_normalize_style_hints(cls, style_hints, rows, cols)` (line 2809): no docstring
-    - `_score_cells(cls, grid, include_complex_types, style_hints)` (line 2828): no docstring
-    - `_infer_single_value_type(cls, text, include_complex_types)` (line 2899): no docstring
-    - `_cell_score(cls, text, inferred_type, row, non_empty_in_row)` (line 2906): no docstring
-    - `_is_label_like_text(cls, text)` (line 2936): no docstring
-    - `_is_header_like_text(cls, text)` (line 2950): no docstring
-    - `_connected_components(points)` (line 2961): no docstring
-    - `_bbox_for_points(points)` (line 2983): no docstring
-    - `_tighten_bbox(grid, bbox)` (line 2989): no docstring
-    - `_bbox_area(bbox)` (line 3011): no docstring
-    - `_count_non_empty_in_bbox(cls, grid, bbox)` (line 3015): no docstring
-    - `_slice_bbox(grid, bbox)` (line 3025): no docstring
-    - `_extract_columns_from_sub(rows)` (line 3029): no docstring
-    - `_extract_rows_from_sub(rows, start_col)` (line 3040): no docstring
-    - `_ensure_row_len(grid, row, length)` (line 3047): no docstring
-    - `_get_cell(grid, row, col)` (line 3054): no docstring
+  - `_CellInfo` (line 53): no docstring
+  - `FunnelStructureAnalyzer` (line 67): Structure analyzer for sheet-like 2D grids.
+    - `_is_blank(value)` (line 86): no docstring
+    - `_cache_get(cls, key)` (line 94): no docstring
+    - `_cache_set(cls, key, payload, ttl_seconds, max_entries)` (line 106): no docstring
+    - `_safe_json_dumps(value)` (line 138): no docstring
+    - `_hash_grid(cls, grid)` (line 146): no docstring
+    - `_hash_style_hints(cls, style_hints)` (line 161): no docstring
+    - `_hash_merges(cls, merged_cells)` (line 178): no docstring
+    - `_make_cache_key(cls, grid, merged_cells, style_hints, include_complex_types, max_tables, options)` (line 191): no docstring
+    - `_compute_sheet_signature(cls, grid, merged_cells, style_hints, opts)` (line 223): Compute a "sheet_signature" designed to be stable across repeated uploads of the same template.
+    - `_compute_coarse_strides(rows, cols, target_cells)` (line 316): Choose downsampling strides so that coarse_rows * coarse_cols ~= target_cells.
+    - `_downsample_grid(cls, grid, row_stride, col_stride)` (line 336): no docstring
+    - `_map_coarse_bbox_to_full(cls, coarse, row_stride, col_stride, rows, cols, margin_rows, margin_cols)` (line 357): no docstring
+    - `_score_cells_in_bbox(cls, grid, bbox, include_complex_types, style_hints)` (line 386): Score only cells inside a bbox (used by coarse-to-fine mode).
+    - `_analyze_coarse_to_fine(cls, grid, style_hints, include_complex_types, merged_cells, max_tables, opts)` (line 461): no docstring
+    - `analyze(cls, grid, include_complex_types, merged_cells, cell_style_hints, max_tables, options)` (line 580): no docstring
+    - `analyze_bbox(cls, grid, bbox, include_complex_types, merged_cells, cell_style_hints, options, table_id, override_mode, override_header_rows, override_header_cols)` (line 766): Analyze a single bbox (used for patch re-evaluation / UI corrections).
+    - `_detect_data_islands(cls, grid, cell_map, row_stats, max_tables, opts, style_hints)` (line 941): no docstring
+    - `_bbox_quality_score(cls, grid, bbox, cell_map)` (line 1057): no docstring
+    - `_split_bbox_by_row_separators(cls, grid, bbox, cell_map, opts, style_hints)` (line 1079): Split a bbox into multiple bboxes when internal separator rows exist.
+    - `_split_bbox_by_row_profile(cls, grid, bbox, opts)` (line 1207): Split hybrid blocks where top rows are narrow (key-value) and bottom rows are wide (table).
+    - `_expand_bbox_to_dense_region(cls, grid, bbox, cell_map, expand_threshold, max_header_scan)` (line 1257): Expand a bbox derived from "core" cells to cover adjacent string/header cells that
+    - `_analyze_island(cls, grid, cell_map, bbox, include_complex_types, table_id, opts, merged_cells)` (line 1343): no docstring
+    - `_detect_preamble_skip(cls, grid, bbox, cell_map, opts)` (line 1519): Detect leading "title/description" rows inside a detected bbox.
+    - `_rank_header_row_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1622): no docstring
+    - `_rank_header_col_candidates(cls, sub, bbox, cell_map, max_k, include_complex_types, merged_cells, opts)` (line 1812): no docstring
+    - `_score_property_mode(cls, sub, bbox, cell_map)` (line 1975): no docstring
+    - `_best_header_row_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2048): no docstring
+    - `_best_header_col_candidate(cls, sub, bbox, cell_map, max_k, include_complex_types)` (line 2074): no docstring
+    - `_header_row_score(cls, sub, bbox, cell_map, header_rows)` (line 2100): no docstring
+    - `_header_col_score(cls, sub, bbox, cell_map, header_cols)` (line 2133): no docstring
+    - `_axis_type_consistency(cls, sequences, include_complex_types)` (line 2168): no docstring
+    - `_string_sequence_consistency(cls, values)` (line 2193): Estimate how "table-like" a string-only sequence is.
+    - `_flatten_merged_cells(cls, grid, merged_cells, include_complex_types, fill_boxes)` (line 2244): no docstring
+    - `_should_fill_merge(cls, value, mr, include_complex_types)` (line 2270): no docstring
+    - `_bboxes_intersect(a, b)` (line 2291): no docstring
+    - `_extract_key_values(cls, grid, cell_map, exclude_boxes, include_complex_types, opts)` (line 2304): no docstring
+    - `_looks_like_kv_label(cls, text)` (line 2426): no docstring
+    - `_looks_like_explicit_kv_label(cls, text)` (line 2440): Strict label detector used to avoid pairing label-to-label in KV extraction.
+    - `_looks_like_data_value_text(cls, text)` (line 2451): Heuristic: some strings are much more likely to be data values than headers/labels.
+    - `_find_nearest_label(cls, cell_map, row, col, radius)` (line 2468): no docstring
+    - `_extract_property_table_kv(cls, sub, bbox, cell_map)` (line 2505): no docstring
+    - `_pivot_transposed(cls, sub, header_cols)` (line 2544): no docstring
+    - `_build_table_column_provenance(cls, headers, bbox, header_rows)` (line 2580): no docstring
+    - `_build_transposed_column_provenance(cls, headers, bbox, header_cols, field_row_offsets)` (line 2605): no docstring
+    - `_extract_table(cls, sub, header_rows)` (line 2634): no docstring
+    - `_build_header_tree(cls, header_grid)` (line 2670): Build a hierarchical header tree from a multi-row header grid.
+    - `_collect_cell_evidence(cls, cell_map, bbox, limit)` (line 2725): Collect a small sample of "evidence" cells for explainability.
+    - `_infer_schema(cls, headers, rows, include_complex_types)` (line 2773): no docstring
+    - `_dedupe_headers(cls, headers)` (line 2789): no docstring
+    - `_normalize_grid(cls, grid)` (line 2805): no docstring
+    - `_normalize_style_hints(cls, style_hints, rows, cols)` (line 2810): no docstring
+    - `_score_cells(cls, grid, include_complex_types, style_hints)` (line 2829): no docstring
+    - `_infer_single_value_type(cls, text, include_complex_types)` (line 2900): no docstring
+    - `_cell_score(cls, text, inferred_type, row, non_empty_in_row)` (line 2904): no docstring
+    - `_is_label_like_text(cls, text)` (line 2934): no docstring
+    - `_is_header_like_text(cls, text)` (line 2948): no docstring
+    - `_connected_components(points)` (line 2959): no docstring
+    - `_bbox_for_points(points)` (line 2981): no docstring
+    - `_tighten_bbox(grid, bbox)` (line 2987): no docstring
+    - `_bbox_area(bbox)` (line 3009): no docstring
+    - `_count_non_empty_in_bbox(cls, grid, bbox)` (line 3013): no docstring
+    - `_slice_bbox(grid, bbox)` (line 3023): no docstring
+    - `_extract_columns_from_sub(rows)` (line 3027): no docstring
+    - `_extract_rows_from_sub(rows, start_col)` (line 3038): no docstring
+    - `_ensure_row_len(grid, row, length)` (line 3045): no docstring
+    - `_get_cell(grid, row, col)` (line 3052): no docstring
 
 ### `backend/funnel/services/structure_patch.py`
 - **Functions**
@@ -3423,62 +3361,13 @@
   - `upsert_patch(patch)` (line 26): no docstring
   - `delete_patch(sheet_signature)` (line 31): no docstring
 
-### `backend/funnel/services/type_inference.py`
-- **Classes**
-  - `PatternBasedTypeDetector` (line 23): 🔥 THINK ULTRA! Pattern-Based Type Detection Service
-    - `infer_column_type(cls, column_data, column_name, include_complex_types, context_columns)` (line 97): 🔥 패턴 매칭과 통계 분석으로 컬럼 데이터를 분석하여 타입을 추론합니다.
-    - `_infer_type_advanced(cls, values, column_name, include_complex_types, context_columns, sample_size)` (line 169): 🔥 Pattern-Based Type Detection Engine
-    - `_get_column_name_hint_scores(cls, column_name)` (line 260): Return type -> hint strength (0.0~1.0) based on column name.
-    - `_extract_unit_from_values(cls, values)` (line 343): Best-effort unit extraction from sample values.
-    - `_infer_semantic_label_and_unit(cls, values, column_name, inferred)` (line 384): Derive a semantic label (meaning) + unit from type + hints.
-    - `_min_confidence_for_type(cls, type_id, thresholds, name_hints)` (line 475): Minimum acceptance confidence for a type (name hints can lower it).
-    - `_type_priority(cls, type_id)` (line 501): Tie-break priority (lower is preferred).
-    - `_select_best_candidate(cls, candidates, thresholds, name_hints)` (line 523): no docstring
-    - `_summarize_candidates(cls, candidates, thresholds, name_hints)` (line 573): no docstring
-    - `_check_complex_types_enhanced(cls, values, thresholds, column_name, name_hints)` (line 604): Evaluate complex/specialized types via validators and heuristics.
-    - `_check_validator_type(cls, values, type_id, sample_limit, hint_reason, constraints)` (line 651): Check values against ComplexTypeValidator for a given type.
-    - `_derive_money_constraints_from_samples(cls, values)` (line 735): Derive money constraints (allowedCurrencies) from explicit tokens in samples.
-    - `_check_enum_enhanced(cls, values, thresholds, name_hints)` (line 766): Detect enum-like categorical strings and propose constraints.
-    - `_check_boolean(cls, values)` (line 806): Check if values are boolean
-    - `_check_integer(cls, values)` (line 830): Check if values are integers
-    - `_check_decimal(cls, values)` (line 867): Check if values are decimal numbers
-    - `_check_date(cls, values)` (line 914): Check if values are dates
-    - `_check_datetime(cls, values)` (line 954): Check if values are datetime
-    - `_check_column_name_hints(cls, column_name)` (line 996): Check column name for type hints
-    - `_calculate_adaptive_thresholds(cls, values, sample_size)` (line 1072): 🔥 Adaptive Thresholds: tune acceptance based on sample size.
-    - `_analyze_context(cls, column_name, context_columns)` (line 1104): 🔥 Contextual Analysis: Analyze surrounding columns for type hints
-    - `_check_column_name_hints_enhanced(cls, column_name)` (line 1134): 🔥 Enhanced Column Name Hints with Multilingual Support
-    - `_check_boolean_enhanced(cls, values, thresholds)` (line 1181): 🔥 Enhanced Boolean Detection with Fuzzy Matching
-    - `_check_integer_enhanced(cls, values, thresholds)` (line 1213): 🔥 Enhanced Integer Detection with Statistical Analysis
-    - `_check_decimal_enhanced(cls, values, thresholds)` (line 1296): 🔥 Enhanced Decimal Detection with Distribution Analysis
-    - `_check_date_enhanced(cls, values, thresholds)` (line 1418): 🔥 Enhanced Date Detection with strict parsing and ambiguity handling.
-    - `_check_datetime_enhanced(cls, values, thresholds)` (line 1566): 🔥 Enhanced DateTime Detection with Advanced Parsing
-    - `analyze_dataset(cls, data, columns, sample_size, include_complex_types)` (line 1636): 전체 데이터셋을 분석하여 각 컬럼의 타입을 추론합니다.
-    - `_check_phone_enhanced(cls, values, thresholds, column_name)` (line 1703): 🔥 Enhanced Phone Number Detection with Global Patterns
-
-### `backend/funnel/services/type_inference_adapter.py`
-- **Classes**
-  - `FunnelTypeInferenceAdapter` (line 13): Adapter that wraps FunnelTypeInferenceService to implement TypeInferenceInterface.
-    - `__init__(self)` (line 21): no docstring
-    - `async infer_column_type(self, column_data, column_name, include_complex_types, context_columns, metadata)` (line 28): Analyze a column of data and infer its type.
-    - `async analyze_dataset(self, data, columns, sample_size, include_complex_types, metadata)` (line 47): Analyze an entire dataset and infer types for all columns.
-
-### `backend/funnel/services/type_inference_runtime.py`
+### `backend/funnel/services/structure_type_hints.py`
 - **Functions**
-  - `get_funnel_type_inference_service()` (line 61): Factory for Funnel production type inference service.
-- **Classes**
-  - `FunnelProductionTypeInferenceService` (line 18): Production type inference backed by Funnel pattern detectors.
-    - `async infer_column_type(self, column_data, column_name, include_complex_types, context_columns, metadata)` (line 21): no docstring
-    - `async analyze_dataset(self, data, columns, sample_size, include_complex_types, metadata)` (line 40): no docstring
+  - `infer_single_value_type(text, include_complex_types)` (line 30): Return a rough XSD type hint for a single cell value.
+  - `infer_column_type_hint(values, column_name, include_complex_types)` (line 49): Lightweight column analysis that mimics the old FunnelTypeInferenceService API.
+  - `infer_columns_for_table(headers, rows, include_complex_types)` (line 95): Foundry-style: all columns default to xsd:string.
 
 ### `backend/funnel/tests/__init__.py`
-
-### `backend/funnel/tests/test_data_processor.py`
-- **Functions**
-  - `async test_data_processor_analyze_dataset_metadata()` (line 11): no docstring
-  - `test_generate_schema_suggestion_handles_confidence()` (line 26): no docstring
-  - `async test_process_google_sheets_preview_success(monkeypatch)` (line 60): no docstring
-  - `async test_process_google_sheets_preview_failure(monkeypatch)` (line 95): no docstring
 
 ### `backend/funnel/tests/test_funnel_main.py`
 - **Functions**
@@ -3489,11 +3378,6 @@
     - `__init__(self)` (line 9): no docstring
     - `async initialize(self)` (line 13): no docstring
     - `async close(self)` (line 16): no docstring
-
-### `backend/funnel/tests/test_risk_assessor.py`
-- **Functions**
-  - `test_assess_dataset_risks_name_collision()` (line 7): no docstring
-  - `test_assess_dataset_risks_low_confidence_and_nulls()` (line 44): no docstring
 
 ### `backend/funnel/tests/test_sheet_grid_parser.py`
 - **Classes**
@@ -3517,67 +3401,6 @@
     - `test_text_only_table_detection(self)` (line 162): 숫자/날짜가 거의 없는 텍스트 표도 데이터 섬으로 잡혀야 함
     - `test_text_only_table_detected_even_when_typed_cells_exist_elsewhere(self)` (line 178): 타입이 강한 셀이 다른 곳에 있어도, 텍스트-only 표를 놓치지 않아야 함
     - `test_multi_header_table(self)` (line 196): 2단 헤더(그룹 헤더 + 필드명) 합성 지원
-
-### `backend/funnel/tests/test_type_inference.py`
-- **Functions**
-  - `test_parametrized_type_detection(test_input, expected_type)` (line 396): 파라미터화된 타입 감지 테스트
-- **Classes**
-  - `TestTypeInference` (line 14): 타입 추론 테스트
-    - `test_integer_detection(self)` (line 17): 정수 타입 감지 테스트
-    - `test_decimal_detection(self)` (line 32): 소수 타입 감지 테스트
-    - `test_boolean_detection(self)` (line 48): 불리언 타입 감지 테스트
-    - `test_date_detection_iso_format(self)` (line 59): ISO 날짜 형식 감지 테스트
-    - `test_date_detection_us_format(self)` (line 70): 미국식 날짜 형식 감지 테스트
-    - `test_date_detection_korean_format(self)` (line 80): 한국식 날짜 형식 감지 테스트
-    - `test_datetime_detection(self)` (line 90): 날짜시간 타입 감지 테스트
-    - `test_mixed_data_string_fallback(self)` (line 100): 혼합 데이터 - 문자열로 폴백
-    - `test_null_handling(self)` (line 110): Null 값 처리 테스트
-    - `test_column_name_hint_email(self)` (line 122): 컬럼 이름 힌트 - 이메일
-    - `test_column_name_hint_phone(self)` (line 136): 컬럼 이름 힌트 - 전화번호
-    - `test_dataset_analysis(self)` (line 149): 전체 데이터셋 분석 테스트
-    - `test_large_dataset_sampling(self)` (line 178): 대용량 데이터셋 샘플링 테스트
-    - `test_empty_dataset(self)` (line 193): 빈 데이터셋 처리
-    - `test_confidence_scores(self)` (line 207): 신뢰도 점수 테스트
-    - `test_decimal_detection_european_format(self)` (line 219): 유럽식 숫자 형식(1.234,56) 감지 테스트
-    - `test_money_detection_with_symbols(self)` (line 231): 통화 기호 기반 money 타입 감지 테스트
-    - `test_semantic_label_qty_from_column_name(self)` (line 247): 의미 라벨(QTY) - 컬럼명 힌트 기반
-    - `test_money_detection_with_asian_currency_formats(self)` (line 258): 아시아권 통화 표기(¥/RMB/원) 기반 money 타입 감지 테스트
-    - `test_enum_detection_and_constraints(self)` (line 276): 열거형(enum) 후보 감지 및 제약조건 제안 테스트
-    - `test_uuid_detection(self)` (line 291): UUID 타입 감지 테스트
-    - `test_ip_detection(self)` (line 306): IP 주소 타입 감지 테스트
-    - `test_uri_detection(self)` (line 317): URI/URL 타입 감지 테스트
-    - `test_json_array_object_detection(self)` (line 332): JSON array/object 타입 감지 테스트
-    - `test_coordinate_detection(self)` (line 349): 좌표(coordinate) 타입 감지 테스트
-    - `test_phone_suggested_region(self)` (line 360): 전화번호 기본 지역 제안(defaultRegion) 테스트
-    - `test_ambiguous_date_detection_sets_metadata(self)` (line 374): 모호한 날짜(DD/MM vs MM/DD) 감지 시 메타데이터/신뢰도 페널티 테스트
-
-### `backend/funnel/tests/test_type_inference_adapter.py`
-- **Functions**
-  - `async test_infer_column_type_respects_metadata_override()` (line 10): no docstring
-  - `async test_analyze_dataset_uses_metadata_sample_size()` (line 27): no docstring
-  - `async test_infer_single_value_type_returns_type()` (line 44): no docstring
-
-### `backend/funnel/tests/test_type_inference_router.py`
-- **Functions**
-  - `async test_analyze_dataset_success_and_error()` (line 71): no docstring
-  - `async test_analyze_sheet_structure_applies_patch(monkeypatch)` (line 81): no docstring
-  - `async test_analyze_excel_structure_happy_path(monkeypatch)` (line 108): no docstring
-  - `async test_analyze_excel_structure_errors()` (line 131): no docstring
-  - `async test_analyze_google_sheets_structure(monkeypatch)` (line 142): no docstring
-  - `async test_structure_patch_endpoints(monkeypatch)` (line 182): no docstring
-  - `async test_preview_and_suggest_schema()` (line 202): no docstring
-  - `async test_router_health_check()` (line 232): no docstring
-- **Classes**
-  - `_FakeProcessor` (line 23): no docstring
-    - `async analyze_dataset(self, request)` (line 24): no docstring
-    - `async process_google_sheets_preview(self, **kwargs)` (line 38): no docstring
-    - `async resolve_optional_access_token(self, connection_id)` (line 48): no docstring
-    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 52): no docstring
-  - `_FailingProcessor` (line 56): no docstring
-    - `async analyze_dataset(self, request)` (line 57): no docstring
-    - `async process_google_sheets_preview(self, **kwargs)` (line 60): no docstring
-    - `async resolve_optional_access_token(self, connection_id)` (line 63): no docstring
-    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 66): no docstring
 
 ## ingest_reconciler_worker
 
@@ -3693,7 +3516,7 @@
   - `_normalize_string_list(value)` (line 42): Normalize to a list of strings.
   - `_mask_observation(payload)` (line 55): Mask PII in tool observations.
   - `_build_error_response(tool_name, error, hint)` (line 60): Build a structured error response.
-  - `async main()` (line 1409): no docstring
+  - `async main()` (line 1435): no docstring
 - **Classes**
   - `OntologyMCPServer` (line 76): MCP server for ontology building tools.
     - `__init__(self)` (line 79): no docstring
@@ -3712,17 +3535,17 @@
     - `async _tool_ontology_add_relationship(self, args)` (line 783): Add a relationship to the ontology.
     - `async _tool_ontology_update_relationship(self, args)` (line 836): Update an existing relationship.
     - `async _tool_ontology_remove_relationship(self, args)` (line 867): Remove a relationship.
-    - `async _tool_ontology_infer_schema_from_data(self, args)` (line 885): Infer schema from sample data using FunnelClient.
-    - `async _tool_ontology_suggest_mappings(self, args)` (line 911): Suggest mappings between source schema and target ontology.
-    - `async _tool_ontology_validate(self, args)` (line 974): Validate the working ontology structure.
-    - `async _tool_ontology_check_relationships(self, args)` (line 1029): Check if relationship targets exist.
-    - `async _tool_ontology_check_circular_refs(self, args)` (line 1070): Check for circular references in parent class chain.
-    - `async _tool_ontology_list_classes(self, args)` (line 1117): List all ontology classes.
-    - `async _tool_ontology_get_class(self, args)` (line 1159): Get details of a specific ontology class.
-    - `async _tool_ontology_search_classes(self, args)` (line 1193): Search ontology classes by label or property names.
-    - `async _tool_ontology_create(self, args)` (line 1253): Create the ontology class in the database.
-    - `async _tool_ontology_update(self, args)` (line 1324): Update an existing ontology class.
-    - `async _tool_ontology_preview(self, args)` (line 1390): Preview the working ontology without saving.
+    - `async _tool_ontology_infer_schema_from_data(self, args)` (line 885): Infer schema from sample data.
+    - `async _tool_ontology_suggest_mappings(self, args)` (line 937): Suggest mappings between source schema and target ontology.
+    - `async _tool_ontology_validate(self, args)` (line 1000): Validate the working ontology structure.
+    - `async _tool_ontology_check_relationships(self, args)` (line 1055): Check if relationship targets exist.
+    - `async _tool_ontology_check_circular_refs(self, args)` (line 1096): Check for circular references in parent class chain.
+    - `async _tool_ontology_list_classes(self, args)` (line 1143): List all ontology classes.
+    - `async _tool_ontology_get_class(self, args)` (line 1185): Get details of a specific ontology class.
+    - `async _tool_ontology_search_classes(self, args)` (line 1219): Search ontology classes by label or property names.
+    - `async _tool_ontology_create(self, args)` (line 1279): Create the ontology class in the database.
+    - `async _tool_ontology_update(self, args)` (line 1350): Update an existing ontology class.
+    - `async _tool_ontology_preview(self, args)` (line 1416): Preview the working ontology without saving.
 
 ### `backend/mcp_servers/pipeline_mcp_errors.py`
 - **Functions**
@@ -5670,13 +5493,6 @@
   - `register_core_services(container)` (line 222): Register all core services with the container
   - `async health_check_core_services(container)` (line 246): Perform health check on all core services
 
-### `backend/shared/dependencies/type_inference.py`
-- **Functions**
-  - `configure_type_inference_service(service)` (line 14): Configure the type inference service implementation.
-  - `get_type_inference_service()` (line 28): Get the configured type inference service.
-  - `type_inference_dependency()` (line 49): FastAPI dependency function for type inference service.
-  - `reset_type_inference_service()` (line 63): Reset the type inference service (mainly for testing).
-
 ### `backend/shared/errors/__init__.py`
 
 ### `backend/shared/errors/enterprise_catalog.py`
@@ -5795,13 +5611,6 @@
   - `localize_free_text(text, target_lang, status_code, api_status)` (line 162): Best-effort localization for existing free-text messages.
 
 ### `backend/shared/interfaces/__init__.py`
-
-### `backend/shared/interfaces/type_inference.py`
-- **Classes**
-  - `TypeInferenceInterface` (line 15): Abstract interface for type inference services.
-    - `async infer_column_type(self, column_data, column_name, include_complex_types, context_columns, metadata)` (line 24): Analyze a single column and infer its type.
-    - `async analyze_dataset(self, data, columns, sample_size, include_complex_types, metadata)` (line 48): Analyze an entire dataset and infer types for all columns.
-    - `async infer_single_value_type(self, value, context)` (line 71): Infer the type of a single value.
 
 ### `backend/shared/middleware/__init__.py`
 
@@ -7660,19 +7469,6 @@
     - `_summarize_cast_stats(self, columns)` (line 751): no docstring
     - `_select_table(self, result, node_id)` (line 767): no docstring
 
-### `backend/shared/services/pipeline/pipeline_funnel_fallback.py`
-- **Functions**
-  - `_is_non_empty(value)` (line 45): no docstring
-  - `_sample_non_empty(values, max_samples)` (line 53): no docstring
-  - `_phone_ratio(values)` (line 65): no docstring
-  - `_email_ratio(values)` (line 78): no docstring
-  - `_bool_ratio(values)` (line 91): no docstring
-  - `_int_ratio(values)` (line 104): no docstring
-  - `_decimal_ratio(values)` (line 119): no docstring
-  - `_date_datetime_ratios(values)` (line 134): no docstring
-  - `infer_type_fallback(values, column_name, include_complex_types)` (line 171): Deterministic, dependency-free(ish) inference used when tabular runtime is unavailable.
-  - `build_tabular_analysis_fallback(columns, rows, include_complex_types, error, stage)` (line 283): Build a tabular-analysis-compatible payload from sample rows without calling runtime.
-
 ### `backend/shared/services/pipeline/pipeline_graph_utils.py`
 - **Functions**
   - `unique_node_id(base, existing, start_index)` (line 7): Return a node id that is unique within `existing`.
@@ -9287,10 +9083,6 @@
   - `compute_schema_hash_from_sample(sample_json)` (line 25): no docstring
   - `compute_schema_hash_from_payload(payload)` (line 34): no docstring
 
-### `backend/shared/utils/schema_type_compatibility.py`
-- **Functions**
-  - `is_type_compatible(source_type, target_type)` (line 21): no docstring
-
 ### `backend/shared/utils/spice_event_ids.py`
 - **Functions**
   - `spice_event_id(command_id, event_type, aggregate_id)` (line 6): Deterministic domain event id derived from a command id.
@@ -9670,6 +9462,14 @@
 
 ### `backend/tests/connectors/__init__.py`
 
+### `backend/tests/fixtures/__init__.py`
+
+### `backend/tests/fixtures/kaggle_data/__init__.py`
+
+### `backend/tests/fixtures/kaggle_data/download_kaggle_data.py`
+- **Functions**
+  - `main()` (line 25): no docstring
+
 ### `backend/tests/integration/test_pipeline_branch_lifecycle.py`
 - **Functions**
   - `async test_pipeline_branch_lifecycle(monkeypatch)` (line 12): no docstring
@@ -9893,6 +9693,28 @@
   - `_extract_tabular_types(payload)` (line 260): no docstring
   - `_build_transactions_xlsx_bytes()` (line 279): no docstring
   - `async test_financial_investigation_workflow_e2e()` (line 304): no docstring
+
+### `backend/tests/test_foundry_e2e_qa.py`
+- **Functions**
+  - `_safe(func)` (line 111): Decorator: catch assertion errors and record as bugs instead of failing.
+  - `async _wait_for_command(client, command_id, timeout)` (line 133): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, timeout, require_properties)` (line 156): Wait for ontology class to exist (and optionally have properties populated).
+  - `async _wait_for_es_doc(client, index_name, doc_id, timeout)` (line 184): no docstring
+  - `async _grant_db_role(db_name, principal_id)` (line 206): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec)` (line 238): Create or update an object type contract (pk_spec + backing source).
+  - `async phase1_data_ingestion(state, client)` (line 330): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
+  - `async phase2_pipeline_transforms(state, client)` (line 525): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
+  - `async phase3_ontology_creation(state, client)` (line 790): Create 5 Object Types + 3 Action Types.
+  - `async phase4_objectify(state, client)` (line 1065): Create mapping specs, run DAG objectify, verify ES indexing.
+  - `async phase5_search_and_query(state, client)` (line 1319): 12 search scenarios using Foundry v2 API + graph queries.
+  - `async _record_deployed_commit_qa(db_name, target_branch)` (line 1580): Record ontology deployment so actions can execute (required by OMS).
+  - `async phase6_actions(state, client)` (line 1605): Test simulate, apply, batch-apply actions with closed-loop ES verification.
+  - `async phase7_closed_loop(state, client)` (line 1768): Verify action effects are reflected in search results.
+  - `async phase8_live_data_cross_domain(state, client)` (line 1858): Test real-time API data: objectify + search + cross-domain pipeline.
+  - `async test_foundry_e2e_qa()` (line 2062): Full Foundry lifecycle QA with real Kaggle data + live APIs.
+- **Classes**
+  - `QAState` (line 73): Mutable state shared across all 8 phases.
+    - `__init__(self)` (line 75): no docstring
 
 ### `backend/tests/test_idempotency_chaos.py`
 - **Functions**
@@ -10576,10 +10398,6 @@
   - `test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac()` (line 554): no docstring
   - `test_bff_agent_tool_policy_enforces_action_type_and_ontology_abac()` (line 700): no docstring
   - `test_bff_agent_tool_idempotency_replays_without_reexecution()` (line 830): no docstring
-
-### `backend/tests/unit/models/test_type_inference_model_defaults.py`
-- **Functions**
-  - `test_type_mapping_request_default_target_system_is_foundry()` (line 6): no docstring
 
 ### `backend/tests/unit/monitoring/test_monitoring_configs.py`
 - **Functions**
@@ -11519,11 +11337,6 @@
     - `test_empty_schema(self)` (line 223): Empty schema should return no patterns
     - `test_patterns_sorted_by_confidence(self)` (line 232): Patterns should be sorted by confidence descending
 
-### `backend/tests/unit/services/test_funnel_data_processor.py`
-- **Functions**
-  - `async test_process_google_sheets_preview_uses_direct_google_sheets_service(monkeypatch)` (line 8): no docstring
-  - `async test_resolve_optional_access_token_reuses_registry_connection(monkeypatch)` (line 56): no docstring
-
 ### `backend/tests/unit/services/test_graph_federation_service_es.py`
 - **Functions**
   - `_make_es_service()` (line 13): no docstring
@@ -12247,15 +12060,6 @@
   - `test_policy_rejects_join_when_disallowed()` (line 38): no docstring
   - `test_policy_rejects_advanced_transform_when_disallowed()` (line 46): no docstring
   - `test_policy_rejects_report_only_scope()` (line 53): no docstring
-
-### `backend/tests/unit/services/test_pipeline_type_inference.py`
-- **Functions**
-  - `test_infer_xsd_type_with_confidence_integer()` (line 6): no docstring
-  - `test_infer_xsd_type_with_confidence_decimal()` (line 12): no docstring
-  - `test_infer_xsd_type_with_confidence_boolean()` (line 18): no docstring
-  - `test_infer_xsd_type_with_confidence_datetime()` (line 24): no docstring
-  - `test_infer_xsd_type_with_confidence_falls_back_to_string_for_mixed_values()` (line 36): no docstring
-  - `test_common_join_key_type_biases_to_string_on_mismatch()` (line 42): no docstring
 
 ### `backend/tests/unit/services/test_pipeline_udf_runtime.py`
 - **Functions**
@@ -13289,6 +13093,32 @@
   - `oms_auth_headers()` (line 45): no docstring
   - `build_smoke_user_jwt(subject, roles, tenant_id, org_id, email)` (line 58): Build a deterministic HS256 user JWT for integration tests.
   - `with_delegated_user(headers)` (line 93): no docstring
+
+### `backend/tests/utils/qa_helpers.py`
+- **Functions**
+  - `async fetch_open_meteo_csv()` (line 329): Fetch São Paulo hourly weather (past 7 days) → CSV bytes.
+  - `async fetch_frankfurter_csv()` (line 361): Fetch BRL exchange rates (2024 full year) → CSV bytes.
+  - `async fetch_usgs_earthquake_csv(min_magnitude, max_rows)` (line 385): Fetch USGS earthquakes (past month, mag >= 2.5) → CSV bytes.
+- **Classes**
+  - `BugRecord` (line 33): no docstring
+  - `BugTracker` (line 44): Collect bugs in real-time without failing the test.
+    - `__init__(self)` (line 47): no docstring
+    - `record(self, phase, step, endpoint, expected, actual, severity)` (line 52): no docstring
+    - `record_pass(self)` (line 74): no docstring
+    - `dump_json(self, path)` (line 77): no docstring
+    - `summary(self)` (line 93): no docstring
+  - `QAClient` (line 119): Async HTTP client for BFF/OMS/ES calls during QA.
+    - `__init__(self, bff_url, oms_url, es_url)` (line 122): no docstring
+    - `async __aenter__(self)` (line 163): no docstring
+    - `async __aexit__(self, *args)` (line 167): no docstring
+    - `client(self)` (line 172): no docstring
+    - `async create_db(self)` (line 178): no docstring
+    - `async grant_db_role(self)` (line 190): no docstring
+    - `async wait_for_command(self, command_id, timeout)` (line 225): no docstring
+    - `async upload_csv(self, name, csv_bytes, description)` (line 243): no docstring
+    - `async wait_for_ontology(self, class_id, timeout)` (line 267): no docstring
+    - `async wait_for_es_doc(self, index_name, doc_id, timeout)` (line 282): no docstring
+    - `async wait_for_es_overlay(self, index_name, doc_id, timeout)` (line 303): no docstring
 
 ## writeback_materializer_worker
 

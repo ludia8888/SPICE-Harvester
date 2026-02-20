@@ -37,7 +37,11 @@ from shared.models.structure_analysis import (
 )
 from shared.utils.blank_utils import is_blank_value
 
-from funnel.services.type_inference import FunnelTypeInferenceService
+from funnel.services.structure_type_hints import (
+    infer_column_type_hint as _infer_column_type_hint,
+    infer_columns_for_table as _infer_columns_for_table_impl,
+    infer_single_value_type as _infer_single_value_type_impl,
+)
 import logging
 
 
@@ -2169,7 +2173,7 @@ class FunnelStructureAnalyzer:
             values = [v for v in seq if v is not None and str(v).strip() != ""]
             if len(values) < 2:
                 continue
-            result = FunnelTypeInferenceService.infer_column_type(
+            result = _infer_column_type_hint(
                 values,
                 column_name=None,
                 include_complex_types=include_complex_types,
@@ -2777,12 +2781,9 @@ class FunnelStructureAnalyzer:
             for i, h in enumerate(headers):
                 if i < len(row):
                     cols[i].append(row[i])
-        return [
-            FunnelTypeInferenceService.infer_column_type(
-                col, column_name=headers[i], include_complex_types=include_complex_types
-            )
-            for i, col in enumerate(cols)
-        ]
+        return _infer_columns_for_table_impl(
+            headers, rows, include_complex_types=include_complex_types
+        )
 
     @classmethod
     def _dedupe_headers(cls, headers: List[str]) -> List[str]:
@@ -2897,10 +2898,7 @@ class FunnelStructureAnalyzer:
     @classmethod
     @lru_cache(maxsize=20000)
     def _infer_single_value_type(cls, text: str, include_complex_types: bool) -> str:
-        res = FunnelTypeInferenceService.infer_column_type(
-            [text], column_name=None, include_complex_types=include_complex_types
-        ).inferred_type
-        return res.type
+        return _infer_single_value_type_impl(text, include_complex_types)
 
     @classmethod
     def _cell_score(

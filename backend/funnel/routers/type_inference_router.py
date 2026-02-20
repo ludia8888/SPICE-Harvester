@@ -1,14 +1,17 @@
+"""Funnel Structure Analysis Router.
+
+Provides sheet structure analysis endpoints (Data Island detection, multi-table
+separation, orientation detection).
+
+NOTE: Legacy type inference endpoints (/analyze, /suggest-schema,
+/preview/google-sheets) have been removed. Palantir Foundry style: all columns
+default to xsd:string. Type coercion at objectify/write time via coerce_value().
 """
-🔥 THINK ULTRA! Funnel Type Inference Router
-타입 추론 및 스키마 제안 API 엔드포인트
-"""
 
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, File, UploadFile, status
 
-from data_connector.google_sheets.service import GoogleSheetsService
-from funnel.services.data_processor import FunnelDataProcessor
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -18,11 +21,6 @@ from shared.models.structure_analysis import (
     SheetStructureAnalysisRequest,
     SheetStructureAnalysisResponse,
 )
-from shared.models.type_inference import (
-    DatasetAnalysisRequest,
-    DatasetAnalysisResponse,
-    TabularPreviewResponse,
-)
 from shared.utils.app_logger import get_logger
 from funnel.services.structure_patch import apply_structure_patch
 from funnel.services.structure_patch_store import delete_patch, get_patch, upsert_patch
@@ -30,47 +28,6 @@ from funnel.services.structure_patch_store import delete_patch, get_patch, upser
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/funnel", tags=["funnel"])
-
-
-async def get_data_processor() -> AsyncIterator[FunnelDataProcessor]:
-    """데이터 프로세서 의존성."""
-    processor = FunnelDataProcessor()
-    await processor.initialize()
-    try:
-        yield processor
-    finally:
-        await processor.close()
-
-
-@router.post("/analyze", response_model=DatasetAnalysisResponse)
-async def analyze_dataset(
-    request: DatasetAnalysisRequest, processor: FunnelDataProcessor = Depends(get_data_processor)
-) -> DatasetAnalysisResponse:
-    """
-    데이터셋을 분석하여 각 컬럼의 타입을 추론합니다.
-
-    - 기본 타입 감지: STRING, INTEGER, DECIMAL, BOOLEAN, DATE
-    - 복합 타입 감지 (선택사항): EMAIL, PHONE, URL, MONEY 등
-    - 신뢰도 점수와 상세한 이유 제공
-    """
-    try:
-        logger.info(f"Analyzing dataset with {len(request.columns)} columns")
-
-        result = await processor.analyze_dataset(request)
-
-        logger.info(
-            f"Analysis completed. Detected types: {[col.inferred_type.type for col in result.columns]}"
-        )
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Dataset analysis failed: {str(e)}")
-        raise classified_http_exception(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Dataset analysis failed: {str(e)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        )
 
 
 @router.post("/structure/analyze", response_model=SheetStructureAnalysisResponse)
@@ -239,15 +196,16 @@ async def analyze_excel_structure(
 @router.post("/structure/analyze/google-sheets", response_model=SheetStructureAnalysisResponse)
 async def analyze_google_sheets_structure(
     request: GoogleSheetStructureAnalysisRequest,
-    processor: FunnelDataProcessor = Depends(get_data_processor),
 ) -> SheetStructureAnalysisResponse:
     """
     Google Sheets URL → direct connector fetch(values+metadata+merges) → grid/merged_cells → 구조 분석
     """
     import asyncio
 
+    from data_connector.google_sheets.service import GoogleSheetsService
+
     try:
-        access_token = await processor.resolve_optional_access_token(
+        access_token = await _resolve_optional_access_token(
             connection_id=request.connection_id,
         )
         google_sheets_service = GoogleSheetsService(api_key=request.api_key)
@@ -365,81 +323,72 @@ async def delete_structure_patch(sheet_signature: str) -> Dict[str, Any]:
     return {"deleted": bool(deleted), "sheet_signature": sheet_signature}
 
 
-@router.post("/preview/google-sheets", response_model=TabularPreviewResponse)
-async def preview_google_sheets_with_inference(
-    sheet_url: str,
-    worksheet_name: str = None,
-    api_key: str = None,
-    connection_id: Optional[str] = None,
-    infer_types: bool = True,
-    include_complex_types: bool = False,
-    processor: FunnelDataProcessor = Depends(get_data_processor),
-) -> TabularPreviewResponse:
-    """
-    Google Sheets 데이터를 미리보기하고 타입을 추론합니다.
-
-    - Google Sheets connector를 통해 데이터 수집
-    - 각 컬럼의 타입 자동 추론
-    - 스키마 제안을 위한 메타데이터 포함
-    """
-    try:
-        logger.info(f"Processing Google Sheets preview with type inference: {sheet_url}")
-
-        result = await processor.process_google_sheets_preview(
-            sheet_url=sheet_url,
-            worksheet_name=worksheet_name,
-            api_key=api_key,
-            connection_id=connection_id,
-            infer_types=infer_types,
-            include_complex_types=include_complex_types,
-        )
-
-        if result.inferred_schema:
-            logger.info(f"Type inference completed for {len(result.columns)} columns")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Google Sheets preview failed: {str(e)}")
-        raise classified_http_exception(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Google Sheets preview failed: {str(e)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        )
-
-
-@router.post("/suggest-schema")
-async def suggest_schema(
-    analysis_results: DatasetAnalysisResponse,
-    class_name: str = None,
-    processor: FunnelDataProcessor = Depends(get_data_processor),
-) -> Dict[str, Any]:
-    """
-    분석 결과를 기반으로 OMS 스키마를 제안합니다.
-
-    - 타입 추론 결과를 OMS 온톨로지 형식으로 변환
-    - 높은 신뢰도의 타입만 사용 (0.7 이상)
-    - 필수 필드, 제약조건 등 자동 감지
-    """
-    try:
-        logger.info(f"Generating schema suggestion for {len(analysis_results.columns)} columns")
-
-        schema = processor.generate_schema_suggestion(analysis_results.columns, class_name)
-
-        logger.info(f"Schema suggestion generated: {schema['id']}")
-
-        return schema
-
-    except Exception as e:
-        logger.error(f"Schema suggestion failed: {str(e)}")
-        raise classified_http_exception(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Schema suggestion failed: {str(e)}",
-            code=ErrorCode.INTERNAL_ERROR,
-        )
+# NOTE: Legacy endpoints removed:
+# - POST /analyze (type inference)
+# - POST /suggest-schema (schema suggestion)
+# - POST /preview/google-sheets (preview with type inference)
+# Palantir Foundry style: all columns default to xsd:string.
 
 
 @router.get("/health")
 async def health_check() -> Dict[str, str]:
     """Funnel 서비스 상태 확인"""
     return {"status": "healthy", "service": "funnel", "version": "0.1.0"}
+
+
+async def _resolve_optional_access_token(
+    *,
+    connection_id: Optional[str],
+) -> Optional[str]:
+    """Resolve OAuth access token for a Google Sheets connection (if configured)."""
+    resolved_connection_id = str(connection_id or "").strip()
+    if not resolved_connection_id:
+        return None
+
+    from shared.services.registries.connector_registry import ConnectorRegistry
+    from data_connector.google_sheets.oauth import GoogleOAuth2Client
+
+    connector_registry = ConnectorRegistry()
+    await connector_registry.initialize()
+    try:
+        source = await connector_registry.get_source(
+            source_type="google_sheets_connection",
+            source_id=resolved_connection_id,
+        )
+        if not source or not source.enabled:
+            raise ValueError("Connection not found")
+
+        config = dict(source.config_json or {})
+        token = str(config.get("access_token") or "").strip() or None
+        expires_at = config.get("expires_at")
+        refresh_token = config.get("refresh_token")
+        oauth_client = GoogleOAuth2Client()
+
+        if token and expires_at:
+            try:
+                expires_at_float = float(expires_at)
+            except (TypeError, ValueError):
+                expires_at_float = None
+            if expires_at_float and oauth_client.is_token_expired(expires_at_float):
+                token = None
+
+        if not token and refresh_token:
+            refreshed = await oauth_client.refresh_access_token(str(refresh_token))
+            config.update(
+                {
+                    "access_token": refreshed.get("access_token"),
+                    "expires_at": refreshed.get("expires_at"),
+                    "refresh_token": refreshed.get("refresh_token", refresh_token),
+                }
+            )
+            await connector_registry.upsert_source(
+                source_type=source.source_type,
+                source_id=source.source_id,
+                enabled=True,
+                config_json=config,
+            )
+            token = str(config.get("access_token") or "").strip() or None
+
+        return token
+    finally:
+        await connector_registry.close()

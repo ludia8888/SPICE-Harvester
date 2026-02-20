@@ -400,7 +400,9 @@ def test_mapping_spec_target_type_mismatch_is_rejected():
     assert detail["mismatches"][0]["target_field"] == "name"
 
 
-def test_mapping_spec_source_type_incompatible_is_rejected():
+def test_mapping_spec_source_type_incompatible_now_succeeds():
+    """Foundry style: type compatibility is NOT checked at mapping spec creation.
+    String → decimal mapping should succeed; type coercion at objectify/write time."""
     payload = _base_payload(
         [{"source_field": "amount", "target_field": "amount"}],
     )
@@ -409,28 +411,21 @@ def test_mapping_spec_source_type_incompatible_is_rejected():
         "relationships": [],
     }
 
+    # Use _CapturingObjectifyRegistry so create_mapping_spec doesn't raise
     res = _post_mapping_spec(
         payload,
         schema_columns=["amount"],
         schema_types={"amount": "string"},
         ontology_payload=ontology_payload,
+        objectify_registry=_CapturingObjectifyRegistry(active_spec=None),
     )
 
-    assert res.status_code == 400
-    detail = res.json()["detail"]
-    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
-    assert detail["error_code"] == "MAPPING_SPEC_TYPE_INCOMPATIBLE"
-    assert detail["mismatches"] == [
-        {
-            "source_field": "amount",
-            "source_type": "xsd:string",
-            "target_field": "amount",
-            "expected_type": "xsd:decimal",
-        }
-    ]
+    assert res.status_code in (200, 201)
 
 
-def test_mapping_spec_source_type_unsupported_is_rejected():
+def test_mapping_spec_source_type_unsupported_now_succeeds():
+    """Foundry style: unsupported source types are NOT rejected at mapping spec creation.
+    Type coercion happens at objectify/write time via coerce_value()."""
     payload = _base_payload(
         [{"source_field": "payload", "target_field": "payload"}],
     )
@@ -439,18 +434,16 @@ def test_mapping_spec_source_type_unsupported_is_rejected():
         "relationships": [],
     }
 
+    # Use _CapturingObjectifyRegistry so create_mapping_spec doesn't raise
     res = _post_mapping_spec(
         payload,
         schema_columns=["payload"],
         schema_types={"payload": "struct"},
         ontology_payload=ontology_payload,
+        objectify_registry=_CapturingObjectifyRegistry(active_spec=None),
     )
 
-    assert res.status_code == 400
-    detail = res.json()["detail"]
-    assert detail["code"] == "OBJECTIFY_MAPPING_ERROR"
-    assert detail["error_code"] == "MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED"
-    assert detail["sources"] == [{"source_field": "payload", "source_type": "struct"}]
+    assert res.status_code in (200, 201)
 
 
 def test_mapping_spec_change_summary_is_recorded():

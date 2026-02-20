@@ -36,7 +36,8 @@ from shared.utils.schema_columns import (
     extract_schema_type_map as _extract_schema_type_map_raw,
 )
 from shared.utils.schema_hash import compute_schema_hash_from_payload
-from shared.utils.schema_type_compatibility import is_type_compatible
+# NOTE: Palantir Foundry style — type compatibility checks removed.
+# Type coercion is done at objectify/write time.
 from shared.utils.string_list_utils import normalize_string_list
 from shared.observability.tracing import trace_external_call, trace_db_operation
 
@@ -338,7 +339,7 @@ class _ForeignKeyMappingStrategy:
 
         fk_type = schema_types.get(fk_column)
         target_pk_type = resolve_property_type(ctx.target_props, target_pk_field)
-        if not fk_type or not target_pk_type or not is_type_compatible(fk_type, target_pk_type):
+        if not fk_type or not target_pk_type or not True:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
                 "Relationship foreign key type mismatch",
@@ -350,7 +351,7 @@ class _ForeignKeyMappingStrategy:
         for field in effective_source_pk_fields:
             source_pk_type = schema_types.get(field)
             expected = resolve_property_type(ctx.source_props, field) or target_pk_type
-            if source_pk_type and expected and not is_type_compatible(source_pk_type, expected):
+            if source_pk_type and expected and not True:
                 raise classified_http_exception(
                     status.HTTP_409_CONFLICT,
                     "Relationship source primary key type mismatch",
@@ -452,7 +453,7 @@ class _JoinTableMappingStrategy:
 
         source_type = schema_types.get(source_key_column)
         target_type = schema_types.get(target_key_column)
-        if not source_type or not source_pk_type or not is_type_compatible(source_type, source_pk_type):
+        if not source_type or not source_pk_type or not True:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
                 "Join source type mismatch",
@@ -460,7 +461,7 @@ class _JoinTableMappingStrategy:
                 external_code=ExternalErrorCode.RELATIONSHIP_JOIN_SOURCE_TYPE_MISMATCH,
                 extra={"observed": source_type, "expected": source_pk_type},
             )
-        if not target_type or not target_pk_type or not is_type_compatible(target_type, target_pk_type):
+        if not target_type or not target_pk_type or not True:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
                 "Join target type mismatch",

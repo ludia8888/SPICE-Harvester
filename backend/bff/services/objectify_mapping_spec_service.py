@@ -14,13 +14,10 @@ from fastapi import HTTPException, Request, status
 
 from bff.routers.objectify_deps import _require_db_role
 from bff.services.objectify_ops_service import (
-    _ALLOWED_SOURCE_TYPES,
     _build_mapping_change_summary,
     _compute_schema_hash_from_sample,
     _extract_ontology_fields,
     _extract_schema_columns,
-    _extract_schema_types,
-    _is_type_compatible,
     _resolve_import_type,
     _unwrap_data_payload,
 )
@@ -168,9 +165,6 @@ async def create_mapping_spec(
                 "Dataset schema columns are required for mapping spec validation",
                 code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
             )
-        schema_types = _extract_schema_types(schema_version.sample_json if schema_version else dataset.schema_json)
-        if not schema_types:
-            schema_types = _extract_schema_types(dataset.schema_json)
         mappings = payload.get("mappings") or []
         if not isinstance(mappings, list) or not mappings:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "mappings is required", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
@@ -517,59 +511,10 @@ async def create_mapping_spec(
                 extra={"targets": sorted(set(unsupported_types))},
             )
 
-        missing_source_types: List[str] = []
-        unsupported_source_types: List[Dict[str, Any]] = []
-        incompatible_types: List[Dict[str, Any]] = []
-        for item in mappings:
-            if not isinstance(item, dict):
-                continue
-            source_field = str(item.get("source_field") or "").strip()
-            target_field = str(item.get("target_field") or "").strip()
-            if not source_field or not target_field:
-                continue
-            if target_field in rel_map:
-                continue
-            source_type = schema_types.get(source_field)
-            if not source_type:
-                missing_source_types.append(source_field)
-                continue
-            if source_type not in _ALLOWED_SOURCE_TYPES:
-                unsupported_source_types.append({"source_field": source_field, "source_type": source_type})
-                continue
-            expected_type = resolved_field_types.get(target_field)
-            if expected_type and not _is_type_compatible(source_type, expected_type):
-                incompatible_types.append(
-                    {
-                        "source_field": source_field,
-                        "source_type": source_type,
-                        "target_field": target_field,
-                        "expected_type": expected_type,
-                    }
-                )
-        if missing_source_types:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "Unknown source types in mapping spec",
-                code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=ExternalErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNKNOWN,
-                extra={"missing_sources": sorted(set(missing_source_types))},
-            )
-        if unsupported_source_types:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "Unsupported source types in mapping spec",
-                code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=ExternalErrorCode.MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED,
-                extra={"sources": unsupported_source_types},
-            )
-        if incompatible_types:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "Incompatible source and target types in mapping spec",
-                code=ErrorCode.OBJECTIFY_MAPPING_ERROR,
-                external_code=ExternalErrorCode.MAPPING_SPEC_TYPE_INCOMPATIBLE,
-                extra={"mismatches": incompatible_types},
-            )
+        # NOTE: Palantir Foundry style — no type compatibility blocking at mapping
+        # spec creation time.  Type coercion is done at objectify/write time via
+        # coerce_value() in sheet_import_service.py.  This avoids false-positive
+        # rejections (e.g. integer CSV column → string ontology property).
 
         if target_field_types:
             mismatches: List[Dict[str, Any]] = []

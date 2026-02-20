@@ -45,7 +45,8 @@ from .providers import (
     health_check_core_services
 )
 
-from .type_inference import configure_type_inference_service
+# NOTE: configure_type_inference_service removed (legacy type inference engine deleted).
+# Palantir Foundry style: all columns default to xsd:string.
 
 __all__ = [
     # Container
@@ -55,10 +56,10 @@ __all__ = [
     'shutdown_container',
     'container_lifespan',
     'get_settings_from_container',
-    
+
     # Providers
     'get_storage_service',
-    'get_redis_service', 
+    'get_redis_service',
     'get_elasticsearch_service',
     'get_settings_dependency',
     'StorageServiceDep',
@@ -67,7 +68,4 @@ __all__ = [
     'SettingsDep',
     'register_core_services',
     'health_check_core_services',
-    
-    # Type inference
-    'configure_type_inference_service'
 ]

@@ -88,36 +88,31 @@ async def upload_csv_dataset(
         if not columns:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No columns detected", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
-        inferred_schema: list[Dict[str, Any]] = []
-        analysis_payload: Optional[Dict[str, Any]] = None
-        try:
-            from bff.services.funnel_client import FunnelClient
-
-            settings = get_settings()
-            async with FunnelClient() as funnel_client:
-                analysis = await funnel_client.analyze_dataset(
-                    {
-                        "data": preview_rows,
-                        "columns": columns,
-                        "sample_size": min(len(preview_rows), 500),
-                        "include_complex_types": True,
-                    },
-                    timeout_seconds=float(settings.services.funnel_infer_timeout_seconds),
-                )
-            analysis_payload = analysis if isinstance(analysis, dict) else None
-            inferred_schema = (analysis_payload or {}).get("columns") or []
-        except Exception as exc:
-            logger.warning("CSV type inference failed: %s", exc)
-            from shared.services.pipeline.pipeline_funnel_fallback import build_tabular_analysis_fallback
-
-            analysis_payload = build_tabular_analysis_fallback(
-                columns=columns,
-                rows=preview_rows,
-                include_complex_types=True,
-                error=str(exc),
-                stage="bff",
-            )
-            inferred_schema = (analysis_payload or {}).get("columns") or []
+        # Palantir Foundry style: all columns default to xsd:string (inferSchema=False).
+        # Type coercion happens at objectify/write time via coerce_value().
+        inferred_schema: list[Dict[str, Any]] = [
+            {
+                "column_name": col,
+                "inferred_type": {
+                    "type": "xsd:string",
+                    "confidence": 1.0,
+                    "reason": "Default string type (Foundry-style inferSchema=False)",
+                },
+                "total_count": len(preview_rows),
+                "non_empty_count": 0,
+                "sample_values": [],
+                "null_count": 0,
+                "unique_count": 0,
+                "null_ratio": 0.0,
+                "unique_ratio": 0.0,
+            }
+            for col in columns
+        ]
+        analysis_payload: Optional[Dict[str, Any]] = {
+            "columns": inferred_schema,
+            "risk_summary": [],
+            "risk_policy": {"stage": "tabular_inference", "suggestion_only": True, "hard_gate": False},
+        }
 
         tabular_analysis = _build_tabular_analysis_payload(analysis_payload, inferred_schema)
         schema_columns = _build_schema_columns(columns, inferred_schema)
