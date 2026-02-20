@@ -39,7 +39,7 @@ services:
     volumes:
       - ./database/migrations:/migrations:ro
       - ./database/migrate/apply_migrations.sh:/apply_migrations.sh:ro
-    entrypoint: ["/bin/sh", "/apply_migrations.sh"]
+    entrypoint: ["sh", "-c", "cat /apply_migrations.sh | sh"]
     restart: "no"
     networks:
       - spice_network
