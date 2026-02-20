@@ -261,9 +261,12 @@ def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict
 def _foundry_valid_action_validation_payload_for_parameters(
     *,
     parameters: Dict[str, Any] | None,
+    action_log_id: Optional[str] = None,
+    writeback_status: Optional[str] = None,
+    side_effect_delivery: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     parameter_results = _default_action_parameter_results(parameters)
-    return {
+    payload: Dict[str, Any] = {
         "validation": {
             "result": "VALID",
             "submissionCriteria": [],
@@ -271,6 +274,14 @@ def _foundry_valid_action_validation_payload_for_parameters(
         },
         "parameters": parameter_results,
     }
+    if action_log_id:
+        payload["action_log_id"] = action_log_id
+        payload["auditLogId"] = action_log_id
+    if writeback_status:
+        payload["writebackStatus"] = writeback_status
+    if side_effect_delivery is not None:
+        payload["sideEffectDelivery"] = side_effect_delivery
+    return payload
 
 
 def _resolve_writeback_target(
@@ -983,9 +994,12 @@ async def apply_action_v2_oms(
                 include_effects=False,
             ),
         )
-        return _foundry_valid_action_validation_payload_for_parameters(parameters=body.parameters)
+        return _foundry_valid_action_validation_payload_for_parameters(
+            parameters=body.parameters,
+            writeback_status="not_submitted",
+        )
 
-    await submit_action_batch_async(
+    submit_response = await submit_action_batch_async(
         db_name=db_name,
         action_type_id=action_type_id,
         request=ActionSubmitBatchRequest(
@@ -997,10 +1011,18 @@ async def apply_action_v2_oms(
                 )
             ],
             base_branch=resolved_branch,
+            overlay_branch=resolved_branch,
         ),
         event_store=event_store,
     )
-    return _foundry_valid_action_validation_payload_for_parameters(parameters=body.parameters)
+    first_item = submit_response.items[0] if submit_response.items else None
+    action_log_id = str(first_item.action_log_id).strip() if first_item and first_item.action_log_id else None
+    return _foundry_valid_action_validation_payload_for_parameters(
+        parameters=body.parameters,
+        action_log_id=action_log_id,
+        writeback_status="submitted" if action_log_id else "missing",
+        side_effect_delivery={"status": "not_configured"},
+    )
 
 
 @foundry_router.post(

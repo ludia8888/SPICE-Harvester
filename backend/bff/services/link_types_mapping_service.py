@@ -253,7 +253,15 @@ def resolve_property_type(prop_map: Dict[str, Dict[str, Any]], field: str) -> Op
 
 
 def _extract_pk_fields(*, contract: Dict[str, Any], props: Dict[str, Dict[str, Any]]) -> List[str]:
-    pk = normalize_key_spec(contract.get("pk_spec") or {}, columns=list(props.keys()))
+    raw_pk_spec = contract.get("pk_spec") or {}
+    if not raw_pk_spec:
+        # Auto-derive pk_spec from properties[].primary_key / title_key flags
+        _props = contract.get("properties") or []
+        _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
+        _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
+        if _pk_cols or _tk_cols:
+            raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
+    pk = normalize_key_spec(raw_pk_spec, columns=list(props.keys()))
     return [str(v).strip() for v in pk.get("primary_key") or [] if str(v).strip()]
 
 

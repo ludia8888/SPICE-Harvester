@@ -359,11 +359,17 @@ class RedisService(AsyncClientPingMixin):
         self,
         key: str,
         value: Dict[str, Any],
-        ttl: Optional[int] = None
+        ttl: Optional[int] = None,
+        ex: Optional[int] = None,
     ) -> None:
-        """Set JSON value with optional TTL."""
-        if ttl:
-            await self.client.setex(key, ttl, json.dumps(value))
+        """Set JSON value with optional TTL.
+
+        `ex` is accepted as a compatibility alias for legacy call sites that
+        still pass redis-py style expiry kwargs.
+        """
+        resolved_ttl = ttl if ttl is not None else ex
+        if resolved_ttl:
+            await self.client.setex(key, resolved_ttl, json.dumps(value))
         else:
             await self.client.set(key, json.dumps(value))
             

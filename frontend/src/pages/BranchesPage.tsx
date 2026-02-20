@@ -53,6 +53,7 @@ export const BranchesPage = ({ dbName }: { dbName: string }) => {
   const renderName = (branch: BranchItem) => {
     const nameValue =
       (branch.name as string | undefined) ||
+      (branch.branchName as string | undefined) ||
       (branch.branch_name as string | undefined) ||
       (branch.id as string | undefined)
     return nameValue ?? 'unknown'

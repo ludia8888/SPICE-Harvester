@@ -13,6 +13,7 @@ import { SidebarRail } from './components/layout/SidebarRail'
 import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
 import { SettingsDialog } from './components/SettingsDialog'
 import { CommandTrackerDrawer } from './commands/CommandTrackerDrawer'
+import { useCommandTracker } from './commands/useCommandTracker'
 import { InspectorDrawer } from './components/layout/InspectorDrawer'
 import { AppRouter } from './app/AppRouter'
 import { useAppStore } from './store/useAppStore'
@@ -256,15 +257,6 @@ const getNavSections = (project: string | null, copy: Copy) => {
       ],
     },
     {
-      title: copy.sections.data,
-      items: [
-        { label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` },
-        { label: copy.nav.importSheets, path: `${base}/data/import/sheets`, match: `${base}/data/import` },
-        { label: copy.nav.importExcel, path: `${base}/data/import/excel`, match: `${base}/data/import` },
-        { label: copy.nav.schemaSuggestion, path: `${base}/data/schema-suggestion`, match: `${base}/data/schema-suggestion` },
-      ],
-    },
-    {
       title: copy.sections.explore,
       items: [
         { label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` },
@@ -298,7 +290,6 @@ const getRailItems = (
     items.push({ icon: 'git-branch', label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
     items.push({ icon: 'flow-branch', label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` })
-    items.push({ icon: 'grid', label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` })
     items.push({ icon: 'database', label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` })
     items.push({ icon: 'graph', label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` })
     items.push({ icon: 'search', label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` })
@@ -328,6 +319,8 @@ const AppShell = () => {
   const setSettingsOpen = useAppStore((state) => state.setSettingsOpen)
 
   const [commandOpen, setCommandOpen] = useState(false)
+
+  useCommandTracker()
 
   const language = context.language
   const copy = copyByLang[language]

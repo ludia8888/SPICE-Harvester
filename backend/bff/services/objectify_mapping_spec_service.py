@@ -270,7 +270,16 @@ async def create_mapping_spec(
                 external_code=ExternalErrorCode.OBJECT_TYPE_INACTIVE,
                 extra={"status": status_value},
             )
-        normalized_pk_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        # Resolve pk_spec: prefer explicit pk_spec, fallback to properties-level flags
+        raw_pk_spec = object_type_spec.get("pk_spec") or {}
+        if not raw_pk_spec:
+            # Auto-derive pk_spec from properties[].primary_key / title_key flags
+            _props = object_type_spec.get("properties") or []
+            _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
+            _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
+            if _pk_cols or _tk_cols:
+                raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
+        normalized_pk_spec = normalize_key_spec(raw_pk_spec, columns=list(prop_map.keys()))
         if not normalized_pk_spec.get("primary_key"):
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,

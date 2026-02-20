@@ -10,7 +10,12 @@ import {
   Intent,
   Text,
 } from '@blueprintjs/core'
-import { createDatabase, deleteDatabase, getDatabaseExpectedSeq, listDatabases } from '../api/bff'
+import {
+  createDatabaseCtx,
+  deleteDatabaseCtx,
+  getDatabaseExpectedSeq,
+  listDatabasesCtx,
+} from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
 import { DangerConfirmDialog } from '../components/DangerConfirmDialog'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -40,11 +45,15 @@ export const DatabasesPage = () => {
 
   const listQuery = useQuery({
     queryKey: qk.databases(requestContext.language),
-    queryFn: () => listDatabases(requestContext),
+    queryFn: () => listDatabasesCtx(requestContext),
   })
 
   const createMutation = useMutation({
-    mutationFn: () => createDatabase(requestContext, { name: name.trim(), description: description.trim() || undefined }),
+    mutationFn: () =>
+      createDatabaseCtx(requestContext, {
+        name: name.trim(),
+        description: description.trim() || undefined,
+      }),
     onSuccess: (result) => {
       const commandId = result.commandId
       if (commandId) {
@@ -69,7 +78,7 @@ export const DatabasesPage = () => {
   const deleteMutation = useMutation({
     mutationFn: async ({ dbName, reason }: { dbName: string; reason: string }) => {
       const expectedSeq = await getDatabaseExpectedSeq(requestContext, dbName)
-      return deleteDatabase(requestContext, dbName, expectedSeq, {
+      return deleteDatabaseCtx(requestContext, dbName, expectedSeq, {
         'X-Change-Reason': reason,
       })
     },

@@ -63,12 +63,130 @@ async def test_search_objects_v2_returns_foundry_shape(mock_es):
     assert body["data"][0]["status"] == "ACTIVE"
     assert body["data"][0]["__apiName"] == "Customer"
     assert body["data"][0]["__primaryKey"] == "cust_1"
+    assert body["data"][0]["properties"] == {"customer_id": "cust_1", "status": "ACTIVE"}
     assert "nickname" not in body["data"][0]
 
     search_call = mock_es.search.call_args
     search_query = search_call.kwargs["query"]
     must = search_query["bool"]["must"]
     assert {"term": {"class_id": "Customer"}} in must
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_retries_with_properties_when_data_query_misses(mock_es):
+    mock_es.search.side_effect = [
+        {
+            "total": 0,
+            "hits": [],
+            "aggregations": {},
+        },
+        {
+            "total": 1,
+            "hits": [
+                {
+                    "instance_id": "order-1",
+                    "class_id": "Order",
+                    "properties": [
+                        {"name": "order_id", "value": "order-1"},
+                        {"name": "order_status", "value": "PENDING"},
+                    ],
+                }
+            ],
+            "aggregations": {},
+        },
+    ]
+
+    payload = {
+        "where": {"type": "eq", "field": "order_id", "value": "order-1"},
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Order/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["totalCount"] == "1"
+    assert body["data"][0]["order_id"] == "order-1"
+    assert body["data"][0]["__primaryKey"] == "order-1"
+    assert mock_es.search.call_count == 2
+
+    fallback_call = mock_es.search.call_args_list[1]
+    fallback_must = fallback_call.kwargs["query"]["bool"]["must"]
+    assert {"term": {"class_id": "Order"}} in fallback_must
+    assert "nested" in fallback_must[1]
+    assert fallback_must[1]["nested"]["path"] == "properties"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_collapses_duplicate_overlay_rows(mock_es):
+    mock_es.search.return_value = {
+        "total": 2,
+        "hits": [
+            {
+                "instance_id": "order-1",
+                "class_id": "Order",
+                "lifecycle_id": "lc-0",
+                "updated_at": "2026-02-20T09:00:00+00:00",
+                "data": {"order_id": "order-1", "order_status": "PENDING"},
+            },
+            {
+                "instance_id": "order-1",
+                "class_id": "Order",
+                "lifecycle_id": "lc-0",
+                "event_sequence": 100,
+                "updated_at": "2026-02-20T09:00:10+00:00",
+                "patchset_commit_id": "c1",
+                "data": {"order_id": "order-1", "order_status": "ON_HOLD"},
+            },
+        ],
+        "aggregations": {},
+    }
+    payload = {"pageSize": 20}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Order/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["data"]) == 1
+    assert body["data"][0]["order_id"] == "order-1"
+    assert body["data"][0]["order_status"] == "ON_HOLD"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_hides_overlay_tombstoned_rows(mock_es):
+    mock_es.search.return_value = {
+        "total": 2,
+        "hits": [
+            {
+                "instance_id": "order-1",
+                "class_id": "Order",
+                "lifecycle_id": "lc-0",
+                "updated_at": "2026-02-20T09:00:00+00:00",
+                "data": {"order_id": "order-1", "order_status": "PENDING"},
+            },
+            {
+                "instance_id": "order-1",
+                "class_id": "Order",
+                "lifecycle_id": "lc-0",
+                "event_sequence": 101,
+                "updated_at": "2026-02-20T09:00:20+00:00",
+                "overlay_tombstone": True,
+                "patchset_commit_id": "c2",
+                "data": {"order_id": "order-1"},
+            },
+        ],
+        "aggregations": {},
+    }
+    payload = {"pageSize": 20}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Order/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"] == []
 
 
 @pytest.mark.asyncio
@@ -106,11 +224,48 @@ async def test_search_objects_v2_supports_select_and_order_by_pushdown(mock_es):
     assert body["data"][0]["__primaryKey"] == "cust_1"
     assert body["data"][0]["instance_id"] == "cust_1"
     assert body["data"][0]["class_id"] == "Customer"
+    assert body["data"][0]["properties"] == {"customer_id": "cust_1", "status": "ACTIVE"}
 
     search_call = mock_es.search.call_args
     sort = search_call.kwargs["sort"]
     assert sort[0] == {"data.customer_id": {"order": "desc"}}
     assert sort[-1] == {"instance_id": {"order": "asc"}}
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_preserves_existing_properties_object(mock_es):
+    mock_es.search.return_value = {
+        "total": 1,
+        "hits": [
+            {
+                "instance_id": "cust_1",
+                "class_id": "Customer",
+                "properties": {
+                    "customer_id": "cust_1",
+                    "status": "ACTIVE",
+                },
+                "data": {
+                    "customer_id": "cust_1",
+                    "status": "ACTIVE",
+                },
+            }
+        ],
+        "aggregations": {},
+    }
+    payload = {
+        "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
+        "pageSize": 10,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"][0]["properties"] == {
+        "customer_id": "cust_1",
+        "status": "ACTIVE",
+    }
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,8 @@ test('shows flow steps for branch, ontology, and mappings', async ({ page }) => 
 })
 
 test('renders sidebar rail actions', async ({ page }) => {
-  await expect(page.getByRole('button', { name: 'Ontology', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Mappings', exact: true })).toBeVisible()
+  const rail = page.locator('.sidebar-rail')
+  await expect(rail.getByRole('button', { name: 'Databases', exact: true })).toBeVisible()
+  await expect(rail.getByRole('button', { name: 'Tasks', exact: true })).toBeVisible()
+  await expect(rail.getByRole('button', { name: 'Admin', exact: true })).toBeVisible()
 })

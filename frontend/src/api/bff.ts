@@ -1674,334 +1674,7 @@ export type DetectedRelationships = {
   relationships: DetectedRelationship[]
 }
 
-// === Lineage API ===
-export const getLineageGraph = async (params: {
-  dbName: string
-  rootId: string
-  direction?: 'both' | 'upstream' | 'downstream'
-  maxDepth?: number
-  maxNodes?: number
-}) => {
-  const query = new URLSearchParams()
-  query.set('root_id', params.rootId)
-  if (params.direction) {
-    query.set('direction', params.direction)
-  }
-  if (params.maxDepth !== undefined) {
-    query.set('max_depth', String(params.maxDepth))
-  }
-  if (params.maxNodes !== undefined) {
-    query.set('max_nodes', String(params.maxNodes))
-  }
-  const encoded = encodeURIComponent(params.dbName)
-  const data = await requestApi<LineageGraphResponse>(
-    `/api/v1/lineage/${encoded}?${query.toString()}`,
-    {
-      headers: {
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-    },
-    '계보 정보를 불러오는데 실패했습니다',
-  )
-  return data
-}
-
-export const getLineageImpact = async (dbName: string, rootId: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<LineageImpactResponse>(
-    `/api/v1/lineage/${encoded}/impact?root_id=${encodeURIComponent(rootId)}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '영향 분석을 불러오는데 실패했습니다',
-  )
-  return data
-}
-
-// === Instance/Explorer API ===
-export const listOntologyClasses = async (dbName: string) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockOntologyClasses
-  }
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<{ classes: OntologyClass[] }>(
-    `/api/v1/ontology/${encoded}/classes`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '클래스 목록을 불러오는데 실패했습니다',
-  )
-  return data.classes ?? []
-}
-
-export const listInstances = async (
-  dbName: string,
-  classId: string,
-  params?: { search?: string; limit?: number; offset?: number },
-) => {
-  const query = new URLSearchParams()
-  if (params?.search) {
-    query.set('search', params.search)
-  }
-  if (params?.limit !== undefined) {
-    query.set('limit', String(params.limit))
-  }
-  if (params?.offset !== undefined) {
-    query.set('offset', String(params.offset))
-  }
-  const encoded = encodeURIComponent(dbName)
-  const classEncoded = encodeURIComponent(classId)
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances?${suffix}`
-    : `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances`
-  const data = await requestApi<InstanceListResponse>(
-    path,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '인스턴스 목록을 불러오는데 실패했습니다',
-  )
-  return data
-}
-
-export const getInstance = async (dbName: string, classId: string, instanceId: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const classEncoded = encodeURIComponent(classId)
-  const instanceEncoded = encodeURIComponent(instanceId)
-  const data = await requestApi<{ instance: Instance }>(
-    `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances/${instanceEncoded}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '인스턴스 정보를 불러오는데 실패했습니다',
-  )
-  return data.instance
-}
-
-export const getInstanceRelationships = async (
-  dbName: string,
-  classId: string,
-  instanceId: string,
-) => {
-  const encoded = encodeURIComponent(dbName)
-  const classEncoded = encodeURIComponent(classId)
-  const instanceEncoded = encodeURIComponent(instanceId)
-  const data = await requestApi<{ relationships: Relationship[] }>(
-    `/api/v1/ontology/${encoded}/classes/${classEncoded}/instances/${instanceEncoded}/relationships`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '관계 정보를 불러오는데 실패했습니다',
-  )
-  return data.relationships ?? []
-}
-
-// === Natural Language Query API ===
-export const naturalLanguageQuery = async (dbName: string, question: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<NLQueryResponse>(
-    `/api/v1/ai/nl-query/${encoded}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify({ question }),
-    },
-    '자연어 쿼리 실행에 실패했습니다',
-  )
-  return data
-}
-
-// === Action API ===
-export const listActionTypes = async (dbName: string) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockActionTypes
-  }
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<{ actionTypes: ActionType[] }>(
-    `/api/v1/ontology/${encoded}/action-types`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Action 목록을 불러오는데 실패했습니다',
-  )
-  return data.actionTypes ?? []
-}
-
-export const getActionType = async (dbName: string, actionTypeId: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const actionEncoded = encodeURIComponent(actionTypeId)
-  const data = await requestApi<{ actionType: ActionTypeDetail }>(
-    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Action 정보를 불러오는데 실패했습니다',
-  )
-  return data.actionType
-}
-
-export const simulateAction = async (
-  dbName: string,
-  actionTypeId: string,
-  params: Record<string, unknown>,
-) => {
-  const encoded = encodeURIComponent(dbName)
-  const actionEncoded = encodeURIComponent(actionTypeId)
-  const data = await requestApi<SimulationResult>(
-    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}/simulate`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify({ params }),
-    },
-    '시뮬레이션 실행에 실패했습니다',
-  )
-  return data
-}
-
-export const executeAction = async (
-  dbName: string,
-  actionTypeId: string,
-  params: Record<string, unknown>,
-) => {
-  const encoded = encodeURIComponent(dbName)
-  const actionEncoded = encodeURIComponent(actionTypeId)
-  const data = await requestApi<ExecutionResult>(
-    `/api/v1/ontology/${encoded}/action-types/${actionEncoded}/execute`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify({ params }),
-    },
-    'Action 실행에 실패했습니다',
-  )
-  return data
-}
-
-export const listActionLogs = async (dbName: string, params?: { limit?: number; offset?: number }) => {
-  const query = new URLSearchParams()
-  if (params?.limit !== undefined) {
-    query.set('limit', String(params.limit))
-  }
-  if (params?.offset !== undefined) {
-    query.set('offset', String(params.offset))
-  }
-  const encoded = encodeURIComponent(dbName)
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/ontology/${encoded}/action-logs?${suffix}`
-    : `/api/v1/ontology/${encoded}/action-logs`
-  const data = await requestApi<{ logs: ActionLog[] }>(
-    path,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Action 기록을 불러오는데 실패했습니다',
-  )
-  return data.logs ?? []
-}
-
-// === Link Type API ===
-export const listLinkTypes = async (dbName: string) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockLinkTypes
-  }
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<{ linkTypes: LinkType[] }>(
-    `/api/v1/ontology/${encoded}/link-types`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Link Type 목록을 불러오는데 실패했습니다',
-  )
-  return data.linkTypes ?? []
-}
-
-export const getLinkType = async (dbName: string, linkTypeId: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const linkEncoded = encodeURIComponent(linkTypeId)
-  const data = await requestApi<{ linkType: LinkTypeDetail }>(
-    `/api/v1/ontology/${encoded}/link-types/${linkEncoded}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Link Type 정보를 불러오는데 실패했습니다',
-  )
-  return data.linkType
-}
-
-// === Objectify API ===
-export const detectRelationships = async (dbName: string, datasetId: string) => {
-  const encoded = encodeURIComponent(dbName)
-  const datasetEncoded = encodeURIComponent(datasetId)
-  const data = await requestApi<DetectedRelationships>(
-    `/api/v1/ontology/${encoded}/datasets/${datasetEncoded}/detect-relationships`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    '관계 감지에 실패했습니다',
-  )
-  return data
-}
+// Removed legacy v1 ontology/explorer/action wrappers.
 
 // === UDF (User Defined Function) API ===
 export type UdfRecord = {
@@ -2129,6 +1802,8 @@ export type RequestContext = {
   adminToken: string
   adminActor?: string
 }
+
+const ENABLE_DATABASE_BRANCH_API = import.meta.env.VITE_ENABLE_DATABASE_BRANCH_API === 'true'
 
 type Bff2SearchParams = Record<string, string | number | boolean | null | undefined>
 
@@ -2266,6 +1941,40 @@ const bff2RequestRaw = async (
   }
 
   return response
+}
+
+let branchApiSupportCache: boolean | null = null
+
+const supportsDatabaseBranchApi = async (context: RequestContext): Promise<boolean> => {
+  if (branchApiSupportCache !== null) {
+    return branchApiSupportCache
+  }
+
+  try {
+    const openApiUrl =
+      typeof window !== 'undefined'
+        ? new URL('/openapi.json', window.location.origin).toString()
+        : bff2BuildApiUrl('/openapi.json', context.language)
+    const response = await fetch(openApiUrl, {
+      method: 'GET',
+      headers: bff2BuildHeaders(context.language, context.adminToken, false),
+    })
+    if (!response.ok) {
+      branchApiSupportCache = true
+      return branchApiSupportCache
+    }
+    const payload = (await bff2ParseJson(response)) as Record<string, unknown> | null
+    const paths = payload?.paths
+    if (paths && typeof paths === 'object' && !Array.isArray(paths)) {
+      branchApiSupportCache = '/api/v1/databases/{db_name}/branches' in paths
+      return branchApiSupportCache
+    }
+  } catch {
+    // Keep backward-compatible behavior and let direct calls decide.
+  }
+
+  branchApiSupportCache = true
+  return branchApiSupportCache
 }
 
 type Bff2DatabaseListResponse = {
@@ -2427,6 +2136,9 @@ type FoundryObjectTypeV2 = {
   >
 }
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+
 const toLegacyOntologyShape = (objectType: FoundryObjectTypeV2): Record<string, unknown> => {
   const classId = String(objectType.apiName ?? '').trim()
   const properties = Object.entries(objectType.properties ?? {}).map(([name, spec]) => ({
@@ -2445,6 +2157,31 @@ const toLegacyOntologyShape = (objectType: FoundryObjectTypeV2): Record<string, 
   }
 }
 
+const toLegacyInstanceShape = (value: unknown, classIdHint?: string): Record<string, unknown> => {
+  const row = asRecord(value) ?? {}
+  const instanceIdRaw = row.__primaryKey ?? row.instance_id ?? row.id ?? row['@id']
+  const instanceId = typeof instanceIdRaw === 'string' || typeof instanceIdRaw === 'number'
+    ? String(instanceIdRaw)
+    : ''
+  const classIdRaw = row.__apiName ?? row.class_id ?? row.classId ?? classIdHint
+  const classId = typeof classIdRaw === 'string' ? classIdRaw : String(classIdHint ?? '')
+  const displayLabelRaw = row.__title ?? row.label ?? row.name ?? instanceId
+  const displayLabel = typeof displayLabelRaw === 'string' || typeof displayLabelRaw === 'number'
+    ? String(displayLabelRaw)
+    : instanceId
+  const currentDisplay = asRecord(row.display)
+  return {
+    ...row,
+    instance_id: instanceId,
+    id: instanceId || row.id,
+    class_id: classId,
+    display: {
+      ...(currentDisplay ?? {}),
+      label: displayLabel,
+    },
+  }
+}
+
 const throwRemovedOntologyWrite = (operation: string): never => {
   throw new HttpError(
     410,
@@ -2457,12 +2194,44 @@ const throwRemovedOntologyWrite = (operation: string): never => {
 }
 
 export const listBranches = async (context: RequestContext, dbName: string) => {
-  const { payload } = await bff2RequestJson<{ branches?: unknown[]; count?: number }>(
-    `databases/${encodeURIComponent(dbName)}/branches`,
-    { method: 'GET' },
-    context,
-  )
-  return payload ?? { branches: [], count: 0 }
+  if (!ENABLE_DATABASE_BRANCH_API) {
+    return {
+      status: 'partial',
+      branch_management_supported: false,
+      branches: [{ name: 'main', source: 'frontend_fallback' }],
+      count: 1,
+      message: 'Branch API is disabled in this frontend profile. Falling back to main branch.',
+    }
+  }
+  const supported = await supportsDatabaseBranchApi(context)
+  if (!supported) {
+    return {
+      status: 'partial',
+      branch_management_supported: false,
+      branches: [{ name: 'main', source: 'frontend_fallback' }],
+      count: 1,
+      message: 'Branch API is unavailable in this backend profile. Falling back to main branch.',
+    }
+  }
+  try {
+    const { payload } = await bff2RequestJson<{ branches?: unknown[]; count?: number }>(
+      `databases/${encodeURIComponent(dbName)}/branches`,
+      { method: 'GET' },
+      context,
+    )
+    return payload ?? { branches: [], count: 0 }
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      return {
+        status: 'partial',
+        branch_management_supported: false,
+        branches: [{ name: 'main', source: 'frontend_fallback' }],
+        count: 1,
+        message: 'Branch API is unavailable in this backend profile. Falling back to main branch.',
+      }
+    }
+    throw error
+  }
 }
 
 export const createBranch = async (
@@ -2470,12 +2239,32 @@ export const createBranch = async (
   dbName: string,
   input: { name: string; from_branch?: string },
 ): Promise<ApiEnvelope> => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/branches`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
+  if (!ENABLE_DATABASE_BRANCH_API) {
+    throw new HttpError(501, 'Branch management API is disabled in this frontend profile.', {
+      errorCode: 'NOT_SUPPORTED',
+    })
+  }
+  const supported = await supportsDatabaseBranchApi(context)
+  if (!supported) {
+    throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
+      errorCode: 'NOT_SUPPORTED',
+    })
+  }
+  try {
+    const { payload } = await bff2RequestJson<ApiEnvelope>(
+      `databases/${encodeURIComponent(dbName)}/branches`,
+      { method: 'POST', body: JSON.stringify(input) },
+      context,
+    )
+    return payload ?? {}
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
+        errorCode: 'NOT_SUPPORTED',
+      })
+    }
+    throw error
+  }
 }
 
 export const deleteBranch = async (
@@ -2483,21 +2272,48 @@ export const deleteBranch = async (
   dbName: string,
   branchName: string,
 ): Promise<ApiEnvelope> => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/branches/${encodeURIComponent(branchName)}`,
-    { method: 'DELETE' },
-    context,
-  )
-  return payload ?? {}
+  if (!ENABLE_DATABASE_BRANCH_API) {
+    throw new HttpError(501, 'Branch management API is disabled in this frontend profile.', {
+      errorCode: 'NOT_SUPPORTED',
+    })
+  }
+  const supported = await supportsDatabaseBranchApi(context)
+  if (!supported) {
+    throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
+      errorCode: 'NOT_SUPPORTED',
+    })
+  }
+  try {
+    const { payload } = await bff2RequestJson<ApiEnvelope>(
+      `databases/${encodeURIComponent(dbName)}/branches/${encodeURIComponent(branchName)}`,
+      { method: 'DELETE' },
+      context,
+    )
+    return payload ?? {}
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) {
+      throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
+        errorCode: 'NOT_SUPPORTED',
+      })
+    }
+    throw error
+  }
 }
 
 export const listDatabaseClasses = async (context: RequestContext, dbName: string) => {
-  const { payload } = await bff2RequestJson<{ classes?: unknown[]; count?: number }>(
-    `databases/${encodeURIComponent(dbName)}/classes`,
+  const { payload } = await bff2RequestJson<{ data?: FoundryObjectTypeV2[] }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes`,
     { method: 'GET' },
     context,
+    { branch: 'main', pageSize: 1000 },
   )
-  return payload ?? { classes: [], count: 0 }
+  const classes = (payload?.data ?? []).map(toLegacyOntologyShape)
+  return {
+    status: 'success',
+    classes,
+    count: classes.length,
+    data: { classes },
+  }
 }
 
 export const listOntology = async (
@@ -2536,6 +2352,225 @@ export const getOntology = async (
     return {}
   }
   return toLegacyOntologyShape(payload)
+}
+
+export const listObjectTypesV2 = async (
+  context: RequestContext,
+  dbName: string,
+  params?: { branch?: string; pageSize?: number },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(1000, Number(params?.pageSize))) : 1000
+  const { payload } = await bff2RequestJson<{ data?: unknown[]; nextPageToken?: string | null }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes`,
+    { method: 'GET' },
+    context,
+    { branch, pageSize },
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const searchObjectsV2 = async (
+  context: RequestContext,
+  dbName: string,
+  objectType: string,
+  input: Record<string, unknown>,
+  params?: { branch?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objects/${encodeURIComponent(objectType)}/search`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
+export const listActionTypesV2 = async (
+  context: RequestContext,
+  dbName: string,
+  params?: { branch?: string; pageSize?: number },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(1000, Number(params?.pageSize))) : 100
+  const { payload } = await bff2RequestJson<{ data?: unknown[]; nextPageToken?: string | null }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/actionTypes`,
+    { method: 'GET' },
+    context,
+    { branch, pageSize },
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const listOntologyResourcesV1 = async (
+  context: RequestContext,
+  dbName: string,
+  resourceType: string,
+  params?: { branch?: string; limit?: number; offset?: number },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const limit = Number.isFinite(params?.limit) ? Math.max(1, Math.min(1000, Number(params?.limit))) : 200
+  const offset = Number.isFinite(params?.offset) ? Math.max(0, Number(params?.offset)) : 0
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/resources/${encodeURIComponent(resourceType)}`,
+    { method: 'GET' },
+    context,
+    { branch, limit, offset },
+  )
+  return payload ?? {}
+}
+
+export const createOntologyResourceV1 = async (
+  context: RequestContext,
+  dbName: string,
+  resourceType: string,
+  input: Record<string, unknown>,
+  params?: { branch?: string; expectedHeadCommit?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const expectedHeadCommit = String(
+    params?.expectedHeadCommit ?? (branch.startsWith('branch:') ? branch : `branch:${branch}`),
+  ).trim()
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/resources/${encodeURIComponent(resourceType)}`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch, expected_head_commit: expectedHeadCommit },
+  )
+  return payload ?? {}
+}
+
+export const getOntologyResourceV1 = async (
+  context: RequestContext,
+  dbName: string,
+  resourceType: string,
+  resourceId: string,
+  params?: { branch?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`,
+    { method: 'GET' },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
+export const updateOntologyResourceV1 = async (
+  context: RequestContext,
+  dbName: string,
+  resourceType: string,
+  resourceId: string,
+  input: Record<string, unknown>,
+  params?: { branch?: string; expectedHeadCommit?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const expectedHeadCommit = String(
+    params?.expectedHeadCommit ?? (branch.startsWith('branch:') ? branch : `branch:${branch}`),
+  ).trim()
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+    { branch, expected_head_commit: expectedHeadCommit },
+  )
+  return payload ?? {}
+}
+
+export const deleteOntologyResourceV1 = async (
+  context: RequestContext,
+  dbName: string,
+  resourceType: string,
+  resourceId: string,
+  params?: { branch?: string; expectedHeadCommit?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const expectedHeadCommit = String(
+    params?.expectedHeadCommit ?? (branch.startsWith('branch:') ? branch : `branch:${branch}`),
+  ).trim()
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(resourceId)}`,
+    { method: 'DELETE' },
+    context,
+    { branch, expected_head_commit: expectedHeadCommit },
+  )
+  return payload ?? {}
+}
+
+export const recordOntologyDeploymentV1 = async (
+  context: RequestContext,
+  dbName: string,
+  input?: {
+    target_branch?: string
+    ontology_commit_id?: string
+    snapshot_rid?: string
+    deployed_by?: string
+    metadata?: Record<string, unknown>
+  },
+) => {
+  const branch = String(input?.target_branch ?? 'main').trim() || 'main'
+  const commitId = String(
+    input?.ontology_commit_id ?? (branch.startsWith('branch:') ? branch : `branch:${branch}`),
+  ).trim()
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `databases/${encodeURIComponent(dbName)}/ontology/records/deployments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        target_branch: branch,
+        ontology_commit_id: commitId,
+        snapshot_rid: input?.snapshot_rid ?? null,
+        deployed_by: input?.deployed_by ?? 'system',
+        metadata: input?.metadata ?? {},
+      }),
+    },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const applyActionV2 = async (
+  context: RequestContext,
+  dbName: string,
+  actionType: string,
+  input: Record<string, unknown>,
+  params?: { branch?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/actions/${encodeURIComponent(actionType)}/apply`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
+export const createObjectifyMappingSpec = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'objectify/mapping-specs',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const runObjectifyDataset = async (
+  context: RequestContext,
+  datasetId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `objectify/datasets/${encodeURIComponent(datasetId)}/run`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
 }
 
 export const validateOntologyCreate = async (
@@ -3015,13 +3050,39 @@ export const listInstancesCtx = async (
   classId: string,
   params: { limit?: number; offset?: number; search?: string },
 ) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instances`,
-    { method: 'GET' },
+  const limit = Number.isFinite(params?.limit) ? Math.max(1, Math.min(500, Number(params.limit))) : 100
+  const offset = Number.isFinite(params?.offset) ? Math.max(0, Number(params.offset)) : 0
+  const { payload } = await bff2RequestJson<{ data?: unknown[]; totalCount?: string | number }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objects/${encodeURIComponent(classId)}/search`,
+    { method: 'POST', body: JSON.stringify({ pageSize: Math.max(200, limit + offset) }) },
     context,
-    params,
+    { branch: 'main' },
   )
-  return payload ?? {}
+  const raw = Array.isArray(payload?.data) ? payload.data : []
+  const normalized = raw.map((item) => toLegacyInstanceShape(item, classId))
+  const search = String(params?.search ?? '').trim().toLowerCase()
+  const filtered = search
+    ? normalized.filter((item) => JSON.stringify(item).toLowerCase().includes(search))
+    : normalized
+  const paged = filtered.slice(offset, offset + limit)
+  const totalCount = payload?.totalCount
+  const totalFromPayload =
+    typeof totalCount === 'number'
+      ? totalCount
+      : (typeof totalCount === 'string' && Number.isFinite(Number(totalCount)) ? Number(totalCount) : filtered.length)
+  return {
+    status: 'success',
+    instances: paged,
+    total: totalFromPayload,
+    limit,
+    offset,
+    data: {
+      instances: paged,
+      total: totalFromPayload,
+      limit,
+      offset,
+    },
+  }
 }
 
 export const getInstanceCtx = async (
@@ -3031,11 +3092,16 @@ export const getInstanceCtx = async (
   instanceId: string,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instance/${encodeURIComponent(instanceId)}`,
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objects/${encodeURIComponent(classId)}/${encodeURIComponent(instanceId)}`,
     { method: 'GET' },
     context,
+    { branch: 'main' },
   )
-  return payload ?? {}
+  const normalized = toLegacyInstanceShape(payload, classId)
+  return {
+    status: 'success',
+    data: normalized,
+  }
 }
 
 export const getSampleValues = async (
@@ -3043,12 +3109,38 @@ export const getSampleValues = async (
   dbName: string,
   classId: string,
 ) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/sample-values`,
-    { method: 'GET' },
+  const { payload } = await bff2RequestJson<{ data?: unknown[] }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objects/${encodeURIComponent(classId)}/search`,
+    { method: 'POST', body: JSON.stringify({ pageSize: 200 }) },
     context,
+    { branch: 'main' },
   )
-  return payload ?? {}
+  const records = Array.isArray(payload?.data) ? payload.data.map((item) => asRecord(item) ?? {}) : []
+  const samples: Record<string, unknown[]> = {}
+  records.forEach((row) => {
+    Object.entries(row).forEach(([key, rawValue]) => {
+      if (key.startsWith('__')) {
+        return
+      }
+      if (rawValue === null || rawValue === undefined || typeof rawValue === 'object') {
+        return
+      }
+      if (!samples[key]) {
+        samples[key] = []
+      }
+      const nextValue = String(rawValue)
+      if (!samples[key].includes(nextValue) && samples[key].length < 12) {
+        samples[key].push(nextValue)
+      }
+    })
+  })
+  return {
+    status: 'success',
+    data: {
+      samples,
+      count: records.length,
+    },
+  }
 }
 
 export const createInstance = async (
@@ -3157,12 +3249,18 @@ export const getGraphHealth = async (context: RequestContext) => {
 }
 
 export const queryBuilderInfo = async (context: RequestContext, dbName: string) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/query/builder`,
-    { method: 'GET' },
-    context,
-  )
-  return payload ?? {}
+  const classesPayload = await listDatabaseClasses(context, dbName)
+  return {
+    status: 'success',
+    source: 'v2_object_search_adapter',
+    operators: {
+      common: ['=', '!=', 'IN', 'IS_NULL', 'IS_NOT_NULL', 'LIKE', 'STARTS_WITH', 'CONTAINS'],
+      string: ['=', '!=', 'LIKE', 'STARTS_WITH', 'CONTAINS', 'IS_NULL', 'IS_NOT_NULL'],
+      number: ['=', '!=', 'IN', 'IS_NULL', 'IS_NOT_NULL'],
+      boolean: ['=', '!=', 'IS_NULL', 'IS_NOT_NULL'],
+    },
+    classes: (classesPayload as { classes?: unknown[] }).classes ?? [],
+  }
 }
 
 export const runQuery = async (
@@ -3170,12 +3268,106 @@ export const runQuery = async (
   dbName: string,
   input: Record<string, unknown>,
 ) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/query`,
-    { method: 'POST', body: JSON.stringify(input) },
+  const classLabelRaw = input.class_label ?? input.classId ?? input.objectType
+  const classLabel = typeof classLabelRaw === 'string' ? classLabelRaw.trim() : ''
+  if (!classLabel) {
+    throw new HttpError(400, 'class_label is required for query', {
+      errorCode: 'INVALID_ARGUMENT',
+    })
+  }
+
+  const normalizeWhereClause = (filter: unknown): Record<string, unknown> | null => {
+    const row = asRecord(filter)
+    if (!row) {
+      return null
+    }
+    const field = String(row.field ?? '').trim()
+    const operator = String(row.operator ?? '').trim().toLowerCase()
+    const value = row.value
+    if (!field || !operator) {
+      return null
+    }
+
+    if (operator === 'eq' || operator === '=') {
+      return { type: 'eq', field, value }
+    }
+    if (operator === 'like') {
+      const text = String(value ?? '').replace(/%/g, '').trim()
+      if (!text) return null
+      return { type: 'containsAnyTerm', field, value: text }
+    }
+    if (operator === 'starts_with') {
+      return { type: 'startsWith', field, value: String(value ?? '') }
+    }
+    if (operator === 'contains') {
+      return { type: 'containsAnyTerm', field, value: String(value ?? '') }
+    }
+    if (operator === 'in') {
+      const list = Array.isArray(value) ? value : String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean)
+      if (list.length === 0) {
+        return null
+      }
+      return { type: 'in', field, value: list }
+    }
+    if (operator === 'is_null') {
+      return { type: 'isNull', field, value: true }
+    }
+    if (operator === 'is_not_null') {
+      return { type: 'isNull', field, value: false }
+    }
+    return null
+  }
+
+  const filtersRaw = Array.isArray(input.filters) ? input.filters : []
+  const whereClauses = filtersRaw.map((item) => normalizeWhereClause(item)).filter((item): item is Record<string, unknown> => Boolean(item))
+  const where =
+    whereClauses.length === 0
+      ? undefined
+      : (whereClauses.length === 1 ? whereClauses[0] : { type: 'and', value: whereClauses })
+
+  const limitRaw = Number(input.limit)
+  const pageSize = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, limitRaw)) : 100
+
+  const select = Array.isArray(input.select)
+    ? input.select.map((item) => String(item)).filter(Boolean)
+    : []
+
+  const orderField = typeof input.order_by === 'string' ? input.order_by.trim() : ''
+  const orderDirection = String(input.order_direction ?? 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc'
+  const orderBy = orderField
+    ? {
+        orderType: 'fields',
+        fields: [{ field: orderField, direction: orderDirection }],
+      }
+    : undefined
+
+  const searchPayload: Record<string, unknown> = {
+    pageSize,
+    ...(where ? { where } : {}),
+    ...(select.length ? { select } : {}),
+    ...(orderBy ? { orderBy } : {}),
+  }
+
+  const { payload } = await bff2RequestJson<{ data?: unknown[]; totalCount?: string | number }>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objects/${encodeURIComponent(classLabel)}/search`,
+    { method: 'POST', body: JSON.stringify(searchPayload) },
     context,
+    { branch: 'main' },
   )
-  return payload ?? {}
+
+  const records = Array.isArray(payload?.data) ? payload.data.map((item) => toLegacyInstanceShape(item, classLabel)) : []
+  const totalCount = payload?.totalCount
+  const total =
+    typeof totalCount === 'number'
+      ? totalCount
+      : (typeof totalCount === 'string' && Number.isFinite(Number(totalCount)) ? Number(totalCount) : records.length)
+
+  return {
+    status: 'success',
+    results: records,
+    total,
+    data: { results: records, total },
+  }
 }
 
 export const simulateMerge = async (

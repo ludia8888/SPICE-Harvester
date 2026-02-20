@@ -357,6 +357,733 @@
         }
       }
     },
+    "/api/v1/databases/{db_name}/ontology/resources": {
+      "get": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "List Resources",
+        "operationId": "list_resources_api_v1_databases__db_name__ontology_resources_get",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Resource type filter",
+              "title": "Resource Type"
+            },
+            "description": "Resource type filter"
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{db_name}/ontology/resources/{resource_type}": {
+      "get": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "List Resources By Type",
+        "operationId": "list_resources_by_type_api_v1_databases__db_name__ontology_resources__resource_type__get",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "Create Resource",
+        "operationId": "create_resource_api_v1_databases__db_name__ontology_resources__resource_type__post",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "expected_head_commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optimistic concurrency guard token",
+              "title": "Expected Head Commit"
+            },
+            "description": "Optimistic concurrency guard token"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OntologyResourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}": {
+      "get": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "Get Resource",
+        "operationId": "get_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__get",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "Update Resource",
+        "operationId": "update_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__put",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "expected_head_commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optimistic concurrency guard token",
+              "title": "Expected Head Commit"
+            },
+            "description": "Optimistic concurrency guard token"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OntologyResourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "Delete Resource",
+        "operationId": "delete_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__delete",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "resource_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Type"
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Resource Id"
+            }
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target branch",
+              "default": "main",
+              "title": "Branch"
+            },
+            "description": "Target branch"
+          },
+          {
+            "name": "expected_head_commit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optimistic concurrency guard token",
+              "title": "Expected Head Commit"
+            },
+            "description": "Optimistic concurrency guard token"
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/databases/{db_name}/ontology/records/deployments": {
+      "post": {
+        "tags": [
+          "Ontology Extensions"
+        ],
+        "summary": "Record Deployment",
+        "operationId": "record_deployment_api_v1_databases__db_name__ontology_records_deployments_post",
+        "parameters": [
+          {
+            "name": "db_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Db Name"
+            }
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ko"
+              ]
+            },
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language."
+          },
+          {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OntologyDeploymentRecordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/databases/{db_name}/ontology": {
       "post": {
         "tags": [
@@ -24822,6 +25549,105 @@
         ],
         "title": "OntologyCreateRequest",
         "description": "Request model for creating ontology"
+      },
+      "OntologyDeploymentRecordRequest": {
+        "properties": {
+          "target_branch": {
+            "type": "string",
+            "title": "Target Branch",
+            "description": "Deployment target branch",
+            "default": "main"
+          },
+          "ontology_commit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ontology Commit Id",
+            "description": "Deployed ontology commit id (defaults to branch:<target_branch>)"
+          },
+          "snapshot_rid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Rid",
+            "description": "Optional snapshot resource identifier"
+          },
+          "deployed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed By",
+            "description": "Actor id for deployment audit"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "title": "OntologyDeploymentRecordRequest"
+      },
+      "OntologyResourceRequest": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Resource id (optional)"
+          },
+          "label": {
+            "title": "Label",
+            "description": "Resource label"
+          },
+          "description": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Resource description"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Spec"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "OntologyResourceRequest"
       },
       "OntologySnapshotRequest": {
         "properties": {

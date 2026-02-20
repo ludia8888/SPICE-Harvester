@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **249**
+- Total documented endpoints: **256**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 148 |
+| `v1` | 155 |
 | `v2` | 101 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -36,8 +36,8 @@
 | `ontologies` | 46 |
 | `pipelines` | 29 |
 | `connectivity` | 28 |
+| `databases` | 22 |
 | `datasets` | 16 |
-| `databases` | 15 |
 | `admin` | 13 |
 | `orchestration` | 11 |
 | `lineage` | 10 |
@@ -385,6 +385,18 @@
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/ontology-agent/runs` | Run ontology agent | `v1` | no | no | `run_ontology_agent_api_v1_ontology_agent_runs_post` |
+
+### Ontology Extensions
+
+| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/databases/{db_name}/ontology/records/deployments` | Record Deployment | `v1` | no | no | `record_deployment_api_v1_databases__db_name__ontology_records_deployments_post` |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources` | List Resources | `v1` | no | no | `list_resources_api_v1_databases__db_name__ontology_resources_get` |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}` | List Resources By Type | `v1` | no | no | `list_resources_by_type_api_v1_databases__db_name__ontology_resources__resource_type__get` |
+| `POST` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}` | Create Resource | `v1` | no | no | `create_resource_api_v1_databases__db_name__ontology_resources__resource_type__post` |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Get Resource | `v1` | no | no | `get_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__get` |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Update Resource | `v1` | no | no | `update_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__put` |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Delete Resource | `v1` | no | no | `delete_resource_api_v1_databases__db_name__ontology_resources__resource_type___resource_id__delete` |
 
 ### Ontology Management
 

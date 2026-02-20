@@ -170,6 +170,10 @@ async def submit_action_request(
                 code=ErrorCode.CONFLICT,
             )
         writeback_target = _resolve_writeback_target(db_name=db_name, raw_target=raw_writeback_target)
+        if request_overlay_branch:
+            # Caller-specified overlay branch should drive the concrete writeback branch used by workers.
+            writeback_target = dict(writeback_target)
+            writeback_target["branch"] = AppConfig.sanitize_lakefs_branch_id(str(request_overlay_branch))
         overlay_branch_resolved = request_overlay_branch or str(writeback_target["branch"])
 
         sanitized_input = sanitize_input(request_input)

@@ -264,8 +264,17 @@ def _is_flag_or_allowlist_enabled(*, global_enabled: bool, allowlist_raw: str, d
     return db in _parse_allowlist(allowlist_raw)
 
 
+def _feature_flags_settings() -> Any:
+    settings = get_settings()
+    flags = getattr(settings, "feature_flags", None)
+    if flags is None:
+        # ApplicationSettings exposes `features`; keep legacy `feature_flags` compatibility.
+        flags = getattr(settings, "features", None)
+    return flags
+
+
 def _jdbc_enabled_for_db(db_name: str | None) -> bool:
-    flags = get_settings().feature_flags
+    flags = _feature_flags_settings()
     return _is_flag_or_allowlist_enabled(
         global_enabled=bool(getattr(flags, "enable_foundry_connectivity_jdbc", False)),
         allowlist_raw=str(getattr(flags, "foundry_connectivity_jdbc_db_allowlist", "") or ""),
@@ -274,7 +283,7 @@ def _jdbc_enabled_for_db(db_name: str | None) -> bool:
 
 
 def _cdc_enabled_for_db(db_name: str | None) -> bool:
-    flags = get_settings().feature_flags
+    flags = _feature_flags_settings()
     return _is_flag_or_allowlist_enabled(
         global_enabled=bool(getattr(flags, "enable_foundry_connectivity_cdc", False)),
         allowlist_raw=str(getattr(flags, "foundry_connectivity_cdc_db_allowlist", "") or ""),
@@ -3234,7 +3243,7 @@ async def create_connection_v2(
 
     # Connection create has no ontology context, so JDBC rollout is gated by global switch.
     if is_jdbc_connector_kind(kind):
-        if not bool(getattr(get_settings().feature_flags, "enable_foundry_connectivity_jdbc", False)):
+        if not bool(getattr(_feature_flags_settings(), "enable_foundry_connectivity_jdbc", False)):
             return _foundry_error(
                 status.HTTP_403_FORBIDDEN,
                 error_code="PERMISSION_DENIED",

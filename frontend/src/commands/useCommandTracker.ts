@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
-import { getCommandStatus, HttpError, listDatabases } from '../api/bff'
+import { getCommandStatus, HttpError, listDatabasesCtx } from '../api/bff'
 import { getInvalidationKeys } from './commandInvalidationMap'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
@@ -101,7 +101,7 @@ export const useCommandTracker = () => {
       queryFn: async () => {
         const databases = await queryClient.fetchQuery({
           queryKey: qk.databases(context.language),
-          queryFn: () => listDatabases(requestContext),
+          queryFn: () => listDatabasesCtx(requestContext),
         })
         const present = databases.includes(command.target.dbName)
         return command.kind === 'CREATE_DATABASE' ? present : !present

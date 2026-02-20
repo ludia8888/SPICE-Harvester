@@ -7,10 +7,6 @@ import { OverviewPage } from '../pages/OverviewPage'
 import { BranchesPage } from '../pages/BranchesPage'
 import { OntologyPage } from '../pages/OntologyPage'
 import { MappingsPage } from '../pages/MappingsPage'
-import { SheetsHubPage } from '../pages/SheetsHubPage'
-import { ImportSheetsPage } from '../pages/ImportSheetsPage'
-import { ImportExcelPage } from '../pages/ImportExcelPage'
-import { SchemaSuggestionPage } from '../pages/SchemaSuggestionPage'
 import { InstancesPage } from '../pages/InstancesPage'
 import { GraphExplorerPage } from '../pages/GraphExplorerPage'
 import { QueryBuilderPage } from '../pages/QueryBuilderPage'
@@ -19,6 +15,7 @@ import { AuditPage } from '../pages/AuditPage'
 import { LineagePage } from '../pages/LineagePage'
 import { TasksPage } from '../pages/TasksPage'
 import { AdminPage } from '../pages/AdminPage'
+import { LegacyDataToolsRemovedPage } from '../pages/LegacyDataToolsRemovedPage'
 
 export const AppRouter = () => {
   const pathname = usePathname()
@@ -57,22 +54,7 @@ export const AppRouter = () => {
       return <MappingsPage dbName={dbName} />
     }
     if (section === 'data') {
-      const sub = segments[3] ?? 'sheets'
-      if (sub === 'sheets') {
-        return <SheetsHubPage dbName={dbName} />
-      }
-      if (sub === 'import') {
-        const kind = segments[4] ?? 'sheets'
-        if (kind === 'sheets') {
-          return <ImportSheetsPage dbName={dbName} />
-        }
-        if (kind === 'excel') {
-          return <ImportExcelPage dbName={dbName} />
-        }
-      }
-      if (sub === 'schema-suggestion') {
-        return <SchemaSuggestionPage dbName={dbName} />
-      }
+      return <LegacyDataToolsRemovedPage />
     }
     if (section === 'instances') {
       return <InstancesPage dbName={dbName} />

@@ -334,6 +334,35 @@ class OMSClient(ManagedAsyncClient):
             logger.error(f"Ontology resource create failed ({db_name}): {e}")
             raise
 
+    async def record_ontology_deployment(
+        self,
+        db_name: str,
+        *,
+        target_branch: str = "main",
+        ontology_commit_id: Optional[str] = None,
+        snapshot_rid: Optional[str] = None,
+        deployed_by: str = "system",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """온톨로지 배포 레코드 기록 (actions precondition)."""
+        try:
+            payload: Dict[str, Any] = {
+                "target_branch": target_branch,
+                "ontology_commit_id": ontology_commit_id,
+                "snapshot_rid": snapshot_rid,
+                "deployed_by": deployed_by,
+                "metadata": metadata or {},
+            }
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/records/deployments",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology deployment record failed ({db_name}): {e}")
+            raise
+
     async def update_ontology_resource(
         self,
         db_name: str,

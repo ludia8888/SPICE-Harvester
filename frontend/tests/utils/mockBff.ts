@@ -144,7 +144,7 @@ export const mockBffRoutes = async (page: Page, options: MockBffOptions = {}) =>
 }
 
 export const openSettingsPopover = async (page: Page) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('.top-nav').getByRole('button', { name: 'Settings', exact: true }).click()
   const popover = page.locator('.settings-popover')
   await popover.waitFor({ state: 'visible' })
   return popover
@@ -153,6 +153,8 @@ export const openSettingsPopover = async (page: Page) => {
 export const enableAdminMode = async (page: Page) => {
   const popover = await openSettingsPopover(page)
   const adminToggle = popover.getByRole('checkbox', { name: 'Admin mode (dangerous actions)', exact: true })
-  await adminToggle.check({ force: true })
+  if (!(await adminToggle.isChecked())) {
+    await popover.getByText('Admin mode (dangerous actions)', { exact: true }).click()
+  }
   await page.keyboard.press('Escape')
 }

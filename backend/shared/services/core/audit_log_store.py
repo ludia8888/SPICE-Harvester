@@ -105,6 +105,21 @@ class AuditLogStore(PostgresSchemaRegistry):
         body = cls._canonical_json(payload).encode("utf-8")
         return hashlib.sha256(base + b"\n" + body).hexdigest()
 
+    @staticmethod
+    def _coerce_metadata(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return {}
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        return {}
+
     async def append(
         self,
         *,
@@ -316,7 +331,7 @@ class AuditLogStore(PostgresSchemaRegistry):
                     command_id=row["command_id"],
                     trace_id=row["trace_id"],
                     correlation_id=row["correlation_id"],
-                    metadata=dict(row["metadata"] or {}),
+                    metadata=self._coerce_metadata(row["metadata"]),
                     error=row["error"],
                     prev_hash=row["prev_hash"],
                     entry_hash=row["entry_hash"],

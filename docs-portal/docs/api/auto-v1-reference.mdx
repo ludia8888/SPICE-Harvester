@@ -16,9 +16,9 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 148**
+**Total v1 endpoints: 155**
 
-### Object Types & Schema (15 endpoints)
+### Object Types & Schema (22 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -37,6 +37,13 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/databases/{db_name}/mappings/import` | Import Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/mappings/validate` | Validate Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/records/deployments` | Record Deployment | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources` | List Resources | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}` | List Resources By Type | No |
+| `POST` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}` | Create Resource | No |
+| `GET` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Get Resource | No |
+| `PUT` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Update Resource | No |
+| `DELETE` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}/{resource_id}` | Delete Resource | No |
 
 ### Objectify (7 endpoints)
 

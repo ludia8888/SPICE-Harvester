@@ -12,6 +12,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      '/api/v2': {
+        target: 'http://localhost:8002',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   test: {

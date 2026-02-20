@@ -485,7 +485,7 @@ class BackgroundTaskManager:
     async def _save_task(self, task: BackgroundTask) -> None:
         """Save task to Redis."""
         key = f"background_task:{task.task_id}"
-        await self.redis.set_json(key, task.model_dump(mode="json"), ex=self.task_ttl)
+        await self.redis.set_json(key, task.model_dump(mode="json"), ttl=self.task_ttl)
         
         # Also save result separately with longer TTL if completed
         if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
@@ -493,7 +493,7 @@ class BackgroundTaskManager:
             await self.redis.set_json(
                 result_key,
                 task.result.model_dump(mode="json") if task.result else {},
-                ex=self.result_ttl
+                ttl=self.result_ttl
             )
             
     async def _get_task(self, task_id: str) -> Optional[BackgroundTask]:

@@ -27,6 +27,13 @@ _SECURITY_VIOLATION_DETAIL = "입력 데이터에 보안 위반이 감지되었�
 T = TypeVar("T")
 
 
+def _default_expected_head_commit(branch: str) -> str:
+    normalized = str(branch or "").strip() or "main"
+    if normalized.lower().startswith("branch:"):
+        return normalized
+    return f"branch:{normalized}"
+
+
 async def _call_oms(*, action: str, func: Callable[[], Awaitable[T]]) -> T:
     try:
         return await func()
@@ -76,6 +83,7 @@ async def create_resource(
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
     resolved_db_name = validate_db_name(db_name)
+    expected_head_commit = expected_head_commit or _default_expected_head_commit(branch)
     resolved_expected_head = await _call_oms(
         action="resolve ontology expected head commit",
         func=lambda: resolve_expected_head_commit(
@@ -109,6 +117,7 @@ async def update_resource(
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
     resolved_db_name = validate_db_name(db_name)
+    expected_head_commit = expected_head_commit or _default_expected_head_commit(branch)
     resolved_expected_head = await _call_oms(
         action="resolve ontology expected head commit",
         func=lambda: resolve_expected_head_commit(
@@ -162,6 +171,7 @@ async def delete_resource(
     expected_head_commit: Optional[str],
 ) -> Dict[str, Any]:
     resolved_db_name = validate_db_name(db_name)
+    expected_head_commit = expected_head_commit or _default_expected_head_commit(branch)
     resolved_expected_head = await _call_oms(
         action="resolve ontology expected head commit",
         func=lambda: resolve_expected_head_commit(
@@ -183,3 +193,30 @@ async def delete_resource(
     )
 
 
+@trace_external_call("bff.ontology_extensions.record_deployment")
+async def record_deployment(
+    *,
+    oms_client: OMSClient,
+    db_name: str,
+    target_branch: str,
+    ontology_commit_id: Optional[str],
+    snapshot_rid: Optional[str],
+    deployed_by: str,
+    metadata: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    resolved_db_name = validate_db_name(db_name)
+    normalized_branch = str(target_branch or "").strip() or "main"
+    normalized_commit = str(ontology_commit_id or "").strip() or _default_expected_head_commit(normalized_branch)
+    normalized_deployed_by = str(deployed_by or "").strip() or "system"
+    normalized_snapshot = str(snapshot_rid or "").strip() or None
+    return await _call_oms(
+        action="record ontology deployment",
+        func=lambda: oms_client.record_ontology_deployment(
+            resolved_db_name,
+            target_branch=normalized_branch,
+            ontology_commit_id=normalized_commit,
+            snapshot_rid=normalized_snapshot,
+            deployed_by=normalized_deployed_by,
+            metadata=sanitize_input(metadata or {}),
+        ),
+    )

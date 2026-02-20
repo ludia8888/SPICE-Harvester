@@ -48,6 +48,17 @@ class OntologyResourceRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class OntologyDeploymentRecordRequest(BaseModel):
+    target_branch: str = Field("main", description="Deployment target branch")
+    ontology_commit_id: Optional[str] = Field(
+        None,
+        description="Deployed ontology commit id (defaults to branch:<target_branch>)",
+    )
+    snapshot_rid: Optional[str] = Field(None, description="Optional snapshot resource identifier")
+    deployed_by: Optional[str] = Field(None, description="Actor id for deployment audit")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 def _normalize_resource_payload(payload: OntologyResourceRequest) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=True)
     spec = data.pop("spec", {}) or {}
@@ -188,6 +199,42 @@ async def _assert_expected_head_commit(
         return None
 
     return expected
+
+
+@router.post("/records/deployments")
+@trace_endpoint("oms.ontology_ext.record_deployment")
+async def record_deployment(
+    db_name: str,
+    payload: OntologyDeploymentRecordRequest,
+):
+    try:
+        db_name = validate_db_name(db_name)
+        target_branch = validate_branch_name(payload.target_branch or "main")
+        ontology_commit_id = str(payload.ontology_commit_id or "").strip() or f"branch:{target_branch}"
+        deployed_by = str(payload.deployed_by or "").strip() or "system"
+
+        registry = OntologyDeploymentRegistryV2()
+        recorded = await registry.record_deployment(
+            db_name=db_name,
+            target_branch=target_branch,
+            ontology_commit_id=ontology_commit_id,
+            snapshot_rid=(str(payload.snapshot_rid).strip() or None) if payload.snapshot_rid is not None else None,
+            deployed_by=deployed_by,
+            metadata=sanitize_input(payload.metadata or {}),
+        )
+        return ApiResponse.success(
+            message="Ontology deployment recorded",
+            data=recorded,
+        ).to_dict()
+    except ValueError as e:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    except Exception as e:
+        logger.error("Failed to record ontology deployment: %s", e)
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
+        )
 
 
 @router.get("/resources")
@@ -511,4 +558,3 @@ async def delete_resource(
         raise classified_http_exception(
             status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR,
         )
-

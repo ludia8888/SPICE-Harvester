@@ -15,6 +15,7 @@ export const navigate = (pathname: string, mode: PathUpdateMode = 'push') => {
   url.pathname = pathname
   const action = mode === 'push' ? window.history.pushState : window.history.replaceState
   action.call(window.history, {}, '', url)
+  window.dispatchEvent(new Event('spice:urlchange'))
 }
 
 export const navigateWithSearch = (
@@ -35,6 +36,7 @@ export const navigateWithSearch = (
   })
   const action = mode === 'push' ? window.history.pushState : window.history.replaceState
   action.call(window.history, {}, '', url)
+  window.dispatchEvent(new Event('spice:urlchange'))
 }
 
 export const subscribePathname = (listener: () => void) => {
@@ -43,5 +45,9 @@ export const subscribePathname = (listener: () => void) => {
   }
   const wrapped = () => listener()
   window.addEventListener('spice:urlchange', wrapped)
-  return () => window.removeEventListener('spice:urlchange', wrapped)
+  window.addEventListener('popstate', wrapped)
+  return () => {
+    window.removeEventListener('spice:urlchange', wrapped)
+    window.removeEventListener('popstate', wrapped)
+  }
 }

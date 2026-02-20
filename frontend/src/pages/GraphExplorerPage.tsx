@@ -14,7 +14,7 @@ import {
   Text,
   TextArea,
 } from '@blueprintjs/core'
-import { getGraphHealth, getGraphPaths, runAiQuery, runGraphQuery, translateQueryPlan } from '../api/bff'
+import { getGraphHealth, getGraphPaths, runAiQuery, runGraphQueryCtx, translateQueryPlan } from '../api/bff'
 import { useRateLimitRetry } from '../api/useRateLimitRetry'
 import { useRequestContext } from '../api/useRequestContext'
 import { GraphCanvas } from '../components/GraphCanvas'
@@ -88,7 +88,7 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
     mutationFn: () => {
       const filters = parseJson<Record<string, unknown>>(filtersJson, {})
       const normalizedHops = hops.filter((hop) => hop.predicate && hop.target_class)
-      return runGraphQuery(requestContext, dbName, branch, {
+      return runGraphQueryCtx(requestContext, dbName, branch, {
         start_class: startClass,
         hops: normalizedHops,
         filters,

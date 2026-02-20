@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any, Dict
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from bff.dependencies import get_oms_client
@@ -417,6 +417,17 @@ async def create_build_v2(
             retry_backoff_duration=resolved.retry_backoff_duration,
             abort_on_failure=resolved.abort_on_failure,
             pipeline=pipeline,
+        )
+    except HTTPException as exc:
+        detail = exc.detail
+        message = detail.get("message") if isinstance(detail, dict) else str(detail or "Build request failed")
+        error_code = "PERMISSION_DENIED" if exc.status_code == status.HTTP_403_FORBIDDEN else "UPSTREAM_ERROR"
+        error_name = "PermissionDenied" if exc.status_code == status.HTTP_403_FORBIDDEN else "BuildRequestFailed"
+        return _foundry_error(
+            exc.status_code,
+            error_code=error_code,
+            error_name=error_name,
+            parameters={"message": message},
         )
     except Exception as exc:
         logger.error("Failed to create Foundry orchestration build: %s", exc)

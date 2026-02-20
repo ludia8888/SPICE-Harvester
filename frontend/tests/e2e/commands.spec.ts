@@ -14,10 +14,11 @@ test('tracks a command from the drawer', async ({ page }) => {
   const drawer = page.locator('.command-drawer')
   await expect(drawer).toBeVisible()
 
-  await drawer.getByLabel('Add command id').fill('cmd-123')
+  await drawer.getByPlaceholder('Paste command_id').fill('cmd-123')
   await drawer.getByRole('button', { name: 'Add', exact: true }).click()
 
-  const row = drawer.getByRole('row', { name: /cmd-123/ })
+  await drawer.getByRole('tab', { name: 'Completed', exact: true }).click()
+  const row = drawer.locator('tbody tr', { hasText: 'cmd-123' }).first()
   await expect(row).toBeVisible()
   await row.click()
 

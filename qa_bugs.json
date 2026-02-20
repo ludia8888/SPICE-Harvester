@@ -1,0 +1,3433 @@
+[
+  {
+    "phase": "Phase 2",
+    "step": "2-3",
+    "endpoint": "POST /pipelines/587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1/build",
+    "expected": "build success",
+    "actual": "Build failed: {'run_id': '07c40afd-3f19-42df-88ae-4eaece63ba9c', 'pipeline_id': '587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1', 'job_id': 'build-587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1-ffe28111-0b01-4127-a39c-ee",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 643, in phase2_pipeline_transforms\n    raise AssertionError(f\"Build failed: {run}\")\nAssertionError: Build failed: {'run_id': '07c40afd-3f19-42df-88ae-4eaece63ba9c', 'pipeline_id': '587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1', 'job_id': 'build-587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1-ffe28111-0b01-4127-a39c-ee3e83d575e1', 'mode': 'build', 'status': 'FAILED', 'node_id': None, 'row_count': None, 'sample_json': {}, 'output_json': {'code': 'INTERNAL_ERROR', 'detail': 'Pipeline execution failed', 'errors': ['[DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE] Cannot resolve \"(price + freight_value)\" due to data type mismatch: the binary operator requires the input type (\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\"), not \"STRING\".; line 1 pos 0;\\n\\'Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, order_approved_at#1915, order_delivered_carrier_date#1924, order_delivered_customer_date#1933, order_estimated_delivery_date#1942, order_item_id#1959, product_id#1967, seller_id#1975, shipping_limit_date#1983, price#1991, freight_value#1999, (price#1991 + freight_value#1999) AS total_value#2021]\\n+- Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, order_approved_at#1915, order_delivered_carrier_date#1924, order_delivered_customer_date#1933, order_estimated_delivery_date#1942, order_item_id#1959, product_id#1967, seller_id#1975, shipping_limit_date#1983, price#1991, freight_value#1999]\\n   +- Join Inner, (order_id#1879 = order_id#1951)\\n      :- Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, order_approved_at#1915, order_delivered_carrier_date#1924, order_delivered_customer_date#1933, CASE WHEN (isnull(trim(cast(order_estimated_delivery_date#1782 as string), None)) OR (length(trim(cast(order_estimated_delivery_date#1782 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_estimated_delivery_date#1782 as string), None) END AS order_estimated_delivery_date#1942]\\n      :  +- Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, order_approved_at#1915, order_delivered_carrier_date#1924, CASE WHEN (isnull(trim(cast(order_delivered_customer_date#1773 as string), None)) OR (length(trim(cast(order_delivered_customer_date#1773 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_customer_date#1773 as string), None) END AS order_delivered_customer_date#1933, order_estimated_delivery_date#1782]\\n      :     +- Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, order_approved_at#1915, CASE WHEN (isnull(trim(cast(order_delivered_carrier_date#1764 as string), None)) OR (length(trim(cast(order_delivered_carrier_date#1764 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_carrier_date#1764 as string), None) END AS order_delivered_carrier_date#1924, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :        +- Project [order_id#1879, customer_id#1888, order_status#1897, order_purchase_timestamp#1906, CASE WHEN (isnull(trim(cast(order_approved_at#1755 as string), None)) OR (length(trim(cast(order_approved_at#1755 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_approved_at#1755 as string), None) END AS order_approved_at#1915, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :           +- Project [order_id#1879, customer_id#1888, order_status#1897, CASE WHEN (isnull(trim(cast(order_purchase_timestamp#1746 as string), None)) OR (length(trim(cast(order_purchase_timestamp#1746 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_purchase_timestamp#1746 as string), None) END AS order_purchase_timestamp#1906, order_approved_at#1755, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :              +- Project [order_id#1879, customer_id#1888, CASE WHEN (isnull(trim(cast(order_status#1737 as string), None)) OR (length(trim(cast(order_status#1737 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_status#1737 as string), None) END AS order_status#1897, order_purchase_timestamp#1746, order_approved_at#1755, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :                 +- Project [order_id#1879, CASE WHEN (isnull(trim(cast(customer_id#1728 as string), None)) OR (length(trim(cast(customer_id#1728 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(customer_id#1728 as string), None) END AS customer_id#1888, order_status#1737, order_purchase_timestamp#1746, order_approved_at#1755, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :                    +- Project [CASE WHEN (isnull(trim(cast(order_id#1718 as string), None)) OR (length(trim(cast(order_id#1718 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1718 as string), None) END AS order_id#1879, customer_id#1728, order_status#1737, order_purchase_timestamp#1746, order_approved_at#1755, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, order_estimated_delivery_date#1782]\\n      :                       +- Project [order_id#1718, customer_id#1728, order_status#1737, order_purchase_timestamp#1746, order_approved_at#1755, order_delivered_carrier_date#1764, order_delivered_customer_date#1773, CASE WHEN (isnull(trim(cast(order_estimated_delivery_date#1709 as string), None)) OR (length(trim(cast(order_estimated_delivery_date#1709 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_estimated_delivery_date#1709 as string), None) END AS order_estimated_delivery_date#1782]\\n      :                          +- Project [order_id#1718, customer_id#1728, order_status#1737, order_purchase_timestamp#1746, order_approved_at#1755, order_delivered_carrier_date#1764, CASE WHEN (isnull(trim(cast(order_delivered_customer_date#1708 as string), None)) OR (length(trim(cast(order_delivered_customer_date#1708 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_customer_date#1708 as string), None) END AS order_delivered_customer_date#1773, order_estimated_delivery_date#1709]\\n      :                             +- Project [order_id#1718, customer_id#1728, order_status#1737, order_purchase_timestamp#1746, order_approved_at#1755, CASE WHEN (isnull(trim(cast(order_delivered_carrier_date#1707 as string), None)) OR (length(trim(cast(order_delivered_carrier_date#1707 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_carrier_date#1707 as string), None) END AS order_delivered_carrier_date#1764, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                +- Project [order_id#1718, customer_id#1728, order_status#1737, order_purchase_timestamp#1746, CASE WHEN (isnull(trim(cast(order_approved_at#1706 as string), None)) OR (length(trim(cast(order_approved_at#1706 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_approved_at#1706 as string), None) END AS order_approved_at#1755, order_delivered_carrier_date#1707, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                   +- Project [order_id#1718, customer_id#1728, order_status#1737, CASE WHEN (isnull(trim(cast(order_purchase_timestamp#1705 as string), None)) OR (length(trim(cast(order_purchase_timestamp#1705 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_purchase_timestamp#1705 as string), None) END AS order_purchase_timestamp#1746, order_approved_at#1706, order_delivered_carrier_date#1707, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                      +- Project [order_id#1718, customer_id#1728, CASE WHEN (isnull(trim(cast(order_status#1704 as string), None)) OR (length(trim(cast(order_status#1704 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_status#1704 as string), None) END AS order_status#1737, order_purchase_timestamp#1705, order_approved_at#1706, order_delivered_carrier_date#1707, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                         +- Project [order_id#1718, CASE WHEN (isnull(trim(cast(customer_id#1703 as string), None)) OR (length(trim(cast(customer_id#1703 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(customer_id#1703 as string), None) END AS customer_id#1728, order_status#1704, order_purchase_timestamp#1705, order_approved_at#1706, order_delivered_carrier_date#1707, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                            +- Project [CASE WHEN (isnull(trim(cast(order_id#1702 as string), None)) OR (length(trim(cast(order_id#1702 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1702 as string), None) END AS order_id#1718, customer_id#1703, order_status#1704, order_purchase_timestamp#1705, order_approved_at#1706, order_delivered_carrier_date#1707, order_delivered_customer_date#1708, order_estimated_delivery_date#1709]\\n      :                                               +- Relation [order_id#1702,customer_id#1703,order_status#1704,order_purchase_timestamp#1705,order_approved_at#1706,order_delivered_carrier_date#1707,order_delivered_customer_date#1708,order_estimated_delivery_date#1709] csv\\n      +- Project [order_id#1951, order_item_id#1959, product_id#1967, seller_id#1975, shipping_limit_date#1983, price#1991, CASE WHEN (isnull(trim(cast(freight_value#1871 as string), None)) OR (length(trim(cast(freight_value#1871 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(freight_value#1871 as string), None) END AS freight_value#1999]\\n         +- Project [order_id#1951, order_item_id#1959, product_id#1967, seller_id#1975, shipping_limit_date#1983, CASE WHEN (isnull(trim(cast(price#1863 as string), None)) OR (length(trim(cast(price#1863 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(price#1863 as string), None) END AS price#1991, freight_value#1871]\\n            +- Project [order_id#1951, order_item_id#1959, product_id#1967, seller_id#1975, CASE WHEN (isnull(trim(cast(shipping_limit_date#1855 as string), None)) OR (length(trim(cast(shipping_limit_date#1855 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(shipping_limit_date#1855 as string), None) END AS shipping_limit_date#1983, price#1863, freight_value#1871]\\n               +- Project [order_id#1951, order_item_id#1959, product_id#1967, CASE WHEN (isnull(trim(cast(seller_id#1847 as string), None)) OR (length(trim(cast(seller_id#1847 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(seller_id#1847 as string), None) END AS seller_id#1975, shipping_limit_date#1855, price#1863, freight_value#1871]\\n                  +- Project [order_id#1951, order_item_id#1959, CASE WHEN (isnull(trim(cast(product_id#1839 as string), None)) OR (length(trim(cast(product_id#1839 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(product_id#1839 as string), None) END AS product_id#1967, seller_id#1847, shipping_limit_date#1855, price#1863, freight_value#1871]\\n                     +- Project [order_id#1951, CASE WHEN (isnull(trim(cast(order_item_id#1831 as string), None)) OR (length(trim(cast(order_item_id#1831 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_item_id#1831 as string), None) END AS order_item_id#1959, product_id#1839, seller_id#1847, shipping_limit_date#1855, price#1863, freight_value#1871]\\n                        +- Project [CASE WHEN (isnull(trim(cast(order_id#1822 as string), None)) OR (length(trim(cast(order_id#1822 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1822 as string), None) END AS order_id#1951, order_item_id#1831, product_id#1839, seller_id#1847, shipping_limit_date#1855, price#1863, freight_value#1871]\\n                           +- Project [order_id#1822, order_item_id#1831, product_id#1839, seller_id#1847, shipping_limit_date#1855, price#1863, CASE WHEN (isnull(trim(cast(freight_value#1814 as string), None)) OR (length(trim(cast(freight_value#1814 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(freight_value#1814 as string), None) END AS freight_value#1871]\\n                              +- Project [order_id#1822, order_item_id#1831, product_id#1839, seller_id#1847, shipping_limit_date#1855, CASE WHEN (isnull(trim(cast(price#1813 as string), None)) OR (length(trim(cast(price#1813 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(price#1813 as string), None) END AS price#1863, freight_value#1814]\\n                                 +- Project [order_id#1822, order_item_id#1831, product_id#1839, seller_id#1847, CASE WHEN (isnull(trim(cast(shipping_limit_date#1812 as string), None)) OR (length(trim(cast(shipping_limit_date#1812 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(shipping_limit_date#1812 as string), None) END AS shipping_limit_date#1855, price#1813, freight_value#1814]\\n                                    +- Project [order_id#1822, order_item_id#1831, product_id#1839, CASE WHEN (isnull(trim(cast(seller_id#1811 as string), None)) OR (length(trim(cast(seller_id#1811 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(seller_id#1811 as string), None) END AS seller_id#1847, shipping_limit_date#1812, price#1813, freight_value#1814]\\n                                       +- Project [order_id#1822, order_item_id#1831, CASE WHEN (isnull(trim(cast(product_id#1810 as string), None)) OR (length(trim(cast(product_id#1810 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(product_id#1810 as string), None) END AS product_id#1839, seller_id#1811, shipping_limit_date#1812, price#1813, freight_value#1814]\\n                                          +- Project [order_id#1822, CASE WHEN (isnull(trim(cast(order_item_id#1809 as string), None)) OR (length(trim(cast(order_item_id#1809 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_item_id#1809 as string), None) END AS order_item_id#1831, product_id#1810, seller_id#1811, shipping_limit_date#1812, price#1813, freight_value#1814]\\n                                             +- Project [CASE WHEN (isnull(trim(cast(order_id#1808 as string), None)) OR (length(trim(cast(order_id#1808 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1808 as string), None) END AS order_id#1822, order_item_id#1809, product_id#1810, seller_id#1811, shipping_limit_date#1812, price#1813, freight_value#1814]\\n                                                +- Relation [order_id#1808,order_item_id#1809,product_id#1810,seller_id#1811,shipping_limit_date#1812,price#1813,freight_value#1814] csv\\n'], 'origin': {'path': None, 'method': None, 'service': 'pipeline_worker', 'endpoint': None}, 'status': 'error', 'context': {'mode': 'build', 'stage': 'execution', 'branch': 'main', 'job_id': 'build-587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1-ffe28111-0b01-4127-a39c-ee3e83d575e1', 'db_name': 'qa_90bbad9a92', 'node_id': None, 'pipeline_id': '587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1', 'exception_type': 'AnalysisException'}, 'message': 'Pipeline execution failed', 'span_id': '567ff6d582d2ecbd', 'category': 'internal', 'trace_id': '8292f9ae7821ece50d70962993dff20e', 'retryable': False, 'enterprise': {'code': 'SHV-PIP-PIP-INT-2001', 'class': 'internal', 'owner': 'operator', 'title': 'Pipeline execution failed', 'action': 'investigate', 'domain': 'pipeline', 'schema': '1.1', 'severity': 'error', 'retryable': False, 'subsystem': 'PIP', 'catalog_ref': '1.0.0', 'http_status': 500, 'runbook_ref': 'PIPELINE_EXECUTION_FAILED', 'max_attempts': 1, 'max_delay_ms': 0, 'base_delay_ms': 0, 'external_code': 'PIPELINE_EXECUTION_FAILED', 'human_required': True, 'jitter_strategy': 'none', 'http_status_hint': 500, 'external_category': 'internal', 'safe_next_actions': ['request_human'], 'catalog_fingerprint': 'sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd', 'default_retry_policy': 'none', 'retry_after_header_respect': False}, 'request_id': None, 'diagnostics': {'lookup': {'span_id': '567ff6d582d2ecbd', 'trace_id': '8292f9ae7821ece50d70962993dff20e', 'request_id': None, 'correlation_id': None, 'enterprise_code': 'SHV-PIP-PIP-INT-2001', 'catalog_fingerprint': 'sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd'}, 'schema': 'error_diagnostics.v1', 'runbook_ref': 'PIPELINE_EXECUTION_FAILED', 'runbook_uri': 'spice://runbook/PIPELINE_EXECUTION_FAILED', 'group_fingerprint': 'sha256:34f18ff4f324b57bd7b02cba0bece6eafb346707a44fe4f32efcbdb70ab5201a', 'instance_fingerprint': 'sha256:f4dd2decb813f6fcfd5ba944f716ccde6094ddd1702d30f19c7d58bc6435a3b0'}, 'http_status': 500, 'correlation_id': None}, 'pipeline_spec_commit_id': '34e9ed67cc5d5cc7c9d4706edf1b411a4ef005d6f29f92c2f82904d6262c8fa5', 'pipeline_spec_hash': 'f7973c2dbd587f71c51dec1bd5237d4835113b366089d33ad7d10e5ac7382322', 'input_lakefs_commits': {}, 'output_lakefs_commit_id': None, 'spark_conf': {'spark.app.id': 'local-1771567862525', 'spark.master': 'local[*]', 'spark.version': '3.5.1', 'spark.app.name': 'spice-pipeline-worker', 'spark.driver.host': '3fdd227993df', 'spark.driver.port': '45155', 'spark.executor.id': 'driver', 'spark.rdd.compress': 'True', 'spark.app.startTime': '1771567860974', 'spark.app.submitTime': '1771567860304', 'spark.submit.pyFiles': '', 'spark.sql.ansi.enabled': 'true', 'spark.sql.warehouse.dir': 'file:/app/spark-warehouse', 'spark.submit.deployMode': 'client', 'spark.default.parallelism': '16', 'spark.sql.adaptive.enabled': 'true', 'spark.sql.session.timeZone': 'UTC', 'spark.sql.shuffle.partitions': '16', 'spark.ui.showConsoleProgress': 'false', 'spark.driver.extraJavaOptions': '-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false', 'spark.executor.extraJavaOptions': '-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false', 'spark.serializer.objectStreamReset': '100', 'spark.sql.adaptive.skewJoin.enabled': 'true', 'spark.sql.adaptive.coalescePartitions.enabled': 'true'}, 'code_version': None, 'started_at': '2026-02-20T06:12:19.513664Z', 'finished_at': '2026-02-20T06:13:02.581224Z'}\n",
+    "timestamp": "2026-02-20T06:13:03.955829"
+  },
+  {
+    "phase": "Phase 2",
+    "step": "2-4",
+    "endpoint": "POST /pipelines/587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1/deploy",
+    "expected": "deploy success",
+    "actual": "Client error '409 Conflict' for url 'http://localhost:8002/api/v1/pipelines/587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/S",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 667, in phase2_pipeline_transforms\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '409 Conflict' for url 'http://localhost:8002/api/v1/pipelines/587eb6ce-2bd4-426d-b4d4-0fd6fde6a2a1/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409\n",
+    "timestamp": "2026-02-20T06:13:03.995556"
+  },
+  {
+    "phase": "Phase 4",
+    "step": "4-5",
+    "endpoint": "ES doc properties",
+    "expected": "Order docs",
+    "actual": "No Order-class documents found",
+    "severity": "P1",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-20T06:13:29.774933"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-7",
+    "endpoint": "search orderBy",
+    "expected": "sorted results",
+    "actual": "Server error '500 Internal Server Error' for url 'http://localhost:8002/api/v2/ontologies/qa_90bbad9a92/objects/OrderItem/search?branch=main'\nFor more information check: https://developer.mozilla.org/",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1449, in phase5_search_and_query\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Server error '500 Internal Server Error' for url 'http://localhost:8002/api/v2/ontologies/qa_90bbad9a92/objects/OrderItem/search?branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500\n",
+    "timestamp": "2026-02-20T06:13:36.091739"
+  },
+  {
+    "phase": "Phase 6",
+    "step": "6-1",
+    "endpoint": "simulate fulfill_order",
+    "expected": "VALIDATE_ONLY success",
+    "actual": "Client error '404 Not Found' for url 'http://localhost:8000/api/v2/ontologies/qa_90bbad9a92/actions/fulfill_order_90bbad9a92/apply?branch=main'\nFor more information check: https://developer.mozilla.or",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1684, in phase6_actions\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'http://localhost:8000/api/v2/ontologies/qa_90bbad9a92/actions/fulfill_order_90bbad9a92/apply?branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
+    "timestamp": "2026-02-20T06:13:49.198794"
+  },
+  {
+    "id": "frontend-qa-e0887f56-a191-4552-87f9-617acf025018",
+    "timestamp": "2026-02-20T07:39:34.291Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_orders_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_orders_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "file": "olist_orders_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-cdad739f-da8b-41ef-b6e1-8f76749de7bb",
+    "timestamp": "2026-02-20T07:39:34.292Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_order_items_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_order_items_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "file": "olist_order_items_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-8ca65e3f-a62e-49fe-a557-ee1241108268",
+    "timestamp": "2026-02-20T07:39:34.293Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_customers_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_customers_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "file": "olist_customers_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-29da706f-39be-4b80-a4d2-cea0b07007da",
+    "timestamp": "2026-02-20T07:39:34.293Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_products_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_products_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "file": "olist_products_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-30a141a4-4bf2-4ef6-bb1d-856e3fc2ad1f",
+    "timestamp": "2026-02-20T07:39:34.293Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_sellers_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_sellers_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "file": "olist_sellers_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-f5eee3e9-d5b3-420a-820f-2f0a45acc69c",
+    "timestamp": "2026-02-20T07:39:35.361Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Live ingest",
+    "repro_steps": [
+      "Open Databases page",
+      "Create database",
+      "Upload CSV dataset (live_weather)"
+    ],
+    "expected": "CSV ingest succeeds and returns dataset_id",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"Idempotency-Key header is required\",\"detail\":{\"message\":\"Idempotency-Key header is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd\",\"code",
+    "endpoint": "POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "status": 400,
+      "body": {
+        "status": "error",
+        "message": "Idempotency-Key header is required",
+        "detail": {
+          "message": "Idempotency-Key header is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/pipelines/datasets/csv-upload",
+          "endpoint": "bff.routers.pipeline_datasets_uploads_csv.upload_csv_dataset"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "e31d1971b7fb4442aeafd23838dd23b1",
+        "correlation_id": "e31d1971b7fb4442aeafd23838dd23b1",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:634d25191f3efcc28843ecf293fdaa23118d9e657db57b75a8112509ea78daa7",
+          "instance_fingerprint": "sha256:74360f834dbc4797fbf051ea6772fc4f6258301d8be0bbb50dde4fc09b49884d",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "e31d1971b7fb4442aeafd23838dd23b1",
+            "correlation_id": "e31d1971b7fb4442aeafd23838dd23b1",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Idempotency-Key header is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      },
+      "step": "live_weather"
+    },
+    "hypothesis": "Dataset upload contract mismatch or storage/registry worker unavailable."
+  },
+  {
+    "id": "frontend-qa-5c9c6f4a-4a50-4bad-bcd9-fbc66396bbb0",
+    "timestamp": "2026-02-20T07:39:35.590Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Live ingest",
+    "repro_steps": [
+      "Open Databases page",
+      "Create database",
+      "Upload CSV dataset (live_fx)"
+    ],
+    "expected": "CSV ingest succeeds and returns dataset_id",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"Idempotency-Key header is required\",\"detail\":{\"message\":\"Idempotency-Key header is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd\",\"code",
+    "endpoint": "POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "status": 400,
+      "body": {
+        "status": "error",
+        "message": "Idempotency-Key header is required",
+        "detail": {
+          "message": "Idempotency-Key header is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/pipelines/datasets/csv-upload",
+          "endpoint": "bff.routers.pipeline_datasets_uploads_csv.upload_csv_dataset"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "cd229c269be2479284ce11c210c88ff9",
+        "correlation_id": "cd229c269be2479284ce11c210c88ff9",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:634d25191f3efcc28843ecf293fdaa23118d9e657db57b75a8112509ea78daa7",
+          "instance_fingerprint": "sha256:057d6896788ec5fd150a6fb2880778928d0fc15e198eae3295ac0615a50e4af1",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "cd229c269be2479284ce11c210c88ff9",
+            "correlation_id": "cd229c269be2479284ce11c210c88ff9",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Idempotency-Key header is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      },
+      "step": "live_fx"
+    },
+    "hypothesis": "Dataset upload contract mismatch or storage/registry worker unavailable."
+  },
+  {
+    "id": "frontend-qa-9007ac9f-c115-47ce-8df4-7371811efdaa",
+    "timestamp": "2026-02-20T07:39:37.552Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Live ingest",
+    "repro_steps": [
+      "Open Databases page",
+      "Create database",
+      "Upload CSV dataset (live_earthquakes)"
+    ],
+    "expected": "CSV ingest succeeds and returns dataset_id",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"Idempotency-Key header is required\",\"detail\":{\"message\":\"Idempotency-Key header is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd\",\"code",
+    "endpoint": "POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "status": 400,
+      "body": {
+        "status": "error",
+        "message": "Idempotency-Key header is required",
+        "detail": {
+          "message": "Idempotency-Key header is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/pipelines/datasets/csv-upload",
+          "endpoint": "bff.routers.pipeline_datasets_uploads_csv.upload_csv_dataset"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "be78d8f4cbfe4fc5b7acd784001e81b4",
+        "correlation_id": "be78d8f4cbfe4fc5b7acd784001e81b4",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:634d25191f3efcc28843ecf293fdaa23118d9e657db57b75a8112509ea78daa7",
+          "instance_fingerprint": "sha256:a1ab2723183ee1fda4d6d41f9e177038f65a8dafb0828e8e649f713980cad501",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "be78d8f4cbfe4fc5b7acd784001e81b4",
+            "correlation_id": "be78d8f4cbfe4fc5b7acd784001e81b4",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Idempotency-Key header is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      },
+      "step": "live_earthquakes"
+    },
+    "hypothesis": "Dataset upload contract mismatch or storage/registry worker unavailable."
+  },
+  {
+    "id": "frontend-qa-f70e2c7c-4768-4a96-8dcd-5cef2a43241d",
+    "timestamp": "2026-02-20T07:39:37.603Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Transform",
+    "repro_steps": [
+      "Upload kaggle datasets",
+      "Create transform pipeline"
+    ],
+    "expected": "orders + order_items datasets are available",
+    "actual": "Missing dataset ids: orders=undefined, items=undefined",
+    "endpoint": "ingest prerequisite",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/overview",
+    "evidence": {
+      "availableDatasets": {}
+    },
+    "hypothesis": "Raw ingest failed, blocking transformation phase."
+  },
+  {
+    "id": "frontend-qa-a88aecb8-8c22-4dc6-b555-88452870c8e6",
+    "timestamp": "2026-02-20T07:39:42.739Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"Instances projection recompute from event replay is unsupported in dataset-primary mode. Run objectify full reindex from dataset artifacts instead.\",\"detail\":{\"message\":\"Instances projection recompute from event replay is unsupported in dataset-primary mode. Run objectif",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Instances projection recompute from event replay is unsupported in dataset-primary mode. Run objectify full reindex from dataset artifacts instead.",
+        "detail": {
+          "message": "Instances projection recompute from event replay is unsupported in dataset-primary mode. Run objectify full reindex from dataset artifacts instead.",
+          "code": "REQUEST_VALIDATION_FAILED",
+          "error": "REQUEST_VALIDATION_FAILED",
+          "projection": "instances",
+          "write_path_mode": "dataset_primary_index"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "5c1615ae1eee4c5e891e99baeb9c3fed",
+        "correlation_id": "5c1615ae1eee4c5e891e99baeb9c3fed",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:12295f7cb92a49a5e6a98c62beedfd27c83adf3a045b5513db256e7f5b224c5b",
+          "instance_fingerprint": "sha256:3b373a89938dc5964dd5b6c91f4b44b342953788170ba7a4f7d50b0e505d7f1e",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "5c1615ae1eee4c5e891e99baeb9c3fed",
+            "correlation_id": "5c1615ae1eee4c5e891e99baeb9c3fed",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Instances projection recompute from event replay is unsupported in dataset-primary mode. Run objectify full reindex from dataset artifacts instead.",
+            "code": "REQUEST_VALIDATION_FAILED",
+            "error": "REQUEST_VALIDATION_FAILED",
+            "projection": "instances",
+            "write_path_mode": "dataset_primary_index"
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection admin API is blocked by token/permission or payload constraints."
+  },
+  {
+    "id": "frontend-qa-ba3e658f-3c86-4f50-868b-12848d5db5b5",
+    "timestamp": "2026-02-20T07:39:42.813Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-71f3a30b-f16d-4891-860e-624708368b9a",
+    "timestamp": "2026-02-20T07:39:49.295Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlukxkew; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlukxcn9_0vng4/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0
+    },
+    "hypothesis": "Read-model projection delay or missing audit partition linkage."
+  },
+  {
+    "id": "frontend-qa-f8994ca4-dc88-464a-b070-da4a31ec594d",
+    "timestamp": "2026-02-20T07:46:00.397Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_orders_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_orders_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "file": "olist_orders_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-ed71b7f7-a9b5-4518-aa82-4d2044c60d94",
+    "timestamp": "2026-02-20T07:46:00.398Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_order_items_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_order_items_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "file": "olist_order_items_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-d0e7f8a4-07c4-4fd2-b9d8-abc28aa119d5",
+    "timestamp": "2026-02-20T07:46:00.398Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_customers_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_customers_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "file": "olist_customers_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-cbd4ba8c-6b90-447a-9812-7cd0da452b0b",
+    "timestamp": "2026-02-20T07:46:00.398Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_products_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_products_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "file": "olist_products_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-797f1a09-a342-4c91-bc26-ccacbb63ac77",
+    "timestamp": "2026-02-20T07:46:00.398Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Raw ingest",
+    "repro_steps": [
+      "Load fixture file olist_sellers_dataset.csv",
+      "Upload CSV"
+    ],
+    "expected": "Kaggle fixture file can be loaded and uploaded",
+    "actual": "ENOENT: no such file or directory, open '/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/fixtures/kaggle_data/olist_sellers_dataset.csv'",
+    "endpoint": "local fixture + POST /api/v1/pipelines/datasets/csv-upload",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "file": "olist_sellers_dataset.csv"
+    },
+    "hypothesis": "Fixture path or upload contract is invalid."
+  },
+  {
+    "id": "frontend-qa-2992df6a-1481-49eb-8c79-0b4d858bc7f8",
+    "timestamp": "2026-02-20T07:46:04.152Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Transform",
+    "repro_steps": [
+      "Upload kaggle datasets",
+      "Create transform pipeline"
+    ],
+    "expected": "orders + order_items datasets are available",
+    "actual": "Missing dataset ids: orders=undefined, items=undefined",
+    "endpoint": "ingest prerequisite",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/overview",
+    "evidence": {
+      "availableDatasets": {
+        "live_weather": "dddf4a85-0a0b-4f7b-84ff-8c51ac4123f3",
+        "live_fx": "94b8cf55-7a3d-4ace-9360-5d0c36ec9eef",
+        "live_earthquakes": "164cefac-c027-407e-9744-9cc489bd9931"
+      }
+    },
+    "hypothesis": "Raw ingest failed, blocking transformation phase."
+  },
+  {
+    "id": "frontend-qa-b982d3d9-1665-4db5-8a97-bda5e8115220",
+    "timestamp": "2026-02-20T07:46:09.074Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "6d56cc9d70624e66b77cb3ae37917f4f",
+        "correlation_id": "6d56cc9d70624e66b77cb3ae37917f4f",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:6d7dbbd571bf03a135e350f7b3e824c9f286424dcf1be35c1bd2839427f87fbd",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "6d56cc9d70624e66b77cb3ae37917f4f",
+            "correlation_id": "6d56cc9d70624e66b77cb3ae37917f4f",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-d19a1a16-9ace-4b13-a454-5cfe78403b11",
+    "timestamp": "2026-02-20T07:46:09.132Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-24a4475e-1ac0-4e0c-8e68-3d392fc20b7b",
+    "timestamp": "2026-02-20T07:46:14.411Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlul5uhu; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlul5lpf_4g0ku/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0
+    },
+    "hypothesis": "Read-model projection delay or missing audit partition linkage."
+  },
+  {
+    "id": "frontend-qa-71704fd5-9bcb-445c-9eba-95548ed66546",
+    "timestamp": "2026-02-20T07:47:30.981Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Transform",
+    "repro_steps": [
+      "Deploy pipeline after build"
+    ],
+    "expected": "Deploy request succeeds",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"node_id is required for promote_build\",\"detail\":{\"message\":\"node_id is required for promote_build\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd\"",
+    "endpoint": "POST /api/v1/pipelines/{pipelineId}/deploy",
+    "ui_path": "/db/qa_live_mlul7dcb_pc4ix/overview",
+    "evidence": {
+      "pipelineId": "72f45666-6004-4f70-b5f9-049d4fa19c81",
+      "response": {
+        "status": "error",
+        "message": "node_id is required for promote_build",
+        "detail": {
+          "message": "node_id is required for promote_build",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/pipelines/72f45666-6004-4f70-b5f9-049d4fa19c81/deploy",
+          "endpoint": "bff.routers.pipeline_execution.deploy_pipeline"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "55c0e342a9934322a6893d8848e90977",
+        "correlation_id": "55c0e342a9934322a6893d8848e90977",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6dcdad722d22251f9dfb40ddd51103daab8fd378be1e36465e2debf679c6b102",
+          "instance_fingerprint": "sha256:61e10dde37c4084a6bb10e6c1c27fc4b3bbbbf359c54968a9ef91c699802b473",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "55c0e342a9934322a6893d8848e90977",
+            "correlation_id": "55c0e342a9934322a6893d8848e90977",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "node_id is required for promote_build",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Deploy lock conflict or promote-build constraints are unmet."
+  },
+  {
+    "id": "frontend-qa-4e87e841-6ef3-4b06-8af6-89e53d321f11",
+    "timestamp": "2026-02-20T07:47:35.894Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "1208c9ed3190478d8c100939ad4726ef",
+        "correlation_id": "1208c9ed3190478d8c100939ad4726ef",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:e160306300ae1d82a6537f4f49c7db683a40b0797959fe2df7a1cd628e8e0634",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "1208c9ed3190478d8c100939ad4726ef",
+            "correlation_id": "1208c9ed3190478d8c100939ad4726ef",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-3fd1ab86-122c-468f-957e-78873cae4846",
+    "timestamp": "2026-02-20T07:47:35.953Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlul7dcb_pc4ix/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-8906d2e6-dda6-4e59-b917-f3f04087703e",
+    "timestamp": "2026-02-20T07:47:59.443Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlul7phj; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlul7dcb_pc4ix/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0
+    },
+    "hypothesis": "Read-model projection delay or missing audit partition linkage."
+  },
+  {
+    "id": "frontend-qa-73dd7dd0-341f-4c6a-9c59-7120d86e5e61",
+    "timestamp": "2026-02-20T07:48:52.941Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "b3208f1c12aa4fe2983b845766782c23",
+        "correlation_id": "b3208f1c12aa4fe2983b845766782c23",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:e505ffc937d4daa0064cedc769eb454aefade44a8f8715873a83b734917bd14d",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "b3208f1c12aa4fe2983b845766782c23",
+            "correlation_id": "b3208f1c12aa4fe2983b845766782c23",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-eea554bd-5d8a-4e23-afd5-19292ca03aef",
+    "timestamp": "2026-02-20T07:48:53.014Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlul91k1_jrgdw/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-a932bb95-1827-4773-8944-5472cca18156",
+    "timestamp": "2026-02-20T07:49:16.591Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlul9cy4; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlul91k1_jrgdw/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0
+    },
+    "hypothesis": "Read-model projection delay or missing audit partition linkage."
+  },
+  {
+    "id": "frontend-qa-b3215865-60bd-409d-9f86-c602e3e6a079",
+    "timestamp": "2026-02-20T07:50:31.477Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "cb89f4772bbe474d8de45b1ceb2607db",
+        "correlation_id": "cb89f4772bbe474d8de45b1ceb2607db",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:12c39d59c21ff4ad17a7d25b904c5ca1429f9f4435f1907fac6637bfb27cb9c6",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "cb89f4772bbe474d8de45b1ceb2607db",
+            "correlation_id": "cb89f4772bbe474d8de45b1ceb2607db",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-7486c324-b10c-4c98-9307-346f00d68f14",
+    "timestamp": "2026-02-20T07:50:31.563Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlulb5q4_kqf1x/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-42708e62-6bf0-4a22-8b1c-1ec3d0601b2e",
+    "timestamp": "2026-02-20T07:50:56.418Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlulbgzq; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlulb5q4_kqf1x/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "33b3ad10f3fe48faae4bed8b7c334a35",
+        "correlation_id": "33b3ad10f3fe48faae4bed8b7c334a35",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:be15b1e58f45d0a6dfe90926835af67a71b34adf12a3a1b38d8b67dfbe017f55",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "33b3ad10f3fe48faae4bed8b7c334a35",
+            "correlation_id": "33b3ad10f3fe48faae4bed8b7c334a35",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-2da9f4fa-281b-4f0a-adc7-98e84dc51984",
+    "timestamp": "2026-02-20T07:52:00.442Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "3ea1dd56fa914b3eaf5e60f084306e18",
+        "correlation_id": "3ea1dd56fa914b3eaf5e60f084306e18",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:c28a339666640c527b1bdb07fc23d19bc5b33b4efeda391660ffb1ac8ce350d1",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "3ea1dd56fa914b3eaf5e60f084306e18",
+            "correlation_id": "3ea1dd56fa914b3eaf5e60f084306e18",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-44503e7c-1139-42d7-b92f-aa11ee47de2d",
+    "timestamp": "2026-02-20T07:52:00.518Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mluld2pk_er395/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-8afa347a-b9ea-423e-a46f-789925937af0",
+    "timestamp": "2026-02-20T07:52:25.207Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mluld2pk_er395/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "7a80f255250341618b967533e5fbe30a",
+        "correlation_id": "7a80f255250341618b967533e5fbe30a",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:1446c8829e8b2da563fd236b05e34777eb54576fc48fb5b0ab2bd2c8d7dc32ab",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "7a80f255250341618b967533e5fbe30a",
+            "correlation_id": "7a80f255250341618b967533e5fbe30a",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-65ec1b41-9bb8-4c6c-973b-5ec8c99498f9",
+    "timestamp": "2026-02-20T07:52:25.207Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlulddmw; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mluld2pk_er395/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "7a80f255250341618b967533e5fbe30a",
+        "correlation_id": "7a80f255250341618b967533e5fbe30a",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:1446c8829e8b2da563fd236b05e34777eb54576fc48fb5b0ab2bd2c8d7dc32ab",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "7a80f255250341618b967533e5fbe30a",
+            "correlation_id": "7a80f255250341618b967533e5fbe30a",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-097d197a-01fa-43a3-a12a-db8333cbc689",
+    "timestamp": "2026-02-20T07:53:51.537Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe failed API call (GET /api/v1/databases/qa_live_mlulfl49_flrlg/branches)"
+    ],
+    "expected": "Frontend-exposed API should not return 404/500 for mandatory QA routes.",
+    "actual": "status=404; method=GET; url=http://127.0.0.1:5173/api/v1/databases/qa_live_mlulfl49_flrlg/branches?lang=en",
+    "endpoint": "GET /api/v1/databases/qa_live_mlulfl49_flrlg/branches",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mlulfl49_flrlg/branches?lang=en&branch=main",
+    "evidence": {
+      "status": 404,
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/api/v1/databases/qa_live_mlulfl49_flrlg/branches?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mlulfl49_flrlg/branches?lang=en&branch=main"
+    },
+    "hypothesis": "Frontend route is still using removed or incompatible API contract."
+  },
+  {
+    "id": "frontend-qa-05cc1fe9-8ef2-40c3-9469-c147a608e1eb",
+    "timestamp": "2026-02-20T07:54:04.084Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "0af92b949e4a4230a267038c0f782844",
+        "correlation_id": "0af92b949e4a4230a267038c0f782844",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:8ba87cdc70a963cf4b1fcd48de9e61130962e0c512a73b150d1f6583a4af1b4a",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "0af92b949e4a4230a267038c0f782844",
+            "correlation_id": "0af92b949e4a4230a267038c0f782844",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-ce42476b-77e1-4cf4-940a-733e859f988a",
+    "timestamp": "2026-02-20T07:54:04.146Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlulfl49_flrlg/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-c2c40884-038d-4a0c-9ca9-bf2fcba351d2",
+    "timestamp": "2026-02-20T07:54:27.694Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mlulfl49_flrlg/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "e7e7501a8adc405386afdc8253428d84",
+        "correlation_id": "e7e7501a8adc405386afdc8253428d84",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:7b4cc0351808f359a8b64f1c3e38068b48c292eddc4029e14fa4e3c2ea8f814e",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "e7e7501a8adc405386afdc8253428d84",
+            "correlation_id": "e7e7501a8adc405386afdc8253428d84",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-f723ad61-e388-473a-a364-93d8d2b075bf",
+    "timestamp": "2026-02-20T07:54:27.694Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlulg10r; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlulfl49_flrlg/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "e7e7501a8adc405386afdc8253428d84",
+        "correlation_id": "e7e7501a8adc405386afdc8253428d84",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:7b4cc0351808f359a8b64f1c3e38068b48c292eddc4029e14fa4e3c2ea8f814e",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "e7e7501a8adc405386afdc8253428d84",
+            "correlation_id": "e7e7501a8adc405386afdc8253428d84",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-f7772090-e2b0-40ed-be7d-53f4bdca7e9c",
+    "timestamp": "2026-02-20T07:55:37.433Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe failed API call (GET /api/v1/databases/qa_live_mlulhu4d_rjxz5/branches)"
+    ],
+    "expected": "Frontend-exposed API should not return 404/500 for mandatory QA routes.",
+    "actual": "status=404; method=GET; url=http://127.0.0.1:5173/api/v1/databases/qa_live_mlulhu4d_rjxz5/branches?lang=en",
+    "endpoint": "GET /api/v1/databases/qa_live_mlulhu4d_rjxz5/branches",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mlulhu4d_rjxz5/branches?lang=en&branch=main",
+    "evidence": {
+      "status": 404,
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/api/v1/databases/qa_live_mlulhu4d_rjxz5/branches?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mlulhu4d_rjxz5/branches?lang=en&branch=main"
+    },
+    "hypothesis": "Frontend route is still using removed or incompatible API contract."
+  },
+  {
+    "id": "frontend-qa-050ee06e-5c72-4740-b4f9-70c0799d3c11",
+    "timestamp": "2026-02-20T07:55:48.297Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "ce1b9ef4348e4987bad54eb709139077",
+        "correlation_id": "ce1b9ef4348e4987bad54eb709139077",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:77fef353b373fda201625eed447c5d099c6cb50828b6264decf91aecb3458158",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "ce1b9ef4348e4987bad54eb709139077",
+            "correlation_id": "ce1b9ef4348e4987bad54eb709139077",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-57b609dc-bc58-4d74-9f1c-d18b9372e651",
+    "timestamp": "2026-02-20T07:55:48.354Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlulhu4d_rjxz5/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-7fb8b85e-eb0d-4565-a8bc-6a7d18fe20bb",
+    "timestamp": "2026-02-20T07:56:11.886Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mlulhu4d_rjxz5/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+        "correlation_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:bda1ef3cad2c31827e23a61b03162a1961070311cf1be587eedf69ef2a2ff10f",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+            "correlation_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-9a416b7d-4d53-43e6-a4e3-a0e5f75e22d8",
+    "timestamp": "2026-02-20T07:56:11.886Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mluli9fo; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlulhu4d_rjxz5/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+        "correlation_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:bda1ef3cad2c31827e23a61b03162a1961070311cf1be587eedf69ef2a2ff10f",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+            "correlation_id": "b0d7ddd7d0ec4de792669a9ca4ba2e36",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-f3d30bbd-26fd-4bdf-89ab-f398aaa3a058",
+    "timestamp": "2026-02-20T07:57:04.039Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe failed API call (GET /api/v1/openapi.json)"
+    ],
+    "expected": "Frontend-exposed API should not return 404/500 for mandatory QA routes.",
+    "actual": "status=404; method=GET; url=http://127.0.0.1:5173/api/v1/openapi.json?lang=en",
+    "endpoint": "GET /api/v1/openapi.json",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mluljoua_6fdk3/branches?lang=en&branch=main",
+    "evidence": {
+      "status": 404,
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/api/v1/openapi.json?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mluljoua_6fdk3/branches?lang=en&branch=main"
+    },
+    "hypothesis": "Frontend route is still using removed or incompatible API contract."
+  },
+  {
+    "id": "frontend-qa-7fa07f42-a6b3-468c-903d-c5e3208d2846",
+    "timestamp": "2026-02-20T07:57:04.040Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe failed API call (GET /api/v1/databases/qa_live_mluljoua_6fdk3/branches)"
+    ],
+    "expected": "Frontend-exposed API should not return 404/500 for mandatory QA routes.",
+    "actual": "status=404; method=GET; url=http://127.0.0.1:5173/api/v1/databases/qa_live_mluljoua_6fdk3/branches?lang=en",
+    "endpoint": "GET /api/v1/databases/qa_live_mluljoua_6fdk3/branches",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mluljoua_6fdk3/branches?lang=en&branch=main",
+    "evidence": {
+      "status": 404,
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/api/v1/databases/qa_live_mluljoua_6fdk3/branches?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mluljoua_6fdk3/branches?lang=en&branch=main"
+    },
+    "hypothesis": "Frontend route is still using removed or incompatible API contract."
+  },
+  {
+    "id": "frontend-qa-b063f113-1a85-4cc8-8a56-a5174e5c0123",
+    "timestamp": "2026-02-20T07:57:15.104Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "7e1cf012118f4af885a2e5f65c940db4",
+        "correlation_id": "7e1cf012118f4af885a2e5f65c940db4",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:d01eee2cade2b67dde6aaedcfa87b38a46b41880778518f060481898da2d794f",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "7e1cf012118f4af885a2e5f65c940db4",
+            "correlation_id": "7e1cf012118f4af885a2e5f65c940db4",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-71e5a354-169b-42ad-a79f-ad438dc0bc1b",
+    "timestamp": "2026-02-20T07:57:15.183Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mluljoua_6fdk3/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-1243679b-d6d0-4219-85ea-ce2b976148a3",
+    "timestamp": "2026-02-20T07:57:38.856Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mluljoua_6fdk3/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "084986ffa9e24d498e9c2474b7e662d7",
+        "correlation_id": "084986ffa9e24d498e9c2474b7e662d7",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:ad82e714500f2cd8b6dab3abae014ed3606774c54514c71fa92fcfb9a06b27b6",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "084986ffa9e24d498e9c2474b7e662d7",
+            "correlation_id": "084986ffa9e24d498e9c2474b7e662d7",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-5e3c8714-20fc-4353-b237-4e04b44d814c",
+    "timestamp": "2026-02-20T07:57:38.856Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlulk4g1; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mluljoua_6fdk3/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "084986ffa9e24d498e9c2474b7e662d7",
+        "correlation_id": "084986ffa9e24d498e9c2474b7e662d7",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:ad82e714500f2cd8b6dab3abae014ed3606774c54514c71fa92fcfb9a06b27b6",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "084986ffa9e24d498e9c2474b7e662d7",
+            "correlation_id": "084986ffa9e24d498e9c2474b7e662d7",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-080eb7fa-9d96-484f-9ce7-cc5b6e13a98d",
+    "timestamp": "2026-02-20T07:58:09.870Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe failed API call (GET /api/v1/databases/qa_live_mlull4g8_1pspt/branches)"
+    ],
+    "expected": "Frontend-exposed API should not return 404/500 for mandatory QA routes.",
+    "actual": "status=404; method=GET; url=http://127.0.0.1:5173/api/v1/databases/qa_live_mlull4g8_1pspt/branches?lang=en",
+    "endpoint": "GET /api/v1/databases/qa_live_mlull4g8_1pspt/branches",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mlull4g8_1pspt/branches?lang=en&branch=main",
+    "evidence": {
+      "status": 404,
+      "method": "GET",
+      "url": "http://127.0.0.1:5173/api/v1/databases/qa_live_mlull4g8_1pspt/branches?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mlull4g8_1pspt/branches?lang=en&branch=main"
+    },
+    "hypothesis": "Frontend route is still using removed or incompatible API contract."
+  },
+  {
+    "id": "frontend-qa-3eaef05b-455b-4665-950c-5800406cc66a",
+    "timestamp": "2026-02-20T07:58:22.461Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "01471ead5f3542c79dd5d8aad4630a18",
+        "correlation_id": "01471ead5f3542c79dd5d8aad4630a18",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:ca8aa636c790205b3bbeebbe7e3f58769c0728b2629171ac4eb7267d5b0e5059",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "01471ead5f3542c79dd5d8aad4630a18",
+            "correlation_id": "01471ead5f3542c79dd5d8aad4630a18",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-f72a0edc-7f19-4337-a4c2-ad8ef467d605",
+    "timestamp": "2026-02-20T07:58:22.550Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlull4g8_1pspt/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-7b27341b-56d3-4cdf-a742-171ba1f6cd25",
+    "timestamp": "2026-02-20T07:58:47.178Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mlull4g8_1pspt/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "9f17e8fc028e4d61aeb4ba1141909836",
+        "correlation_id": "9f17e8fc028e4d61aeb4ba1141909836",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:30254cdc18fd7f0b235ef8e649a7b0f7a624efe83399cf462f4fb37c6fa515c2",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "9f17e8fc028e4d61aeb4ba1141909836",
+            "correlation_id": "9f17e8fc028e4d61aeb4ba1141909836",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-f4f71989-ce8f-4d1f-9646-c92fd035ed2f",
+    "timestamp": "2026-02-20T07:58:47.178Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mlullkff; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlull4g8_1pspt/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "9f17e8fc028e4d61aeb4ba1141909836",
+        "correlation_id": "9f17e8fc028e4d61aeb4ba1141909836",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:30254cdc18fd7f0b235ef8e649a7b0f7a624efe83399cf462f4fb37c6fa515c2",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "9f17e8fc028e4d61aeb4ba1141909836",
+            "correlation_id": "9f17e8fc028e4d61aeb4ba1141909836",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-7e061ce4-b968-48b4-97d3-8ccda8c6e626",
+    "timestamp": "2026-02-20T07:59:38.101Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Projection",
+    "repro_steps": [
+      "Trigger projection recompute task"
+    ],
+    "expected": "Recompute task is accepted",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Internal server error\",\"detail\":\"RedisService.set_json() got an unexpected keyword argument 'ex'\",\"code\":\"INTERNAL_ERROR\",\"category\":\"internal\",\"http_status\":500,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e09264",
+    "endpoint": "POST /api/v1/admin/recompute-projection",
+    "ui_path": "/operations/admin",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Internal server error",
+        "detail": "RedisService.set_json() got an unexpected keyword argument 'ex'",
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/admin/recompute-projection",
+          "endpoint": "bff.routers.admin_recompute_projection.recompute_projection"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "d40d4e0429244174a3aaeecaf2ce3919",
+        "correlation_id": "d40d4e0429244174a3aaeecaf2ce3919",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:6560c8135fb7f0d2e4f2eca1eaa3f0515003c126624ff7d83f8affa501ec37c2",
+          "instance_fingerprint": "sha256:29600e8da5d42f4add31b0cf80192822f299ae7e34332a29d026174890eca56d",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "d40d4e0429244174a3aaeecaf2ce3919",
+            "correlation_id": "d40d4e0429244174a3aaeecaf2ce3919",
+            "trace_id": null,
+            "span_id": null
+          }
+        }
+      }
+    },
+    "hypothesis": "Projection task scheduling or Redis task state persistence is failing."
+  },
+  {
+    "id": "frontend-qa-21efa8ca-2445-4a32-95a4-e4052ddc16f7",
+    "timestamp": "2026-02-20T07:59:38.162Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "List action types",
+      "Apply action validate/execute"
+    ],
+    "expected": "At least one action type is available for apply",
+    "actual": "No action type available in ontology. Action lifecycle cannot be verified.",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/actionTypes",
+    "ui_path": "/db/qa_live_mlulmqag_25270/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      }
+    },
+    "hypothesis": "Action type creation/public management flow is missing from FE-exposed APIs."
+  },
+  {
+    "id": "frontend-qa-452a2d83-8861-4ecf-b7ef-64353c4a7099",
+    "timestamp": "2026-02-20T08:00:01.775Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Load audit logs using db partition key"
+    ],
+    "expected": "Audit API returns filtered logs successfully",
+    "actual": "status=400; body={\"status\":\"error\",\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"detail\":{\"message\":\"dictionary update sequence element #0 has length 1; 2 is required\",\"code\":\"REQUEST_VALIDATION_FAILED\"},\"code\":\"REQUEST_VALIDATION_FAILED\",\"category\":\"input\",\"http_status\":400,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:b5c7e0926",
+    "endpoint": "GET /api/v1/audit/logs",
+    "ui_path": "/db/qa_live_mlulmqag_25270/audit",
+    "evidence": {
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+        "correlation_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:0a218d135da692e763099cf74b36e1f417bcb44695c58e305334ba5f94c1a2c3",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+            "correlation_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API request parsing or filter handling is broken in current runtime."
+  },
+  {
+    "id": "frontend-qa-a5fa28b4-00bf-42f8-a2e9-a3ef751039ab",
+    "timestamp": "2026-02-20T08:00:01.775Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Closed loop",
+    "repro_steps": [
+      "Create instance",
+      "Search objects",
+      "Load audit logs"
+    ],
+    "expected": "Object becomes queryable and corresponding audit log exists",
+    "actual": "closed_loop_status=partial; created=qa_order_mluln6r6; audit_count=0",
+    "endpoint": "Instance write + object search + audit logs",
+    "ui_path": "/db/qa_live_mlulmqag_25270/instances",
+    "evidence": {
+      "before_count": 0,
+      "after_count": 1,
+      "audit_count": 0,
+      "audit_status": 400,
+      "audit_response": {
+        "status": "error",
+        "message": "dictionary update sequence element #0 has length 1; 2 is required",
+        "detail": {
+          "message": "dictionary update sequence element #0 has length 1; 2 is required",
+          "code": "REQUEST_VALIDATION_FAILED"
+        },
+        "code": "REQUEST_VALIDATION_FAILED",
+        "category": "input",
+        "http_status": 400,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+          "code": "SHV-BFF-INP-VAL-0001",
+          "domain": "input",
+          "class": "validation",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Request validation failed",
+          "http_status": 400,
+          "http_status_hint": 400,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "fix_input",
+          "owner": "user",
+          "external_code": "REQUEST_VALIDATION_FAILED",
+          "external_category": "input"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "GET",
+          "path": "/api/v1/audit/logs",
+          "endpoint": "bff.routers.audit.list_audit_logs"
+        },
+        "trace_id": null,
+        "span_id": null,
+        "request_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+        "correlation_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:345ab6eba0b4f95dcfb4646407bf68b560180e0c28e2b0596631b55c69dc7cb1",
+          "instance_fingerprint": "sha256:0a218d135da692e763099cf74b36e1f417bcb44695c58e305334ba5f94c1a2c3",
+          "runbook_ref": "REQUEST_VALIDATION_FAILED",
+          "runbook_uri": "spice://runbook/REQUEST_VALIDATION_FAILED",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-INP-VAL-0001",
+            "catalog_fingerprint": "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd",
+            "request_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+            "correlation_id": "b4a75541cd754bc3ad0ae92e3fa20454",
+            "trace_id": null,
+            "span_id": null
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "dictionary update sequence element #0 has length 1; 2 is required",
+            "code": "REQUEST_VALIDATION_FAILED"
+          }
+        }
+      }
+    },
+    "hypothesis": "Audit API failed, so closed-loop evidence could not be retrieved."
+  },
+  {
+    "id": "frontend-qa-6a764f33-5441-484f-8da2-ba01a8b2928a",
+    "timestamp": "2026-02-20T08:35:58Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Run playwright full suite",
+      "Open settings popover from project/settings tests"
+    ],
+    "expected": "Single unique Settings trigger is interactable",
+    "actual": "strict mode violation: Settings button matched 2 elements",
+    "endpoint": "UI selector interaction (Settings button)",
+    "ui_path": "/",
+    "evidence": {
+      "tests": [
+        "tests/e2e/settings.spec.ts",
+        "tests/e2e/project.spec.ts"
+      ],
+      "file": "/Users/isihyeon/Desktop/SPICE-Harvester/frontend/tests/utils/mockBff.ts:147"
+    },
+    "hypothesis": "UI now renders two Settings controls; E2E selector contract regressed."
+  },
+  {
+    "id": "frontend-qa-3bd7de56-9b96-485f-8953-daeed1283718",
+    "timestamp": "2026-02-20T08:35:58Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Run playwright full suite",
+      "Open project page tests"
+    ],
+    "expected": "Project heading/combobox are visible on project landing",
+    "actual": "Project heading and combobox locators not found within timeout",
+    "endpoint": "UI render contract (project overview)",
+    "ui_path": "/",
+    "evidence": {
+      "tests": [
+        "tests/e2e/project.spec.ts:10",
+        "tests/e2e/project.spec.ts:18"
+      ]
+    },
+    "hypothesis": "Project page layout/semantics changed; legacy selectors no longer match live UI."
+  },
+  {
+    "id": "frontend-qa-1e65ddd4-7bbc-481a-864a-242957a57a5d",
+    "timestamp": "2026-02-20T08:35:58Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Run playwright full suite",
+      "Open navigation rail test"
+    ],
+    "expected": "Ontology and Mappings rail buttons are visible",
+    "actual": "Ontology rail button locator not found within timeout",
+    "endpoint": "UI navigation rail visibility",
+    "ui_path": "/",
+    "evidence": {
+      "tests": [
+        "tests/e2e/navigation.spec.ts:16"
+      ]
+    },
+    "hypothesis": "Sidebar actions were renamed/relocated; E2E route-action assertions are outdated."
+  },
+  {
+    "id": "frontend-qa-7b77a603-255c-4509-96be-1314423e877e",
+    "timestamp": "2026-02-20T08:35:58Z",
+    "source": "frontend_e2e",
+    "severity": "P2",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Run playwright full suite",
+      "Open command drawer test",
+      "Try to fill Add command id input"
+    ],
+    "expected": "Command drawer exposes Add command id input",
+    "actual": "Add command id input locator unresolved; test times out",
+    "endpoint": "UI command drawer interaction",
+    "ui_path": "/",
+    "evidence": {
+      "tests": [
+        "tests/e2e/commands.spec.ts:10"
+      ]
+    },
+    "hypothesis": "Command drawer form semantics changed; accessibility label no longer matches test contract."
+  },
+  {
+    "id": "frontend-qa-4ebe0391-7bcf-448f-83a7-c2d447465266",
+    "timestamp": "2026-02-20T08:42:40Z",
+    "source": "frontend_api_smoke",
+    "severity": "P0",
+    "phase": "Foundry Connectivity v2",
+    "repro_steps": [
+      "POST /api/v2/connectivity/connections?preview=true",
+      "connectionConfiguration.type=PostgreSqlConnectionConfig"
+    ],
+    "expected": "Connection object is created or validation error is returned cleanly",
+    "actual": "500 INTERNAL_ERROR: ApplicationSettings has no attribute feature_flags",
+    "endpoint": "POST /api/v2/connectivity/connections?preview=true",
+    "ui_path": "/db/{db}/connectivity",
+    "evidence": {
+      "response_status": 500,
+      "error_detail": "ApplicationSettings object has no attribute feature_flags"
+    },
+    "hypothesis": "Router accesses get_settings().feature_flags but settings model in runtime does not expose that attribute."
+  },
+  {
+    "id": "frontend-qa-64978c6a-0d7c-46a9-8b6e-aa11b97f28ed",
+    "timestamp": "2026-02-20T08:42:40Z",
+    "source": "frontend_api_smoke",
+    "severity": "P1",
+    "phase": "Foundry Orchestration v2",
+    "repro_steps": [
+      "POST /api/v1/pipelines (create pipeline)",
+      "POST /api/v2/orchestration/builds/create with targetRid of created pipeline"
+    ],
+    "expected": "Build create returns proper success or pass-through 4xx permission error",
+    "actual": "Endpoint returns 500 Internal while downstream failure is permission denied (403)",
+    "endpoint": "POST /api/v2/orchestration/builds/create",
+    "ui_path": "/db/{db}/pipelines",
+    "evidence": {
+      "response_status": 500,
+      "pipeline_id": "6e737b2c-1088-4eb8-ad6b-544cb6e1e784",
+      "bff_log": "Failed to create Foundry orchestration build: 403 Permission denied"
+    },
+    "hypothesis": "Error mapping layer converts OMS permission failure into generic 500 instead of preserving authorization semantics."
+  },
+  {
+    "id": "frontend-qa-dad57a71-6b0a-4960-8c04-a48f1863ddfe",
+    "timestamp": "2026-02-20T08:59:54Z",
+    "source": "frontend_api_smoke",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "POST /api/v2/ontologies/{ontology}/actions/HoldOrder/apply?options.mode=VALIDATE_AND_EXECUTE",
+      "Query target Order object status before/after"
+    ],
+    "expected": "Action execute should return execution evidence (action_log_id/auditLogId) and explicit branch semantics for closed-loop verification",
+    "actual": "Action response now includes action_log_id/auditLogId/writebackStatus; writeback branch reflects ON_HOLD but main branch remains PENDING (branch consistency gap)",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/actions/{action}/apply",
+    "ui_path": "/db/{db}/ontology",
+    "evidence": {
+      "db": "qa_live_mluniu9x_rcdzv",
+      "order_id": "qa_closedloop_1771577705",
+      "before_status": "PENDING",
+      "after_status": "PENDING",
+      "response_keys": [
+        "validation",
+        "parameters"
+      ],
+      "main_branch_status": "PENDING",
+      "writeback_branch_status": "ON_HOLD",
+      "writeback_branch": "writeback-qa_live_mluniu9x_rcdzv",
+      "patched_response_keys": [
+        "action_log_id",
+        "auditLogId",
+        "writebackStatus",
+        "sideEffectDelivery",
+        "validation",
+        "parameters"
+      ],
+      "audit_lookup_hits": 1
+    },
+    "hypothesis": "Execution evidence contract is fixed; remaining behavior is branch-scoped writeback not auto-promoted to main branch/read model."
+  },
+  {
+    "id": "frontend-qa-1aa1f46e-cbbe-469d-9dc9-b1f590c6cde8",
+    "timestamp": "2026-02-20T09:28:21Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Action",
+    "repro_steps": [
+      "Create Order instance",
+      "Apply HoldOrder via POST /api/v2/ontologies/{ontology}/actions/{action}/apply?branch=main",
+      "Search Order objects via POST /api/v2/ontologies/{ontology}/objects/Order/search?branch=main"
+    ],
+    "expected": "Single authoritative row per Order primary key showing latest action-applied status.",
+    "actual": "Before fix, search could return duplicate rows (base + action overlay) for same order_id, causing stale PENDING to appear first and closed-loop validation to fail intermittently.",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/objects/{objectType}/search",
+    "ui_path": "/db/qa_live_mluniu9x_rcdzv/instances",
+    "evidence": {
+      "db_name": "qa_live_mluniu9x_rcdzv",
+      "sample_order_id": "qa_debug_1771579120",
+      "before_fix_symptom": "duplicate rows for same order_id with conflicting statuses",
+      "after_fix_check": "single row with order_status=ON_HOLD"
+    },
+    "hypothesis": "OMS v2 object search lacked duplicate collapse for writeback-projected rows sharing the same primary key."
+  },
+  {
+    "id": "frontend-qa-cf26a5c0-c252-423c-92b7-9e843a51c926",
+    "timestamp": "2026-02-20T10:07:40.977Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Search operators",
+    "repro_steps": [
+      "Create Order instance",
+      "Search with eq(order_id) + X-Consistency: strong"
+    ],
+    "expected": "Read-after-write should return target object via strong-consistency search.",
+    "actual": "status=200; rows=0; found=false",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/objects/Order/search",
+    "ui_path": "/db/qa_live_mluq6ze5_as0tw/instances",
+    "evidence": {
+      "synthetic_order_id": "qa_order_mluq7pez",
+      "response_status": 200,
+      "response_body": {
+        "data": [],
+        "nextPageToken": null,
+        "totalCount": "0"
+      }
+    },
+    "hypothesis": "Strong consistency header path or eq operator mapping does not guarantee read-your-write behavior."
+  },
+  {
+    "id": "frontend-qa-f34aaa80-1439-4d20-8d4e-4a4fdbaad038",
+    "timestamp": "2026-02-20T10:12:17.886Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Search operators",
+    "repro_steps": [
+      "Create Order instance",
+      "Search with eq(order_id) + X-Consistency: strong"
+    ],
+    "expected": "Read-after-write should return target object via strong-consistency search.",
+    "actual": "status=200; rows=0; found=false",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/objects/Order/search",
+    "ui_path": "/db/qa_live_mluqczcz_5v6hl/instances",
+    "evidence": {
+      "synthetic_order_id": "qa_order_mluqdn2l",
+      "response_status": 200,
+      "response_body": {
+        "data": [],
+        "nextPageToken": null,
+        "totalCount": "0"
+      }
+    },
+    "hypothesis": "Strong consistency header path or eq operator mapping does not guarantee read-your-write behavior."
+  }
+]

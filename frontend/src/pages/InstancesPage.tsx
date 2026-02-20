@@ -21,10 +21,10 @@ import {
   bulkCreateInstances,
   createInstance,
   deleteInstance,
-  getInstance,
+  getInstanceCtx,
   getSampleValues,
   listDatabaseClasses,
-  listInstances,
+  listInstancesCtx,
   updateInstance,
 } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
@@ -143,7 +143,7 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
   const instancesQuery = useQuery({
     queryKey: qk.instances(dbName, classId, requestContext.language, { limit, search }),
     queryFn: () =>
-      listInstances(requestContext, dbName, classId, {
+      listInstancesCtx(requestContext, dbName, classId, {
         limit: Number(limit) || 100,
         offset: 0,
         search: search || undefined,
@@ -153,7 +153,7 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
 
   const detailQuery = useQuery({
     queryKey: selectedId ? qk.instance(dbName, classId, selectedId, requestContext.language) : ['instance', 'none'],
-    queryFn: () => getInstance(requestContext, dbName, classId, selectedId ?? ''),
+    queryFn: () => getInstanceCtx(requestContext, dbName, classId, selectedId ?? ''),
     enabled: Boolean(selectedId && classId),
   })
 

@@ -853,7 +853,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     ]
                 },
             )
-        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        # Resolve pk_spec: prefer explicit pk_spec, fallback to properties-level flags
+        raw_pk_spec = object_type_spec.get("pk_spec") or {}
+        if not raw_pk_spec:
+            _props = object_type_spec.get("properties") or []
+            _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
+            _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
+            if _pk_cols or _tk_cols:
+                raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
+        object_type_key_spec = normalize_key_spec(raw_pk_spec, columns=list(prop_map.keys()))
         object_type_pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
         object_type_title_targets = [str(v).strip() for v in object_type_key_spec.get("title_key") or [] if str(v).strip()]
         object_type_unique_keys = [

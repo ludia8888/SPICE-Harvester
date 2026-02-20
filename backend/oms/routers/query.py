@@ -28,6 +28,7 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
+from shared.utils.number_utils import to_int_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +474,87 @@ def _to_es_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
         )
 
     raise ValueError(f"Unsupported query operator: {q.type}")
+
+
+def _property_exact_term_clause(value: Any) -> Dict[str, Any]:
+    if isinstance(value, bool):
+        return {"term": {"properties.value.keyword": str(value).lower()}}
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {"term": {"properties.value.numeric": float(value)}}
+    return {"term": {"properties.value.keyword": str(value)}}
+
+
+def _property_range_clause(*, op: str, value: Any) -> Dict[str, Any]:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {"range": {"properties.value.numeric": {op: float(value)}}}
+    return {"range": {"properties.value.keyword": {op: str(value)}}}
+
+
+def _to_es_properties_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
+    if depth > _MAX_QUERY_DEPTH:
+        raise ValueError("Search query nesting is too deep")
+
+    q = _coerce_query(query)
+
+    if q.type == "and":
+        children = [_to_es_properties_query(child, depth=depth + 1) for child in q.value]
+        return {"bool": {"must": children}}
+
+    if q.type == "or":
+        children = [_to_es_properties_query(child, depth=depth + 1) for child in q.value]
+        return {"bool": {"should": children, "minimum_should_match": 1}}
+
+    if q.type == "not":
+        child = _to_es_properties_query(q.value, depth=depth + 1)
+        return {"bool": {"must_not": [child]}}
+
+    field_name = _validate_field_name(str(q.field or ""))
+    field_path = _resolve_field_path(field_name)
+    # Top-level fields are already queryable in the canonical path.
+    if field_path in _TOP_LEVEL_FIELDS:
+        return _to_es_query(q, depth=depth)
+
+    property_name_clause = {"term": {"properties.name": field_name}}
+    value_clause: Optional[Dict[str, Any]] = None
+
+    if q.type == "eq":
+        value_clause = _property_exact_term_clause(q.value)
+    elif q.type == "gt":
+        value_clause = _property_range_clause(op="gt", value=q.value)
+    elif q.type == "lt":
+        value_clause = _property_range_clause(op="lt", value=q.value)
+    elif q.type == "gte":
+        value_clause = _property_range_clause(op="gte", value=q.value)
+    elif q.type == "lte":
+        value_clause = _property_range_clause(op="lte", value=q.value)
+    elif q.type == "containsAnyTerm":
+        value_clause = {"match": {"properties.value": {"query": str(q.value).strip(), "operator": "or"}}}
+    elif q.type == "containsAllTerms":
+        value_clause = {"match": {"properties.value": {"query": str(q.value).strip(), "operator": "and"}}}
+    elif q.type == "startsWith":
+        value_clause = {"prefix": {"properties.value.keyword": str(q.value).strip()}}
+    elif q.type == "in":
+        raw_values = q.value if isinstance(q.value, list) else []
+        values = [str(item) for item in raw_values]
+        value_clause = {"terms": {"properties.value.keyword": values}}
+
+    if value_clause is None:
+        # Unsupported operator for properties fallback.
+        return _to_es_query(q, depth=depth)
+
+    return {
+        "nested": {
+            "path": "properties",
+            "query": {
+                "bool": {
+                    "must": [
+                        property_name_clause,
+                        value_clause,
+                    ]
+                }
+            },
+        }
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1347,6 +1429,66 @@ def _flatten_source(source: Dict[str, Any]) -> Dict[str, Any]:
     return flat
 
 
+def _source_instance_key(source: Dict[str, Any]) -> Optional[str]:
+    class_id = str(source.get("class_id") or "").strip()
+    if not class_id:
+        data = source.get("data")
+        if isinstance(data, dict):
+            class_id = str(data.get("class_id") or "").strip()
+
+    instance_id = str(source.get("instance_id") or "").strip()
+    if not instance_id:
+        data = source.get("data")
+        if isinstance(data, dict):
+            instance_id = str(data.get("instance_id") or "").strip()
+    if not instance_id:
+        return None
+    return f"{class_id}|{instance_id}"
+
+
+def _source_sort_rank(source: Dict[str, Any]) -> tuple[str, int, int]:
+    seq = to_int_or_none(source.get("event_sequence"))
+    updated_at = str(source.get("updated_at") or "").strip()
+    # Overlay/action-projected docs should win tie-breaks when recency is equal.
+    overlay_rank = 1 if ("patchset_commit_id" in source or "overlay_tombstone" in source) else 0
+    return (updated_at, overlay_rank, int(seq) if seq is not None else -1)
+
+
+def _collapse_duplicate_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_key: Dict[str, Dict[str, Any]] = {}
+    key_order: List[str] = []
+    unkeyed: List[Dict[str, Any]] = []
+
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        key = _source_instance_key(source)
+        if key is None:
+            unkeyed.append(source)
+            continue
+
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = source
+            key_order.append(key)
+            continue
+
+        if _source_sort_rank(source) >= _source_sort_rank(existing):
+            by_key[key] = source
+
+    collapsed: List[Dict[str, Any]] = []
+    for key in key_order:
+        source = by_key.get(key)
+        if not isinstance(source, dict):
+            continue
+        if bool(source.get("overlay_tombstone")):
+            continue
+        collapsed.append(source)
+
+    collapsed.extend(unkeyed)
+    return collapsed
+
+
 def _rid_component(value: Any, *, fallback: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1384,7 +1526,7 @@ def _normalize_foundry_object_row(
     db_name: str,
     object_type: str,
     exclude_rid: bool,
-) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
     normalized = _prune_none_values(dict(row))
     if not isinstance(normalized, dict):
         normalized = {}
@@ -1419,6 +1561,33 @@ def _normalize_foundry_object_row(
                 object_type=normalized_object_type,
                 primary_key=primary_key,
             )
+
+    # Keep a stable properties object to match Foundry-style object payloads.
+    if "properties" not in normalized or not isinstance(normalized.get("properties"), dict):
+        metadata_keys = {
+            "__rid",
+            "__primaryKey",
+            "__apiName",
+            "primaryKey",
+            "instance_id",
+            "class_id",
+            "class_label",
+            "db_name",
+            "branch",
+            "created_at",
+            "updated_at",
+            "lifecycle_id",
+            "event_id",
+            "event_sequence",
+            "event_timestamp",
+            "overlay_tombstone",
+            "patchset_commit_id",
+        }
+        normalized["properties"] = {
+            key: value
+            for key, value in normalized.items()
+            if not key.startswith("__") and key not in metadata_keys and key != "properties"
+        }
 
     return normalized
 
@@ -1468,11 +1637,45 @@ async def _search_objects_v2_impl(
             sort=sort_clause,
         )
 
+        # Runtime indices may keep searchable fields in nested ``properties`` while
+        # ``data`` is disabled for indexing. Retry with a properties-based query when
+        # the canonical query returns no hits.
+        first_total = to_int_or_none(result.get("total")) or 0
+        first_hits = result.get("hits")
+        no_hits = not isinstance(first_hits, list) or len(first_hits) == 0
+        if request.where is not None and first_total <= 0 and no_hits:
+            fallback_query = {
+                "bool": {
+                    "must": [
+                        {"term": {"class_id": object_type}},
+                        _to_es_properties_query(request.where),
+                    ]
+                }
+            }
+            fallback_sort = [
+                sort_item
+                for sort_item in sort_clause
+                if not any(str(field).startswith("data.") for field in sort_item.keys())
+            ] or [{"instance_id": {"order": "asc"}}]
+            fallback_result = await es.search(
+                index=index_name,
+                query=fallback_query,
+                size=request.pageSize,
+                from_=offset,
+                sort=fallback_sort,
+            )
+            fallback_total = to_int_or_none(fallback_result.get("total")) or 0
+            fallback_hits = fallback_result.get("hits")
+            if fallback_total > 0 or (isinstance(fallback_hits, list) and len(fallback_hits) > 0):
+                result = fallback_result
+
         hits = result.get("hits", [])
         if not isinstance(hits, list):
             hits = []
 
-        flattened = [_flatten_source(hit) for hit in hits if isinstance(hit, dict)]
+        raw_sources = [hit for hit in hits if isinstance(hit, dict)]
+        collapsed_sources = _collapse_duplicate_sources(raw_sources)
+        flattened = [_flatten_source(hit) for hit in collapsed_sources]
 
         if selected_fields is not None:
             projected: List[Dict[str, Any]] = []
