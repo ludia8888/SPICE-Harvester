@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const qaProxyTarget = process.env.E2E_VITE_PROXY_TARGET ?? 'http://127.0.0.1:18012'
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
@@ -15,7 +17,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173',
+    command: `VITE_PROXY_TARGET=${qaProxyTarget} npm run dev -- --host 127.0.0.1 --port 5173`,
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

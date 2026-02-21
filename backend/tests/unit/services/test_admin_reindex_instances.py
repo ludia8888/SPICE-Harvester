@@ -15,6 +15,11 @@ class _FakeSpec:
             setattr(self, k, v)
 
 
+class _FakeDataset:
+    def __init__(self, *, db_name: str):
+        self.db_name = db_name
+
+
 @pytest.mark.asyncio
 async def test_reindex_no_mapping_specs() -> None:
     registry = AsyncMock()
@@ -126,3 +131,35 @@ async def test_reindex_with_multiple_specs() -> None:
 
     assert result["submitted_jobs"] == 2
     assert job_queue.enqueue.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reindex_filters_legacy_specs_by_dataset_db_name() -> None:
+    spec = _FakeSpec(
+        mapping_spec_id="ms-legacy",
+        version=1,
+        target_class_id="Order",
+        dataset_id="ds-legacy",
+        dataset_branch="main",
+    )
+
+    registry = AsyncMock()
+    registry.list_mapping_specs = AsyncMock(return_value=[spec])
+
+    dataset_reg = AsyncMock()
+    dataset_reg.get_dataset = AsyncMock(return_value=_FakeDataset(db_name="other_db"))
+    dataset_reg.list_dataset_versions = AsyncMock(return_value=[{"version_id": "v-1"}])
+
+    job_queue = AsyncMock()
+    job_queue.enqueue = AsyncMock()
+
+    result = await reindex_all_instances(
+        db_name="test_db",
+        objectify_registry=registry,
+        dataset_registry=dataset_reg,
+        job_queue=job_queue,
+    )
+
+    assert result["status"] == "submitted"
+    assert result["submitted_jobs"] == 0
+    assert job_queue.enqueue.call_count == 0

@@ -38,6 +38,27 @@ def test_object_type_requires_pk_spec_and_backing_source():
     assert "backing_source" in missing
 
 
+def test_object_type_draft_allows_missing_pk_and_backing():
+    issues = check_required_fields("object_type", {"status": "DRAFT"})
+    missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
+    assert "pk_spec" not in missing
+    assert "pk_spec.primary_key" not in missing
+    assert "pk_spec.title_key" not in missing
+    assert "backing_source" not in missing
+
+
+def test_object_type_supports_backing_sources_list():
+    issues = check_required_fields(
+        "object_type",
+        {
+            "status": "ACTIVE",
+            "pk_spec": {"primary_key": ["account_id"], "title_key": ["account_id"]},
+            "backing_sources": [{"dataset_id": "ds-1"}],
+        },
+    )
+    assert not [issue for issue in issues if issue["severity"] == "error"]
+
+
 def test_shared_property_requires_properties_list():
     issues = check_required_fields("shared_property", {})
     missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
@@ -254,3 +275,37 @@ def test_action_type_rejects_non_boolean_edits_beyond_actions() -> None:
     issues = check_required_fields("action_type", spec)
     invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
     assert "edits_beyond_actions" in invalid
+
+
+@pytest.mark.unit
+def test_permission_policy_accepts_project_inheritance_fields() -> None:
+    issues = _collect_permission_policy_issues(
+        {
+            "effect": "ALLOW",
+            "principals": ["role:DomainModeler"],
+            "inherit_project_policy": True,
+            "require_project_policy": True,
+            "project_policy_scope": "action_access",
+            "project_policy_subject_type": "project",
+            "project_policy_subject_id": "demo",
+        }
+    )
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert not invalid
+
+
+@pytest.mark.unit
+def test_permission_policy_rejects_invalid_project_inheritance_field_types() -> None:
+    issues = _collect_permission_policy_issues(
+        {
+            "effect": "ALLOW",
+            "principals": ["role:DomainModeler"],
+            "inherit_project_policy": "yes",
+            "require_project_policy": "no",
+            "project_policy_scope": 123,
+        }
+    )
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "permission_policy.inherit_project_policy" in invalid
+    assert "permission_policy.require_project_policy" in invalid
+    assert "permission_policy.project_policy_scope" in invalid

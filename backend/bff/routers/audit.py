@@ -17,6 +17,16 @@ from shared.dependencies.providers import AuditLogStoreDep
 from shared.models.requests import ApiResponse
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
+_AUDIT_STATUS_VALUES = {"success", "failure"}
+
+
+def _normalize_audit_status_filter(raw_value: Optional[str]) -> Optional[str]:
+    text = str(raw_value or "").strip().lower()
+    if not text:
+        return None
+    if text not in _AUDIT_STATUS_VALUES:
+        raise ValueError("status must be one of: success, failure")
+    return text
 
 
 @router.get("/logs")
@@ -38,10 +48,17 @@ async def list_audit_logs(
     audit_store: AuditLogStoreDep,
 ):
     try:
+        normalized_status_filter = _normalize_audit_status_filter(status_filter)
+        if since and until and since > until:
+            raise ValueError("since must be less than or equal to until")
+    except ValueError as e:
+        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
+
+    try:
         logs = await audit_store.list_logs(
             partition_key=partition_key,
             action=action,
-            status=status_filter,
+            status=normalized_status_filter,
             resource_type=resource_type,
             resource_id=resource_id,
             event_id=event_id,
@@ -56,8 +73,6 @@ async def list_audit_logs(
             message="Audit logs fetched",
             data={"items": [item.model_dump(mode="json") for item in logs], "count": len(logs)},
         ).to_dict()
-    except ValueError as e:
-        raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED) from e
     except Exception as e:
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR) from e
 

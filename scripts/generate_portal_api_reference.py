@@ -422,7 +422,8 @@ def _render_api_overview_summary(endpoints: List[Endpoint]) -> str:
 
 def _render_openapi_json(spec: Dict) -> str:
     """Export the OpenAPI spec as JSON for static hosting."""
-    return json.dumps(spec, indent=2, ensure_ascii=False) + "\n"
+    # Keep output deterministic across runs to stabilize docs pre-commit checks.
+    return json.dumps(spec, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ Ontology schema resolved via OMS HTTP API.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -43,7 +44,7 @@ from shared.models.lineage_edge_types import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.security.auth_utils import BFF_TOKEN_ENV_KEYS, get_expected_token
+from shared.security.auth_utils import OMS_SERVICE_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_instance_id
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
@@ -52,6 +53,7 @@ from shared.services.kafka.processed_event_worker import (
     StrictHeartbeatKafkaWorker,
     WorkerRuntimeConfig,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.kafka.retry_classifier import (
     INSTANCE_COMMAND_RETRY_PROFILE,
     classify_retryable_with_profile,
@@ -148,6 +150,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.event_store: Optional[EventStore] = None
 
         # First-class provenance/audit (lineage fail-closed by default)
@@ -269,13 +272,40 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         
         # Elasticsearch (direct instance writes — Phase 2)
         self.elasticsearch_service = create_elasticsearch_service(settings)
-        await self.elasticsearch_service.connect()
+        es_connect_error: Optional[Exception] = None
+        for attempt in range(1, 11):
+            try:
+                await self.elasticsearch_service.connect()
+                es_connect_error = None
+                break
+            except Exception as exc:
+                es_connect_error = exc
+                msg = str(exc or "").lower()
+                retryable = (
+                    isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+                    or self._is_elasticsearch_outage_error_message(msg)
+                    or "cannot connect to host" in msg
+                    or "connectionerror" in msg
+                    or "connection refused" in msg
+                )
+                if (not retryable) or attempt >= 10:
+                    raise
+                backoff_s = min(30, int(2 ** max(attempt - 1, 0)))
+                logger.warning(
+                    "Elasticsearch not ready during startup (attempt %s/10); retrying in %ss: %s",
+                    attempt,
+                    backoff_s,
+                    exc,
+                )
+                await asyncio.sleep(backoff_s)
+        if es_connect_error is not None:
+            raise RuntimeError("Failed to connect to Elasticsearch during worker startup") from es_connect_error
         logger.info("Elasticsearch connected for direct instance writes")
 
         # OMS HTTP client (ontology schema resolution)
         oms_url = settings.services.oms_base_url
         oms_headers: Dict[str, str] = {}
-        oms_token = get_expected_token(BFF_TOKEN_ENV_KEYS)
+        oms_token = get_expected_token(OMS_SERVICE_TOKEN_ENV_KEYS)
         if oms_token:
             oms_headers["X-Admin-Token"] = oms_token
         self.oms_http = httpx.AsyncClient(
@@ -284,11 +314,31 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             headers=oms_headers,
         )
 
-        stores = await initialize_worker_stores(
-            enable_lineage=self.enable_lineage,
-            enable_audit_logs=self.enable_audit_logs,
-            logger=logger,
-        )
+        stores = None
+        stores_init_error: Optional[Exception] = None
+        for attempt in range(1, 6):
+            try:
+                stores = await initialize_worker_stores(
+                    enable_lineage=self.enable_lineage,
+                    enable_audit_logs=self.enable_audit_logs,
+                    logger=logger,
+                )
+                break
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                stores_init_error = exc
+                if attempt >= 5:
+                    raise
+                backoff_s = min(30, int(2 ** max(attempt - 1, 0)))
+                logger.warning(
+                    "initialize_worker_stores timed out (attempt %s/5); retrying in %ss",
+                    attempt,
+                    backoff_s,
+                )
+                await asyncio.sleep(backoff_s)
+
+        if stores is None:
+            raise RuntimeError("initialize_worker_stores failed after retries") from stores_init_error
+
         self.processed_event_registry = stores.processed
         self.processed = stores.processed
         self.lineage_store = stores.lineage_store
@@ -327,6 +377,10 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             )
 
         self.event_store = EventStore()
+        self.event_store.attach_observability_stores(
+            lineage_store=self.lineage_store,
+            audit_store=self.audit_store,
+        )
         await self.event_store.connect()
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
         
@@ -952,7 +1006,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             logger.info("✅ STRICT: Instance created successfully")
         except Exception as e:
             logger.error(f"❌ Failed to create instance: {e}")
-            await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
     async def process_bulk_create_instances(self, command: Dict[str, Any]) -> None:
@@ -1137,7 +1190,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
 
         except Exception as e:
             logger.error(f"❌ Failed to bulk create instances: {e}")
-            await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
     async def process_bulk_update_instances(self, command: Dict[str, Any]) -> None:
@@ -1231,7 +1283,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             )
         except Exception as e:
             logger.error(f"❌ Failed to bulk update instances: {e}")
-            await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
     async def process_update_instance(self, command: Dict[str, Any], *, skip_status: bool = False) -> None:
@@ -2257,6 +2308,23 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             return True
         return classify_retryable_with_profile(exc, INSTANCE_COMMAND_RETRY_PROFILE)
 
+    @staticmethod
+    def _is_elasticsearch_outage_error_message(message: str) -> bool:
+        msg = str(message or "").lower()
+        if not msg:
+            return False
+        if "unavailableshardsexception" in msg:
+            return True
+        if "elasticsearch" in msg and (
+            "connectionerror" in msg
+            or "cannot connect to host" in msg
+            or "connection refused" in msg
+            or "service unavailable" in msg
+            or "503" in msg
+        ):
+            return True
+        return False
+
     async def _publish_to_dlq(
         self,
         *,
@@ -2461,6 +2529,10 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         msg = str(error or exc).lower()
         if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
             return max(int(self.max_retries), int(self.untyped_ref_max_retry_attempts))
+        # ES node restart/rolling outage can exceed the default retry window.
+        # Keep the retry window wide enough to bridge restart periods.
+        if self._is_elasticsearch_outage_error_message(msg):
+            return max(int(self.max_retries), 20)
         return int(self.max_retries)
 
     def _backoff_seconds_for_error(  # type: ignore[override]
@@ -2476,6 +2548,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         cap = int(self.backoff_max)
         if "references_untyped_object" in msg or "no_unique_type_for_document" in msg:
             cap = max(1, int(self.untyped_ref_backoff_max_seconds))
+        elif self._is_elasticsearch_outage_error_message(msg):
+            # Avoid long head-of-line blocking during transient ES outages.
+            cap = min(cap, 8)
         return min(cap, int(2 ** max(attempt_count - 1, 0)))
 
     async def _on_retry_scheduled(  # type: ignore[override]
@@ -2554,6 +2629,27 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         """Graceful shutdown"""
         logger.info("Shutting down STRICT Instance Worker...")
         self.running = False
+
+        async def _safe_close(component_name: str, obj: Any, *method_names: str) -> None:
+            if obj is None:
+                return
+            for method_name in method_names:
+                method = getattr(obj, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    maybe_awaitable = method()
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to close %s via %s: %s",
+                        component_name,
+                        method_name,
+                        exc,
+                        exc_info=True,
+                    )
+                return
         
         await self._close_consumer_runtime()
         await close_kafka_producer(
@@ -2564,18 +2660,12 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         )
         self.producer = None
         self.dlq_producer = None
-        if self.redis_client:
-            await self.redis_client.close()
-        if self.elasticsearch_service:
-            await self.elasticsearch_service.close()
-        if self.oms_http:
-            await self.oms_http.aclose()
-        if self.processed_event_registry:
-            await self.processed_event_registry.close()
-        if self.dataset_registry:
-            await self.dataset_registry.close()
-        if self.objectify_registry:
-            await self.objectify_registry.close()
+        await _safe_close("redis_client", self.redis_client, "aclose", "close")
+        await _safe_close("elasticsearch_service", self.elasticsearch_service, "disconnect", "aclose", "close")
+        await _safe_close("oms_http", self.oms_http, "aclose", "close")
+        await _safe_close("processed_event_registry", self.processed_event_registry, "close")
+        await _safe_close("dataset_registry", self.dataset_registry, "close")
+        await _safe_close("objectify_registry", self.objectify_registry, "close")
             
 
 async def main():

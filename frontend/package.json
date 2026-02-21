@@ -10,7 +10,9 @@
     "test": "vitest run --coverage",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:live": "bash ./scripts/run_live_foundry_qa.sh",
+    "test:e2e:live:soak": "E2E_REPEAT=3 bash ./scripts/run_live_foundry_qa.sh"
   },
   "dependencies": {
     "@blueprintjs/core": "^6.7.0",

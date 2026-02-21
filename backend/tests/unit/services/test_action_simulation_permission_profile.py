@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import oms.services.action_simulation_service as simulation_service
@@ -130,3 +132,115 @@ async def test_enforce_action_permission_rejects_invalid_permission_profile(monk
         )
     assert exc.value.status_code == 409
     assert exc.value.payload.get("error") == "action_permission_profile_invalid"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_action_permission_allows_when_project_policy_inheritance_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:
+        return "Owner"
+
+    class _Registry:
+        async def connect(self) -> None:
+            return None
+
+        async def get_access_policy(self, *, db_name: str, scope: str, subject_type: str, subject_id: str):  # noqa: ANN201
+            _ = db_name, scope, subject_type, subject_id
+            return SimpleNamespace(policy={"effect": "ALLOW", "principals": ["role:Owner"]})
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "DatasetRegistry", lambda: _Registry())
+
+    role = await enforce_action_permission(
+        db_name="demo",
+        submitted_by="alice",
+        submitted_by_type="user",
+        action_spec={
+            "permission_model": "ontology_roles",
+            "permission_policy": {
+                "effect": "ALLOW",
+                "principals": ["role:Owner"],
+                "inherit_project_policy": True,
+                "project_policy_scope": "action_access",
+                "project_policy_subject_type": "project",
+            },
+        },
+    )
+    assert role == "Owner"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_action_permission_rejects_when_required_project_policy_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:
+        return "Owner"
+
+    class _Registry:
+        async def connect(self) -> None:
+            return None
+
+        async def get_access_policy(self, *, db_name: str, scope: str, subject_type: str, subject_id: str):  # noqa: ANN201
+            _ = db_name, scope, subject_type, subject_id
+            return None
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "DatasetRegistry", lambda: _Registry())
+
+    with pytest.raises(ActionSimulationRejected) as exc:
+        await enforce_action_permission(
+            db_name="demo",
+            submitted_by="alice",
+            submitted_by_type="user",
+            action_spec={
+                "permission_model": "ontology_roles",
+                "permission_policy": {
+                    "effect": "ALLOW",
+                    "principals": ["role:Owner"],
+                    "inherit_project_policy": True,
+                    "require_project_policy": True,
+                },
+            },
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.payload.get("error") == "PERMISSION_DENIED"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enforce_action_permission_rejects_when_inherited_project_policy_denies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:
+        return "Owner"
+
+    class _Registry:
+        async def connect(self) -> None:
+            return None
+
+        async def get_access_policy(self, *, db_name: str, scope: str, subject_type: str, subject_id: str):  # noqa: ANN201
+            _ = db_name, scope, subject_type, subject_id
+            return SimpleNamespace(policy={"effect": "ALLOW", "principals": ["role:Security"]})
+
+    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "DatasetRegistry", lambda: _Registry())
+
+    with pytest.raises(ActionSimulationRejected) as exc:
+        await enforce_action_permission(
+            db_name="demo",
+            submitted_by="alice",
+            submitted_by_type="user",
+            action_spec={
+                "permission_model": "ontology_roles",
+                "permission_policy": {
+                    "effect": "ALLOW",
+                    "principals": ["role:Owner"],
+                    "inherit_project_policy": True,
+                },
+            },
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.payload.get("error") == "PERMISSION_DENIED"

@@ -39,8 +39,10 @@ class _DatasetRegistry:
     def __init__(self) -> None:
         self.datasets: dict[str, Any] = {}
         self.versions: dict[str, Any] = {}
+        self.versions_by_ingest_request_id: dict[str, Any] = {}
         self.transactions_by_id: dict[str, Any] = {}
         self.transaction_id_by_ingest_request_id: dict[str, str] = {}
+        self.ingest_requests_by_id: dict[str, Any] = {}
 
     async def create_dataset(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         dataset_id = str(uuid.uuid4())
@@ -109,8 +111,24 @@ class _DatasetRegistry:
             db_name=db_name,
             branch=branch,
             idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+            status="RECEIVED",
+            lakefs_commit_id=None,
+            artifact_key=None,
+            schema_json=kwargs.get("schema_json") or {},
+            sample_json=kwargs.get("sample_json") or {},
+            row_count=kwargs.get("row_count"),
+            source_metadata=kwargs.get("source_metadata") or {},
+            error=None,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+            published_at=None,
         )
+        self.ingest_requests_by_id[ingest_request_id] = req
         return req, True
+
+    async def get_ingest_request(self, *, ingest_request_id: str) -> SimpleNamespace | None:  # noqa: ANN001
+        return self.ingest_requests_by_id.get(ingest_request_id)
 
     async def create_ingest_transaction(
         self,
@@ -156,6 +174,7 @@ class _DatasetRegistry:
         if txn:
             txn.status = "COMMITTED"
             txn.lakefs_commit_id = lakefs_commit_id
+            txn.artifact_key = artifact_key
             txn.committed_at = utcnow()
         return txn
 
@@ -171,6 +190,58 @@ class _DatasetRegistry:
             txn.error = error
             txn.aborted_at = utcnow()
         return txn
+
+    async def publish_ingest_request(
+        self,
+        *,
+        ingest_request_id: str,
+        dataset_id: str,
+        lakefs_commit_id: str,
+        artifact_key: str | None,
+        row_count: int | None,
+        sample_json: dict[str, Any] | None,
+        schema_json: dict[str, Any] | None,
+        apply_schema: bool = True,
+        outbox_entries: list[dict[str, Any]] | None = None,
+    ) -> SimpleNamespace:
+        existing = self.versions_by_ingest_request_id.get(ingest_request_id)
+        if existing is not None:
+            return existing
+
+        version = SimpleNamespace(
+            version_id=str(uuid.uuid4()),
+            dataset_id=dataset_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+            row_count=row_count,
+            sample_json=sample_json or {},
+            ingest_request_id=ingest_request_id,
+            promoted_from_artifact_id=None,
+            created_at=utcnow(),
+        )
+        self.versions[dataset_id] = version
+        self.versions_by_ingest_request_id[ingest_request_id] = version
+
+        ingest_request = self.ingest_requests_by_id.get(ingest_request_id)
+        if ingest_request is not None:
+            ingest_request.status = "PUBLISHED"
+            ingest_request.lakefs_commit_id = lakefs_commit_id
+            ingest_request.artifact_key = artifact_key
+            ingest_request.sample_json = sample_json or ingest_request.sample_json
+            ingest_request.row_count = row_count
+            ingest_request.published_at = utcnow()
+
+        dataset = self.datasets.get(dataset_id)
+        if dataset is not None and apply_schema and isinstance(schema_json, dict):
+            dataset.schema_json = schema_json
+
+        txn = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
+        if txn is not None:
+            txn.status = "COMMITTED"
+            txn.lakefs_commit_id = lakefs_commit_id
+            txn.artifact_key = artifact_key
+            txn.committed_at = utcnow()
+        return version
 
 
 class _MockLakeFSClient:
@@ -213,7 +284,9 @@ class _MockLakeFSStorage:
         self.objects: dict[str, bytes] = {}
 
     async def load_bytes(self, repo: str, path: str) -> bytes:
-        return self.objects.get(path, b"col1,col2\nval1,val2\n")
+        if path not in self.objects:
+            raise FileNotFoundError(path)
+        return self.objects[path]
 
     async def save_bytes(self, repo: str, path: str, data: bytes, content_type: str | None = None) -> None:
         self.objects[path] = data
@@ -595,6 +668,10 @@ async def test_foundry_datasets_transaction_lifecycle(
         assert commit_body["status"] == "COMMITTED"
         assert commit_body["datasetRid"] == dataset_rid
 
+    latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
+    assert latest_version is not None
+    assert latest_version.lakefs_commit_id == "commit-123"
+
     # Create another transaction to test abort
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp2 = await client.post(
@@ -615,6 +692,146 @@ async def test_foundry_datasets_transaction_lifecycle(
         abort_body = abort_resp.json()
         assert abort_body["status"] == "ABORTED"
         assert abort_body["datasetRid"] == dataset_rid
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_version(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+    storage = _MockLakeFSStorage()
+    pr = _PipelineRegistry(lakefs_storage=storage)
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions",
+            json={"transactionType": "APPEND"},
+            headers={"X-User-ID": "user-1"},
+        )
+        assert create_resp.status_code == 200
+        txn_rid = create_resp.json()["rid"]
+
+        csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
+        upload_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/files:upload",
+            params={"filePath": "source.csv", "branchName": "main"},
+            content=csv_payload,
+            headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
+        )
+        assert upload_resp.status_code == 200
+
+        commit_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
+            headers={"X-User-ID": "user-1"},
+        )
+        assert commit_resp.status_code == 200
+        assert commit_resp.json()["status"] == "COMMITTED"
+
+        read_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/readTable",
+            json={"rowLimit": 10},
+            headers={"X-User-ID": "user-1"},
+        )
+        assert read_resp.status_code == 200
+        table = read_resp.json()
+        assert [col["name"] for col in table["columns"]] == ["id", "amount", "status"]
+        assert table["rows"] == [
+            ["order-1", "10.5", "OPEN"],
+            ["order-2", "20.0", "HOLD"],
+        ]
+        assert table["totalRowCount"] == 2
+
+    latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
+    assert latest_version is not None
+    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.row_count == 2
+    assert latest_version.sample_json["rows"] == [
+        ["order-1", "10.5", "OPEN"],
+        ["order-2", "20.0", "HOLD"],
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_when_list_objects_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+    storage = _MockLakeFSStorage()
+    pr = _PipelineRegistry(
+        lakefs_client=_FailingLakeFSListClient(),
+        lakefs_storage=storage,
+    )
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions",
+            json={"transactionType": "APPEND"},
+            headers={"X-User-ID": "user-1"},
+        )
+        assert create_resp.status_code == 200
+        txn_rid = create_resp.json()["rid"]
+
+        csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
+        upload_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/files:upload",
+            params={"filePath": "orders_snapshot.csv", "branchName": "main"},
+            content=csv_payload,
+            headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
+        )
+        assert upload_resp.status_code == 200
+        assert storage.objects.get(f"main/commerce_db/{ds.dataset_id}/orders/source.csv") == csv_payload
+
+        commit_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
+            headers={"X-User-ID": "user-1"},
+        )
+        assert commit_resp.status_code == 200
+        assert commit_resp.json()["status"] == "COMMITTED"
+
+        read_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/readTable",
+            json={"rowLimit": 10},
+            headers={"X-User-ID": "user-1"},
+        )
+        assert read_resp.status_code == 200
+        table = read_resp.json()
+        assert [col["name"] for col in table["columns"]] == ["id", "amount", "status"]
+        assert table["rows"] == [
+            ["order-1", "10.5", "OPEN"],
+            ["order-2", "20.0", "HOLD"],
+        ]
+        assert table["totalRowCount"] == 2
+
+    latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
+    assert latest_version is not None
+    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.row_count == 2
 
 
 @pytest.mark.unit
@@ -878,6 +1095,51 @@ async def test_foundry_datasets_read_table_with_column_selection(
     assert col_names == ["id", "status"]
     assert table["rows"][0] == ["order-1", "ACTIVE"]
     assert table["rows"][1] == ["order-2", "CLOSED"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_datasets_read_table_uses_version_artifact_key_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        foundry_datasets_v2,
+        "_resolve_lakefs_raw_repository",
+        lambda: "raw-datasets",
+    )
+
+    app = _build_test_app()
+    dr = _DatasetRegistry()
+    storage = _MockLakeFSStorage()
+    pr = _PipelineRegistry(lakefs_storage=storage)
+    _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
+
+    ds = await dr.create_dataset(db_name="commerce_db", name="orders")
+    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    custom_artifact_key = f"commerce_db/{ds.dataset_id}/orders/custom/path/orders_snapshot.csv"
+    storage.objects[f"main/{custom_artifact_key}"] = b"id,status\norder-1,OPEN\norder-2,HOLD\n"
+
+    dr.versions[ds.dataset_id] = SimpleNamespace(
+        version_id=str(uuid.uuid4()),
+        dataset_id=ds.dataset_id,
+        artifact_key=custom_artifact_key,
+        sample_json={},
+        row_count=2,
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        read_resp = await client.post(
+            f"/api/v2/datasets/{dataset_rid}/readTable",
+            json={"rowLimit": 10},
+            headers={"X-User-ID": "user-1"},
+        )
+
+    assert read_resp.status_code == 200
+    table = read_resp.json()
+    assert [col["name"] for col in table["columns"]] == ["id", "status"]
+    assert table["rows"] == [["order-1", "OPEN"], ["order-2", "HOLD"]]
+    assert table["totalRowCount"] == 2
 
 
 @pytest.mark.unit

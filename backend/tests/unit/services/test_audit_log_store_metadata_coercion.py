@@ -17,3 +17,10 @@ def test_coerce_metadata_parses_json_string() -> None:
 def test_coerce_metadata_returns_empty_for_invalid_string() -> None:
     assert AuditLogStore._coerce_metadata("not-json") == {}
 
+
+def test_coerce_metadata_returns_empty_for_broken_mapping() -> None:
+    class _BrokenMapping(dict):
+        def items(self):  # type: ignore[override]
+            raise ValueError("broken mapping")
+
+    assert AuditLogStore._coerce_metadata(_BrokenMapping({"a": 1})) == {}

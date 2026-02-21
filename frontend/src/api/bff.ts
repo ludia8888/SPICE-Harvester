@@ -1,36 +1,7 @@
 import type { Language } from '../types/app'
 import { useAppStore } from '../store/useAppStore'
 import { API_BASE_URL } from './config'
-
-// Mock 모드 설정 - .env에서 VITE_MOCK_API=true로 설정
-export const isMockMode = import.meta.env.VITE_MOCK_API === 'true'
-
-type MockDataModule = typeof import('./mockData')
-
-let mockDataModulePromise: Promise<MockDataModule> | null = null
-const MOCK_DATA_SPECIFIER = './mockData'
-
-const DEFAULT_MOCK_DELAY_MS = import.meta.env.MODE === 'test' ? 0 : 300
-const MOCK_DELAY_MS = (() => {
-  const configured = import.meta.env.VITE_MOCK_API_DELAY_MS
-  if (!configured) {
-    return DEFAULT_MOCK_DELAY_MS
-  }
-  const parsed = Number.parseInt(configured, 10)
-  return Number.isFinite(parsed) ? parsed : DEFAULT_MOCK_DELAY_MS
-})()
-
-const loadMockData = async () => {
-  if (!mockDataModulePromise) {
-    const specifier = MOCK_DATA_SPECIFIER
-    mockDataModulePromise = (import(/* @vite-ignore */ specifier) as Promise<MockDataModule>).catch((err) => {
-      throw new Error(
-        `VITE_MOCK_API=true but the mock data module (${MOCK_DATA_SPECIFIER}) could not be loaded: ${String(err)}`,
-      )
-    })
-  }
-  return mockDataModulePromise
-}
+import { LEGACY_ENDPOINT_BLOCKLIST_PATTERNS } from './legacyEndpointBlocklist'
 
 export type ApiResponse<T> = {
   status: string
@@ -80,6 +51,9 @@ export type DatasetRecord = {
 
 export type DatasetRawFile = {
   dataset_id: string
+  version_id?: string
+  lakefs_commit_id?: string
+  version_created_at?: string
   filename: string
   content_type?: string
   size_bytes?: number
@@ -105,6 +79,176 @@ export type DatasetIngestRequestRecord = {
   created_at?: string
   updated_at?: string
   published_at?: string | null
+}
+
+export type FoundryDatasetRecordV2 = {
+  rid: string
+  name: string
+  description?: string | null
+  parentFolderRid?: string
+  branchName?: string
+  sourceType?: string
+  createdTime?: string | null
+  createdBy?: string
+}
+
+export type FoundryDatasetTransactionRecordV2 = {
+  rid: string
+  datasetRid?: string | null
+  transactionType?: string
+  status?: string
+  createdTime?: string | null
+  closedTime?: string | null
+}
+
+export type FoundryReadTableResponseV2 = {
+  columns: Array<{ name?: string; type?: string } | string>
+  rows: unknown[]
+  totalRowCount: number
+}
+
+export type FoundryConnectionRecordV2 = {
+  rid: string
+  displayName?: string
+  connectionConfiguration?: Record<string, unknown>
+  configuration?: Record<string, unknown>
+  parentFolderRid?: string
+  exportSettings?: Record<string, unknown>
+  status?: string
+  createdTime?: string | null
+  updatedTime?: string | null
+}
+
+export type FoundryConnectionListResponseV2 = {
+  data: FoundryConnectionRecordV2[]
+  nextPageToken?: string | null
+}
+
+export type FoundryConnectionTestResultV2 = {
+  connectionRid?: string
+  status?: string
+  message?: string
+  details?: Record<string, unknown>
+}
+
+export type FoundryConnectionConfigurationResponseV2 = {
+  connectionRid?: string
+  connectionConfiguration?: Record<string, unknown>
+  configuration?: Record<string, unknown>
+}
+
+export type FoundryConnectionConfigurationBatchResponseV2 = {
+  data: Record<string, Record<string, unknown>>
+}
+
+export type FoundryConnectionExportRunRecordV2 = {
+  rid: string
+  connectionRid?: string
+  status?: string
+  taskId?: string
+  createdTime?: string | null
+  startedTime?: string | null
+  completedTime?: string | null
+  auditLogId?: string
+  sideEffectDelivery?: Record<string, unknown>
+  writebackStatus?: string
+  error?: string
+}
+
+export type FoundryConnectionExportRunListResponseV2 = {
+  data: FoundryConnectionExportRunRecordV2[]
+  nextPageToken?: string | null
+}
+
+export type FoundryQueryTypeRecordV2 = {
+  apiName?: string
+  displayName?: string
+  description?: string
+  parameters?: Record<string, unknown>
+  output?: unknown
+  version?: string
+  [key: string]: unknown
+}
+
+export type FoundryQueryTypeListResponseV2 = {
+  data: FoundryQueryTypeRecordV2[]
+  nextPageToken?: string | null
+}
+
+export type FoundryQueryTypeExecuteResponseV2 = Record<string, unknown> & {
+  value?: Record<string, unknown> | unknown[] | null
+}
+
+export type FoundryActionProjectPolicyInheritanceV2 = {
+  enabled?: boolean
+  scope?: string
+  subjectType?: string
+  subjectId?: string
+  requirePolicy?: boolean
+}
+
+export type FoundryActionDynamicSecurityV2 = {
+  permissionModel?: string
+  editsBeyondActions?: boolean
+  permissionPolicy?: Record<string, unknown>
+  projectPolicyInheritance?: FoundryActionProjectPolicyInheritanceV2
+}
+
+export type FoundryActionTypeRecordV2 = {
+  apiName?: string
+  displayName?: string
+  description?: string
+  status?: string
+  rid?: string
+  parameters?: Record<string, unknown>
+  operations?: unknown[]
+  toolDescription?: string
+  targetObjectType?: string
+  writebackTarget?: Record<string, unknown>
+  conflictPolicy?: string
+  validationRules?: unknown[]
+  permissionModel?: string
+  editsBeyondActions?: boolean
+  permissionPolicy?: Record<string, unknown>
+  projectPolicyInheritance?: FoundryActionProjectPolicyInheritanceV2
+  dynamicSecurity?: FoundryActionDynamicSecurityV2
+  [key: string]: unknown
+}
+
+export type FoundryActionTypeListResponseV2 = {
+  data: FoundryActionTypeRecordV2[]
+  nextPageToken?: string | null
+}
+
+export type AccessPolicyRecordV1 = {
+  policy_id?: string
+  db_name?: string
+  scope?: string
+  subject_type?: string
+  subject_id?: string
+  policy?: Record<string, unknown>
+  status?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export type FoundryConnectivityImportRecordV2 = {
+  rid: string
+  name?: string
+  parentRid?: string
+  displayName?: string
+  connectionRid?: string
+  datasetRid?: string
+  branchName?: string | null
+  importMode?: string
+  allowSchemaChanges?: boolean
+  config?: Record<string, unknown>
+  markings?: unknown[]
+}
+
+export type FoundryConnectivityImportListResponseV2 = {
+  data: FoundryConnectivityImportRecordV2[]
+  nextPageToken?: string | null
 }
 
 export type PipelineRecord = {
@@ -183,35 +327,53 @@ export type PipelineReadiness = {
   fallback_branches?: string[]
 }
 
-export type UploadMode = 'structured' | 'media' | 'unstructured' | 'raw'
-
-export type GoogleSheetRegisteredSheet = {
-  sheet_id: string
-  sheet_url: string
-  sheet_title?: string | null
-  worksheet_name: string
-  polling_interval: number
-  database_name?: string | null
-  branch?: string | null
-  class_label?: string | null
-  auto_import?: boolean
-  max_import_rows?: number | null
-  last_polled?: string | null
-  last_hash?: string | null
-  is_active?: boolean
-  registered_at?: string | null
+export type LineageNode = {
+  id: string
+  label: string
+  type: 'dataset' | 'pipeline' | 'object' | 'report' | 'source'
+  metadata?: Record<string, unknown>
 }
 
-export type GoogleSheetPreview = {
-  sheet_id?: string
-  sheet_title?: string
-  worksheet_title?: string
-  worksheet_name?: string
-  columns?: string[]
-  sample_rows?: Array<Record<string, unknown>>
-  total_rows?: number
-  total_columns?: number
-  [key: string]: unknown
+export type LineageEdge = {
+  id: string
+  source: string
+  target: string
+  label?: string
+}
+
+export type LineageImpactResponse = {
+  affectedReports: number
+  affectedPipelines: number
+  lastUpdated?: string
+  downstream: Array<{ id: string; name: string; type: string }>
+}
+
+export type OntologyClass = {
+  id: string
+  label: string
+  description?: string
+  propertyCount?: number
+  instanceCount?: number
+}
+
+export type Instance = {
+  id: string
+  classId: string
+  label: string
+  properties: Record<string, unknown>
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type UdfRecord = {
+  udf_id: string
+  db_name: string
+  name: string
+  description?: string
+  latest_version: number
+  created_at?: string
+  updated_at?: string
+  code?: string
 }
 
 type DatabaseListPayload = {
@@ -272,12 +434,6 @@ type DatasetSchemaApprovalPayload = {
   ingest_request?: DatasetIngestRequestRecord
 }
 
-type GoogleSheetsRegisteredListPayload = {
-  sheets?: GoogleSheetRegisteredSheet[]
-  count?: number
-  database_filter?: string | null
-}
-
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
 const API_TOKEN_RAW =
   (import.meta.env.VITE_BFF_TOKEN as string | undefined) ??
@@ -297,6 +453,41 @@ const stripBearerPrefix = (value: string) => {
 
 const API_TOKEN = stripBearerPrefix(API_TOKEN_RAW)
 const API_USER_JWT = stripBearerPrefix(API_USER_JWT_RAW)
+
+const normalizeApiPathForLegacyGuard = (path: string) => {
+  const raw = String(path || '').trim()
+  if (!raw) {
+    return '/'
+  }
+  const fromUrl = (() => {
+    try {
+      return new URL(raw).pathname
+    } catch {
+      return null
+    }
+  })()
+  if (fromUrl) {
+    return fromUrl
+  }
+  const noQuery = raw.split('?')[0]
+  if (noQuery.startsWith('/api/')) {
+    return noQuery
+  }
+  if (noQuery.startsWith('/')) {
+    return noQuery
+  }
+  if (noQuery.startsWith('api/')) {
+    return `/${noQuery}`
+  }
+  return `/api/v1/${noQuery.replace(/^\/+/, '')}`
+}
+
+const assertLegacyEndpointNotRemoved = (path: string) => {
+  const normalized = normalizeApiPathForLegacyGuard(path)
+  if (LEGACY_ENDPOINT_BLOCKLIST_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    throw new Error(`Removed legacy endpoint blocked: ${normalized}`)
+  }
+}
 
 const buildUrl = (path: string) => {
   if (!API_BASE) {
@@ -328,6 +519,7 @@ const requestApi = async <T>(
   options?: RequestInit,
   fallbackMessage = 'Request failed',
 ): Promise<T> => {
+  assertLegacyEndpointNotRemoved(path)
   const headers = new Headers()
   headers.set('Accept', 'application/json')
   if (API_TOKEN) {
@@ -364,1416 +556,6 @@ const createIdempotencyKey = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-const getDatasetBaseName = (fileName: string) => fileName.replace(/\.[^/.]+$/, '')
-
-const inferUploadEndpoint = (mode: UploadMode, fileName: string) => {
-  const lower = fileName.toLowerCase()
-  if (mode === 'structured') {
-    if (lower.endsWith('.csv')) {
-      return '/api/v1/pipelines/datasets/csv-upload'
-    }
-    if (lower.endsWith('.xlsx') || lower.endsWith('.xlsm') || lower.endsWith('.xls')) {
-      return '/api/v1/pipelines/datasets/excel-upload'
-    }
-    return null
-  }
-  return '/api/v1/pipelines/datasets/media-upload'
-}
-
-export const listDatabases = async () => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockDatabases
-  }
-  const data = await requestApi<DatabaseListPayload>('/api/v1/databases', undefined, 'Failed to load databases')
-  return data.databases ?? []
-}
-
-export const createDatabase = async (name: string, description?: string) => {
-  const data = await requestApi<{ name?: string }>('/api/v1/databases',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ name, description }),
-    },
-    'Failed to create database',
-  )
-  return data
-}
-
-export const deleteDatabase = async (name: string) => {
-  const encoded = encodeURIComponent(name)
-  const data = await requestApi(`/api/v1/databases/${encoded}`, { method: 'DELETE' }, 'Failed to delete database')
-  return data
-}
-
-export const listDatasets = async (dbName: string, stage?: 'raw' | 'clean') => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockDatasets.filter(d => d.db_name === dbName)
-  }
-  // stage 파라미터가 있으면 해당 stage만, 없으면 전체 (raw + clean)
-  const stageParam = stage ? `&stage=${stage}` : ''
-  const data = await requestApi<DatasetListPayload>(
-    `/api/v1/pipelines/datasets?db_name=${encodeURIComponent(dbName)}${stageParam}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Failed to load datasets',
-  )
-  return data.datasets ?? []
-}
-
-export const getDatasetRawFile = async (params: {
-  dbName: string
-  datasetId: string
-  fileName?: string
-  fileIndex?: number
-}) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    // Mock raw file data based on dataset
-    const dataset = mockData.mockDatasets.find(d => d.dataset_id === params.datasetId)
-    if (!dataset) return null
-    return {
-      dataset_id: params.datasetId,
-      filename: `${dataset.name}.csv`,
-      content_type: 'text/csv',
-      encoding: 'utf-8',
-      content: mockData.getMockRawContent(params.datasetId),
-    } as DatasetRawFile
-  }
-  const query = new URLSearchParams()
-  if (params.fileName) {
-    query.set('file_name', params.fileName)
-  }
-  if (params.fileIndex !== undefined) {
-    query.set('file_index', String(params.fileIndex))
-  }
-  const suffix = query.toString()
-  const data = await requestApi<{ file?: DatasetRawFile }>(
-    `/api/v1/pipelines/datasets/${encodeURIComponent(params.datasetId)}/raw-file${suffix ? `?${suffix}` : ''}`,
-    {
-      headers: {
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-    },
-    'Failed to load raw file content',
-  )
-  return data.file ?? null
-}
-
-// Transform Node Preview API
-export type TransformPreviewResponse = {
-  node_id: string
-  schema_json: { columns: Array<{ name: string; type?: string }> }
-  sample_json: { rows: Record<string, unknown>[] }
-  row_count: number
-}
-
-export const getTransformPreview = async (
-  dbName: string,
-  nodeId: string
-): Promise<TransformPreviewResponse | null> => {
-  try {
-    const data = await requestApi<TransformPreviewResponse>(
-      `/api/v1/pipelines/transform-preview/${encodeURIComponent(nodeId)}`,
-      {
-        headers: {
-          'X-DB-Name': dbName,
-          'X-Project': dbName,
-        },
-      },
-      'Failed to load transform preview',
-    )
-    return data
-  } catch {
-    return null
-  }
-}
-
-export const listPipelines = async (dbName: string) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockPipelines.filter(p => p.db_name === dbName || dbName === 'demo-project')
-  }
-  const data = await requestApi<PipelineListPayload>(
-    `/api/v1/pipelines?db_name=${encodeURIComponent(dbName)}`,
-    {
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Failed to load pipelines',
-  )
-  return data.pipelines ?? []
-}
-
-export const listPipelineArtifacts = async (
-  pipelineId: string,
-  params?: { mode?: string; limit?: number; dbName?: string },
-) => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockPipelineArtifacts.filter(a => a.pipeline_id === pipelineId)
-  }
-  const query = new URLSearchParams()
-  if (params?.mode) {
-    query.set('mode', params.mode)
-  }
-  if (params?.limit) {
-    query.set('limit', String(params.limit))
-  }
-  const suffix = query.toString()
-  const path = suffix ? `/api/v1/pipelines/${pipelineId}/artifacts?${suffix}` : `/api/v1/pipelines/${pipelineId}/artifacts`
-  const data = await requestApi<PipelineArtifactListPayload>(
-    path,
-    params?.dbName
-      ? {
-          headers: {
-            'X-DB-Name': params.dbName,
-            'X-Project': params.dbName,
-          },
-        }
-      : undefined,
-    'Failed to load pipeline artifacts',
-  )
-  return data.artifacts ?? []
-}
-
-export const getPipelineReadiness = async (
-  pipelineId: string,
-  params?: { branch?: string; dbName?: string },
-) => {
-  const query = new URLSearchParams()
-  if (params?.branch) {
-    query.set('branch', params.branch)
-  }
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/pipelines/${pipelineId}/readiness?${suffix}`
-    : `/api/v1/pipelines/${pipelineId}/readiness`
-  const data = await requestApi<PipelineReadinessPayload>(
-    path,
-    params?.dbName
-      ? {
-          headers: {
-            'X-DB-Name': params.dbName,
-            'X-Project': params.dbName,
-          },
-        }
-      : undefined,
-    'Failed to load pipeline readiness',
-  )
-  return data
-}
-
-export const getPipeline = async (
-  pipelineId: string,
-  params?: { branch?: string; previewNodeId?: string; dbName?: string },
-) => {
-  const query = new URLSearchParams()
-  if (params?.branch) {
-    query.set('branch', params.branch)
-  }
-  if (params?.previewNodeId) {
-    query.set('preview_node_id', params.previewNodeId)
-  }
-  const suffix = query.toString()
-  const path = suffix ? `/api/v1/pipelines/${pipelineId}?${suffix}` : `/api/v1/pipelines/${pipelineId}`
-  const data = await requestApi<PipelineGetPayload>(
-    path,
-    params?.dbName
-      ? {
-          headers: {
-            'X-DB-Name': params.dbName,
-            'X-Project': params.dbName,
-          },
-        }
-      : undefined,
-    'Failed to load pipeline',
-  )
-  return data.pipeline
-}
-
-export const updatePipeline = async (
-  pipelineId: string,
-  params: {
-    definition_json?: PipelineDefinition
-    dbName?: string
-  },
-) => {
-  const data = await requestApi<{ pipeline?: PipelineDetailRecord }>(
-    `/api/v1/pipelines/${pipelineId}`,
-    {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        definition_json: params.definition_json,
-      }),
-    },
-    'Failed to update pipeline',
-  )
-  return data.pipeline
-}
-
-export const submitPipelineProposal = async (
-  pipelineId: string,
-  params: {
-    title: string
-    description?: string
-    buildJobId?: string
-    mappingSpecIds?: string[]
-    dbName?: string
-  },
-) => {
-  const data = await requestApi<{ proposal?: Record<string, unknown> }>(
-    `/api/v1/pipelines/${pipelineId}/proposals`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        title: params.title,
-        description: params.description,
-        build_job_id: params.buildJobId,
-        mapping_spec_ids: params.mappingSpecIds,
-      }),
-    },
-    'Failed to submit proposal',
-  )
-  return data.proposal ?? null
-}
-
-export type ProposalRecord = {
-  proposal_id: string
-  pipeline_id: string
-  title: string
-  description?: string
-  status: string
-  from_branch?: string
-  to_branch?: string
-  build_job_id?: string
-  mapping_spec_ids?: string[]
-  created_by?: string
-  reviewed_by?: string
-  review_comment?: string
-  created_at?: string
-  updated_at?: string
-}
-
-export const listPipelineProposals = async (params: {
-  dbName: string
-  branch?: string
-  status?: string
-}) => {
-  const query = new URLSearchParams()
-  query.set('db_name', params.dbName)
-  if (params.branch) {
-    query.set('branch', params.branch)
-  }
-  if (params.status) {
-    query.set('status', params.status)
-  }
-  const data = await requestApi<{ proposals?: ProposalRecord[] }>(
-    `/api/v1/pipelines/proposals?${query.toString()}`,
-    {
-      method: 'GET',
-      headers: {
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-    },
-    'Failed to list proposals',
-  )
-  return data.proposals ?? []
-}
-
-export const approvePipelineProposal = async (
-  pipelineId: string,
-  params: { proposalId: string; comment?: string; dbName?: string },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/pipelines/${pipelineId}/proposals/approve`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        proposal_id: params.proposalId,
-        review_comment: params.comment,
-      }),
-    },
-    'Failed to approve proposal',
-  )
-  return data
-}
-
-export const rejectPipelineProposal = async (
-  pipelineId: string,
-  params: { proposalId: string; comment?: string; dbName?: string },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/pipelines/${pipelineId}/proposals/reject`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        proposal_id: params.proposalId,
-        review_comment: params.comment,
-      }),
-    },
-    'Failed to reject proposal',
-  )
-  return data
-}
-
-export type PipelineBranchRecord = {
-  branch: string
-  db_name?: string
-  status?: string
-  created_at?: string
-  updated_at?: string
-}
-
-export const listPipelineBranches = async (dbName: string) => {
-  const data = await requestApi<{ branches?: PipelineBranchRecord[]; count?: number }>(
-    `/api/v1/pipelines/branches?db_name=${encodeURIComponent(dbName)}`,
-    {
-      method: 'GET',
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'Failed to list pipeline branches',
-  )
-  return data.branches ?? []
-}
-
-export const createPipelineBranch = async (
-  pipelineId: string,
-  params: { branch: string; dbName?: string },
-) => {
-  const data = await requestApi<{ branch?: Record<string, unknown> }>(
-    `/api/v1/pipelines/${pipelineId}/branches`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        branch: params.branch,
-      }),
-    },
-    'Failed to create pipeline branch',
-  )
-  return data.branch ?? null
-}
-
-export const buildPipeline = async (
-  pipelineId: string,
-  params: {
-    nodeId?: string
-    limit?: number
-    dbName?: string
-  },
-) => {
-  const data = await requestApi<{ job_id?: string; artifact_id?: string }>(
-    `/api/v1/pipelines/${pipelineId}/build`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': `build-${pipelineId}-${Date.now()}`,
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        node_id: params.nodeId,
-        limit: params.limit ?? 200,
-      }),
-    },
-    'Failed to build pipeline',
-  )
-  return data
-}
-
-export const deployPipeline = async (
-  pipelineId: string,
-  params: {
-    promoteBuild: boolean
-    buildJobId?: string
-    artifactId?: string
-    nodeId?: string
-    replayOnDeploy?: boolean
-    dbName?: string
-  },
-) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/pipelines/${pipelineId}/deploy`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        ...(params.dbName
-          ? {
-              'X-DB-Name': params.dbName,
-              'X-Project': params.dbName,
-            }
-          : {}),
-      },
-      body: JSON.stringify({
-        promote_build: params.promoteBuild,
-        build_job_id: params.buildJobId,
-        artifact_id: params.artifactId,
-        node_id: params.nodeId,
-        replay_on_deploy: params.replayOnDeploy,
-      }),
-    },
-    'Failed to deploy pipeline',
-  )
-  return data
-}
-
-export const createPipeline = async (params: {
-  dbName: string
-  name: string
-  pipelineType: string
-  location?: string
-  branch?: string
-  description?: string
-  definitionJson?: PipelineDefinition
-}) => {
-  const data = await requestApi<PipelineCreatePayload>(
-    '/api/v1/pipelines',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-      body: JSON.stringify({
-        db_name: params.dbName,
-        name: params.name,
-        pipeline_type: params.pipelineType,
-        location: params.location,
-        branch: params.branch,
-        description: params.description,
-        definition_json: params.definitionJson,
-      }),
-    },
-    'Failed to create pipeline',
-  )
-  return data.pipeline
-}
-
-export const uploadDataset = async (params: { dbName: string; file: File; mode: UploadMode }) => {
-  const endpoint = inferUploadEndpoint(params.mode, params.file.name)
-  if (!endpoint) {
-    throw new Error('Only .csv, .xls, .xlsx, or .xlsm files are supported for structured uploads.')
-  }
-
-  const datasetName = getDatasetBaseName(params.file.name)
-  const formData = new FormData()
-  if (endpoint.includes('media-upload')) {
-    formData.append('files', params.file)
-  } else {
-    formData.append('file', params.file)
-  }
-  formData.append('dataset_name', datasetName)
-  formData.append('description', 'Uploaded from Files')
-
-  const data = await requestApi<DatasetUploadPayload>(
-    `${endpoint}?db_name=${encodeURIComponent(params.dbName)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-      body: formData,
-    },
-    'Failed to upload dataset',
-  )
-
-  if (!data.dataset) {
-    throw new Error('Dataset upload returned no dataset information.')
-  }
-  return {
-    dataset: data.dataset,
-    ingest_request_id: data.ingest_request_id,
-    schema_status: data.schema_status,
-    schema_suggestion: data.schema_suggestion,
-  }
-}
-
-export const approveDatasetSchema = async (params: {
-  ingestRequestId: string
-  dbName: string
-  schemaJson?: Record<string, unknown>
-}) => {
-  const data = await requestApi<DatasetSchemaApprovalPayload>(
-    `/api/v1/pipelines/datasets/ingest-requests/${encodeURIComponent(params.ingestRequestId)}/schema/approve`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-DB-Name': params.dbName,
-        'X-Project': params.dbName,
-      },
-      body: JSON.stringify(params.schemaJson ? { schema_json: params.schemaJson } : {}),
-    },
-    'Failed to approve dataset schema',
-  )
-  return data
-}
-
-export const listRegisteredGoogleSheets = async (params?: { databaseName?: string }) => {
-  const query = new URLSearchParams()
-  if (params?.databaseName) {
-    query.set('database_name', params.databaseName)
-  }
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/data-connectors/google-sheets/registered?${suffix}`
-    : '/api/v1/data-connectors/google-sheets/registered'
-  const data = await requestApi<GoogleSheetsRegisteredListPayload>(path, undefined, 'Failed to load registered sheets')
-  return {
-    sheets: data.sheets ?? [],
-    count: data.count ?? (data.sheets?.length ?? 0),
-    database_filter: data.database_filter ?? null,
-  }
-}
-
-export const registerGoogleSheet = async (payload: Record<string, unknown>) => {
-  const data = await requestApi<Record<string, unknown>>(
-    '/api/v1/data-connectors/google-sheets/register',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to register Google Sheet',
-  )
-  return data
-}
-
-export const previewRegisteredGoogleSheet = async (
-  sheetId: string,
-  params?: { worksheetName?: string; limit?: number },
-) => {
-  const query = new URLSearchParams()
-  if (params?.worksheetName) {
-    query.set('worksheet_name', params.worksheetName)
-  }
-  if (params?.limit) {
-    query.set('limit', String(params.limit))
-  }
-  const suffix = query.toString()
-  const path = suffix
-    ? `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview?${suffix}`
-    : `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview`
-  const data = await requestApi<GoogleSheetPreview>(path, undefined, 'Failed to preview Google Sheet')
-  return data
-}
-
-export const startPipeliningGoogleSheet = async (sheetId: string, payload: Record<string, unknown>) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/start-pipelining`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to start pipelining',
-  )
-  return data
-}
-
-export const unregisterGoogleSheet = async (sheetId: string) => {
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}`,
-    {
-      method: 'DELETE',
-      headers: { 'Idempotency-Key': createIdempotencyKey() },
-    },
-    'Failed to unregister Google Sheet',
-  )
-  return data
-}
-
-export type AIQueryMode = 'auto' | 'label_query' | 'graph_query' | 'dataset_list'
-
-export type AIQueryRequest = {
-  question: string
-  branch?: string
-  mode?: AIQueryMode
-  limit?: number
-  include_documents?: boolean
-  include_provenance?: boolean
-  session_id?: string | null
-}
-
-export type AIIntentRoute = 'chat' | 'query' | 'plan' | 'pipeline'
-export type AIIntentType = 'greeting' | 'small_talk' | 'help' | 'data_query' | 'plan_request' | 'unknown'
-
-export type AIIntentRequest = {
-  question: string
-  db_name?: string | null
-  project_name?: string | null
-  pipeline_name?: string | null
-  language?: string | null
-  context?: Record<string, unknown> | null
-  session_id?: string | null
-}
-
-export type AIIntentResponse = {
-  intent: AIIntentType
-  route: AIIntentRoute
-  confidence: number
-  requires_clarification: boolean
-  clarifying_question?: string
-  reply?: string
-  missing_fields?: string[]
-  llm?: Record<string, unknown>
-}
-
-export const aiQuery = async (dbName: string, payload: AIQueryRequest) => {
-  const encoded = encodeURIComponent(dbName)
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/ai/query/${encoded}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify(payload),
-    },
-    'AI query failed',
-  )
-  return data
-}
-
-export const aiIntent = async (payload: AIIntentRequest) => {
-  const data = await requestApi<AIIntentResponse>(
-    '/api/v1/ai/intent',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'AI intent routing failed',
-  )
-  return data
-}
-
-export const runPipelineAgent = async (payload: {
-  goal: string
-  data_scope: Record<string, unknown>
-  plan_id?: string
-  planner_hints?: Record<string, unknown>
-  answers?: Record<string, unknown>
-  apply_specs?: boolean
-  max_transform?: number
-  max_cleansing?: number
-  max_repairs?: number
-}) => {
-  const data = await requestApi<Record<string, unknown>>(
-    '/api/v1/agent/pipeline-runs',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to run pipeline agent',
-  )
-  return data
-}
-
-// === Pipeline Agent SSE Streaming Types ===
-export type AgentStreamEventType =
-  | 'start'
-  | 'thinking'
-  | 'tool_start'
-  | 'tool_end'
-  | 'plan_update'
-  | 'preview_update'
-  | 'ontology_update'
-  | 'clarification'
-  | 'error'
-  | 'complete'
-
-export type AgentStreamEvent = {
-  type: AgentStreamEventType
-  data: {
-    run_id?: string
-    step?: number
-    tool?: string
-    args?: Record<string, unknown>
-    success?: boolean
-    observation?: Record<string, unknown>
-    error?: string
-    plan?: {
-      definition_json?: {
-        nodes?: Array<{
-          id?: string
-          type?: string
-          operation?: string
-          metadata?: Record<string, unknown>
-        }>
-        edges?: Array<{
-          id?: string
-          from?: string
-          to?: string
-        }>
-      }
-      outputs?: Array<Record<string, unknown>>
-    }
-    plan_id?: string
-    status?: string
-    node_count?: number
-    edge_count?: number
-    questions?: Array<Record<string, unknown>>
-    validation_errors?: string[]
-    validation_warnings?: string[]
-    // preview_update 이벤트용
-    preview?: {
-      columns?: Array<{ name: string; type?: string }>
-      rows?: Array<Record<string, unknown>>
-      row_count?: number
-    }
-    // ontology_update 이벤트용
-    ontology?: Record<string, unknown>
-    schema_inference?: Record<string, unknown>
-    mapping_suggestions?: Record<string, unknown>
-    objectify_status?: {
-      job_id?: string
-      status?: string
-      instances_created?: number
-    }
-    [key: string]: unknown
-  }
-}
-
-export type AgentStreamCallbacks = {
-  onStart?: (data: AgentStreamEvent['data']) => void
-  onThinking?: (data: AgentStreamEvent['data']) => void
-  onToolStart?: (data: AgentStreamEvent['data']) => void
-  onToolEnd?: (data: AgentStreamEvent['data']) => void
-  onPlanUpdate?: (data: AgentStreamEvent['data']) => void
-  onPreviewUpdate?: (data: AgentStreamEvent['data']) => void
-  onOntologyUpdate?: (data: AgentStreamEvent['data']) => void
-  onClarification?: (data: AgentStreamEvent['data']) => void
-  onError?: (data: AgentStreamEvent['data']) => void
-  onComplete?: (data: AgentStreamEvent['data']) => void
-}
-
-// SSE 스트리밍 Pipeline Agent 실행
-export const runPipelineAgentStreaming = (
-  payload: {
-    goal: string
-    data_scope: Record<string, unknown>
-    plan_id?: string
-    planner_hints?: Record<string, unknown>
-    answers?: Record<string, unknown>
-    apply_specs?: boolean
-    max_transform?: number
-    max_cleansing?: number
-    max_repairs?: number
-  },
-  callbacks: AgentStreamCallbacks,
-): { abort: () => void } => {
-  const controller = new AbortController()
-
-  const splitSseBuffer = (buffer: string): { frames: string[]; remainder: string } => {
-    // SSE frames are separated by a blank line, which can be "\n\n" or "\r\n\r\n".
-    // We normalize by detecting the earliest delimiter occurrence and iterating.
-    const frames: string[] = []
-    let rest = buffer
-    while (true) {
-      const lfIndex = rest.indexOf('\n\n')
-      const crlfIndex = rest.indexOf('\r\n\r\n')
-      let index = -1
-      let delimLen = 0
-      if (lfIndex !== -1 && (crlfIndex === -1 || lfIndex < crlfIndex)) {
-        index = lfIndex
-        delimLen = 2
-      } else if (crlfIndex !== -1) {
-        index = crlfIndex
-        delimLen = 4
-      }
-
-      if (index === -1) {
-        break
-      }
-      const frame = rest.slice(0, index)
-      if (frame.trim().length > 0) {
-        frames.push(frame)
-      }
-      rest = rest.slice(index + delimLen)
-    }
-    return { frames, remainder: rest }
-  }
-
-  const parseSseFrame = (frame: string): AgentStreamEvent | null => {
-    // Supports multi-line `data:` payloads and CRLF.
-    let eventType: string | null = null
-    const dataLines: string[] = []
-    const lines = frame.split(/\r?\n/)
-    for (const rawLine of lines) {
-      const line = rawLine ?? ''
-      if (!line) continue
-      if (line.startsWith(':')) {
-        // Comment line per SSE spec.
-        continue
-      }
-      if (line.startsWith('event:')) {
-        eventType = line.slice('event:'.length).trim()
-        continue
-      }
-      if (line.startsWith('data:')) {
-        dataLines.push(line.slice('data:'.length).trimStart())
-        continue
-      }
-      // Ignore id:/retry: and unknown fields for now.
-    }
-
-    if (!eventType || dataLines.length === 0) {
-      return null
-    }
-
-    const dataText = dataLines.join('\n')
-    try {
-      const data = JSON.parse(dataText)
-      return { type: eventType as AgentStreamEventType, data }
-    } catch {
-      // Some events may not be JSON-encoded; treat as error-friendly raw payload.
-      return { type: eventType as AgentStreamEventType, data: { raw: dataText } }
-    }
-  }
-
-  const fetchSSE = async () => {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-    }
-    if (API_TOKEN) {
-      headers['X-Admin-Token'] = API_TOKEN
-    }
-    if (API_USER_JWT) {
-      headers['X-Delegated-Authorization'] = `Bearer ${API_USER_JWT}`
-    }
-    if (API_USER_ID) {
-      headers['X-User-ID'] = API_USER_ID
-    }
-    if (API_USER_NAME) {
-      headers['X-User-Name'] = API_USER_NAME
-    }
-
-    // Enterprise hardening: satisfy BFF db-scope enforcement when enabled.
-    const scopeDbName =
-      typeof payload.data_scope?.['db_name'] === 'string' ? payload.data_scope['db_name'] : undefined
-    const dbName = String(scopeDbName ?? '').trim()
-    if (dbName) {
-      headers['X-DB-Name'] = dbName
-      headers['X-Project'] = dbName
-    }
-
-    try {
-      const response = await fetch(buildUrl('/api/v1/agent/pipeline-runs/stream'), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        let message = errorText || response.statusText
-        try {
-          const parsed = JSON.parse(errorText)
-          const msg = typeof parsed?.message === 'string' ? parsed.message : ''
-          const detail = typeof parsed?.detail === 'string' ? parsed.detail : ''
-          if (msg && detail) {
-            message = `${msg} (${detail})`
-          } else if (msg) {
-            message = msg
-          } else if (detail) {
-            message = detail
-          }
-        } catch {
-          // ignore - keep raw errorText
-        }
-        callbacks.onError?.({ error: message })
-        return
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        callbacks.onError?.({ error: 'No response body' })
-        return
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-
-        const { frames, remainder } = splitSseBuffer(buffer)
-        buffer = remainder
-        for (const frame of frames) {
-          const parsed = parseSseFrame(frame)
-          if (!parsed) {
-            continue
-          }
-          const data = parsed.data
-          switch (parsed.type) {
-            case 'start':
-              callbacks.onStart?.(data)
-              break
-            case 'thinking':
-              callbacks.onThinking?.(data)
-              break
-            case 'tool_start':
-              callbacks.onToolStart?.(data)
-              break
-            case 'tool_end':
-              callbacks.onToolEnd?.(data)
-              break
-            case 'plan_update':
-              callbacks.onPlanUpdate?.(data)
-              break
-            case 'preview_update':
-              callbacks.onPreviewUpdate?.(data)
-              break
-            case 'ontology_update':
-              callbacks.onOntologyUpdate?.(data)
-              break
-            case 'clarification':
-              callbacks.onClarification?.(data)
-              break
-            case 'error':
-              callbacks.onError?.(data)
-              break
-            case 'complete':
-              callbacks.onComplete?.(data)
-              break
-            default:
-              // Unknown event types are ignored to keep smoke streaming resilient.
-              break
-          }
-        }
-      }
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') {
-        callbacks.onError?.({ error: (error as Error).message })
-      }
-    }
-  }
-
-  fetchSSE()
-
-  return {
-    abort: () => controller.abort(),
-  }
-}
-
-export const previewPipelinePlan = async (
-  planId: string,
-  payload: {
-    node_id?: string
-    limit?: number
-    include_run_tables?: boolean
-    run_table_limit?: number
-  },
-) => {
-  const encoded = encodeURIComponent(planId)
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/pipeline-plans/${encoded}/preview`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-      },
-      body: JSON.stringify(payload),
-    },
-    'Failed to preview pipeline plan',
-  )
-  return data
-}
-
-export const runGraphQuery = async (dbName: string, payload: Record<string, unknown>, params?: { branch?: string }) => {
-  const encoded = encodeURIComponent(dbName)
-  const branch = (params?.branch ?? 'main').trim() || 'main'
-  const data = await requestApi<Record<string, unknown>>(
-    `/api/v1/graph-query/${encoded}?branch=${encodeURIComponent(branch)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': createIdempotencyKey(),
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify(payload),
-    },
-    'Graph query failed',
-  )
-  return data
-}
-
-// === Lineage Types ===
-export type LineageNode = {
-  id: string
-  label: string
-  type: 'dataset' | 'pipeline' | 'object' | 'report' | 'source'
-  metadata?: Record<string, unknown>
-}
-
-export type LineageEdge = {
-  id: string
-  source: string
-  target: string
-  label?: string
-}
-
-export type LineageGraphResponse = {
-  nodes: LineageNode[]
-  edges: LineageEdge[]
-  rootId: string
-}
-
-export type LineageImpactResponse = {
-  affectedReports: number
-  affectedPipelines: number
-  lastUpdated?: string
-  downstream: Array<{ id: string; name: string; type: string }>
-}
-
-// === Instance/Explorer Types ===
-export type OntologyClass = {
-  id: string
-  label: string
-  description?: string
-  propertyCount?: number
-  instanceCount?: number
-}
-
-export type Instance = {
-  id: string
-  classId: string
-  label: string
-  properties: Record<string, unknown>
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type InstanceListResponse = {
-  instances: Instance[]
-  total: number
-  limit: number
-  offset: number
-}
-
-export type Relationship = {
-  id: string
-  predicate: string
-  predicateLabel?: string
-  sourceId: string
-  sourceLabel: string
-  sourceClass: string
-  targetId: string
-  targetLabel: string
-  targetClass: string
-  properties?: Record<string, unknown>
-}
-
-export type NLQueryResponse = {
-  results: Array<Record<string, unknown>>
-  columns: string[]
-  query?: string
-  explanation?: string
-  totalCount?: number
-}
-
-// === Action Types ===
-export type ActionParameter = {
-  name: string
-  label: string
-  type: 'string' | 'number' | 'boolean' | 'select' | 'instance'
-  required?: boolean
-  options?: Array<{ value: string; label: string }>
-  instanceClassId?: string
-  defaultValue?: unknown
-  description?: string
-}
-
-export type ActionType = {
-  id: string
-  name: string
-  description?: string
-  targetClass?: string
-  parameters: ActionParameter[]
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type ActionTypeDetail = ActionType & {
-  examples?: Array<{ description: string; params: Record<string, unknown> }>
-  relatedActions?: string[]
-}
-
-export type SimulationResult = {
-  success: boolean
-  changes: Array<{
-    entityId: string
-    entityLabel: string
-    field: string
-    before: unknown
-    after: unknown
-  }>
-  warnings?: string[]
-  errors?: string[]
-}
-
-export type ExecutionResult = {
-  success: boolean
-  executionId: string
-  timestamp: string
-  changes: Array<{
-    entityId: string
-    entityLabel: string
-    field: string
-    before: unknown
-    after: unknown
-  }>
-  errors?: string[]
-}
-
-export type ActionLog = {
-  id: string
-  actionTypeId: string
-  actionTypeName: string
-  executedBy: string
-  executedAt: string
-  status: 'success' | 'failed' | 'pending'
-  params: Record<string, unknown>
-  result?: Record<string, unknown>
-}
-
-// === Link Type Types ===
-export type LinkType = {
-  id: string
-  name: string
-  predicate: string
-  sourceClassId: string
-  sourceClassName: string
-  targetClassId: string
-  targetClassName: string
-  cardinality?: 'one-to-one' | 'one-to-many' | 'many-to-many'
-  description?: string
-}
-
-export type LinkTypeDetail = LinkType & {
-  properties?: Array<{ name: string; type: string }>
-  instanceCount?: number
-}
-
-// === Detected Relationships (Objectify) ===
-export type DetectedRelationship = {
-  sourceColumn: string
-  targetDataset: string
-  targetColumn: string
-  confidence: number
-  suggestedPredicate?: string
-}
-
-export type DetectedRelationships = {
-  datasetId: string
-  relationships: DetectedRelationship[]
-}
-
-// Removed legacy v1 ontology/explorer/action wrappers.
-
-// === UDF (User Defined Function) API ===
-export type UdfRecord = {
-  udf_id: string
-  db_name: string
-  name: string
-  description?: string
-  latest_version: number
-  created_at?: string
-  updated_at?: string
-  code?: string
-}
-
-export type UdfVersionRecord = {
-  version_id: string
-  udf_id: string
-  version: number
-  code: string
-  created_at?: string
-}
-
-export const listUdfs = async (dbName: string): Promise<UdfRecord[]> => {
-  if (isMockMode) {
-    const mockData = await loadMockData()
-    await mockData.mockDelay(MOCK_DELAY_MS)
-    return mockData.mockUdfs.filter(u => u.db_name === dbName || dbName === 'demo-project')
-  }
-  const data = await requestApi<UdfRecord[]>(
-    `/api/v1/pipelines/udfs?db_name=${encodeURIComponent(dbName)}`,
-    {
-      method: 'GET',
-      headers: {
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-    },
-    'UDF 목록 조회에 실패했습니다',
-  )
-  return data
-}
-
-export const createUdf = async (
-  dbName: string,
-  params: { name: string; code: string; description?: string },
-): Promise<UdfRecord> => {
-  const data = await requestApi<UdfRecord>(
-    `/api/v1/pipelines/udfs?db_name=${encodeURIComponent(dbName)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-DB-Name': dbName,
-        'X-Project': dbName,
-      },
-      body: JSON.stringify(params),
-    },
-    'UDF 생성에 실패했습니다',
-  )
-  return data
-}
-
-export const getUdf = async (udfId: string): Promise<UdfRecord> => {
-  const data = await requestApi<UdfRecord>(
-    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}`,
-    { method: 'GET' },
-    'UDF 조회에 실패했습니다',
-  )
-  return data
-}
-
-export const createUdfVersion = async (
-  udfId: string,
-  code: string,
-): Promise<UdfVersionRecord> => {
-  const data = await requestApi<UdfVersionRecord>(
-    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}/versions`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    },
-    'UDF 버전 생성에 실패했습니다',
-  )
-  return data
-}
-
-export const getUdfVersion = async (
-  udfId: string,
-  version: number,
-): Promise<UdfVersionRecord> => {
-  const data = await requestApi<UdfVersionRecord>(
-    `/api/v1/pipelines/udfs/${encodeURIComponent(udfId)}/versions/${version}`,
-    { method: 'GET' },
-    'UDF 버전 조회에 실패했습니다',
-  )
-  return data
-}
-
-
 /* ═══════════════════════════════════════════════════════════════════════════
    BFF v2 API layer (RequestContext-based)
    ─────────────────────────────────────────────────────────────────────────
@@ -1802,8 +584,6 @@ export type RequestContext = {
   adminToken: string
   adminActor?: string
 }
-
-const ENABLE_DATABASE_BRANCH_API = import.meta.env.VITE_ENABLE_DATABASE_BRANCH_API === 'true'
 
 type Bff2SearchParams = Record<string, string | number | boolean | null | undefined>
 
@@ -1882,6 +662,7 @@ const bff2RequestJson = async <T>(
   searchParams?: Bff2SearchParams,
   extraHeaders?: HeadersInit,
 ): Promise<{ status: number; payload: T | null }> => {
+  assertLegacyEndpointNotRemoved(path)
   const isJsonBody = init.body !== undefined && !(init.body instanceof FormData)
   const headers = bff2BuildHeaders(context.language, context.adminToken, isJsonBody)
   if (context.adminActor) {
@@ -1917,6 +698,7 @@ const bff2RequestRaw = async (
   searchParams?: Bff2SearchParams,
   extraHeaders?: HeadersInit,
 ): Promise<Response> => {
+  assertLegacyEndpointNotRemoved(path)
   const headers = bff2BuildHeaders(context.language, context.adminToken, false)
   if (context.adminActor) {
     headers.set('X-Admin-Actor', context.adminActor)
@@ -1943,38 +725,15 @@ const bff2RequestRaw = async (
   return response
 }
 
-let branchApiSupportCache: boolean | null = null
-
-const supportsDatabaseBranchApi = async (context: RequestContext): Promise<boolean> => {
-  if (branchApiSupportCache !== null) {
-    return branchApiSupportCache
+const bff2DbContextHeaders = (dbName?: string): HeadersInit | undefined => {
+  const normalized = String(dbName ?? '').trim()
+  if (!normalized) {
+    return undefined
   }
-
-  try {
-    const openApiUrl =
-      typeof window !== 'undefined'
-        ? new URL('/openapi.json', window.location.origin).toString()
-        : bff2BuildApiUrl('/openapi.json', context.language)
-    const response = await fetch(openApiUrl, {
-      method: 'GET',
-      headers: bff2BuildHeaders(context.language, context.adminToken, false),
-    })
-    if (!response.ok) {
-      branchApiSupportCache = true
-      return branchApiSupportCache
-    }
-    const payload = (await bff2ParseJson(response)) as Record<string, unknown> | null
-    const paths = payload?.paths
-    if (paths && typeof paths === 'object' && !Array.isArray(paths)) {
-      branchApiSupportCache = '/api/v1/databases/{db_name}/branches' in paths
-      return branchApiSupportCache
-    }
-  } catch {
-    // Keep backward-compatible behavior and let direct calls decide.
+  return {
+    'X-DB-Name': normalized,
+    'X-Project': normalized,
   }
-
-  branchApiSupportCache = true
-  return branchApiSupportCache
 }
 
 type Bff2DatabaseListResponse = {
@@ -2182,122 +941,654 @@ const toLegacyInstanceShape = (value: unknown, classIdHint?: string): Record<str
   }
 }
 
-const throwRemovedOntologyWrite = (operation: string): never => {
-  throw new HttpError(
-    410,
-    `${operation} endpoint removed from v1 ontology API`,
-    {
-      errorCode: 'RESOURCE_GONE',
-      message: `${operation} via /api/v1/databases/{db_name}/ontology/{class_label} is removed. Use Foundry object type contract flow.`,
-    },
+export const createDatasetV2 = async (
+  context: RequestContext,
+  input: {
+    dbName: string
+    name: string
+    description?: string
+    branchName?: string
+  },
+): Promise<FoundryDatasetRecordV2> => {
+  const dbName = String(input.dbName).trim()
+  const branchName = String(input.branchName ?? 'main').trim() || 'main'
+  const body = {
+    name: input.name,
+    description: input.description,
+    branchName,
+    parentFolderRid: `ri.spice.main.folder.${dbName}`,
+  }
+  const { payload } = await bff2RequestJson<FoundryDatasetRecordV2>(
+    '/api/v2/datasets',
+    { method: 'POST', body: JSON.stringify(body) },
+    context,
+    undefined,
+    bff2DbContextHeaders(dbName),
+  )
+  return payload ?? { rid: '', name: input.name, branchName }
+}
+
+export const createDatasetTransactionV2 = async (
+  context: RequestContext,
+  datasetRid: string,
+  params?: {
+    dbName?: string
+    transactionType?: string
+    idempotencyKey?: string
+  },
+): Promise<FoundryDatasetTransactionRecordV2> => {
+  const body = {
+    transactionType: String(params?.transactionType ?? 'APPEND'),
+    idempotencyKey: params?.idempotencyKey,
+  }
+  const { payload } = await bff2RequestJson<FoundryDatasetTransactionRecordV2>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/transactions`,
+    { method: 'POST', body: JSON.stringify(body) },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: '', status: 'OPEN' }
+}
+
+export const uploadDatasetFileV2 = async (
+  context: RequestContext,
+  datasetRid: string,
+  params: {
+    filePath: string
+    content: BodyInit
+    branchName?: string
+    contentType?: string
+    dbName?: string
+  },
+) => {
+  const branchName = String(params.branchName ?? 'main').trim() || 'main'
+  const extraHeaders = new Headers(bff2DbContextHeaders(params.dbName))
+  extraHeaders.set('Content-Type', params.contentType ?? 'application/octet-stream')
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files:upload`,
+    { method: 'POST', body: params.content },
+    context,
+    { filePath: params.filePath, branchName },
+    extraHeaders,
+  )
+  return payload ?? {}
+}
+
+export const commitDatasetTransactionV2 = async (
+  context: RequestContext,
+  datasetRid: string,
+  transactionRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryDatasetTransactionRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryDatasetTransactionRecordV2>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/transactions/${encodeURIComponent(transactionRid)}/commit`,
+    { method: 'POST' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: transactionRid, status: 'COMMITTED' }
+}
+
+export const abortDatasetTransactionV2 = async (
+  context: RequestContext,
+  datasetRid: string,
+  transactionRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryDatasetTransactionRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryDatasetTransactionRecordV2>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/transactions/${encodeURIComponent(transactionRid)}/abort`,
+    { method: 'POST' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: transactionRid, status: 'ABORTED' }
+}
+
+export const readDatasetTableV2 = async (
+  context: RequestContext,
+  datasetRid: string,
+  input?: {
+    rowLimit?: number
+    columns?: string[]
+  },
+  params?: { dbName?: string },
+): Promise<FoundryReadTableResponseV2> => {
+  const { payload } = await bff2RequestJson<FoundryReadTableResponseV2>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/readTable`,
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { columns: [], rows: [], totalRowCount: 0 }
+}
+
+const withConnectivityPreview = (searchParams?: Bff2SearchParams): Bff2SearchParams => ({
+  preview: true,
+  ...(searchParams ?? {}),
+})
+
+const extractConnectivityExecuteRid = (payload: unknown) => {
+  if (typeof payload === 'string') {
+    return payload
+  }
+  const record = asRecord(payload)
+  if (!record) {
+    return ''
+  }
+  const direct =
+    record.rid ??
+    record.buildRid ??
+    record.build_rid ??
+    asRecord(record.data)?.rid ??
+    asRecord(record.data)?.buildRid ??
+    asRecord(record.data)?.build_rid
+  return typeof direct === 'string' ? direct : ''
+}
+
+export const createConnectionV2 = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionRecordV2>(
+    '/api/v2/connectivity/connections',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return (
+    payload ?? {
+      rid: '',
+      displayName: String(input['displayName'] ?? input['name'] ?? ''),
+    }
   )
 }
 
-export const listBranches = async (context: RequestContext, dbName: string) => {
-  if (!ENABLE_DATABASE_BRANCH_API) {
-    return {
-      status: 'partial',
-      branch_management_supported: false,
-      branches: [{ name: 'main', source: 'frontend_fallback' }],
-      count: 1,
-      message: 'Branch API is disabled in this frontend profile. Falling back to main branch.',
-    }
-  }
-  const supported = await supportsDatabaseBranchApi(context)
-  if (!supported) {
-    return {
-      status: 'partial',
-      branch_management_supported: false,
-      branches: [{ name: 'main', source: 'frontend_fallback' }],
-      count: 1,
-      message: 'Branch API is unavailable in this backend profile. Falling back to main branch.',
-    }
-  }
-  try {
-    const { payload } = await bff2RequestJson<{ branches?: unknown[]; count?: number }>(
-      `databases/${encodeURIComponent(dbName)}/branches`,
-      { method: 'GET' },
-      context,
-    )
-    return payload ?? { branches: [], count: 0 }
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 404) {
-      return {
-        status: 'partial',
-        branch_management_supported: false,
-        branches: [{ name: 'main', source: 'frontend_fallback' }],
-        count: 1,
-        message: 'Branch API is unavailable in this backend profile. Falling back to main branch.',
-      }
-    }
-    throw error
-  }
+export const getConnectionV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: connectionRid }
 }
 
-export const createBranch = async (
+export const listConnectionsV2 = async (
   context: RequestContext,
-  dbName: string,
-  input: { name: string; from_branch?: string },
-): Promise<ApiEnvelope> => {
-  if (!ENABLE_DATABASE_BRANCH_API) {
-    throw new HttpError(501, 'Branch management API is disabled in this frontend profile.', {
-      errorCode: 'NOT_SUPPORTED',
-    })
-  }
-  const supported = await supportsDatabaseBranchApi(context)
-  if (!supported) {
-    throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
-      errorCode: 'NOT_SUPPORTED',
-    })
-  }
-  try {
-    const { payload } = await bff2RequestJson<ApiEnvelope>(
-      `databases/${encodeURIComponent(dbName)}/branches`,
-      { method: 'POST', body: JSON.stringify(input) },
-      context,
-    )
-    return payload ?? {}
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 404) {
-      throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
-        errorCode: 'NOT_SUPPORTED',
-      })
-    }
-    throw error
-  }
+  params?: { dbName?: string; pageSize?: number; pageToken?: string | null },
+): Promise<FoundryConnectionListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryConnectionListResponseV2>(
+    '/api/v2/connectivity/connections',
+    { method: 'GET' },
+    context,
+    withConnectivityPreview({ pageSize, pageToken }),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: [], nextPageToken: null }
 }
 
-export const deleteBranch = async (
+export const deleteConnectionV2 = async (
   context: RequestContext,
-  dbName: string,
-  branchName: string,
-): Promise<ApiEnvelope> => {
-  if (!ENABLE_DATABASE_BRANCH_API) {
-    throw new HttpError(501, 'Branch management API is disabled in this frontend profile.', {
-      errorCode: 'NOT_SUPPORTED',
-    })
-  }
-  const supported = await supportsDatabaseBranchApi(context)
-  if (!supported) {
-    throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
-      errorCode: 'NOT_SUPPORTED',
-    })
-  }
-  try {
-    const { payload } = await bff2RequestJson<ApiEnvelope>(
-      `databases/${encodeURIComponent(dbName)}/branches/${encodeURIComponent(branchName)}`,
-      { method: 'DELETE' },
-      context,
-    )
-    return payload ?? {}
-  } catch (error) {
-    if (error instanceof HttpError && error.status === 404) {
-      throw new HttpError(501, 'Branch management API is not available in this backend profile.', {
-        errorCode: 'NOT_SUPPORTED',
-      })
-    }
-    throw error
-  }
+  connectionRid: string,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}`,
+    { method: 'DELETE' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const testConnectionV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionTestResultV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionTestResultV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/test`,
+    { method: 'POST' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const getConnectionConfigurationV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionConfigurationResponseV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionConfigurationResponseV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/getConfiguration`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const getConnectionConfigurationBatchV2 = async (
+  context: RequestContext,
+  input: Array<{ connectionRid: string }>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionConfigurationBatchResponseV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionConfigurationBatchResponseV2>(
+    '/api/v2/connectivity/connections/getConfigurationBatch',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: {} }
+}
+
+export const updateConnectionSecretsV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/updateSecrets`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const updateConnectionExportSettingsV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/updateExportSettings`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const createConnectionExportRunV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionExportRunRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionExportRunRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/exportRuns`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: '' }
+}
+
+export const getConnectionExportRunV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  exportRunRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectionExportRunRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectionExportRunRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/exportRuns/${encodeURIComponent(exportRunRid)}`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: exportRunRid }
+}
+
+export const listConnectionExportRunsV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string; pageSize?: number; pageToken?: string | null },
+): Promise<FoundryConnectionExportRunListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryConnectionExportRunListResponseV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/exportRuns`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview({ pageSize, pageToken }),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const uploadCustomJdbcDriversV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: {
+    fileName: string
+    content: BodyInit
+    contentType?: string
+    dbName?: string
+  },
+): Promise<FoundryConnectionRecordV2> => {
+  const extraHeaders = new Headers(bff2DbContextHeaders(input.dbName))
+  extraHeaders.set('Content-Type', input.contentType ?? 'application/octet-stream')
+  const { payload } = await bff2RequestJson<FoundryConnectionRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/uploadCustomJdbcDrivers`,
+    { method: 'POST', body: input.content },
+    context,
+    withConnectivityPreview({ fileName: input.fileName }),
+    extraHeaders,
+  )
+  return payload ?? { rid: connectionRid }
+}
+
+export const createTableImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: '' }
+}
+
+export const getTableImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  tableImportRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports/${encodeURIComponent(tableImportRid)}`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: tableImportRid }
+}
+
+export const listTableImportsV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string; pageSize?: number; pageToken?: string | null },
+): Promise<FoundryConnectivityImportListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportListResponseV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview({ pageSize, pageToken }),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const replaceTableImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  tableImportRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports/${encodeURIComponent(tableImportRid)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: tableImportRid }
+}
+
+export const deleteTableImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  tableImportRid: string,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports/${encodeURIComponent(tableImportRid)}`,
+    { method: 'DELETE' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const executeTableImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  tableImportRid: string,
+  params?: { dbName?: string },
+): Promise<string> => {
+  const { payload } = await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/tableImports/${encodeURIComponent(tableImportRid)}/execute`,
+    { method: 'POST' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return extractConnectivityExecuteRid(payload)
+}
+
+export const createFileImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: '' }
+}
+
+export const getFileImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  fileImportRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports/${encodeURIComponent(fileImportRid)}`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: fileImportRid }
+}
+
+export const listFileImportsV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string; pageSize?: number; pageToken?: string | null },
+): Promise<FoundryConnectivityImportListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportListResponseV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview({ pageSize, pageToken }),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const replaceFileImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  fileImportRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports/${encodeURIComponent(fileImportRid)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: fileImportRid }
+}
+
+export const deleteFileImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  fileImportRid: string,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports/${encodeURIComponent(fileImportRid)}`,
+    { method: 'DELETE' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const executeFileImportV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  fileImportRid: string,
+  params?: { dbName?: string },
+): Promise<string> => {
+  const { payload } = await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/fileImports/${encodeURIComponent(fileImportRid)}/execute`,
+    { method: 'POST' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return extractConnectivityExecuteRid(payload)
+}
+
+export const createVirtualTableV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: '' }
+}
+
+export const getVirtualTableV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  virtualTableRid: string,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables/${encodeURIComponent(virtualTableRid)}`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: virtualTableRid }
+}
+
+export const listVirtualTablesV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  params?: { dbName?: string; pageSize?: number; pageToken?: string | null },
+): Promise<FoundryConnectivityImportListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportListResponseV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables`,
+    { method: 'GET' },
+    context,
+    withConnectivityPreview({ pageSize, pageToken }),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { data: [], nextPageToken: null }
+}
+
+export const replaceVirtualTableV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  virtualTableRid: string,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+): Promise<FoundryConnectivityImportRecordV2> => {
+  const { payload } = await bff2RequestJson<FoundryConnectivityImportRecordV2>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables/${encodeURIComponent(virtualTableRid)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? { rid: virtualTableRid }
+}
+
+export const deleteVirtualTableV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  virtualTableRid: string,
+  params?: { dbName?: string },
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables/${encodeURIComponent(virtualTableRid)}`,
+    { method: 'DELETE' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const executeVirtualTableV2 = async (
+  context: RequestContext,
+  connectionRid: string,
+  virtualTableRid: string,
+  params?: { dbName?: string },
+): Promise<string> => {
+  const { payload } = await bff2RequestJson<unknown>(
+    `/api/v2/connectivity/connections/${encodeURIComponent(connectionRid)}/virtualTables/${encodeURIComponent(virtualTableRid)}/execute`,
+    { method: 'POST' },
+    context,
+    withConnectivityPreview(),
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return extractConnectivityExecuteRid(payload)
 }
 
 export const listDatabaseClasses = async (context: RequestContext, dbName: string) => {
@@ -2370,6 +1661,80 @@ export const listObjectTypesV2 = async (
   return payload ?? { data: [], nextPageToken: null }
 }
 
+export type ObjectTypeContractCreateInputV2 = {
+  apiName: string
+  status?: string
+  primaryKey?: string
+  titleProperty?: string
+  pkSpec?: Record<string, unknown>
+  backingSource?: Record<string, unknown>
+  backingSources?: Record<string, unknown>[]
+  backingDatasetId?: string
+  backingDatasourceId?: string
+  backingDatasourceVersionId?: string
+  datasetVersionId?: string
+  schemaHash?: string
+  mappingSpecId?: string
+  mappingSpecVersion?: number
+  autoGenerateMapping?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type ObjectTypeContractUpdateInputV2 = Omit<ObjectTypeContractCreateInputV2, 'apiName'> & {
+  migration?: Record<string, unknown>
+}
+
+export const createObjectTypeV2 = async (
+  context: RequestContext,
+  dbName: string,
+  input: ObjectTypeContractCreateInputV2,
+  params?: { branch?: string; expectedHeadCommit?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const expectedHeadCommit = String(params?.expectedHeadCommit ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch, expectedHeadCommit },
+  )
+  return payload ?? {}
+}
+
+export const updateObjectTypeV2 = async (
+  context: RequestContext,
+  dbName: string,
+  objectType: string,
+  input: ObjectTypeContractUpdateInputV2,
+  params?: { branch?: string; expectedHeadCommit?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const expectedHeadCommit = String(params?.expectedHeadCommit ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes/${encodeURIComponent(objectType)}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+    context,
+    { branch, expectedHeadCommit },
+  )
+  return payload ?? {}
+}
+
+export const getObjectTypeFullMetadataV2 = async (
+  context: RequestContext,
+  dbName: string,
+  objectType: string,
+  params?: { branch?: string },
+) => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/objectTypes/${encodeURIComponent(objectType)}/fullMetadata`,
+    { method: 'GET' },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
 export const searchObjectsV2 = async (
   context: RequestContext,
   dbName: string,
@@ -2391,16 +1756,181 @@ export const listActionTypesV2 = async (
   context: RequestContext,
   dbName: string,
   params?: { branch?: string; pageSize?: number },
-) => {
+): Promise<FoundryActionTypeListResponseV2> => {
   const branch = String(params?.branch ?? 'main').trim() || 'main'
   const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(1000, Number(params?.pageSize))) : 100
-  const { payload } = await bff2RequestJson<{ data?: unknown[]; nextPageToken?: string | null }>(
+  const { payload } = await bff2RequestJson<Record<string, unknown> | unknown[]>(
     `/api/v2/ontologies/${encodeURIComponent(dbName)}/actionTypes`,
     { method: 'GET' },
     context,
     { branch, pageSize },
   )
-  return payload ?? { data: [], nextPageToken: null }
+  if (Array.isArray(payload)) {
+    return { data: payload as FoundryActionTypeRecordV2[], nextPageToken: null }
+  }
+
+  const record = payload && typeof payload === 'object' ? payload : {}
+  const container =
+    record && typeof record === 'object' && !Array.isArray(record.data) && record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : null
+
+  const data = Array.isArray((record as Record<string, unknown>).data)
+    ? ((record as Record<string, unknown>).data as FoundryActionTypeRecordV2[])
+    : (Array.isArray(container?.actionTypes) ? (container?.actionTypes as FoundryActionTypeRecordV2[]) : [])
+
+  const nextPageTokenRaw =
+    (record as Record<string, unknown>).nextPageToken ??
+    (container ? container.nextPageToken : null)
+  const nextPageToken =
+    typeof nextPageTokenRaw === 'string' ? nextPageTokenRaw : (nextPageTokenRaw == null ? null : String(nextPageTokenRaw))
+
+  return { data, nextPageToken }
+}
+
+export const getActionTypeV2 = async (
+  context: RequestContext,
+  dbName: string,
+  actionType: string,
+  params?: { branch?: string },
+): Promise<FoundryActionTypeRecordV2> => {
+  const branch = String(params?.branch ?? 'main').trim() || 'main'
+  const { payload } = await bff2RequestJson<FoundryActionTypeRecordV2>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/actionTypes/${encodeURIComponent(actionType)}`,
+    { method: 'GET' },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
+export const listQueryTypesV2 = async (
+  context: RequestContext,
+  dbName: string,
+  params?: { pageSize?: number; pageToken?: string | null },
+): Promise<FoundryQueryTypeListResponseV2> => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(1000, Number(params?.pageSize))) : 100
+  const pageToken = String(params?.pageToken ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<Record<string, unknown> | unknown[]>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/queryTypes`,
+    { method: 'GET' },
+    context,
+    { pageSize, pageToken },
+  )
+  if (Array.isArray(payload)) {
+    return { data: payload as FoundryQueryTypeRecordV2[], nextPageToken: null }
+  }
+
+  const record = payload && typeof payload === 'object' ? payload : {}
+  const container =
+    record && typeof record === 'object' && !Array.isArray(record.data) && record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : null
+
+  const data = Array.isArray((record as Record<string, unknown>).data)
+    ? ((record as Record<string, unknown>).data as FoundryQueryTypeRecordV2[])
+    : (Array.isArray(container?.queryTypes) ? (container?.queryTypes as FoundryQueryTypeRecordV2[]) : [])
+
+  const nextPageTokenRaw =
+    (record as Record<string, unknown>).nextPageToken ??
+    (container ? container.nextPageToken : null)
+  const nextPageToken =
+    typeof nextPageTokenRaw === 'string' ? nextPageTokenRaw : (nextPageTokenRaw == null ? null : String(nextPageTokenRaw))
+
+  return { data, nextPageToken }
+}
+
+export const getQueryTypeV2 = async (
+  context: RequestContext,
+  dbName: string,
+  queryApiName: string,
+  params?: { version?: string | null },
+): Promise<FoundryQueryTypeRecordV2> => {
+  const version = String(params?.version ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryQueryTypeRecordV2>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/queryTypes/${encodeURIComponent(queryApiName)}`,
+    { method: 'GET' },
+    context,
+    { version },
+  )
+  return payload ?? {}
+}
+
+export const executeQueryTypeV2 = async (
+  context: RequestContext,
+  dbName: string,
+  queryApiName: string,
+  input?: {
+    parameters?: Record<string, unknown>
+    options?: Record<string, unknown>
+  },
+  params?: { version?: string | null },
+): Promise<FoundryQueryTypeExecuteResponseV2> => {
+  const version = String(params?.version ?? '').trim() || undefined
+  const { payload } = await bff2RequestJson<FoundryQueryTypeExecuteResponseV2>(
+    `/api/v2/ontologies/${encodeURIComponent(dbName)}/queries/${encodeURIComponent(queryApiName)}/execute`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        parameters: input?.parameters ?? {},
+        options: input?.options ?? {},
+      }),
+    },
+    context,
+    { version },
+  )
+  return payload ?? {}
+}
+
+export const upsertAccessPolicyV1 = async (
+  context: RequestContext,
+  input: {
+    db_name: string
+    scope?: string
+    subject_type: string
+    subject_id: string
+    policy: Record<string, unknown>
+    status?: string
+  },
+): Promise<AccessPolicyRecordV1> => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    '/api/v1/access-policies',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    context,
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  const record = data.access_policy && typeof data.access_policy === 'object'
+    ? (data.access_policy as AccessPolicyRecordV1)
+    : (data as AccessPolicyRecordV1)
+  return record ?? {}
+}
+
+export const listAccessPoliciesV1 = async (
+  context: RequestContext,
+  params?: {
+    db_name?: string
+    scope?: string
+    subject_type?: string
+    subject_id?: string
+    status?: string
+  },
+): Promise<AccessPolicyRecordV1[]> => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    '/api/v1/access-policies',
+    { method: 'GET' },
+    context,
+    params ?? {},
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  const rows = Array.isArray(data.access_policies)
+    ? (data.access_policies as AccessPolicyRecordV1[])
+    : (Array.isArray(root.access_policies) ? (root.access_policies as AccessPolicyRecordV1[]) : [])
+  return rows
 }
 
 export const listOntologyResourcesV1 = async (
@@ -2531,13 +2061,48 @@ export const recordOntologyDeploymentV1 = async (
   return payload ?? {}
 }
 
+export type ActionApplyResponseV2 = Record<string, unknown> & {
+  auditLogId: string | null
+  sideEffectDelivery: unknown | null
+  writebackStatus: 'confirmed' | 'missing' | 'not_configured'
+}
+
+const normalizeActionApplyResponseV2 = (payload: Record<string, unknown> | null): ActionApplyResponseV2 => {
+  const record = payload ?? {}
+  const nested = asRecord(record.data)
+  const auditLogIdCandidate = (
+    record.auditLogId ??
+    record.action_log_id ??
+    record.command_id ??
+    nested?.auditLogId ??
+    nested?.action_log_id ??
+    nested?.command_id ??
+    null
+  )
+  const auditLogId = String(auditLogIdCandidate ?? '').trim() || null
+  const sideEffectDelivery = (record.sideEffectDelivery ?? nested?.sideEffectDelivery ?? null) as unknown
+  const rawWritebackStatus = String(record.writebackStatus ?? nested?.writebackStatus ?? '').trim().toLowerCase()
+  const writebackStatus: ActionApplyResponseV2['writebackStatus'] =
+    rawWritebackStatus === 'confirmed' || rawWritebackStatus === 'missing' || rawWritebackStatus === 'not_configured'
+      ? rawWritebackStatus
+      : (auditLogId || sideEffectDelivery !== null ? 'confirmed' : 'not_configured')
+
+  return {
+    ...record,
+    auditLogId,
+    action_log_id: auditLogId,
+    sideEffectDelivery,
+    writebackStatus,
+  }
+}
+
 export const applyActionV2 = async (
   context: RequestContext,
   dbName: string,
   actionType: string,
   input: Record<string, unknown>,
   params?: { branch?: string },
-) => {
+): Promise<ActionApplyResponseV2> => {
   const branch = String(params?.branch ?? 'main').trim() || 'main'
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     `/api/v2/ontologies/${encodeURIComponent(dbName)}/actions/${encodeURIComponent(actionType)}/apply`,
@@ -2545,7 +2110,7 @@ export const applyActionV2 = async (
     context,
     { branch },
   )
-  return payload ?? {}
+  return normalizeActionApplyResponseV2(payload)
 }
 
 export const createObjectifyMappingSpec = async (
@@ -2560,114 +2125,19 @@ export const createObjectifyMappingSpec = async (
   return payload ?? {}
 }
 
+export type RunObjectifyDatasetInput = Record<string, unknown> & {
+  dataset_version_id: string
+}
+
 export const runObjectifyDataset = async (
   context: RequestContext,
   datasetId: string,
-  input: Record<string, unknown>,
+  input: RunObjectifyDatasetInput,
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     `objectify/datasets/${encodeURIComponent(datasetId)}/run`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
-  )
-  return payload ?? {}
-}
-
-export const validateOntologyCreate = async (
-  context: RequestContext,
-  dbName: string,
-  branch: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/ontology/validate`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-    { branch },
-  )
-  return payload ?? {}
-}
-
-export const createOntology = async (
-  context: RequestContext,
-  dbName: string,
-  branch: string,
-  input: Record<string, unknown>,
-  extraHeaders?: HeadersInit,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/ontology`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-    { branch },
-    extraHeaders,
-  )
-  return payload ?? {}
-}
-
-export const validateOntologyUpdate = async (
-  context: RequestContext,
-  dbName: string,
-  classLabel: string,
-  branch: string,
-  input: Record<string, unknown>,
-) => {
-  void context
-  void dbName
-  void classLabel
-  void branch
-  void input
-  return throwRemovedOntologyWrite('validateOntologyUpdate')
-}
-
-export const updateOntology = async (
-  context: RequestContext,
-  dbName: string,
-  classLabel: string,
-  branch: string,
-  expectedSeq: number,
-  input: Record<string, unknown>,
-  extraHeaders?: HeadersInit,
-) => {
-  void context
-  void dbName
-  void classLabel
-  void branch
-  void expectedSeq
-  void input
-  void extraHeaders
-  return throwRemovedOntologyWrite('updateOntology')
-}
-
-export const deleteOntology = async (
-  context: RequestContext,
-  dbName: string,
-  classLabel: string,
-  branch: string,
-  expectedSeq: number,
-  extraHeaders?: HeadersInit,
-) => {
-  void context
-  void dbName
-  void classLabel
-  void branch
-  void expectedSeq
-  void extraHeaders
-  return throwRemovedOntologyWrite('deleteOntology')
-}
-
-export const getOntologySchema = async (
-  context: RequestContext,
-  dbName: string,
-  classId: string,
-  branch: string,
-  format: 'json' | 'jsonld' | 'owl' = 'json',
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classId)}/schema`,
-    { method: 'GET' },
-    context,
-    { branch, format },
   )
   return payload ?? {}
 }
@@ -2731,93 +2201,6 @@ export const clearMappings = async (context: RequestContext, dbName: string) => 
   return payload ?? {}
 }
 
-export const previewGoogleSheet = async (
-  context: RequestContext,
-  input: { sheet_url: string; worksheet_name?: string; api_key?: string },
-  limit = 10,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    'data-connectors/google-sheets/preview',
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-    { limit },
-  )
-  return payload ?? {}
-}
-
-export const gridGoogleSheet = async (
-  context: RequestContext,
-  input: { sheet_url: string; worksheet_name?: string; api_key?: string; max_rows?: number; max_cols?: number; trim_trailing_empty?: boolean },
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    'data-connectors/google-sheets/grid',
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const registerGoogleSheetCtx = async (
-  context: RequestContext,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    'data-connectors/google-sheets/register',
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const listRegisteredSheets = async (
-  context: RequestContext,
-  databaseName?: string,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    'data-connectors/google-sheets/registered',
-    { method: 'GET' },
-    context,
-    { database_name: databaseName },
-  )
-  return payload ?? {}
-}
-
-export const previewRegisteredSheet = async (
-  context: RequestContext,
-  sheetId: string,
-  params?: { worksheet_name?: string; limit?: number },
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview`,
-    { method: 'GET' },
-    context,
-    { worksheet_name: params?.worksheet_name, limit: params?.limit },
-  )
-  return payload ?? {}
-}
-
-export const unregisterSheet = async (context: RequestContext, sheetId: string) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `data-connectors/google-sheets/${encodeURIComponent(sheetId)}`,
-    { method: 'DELETE' },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const suggestMappingsFromGoogleSheets = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/suggest-mappings-from-google-sheets`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
 export const suggestMappingsFromExcel = async (
   context: RequestContext,
   dbName: string,
@@ -2847,32 +2230,6 @@ export const suggestMappingsFromExcel = async (
     { method: 'POST', body },
     context,
     { target_class_id: params.target_class_id },
-  )
-  return payload ?? {}
-}
-
-export const dryRunImportFromGoogleSheets = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/import-from-google-sheets/dry-run`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const commitImportFromGoogleSheets = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/import-from-google-sheets/commit`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
   )
   return payload ?? {}
 }
@@ -2982,19 +2339,6 @@ export const suggestSchemaFromData = async (
 ) => {
   const { payload } = await bff2RequestJson<ApiEnvelope>(
     `databases/${encodeURIComponent(dbName)}/suggest-schema-from-data`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const suggestSchemaFromGoogleSheets = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<ApiEnvelope>(
-    `databases/${encodeURIComponent(dbName)}/suggest-schema-from-google-sheets`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
@@ -3370,32 +2714,6 @@ export const runQuery = async (
   }
 }
 
-export const simulateMerge = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/merge/simulate`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
-export const resolveMerge = async (
-  context: RequestContext,
-  dbName: string,
-  input: Record<string, unknown>,
-) => {
-  const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `databases/${encodeURIComponent(dbName)}/merge/resolve`,
-    { method: 'POST', body: JSON.stringify(input) },
-    context,
-  )
-  return payload ?? {}
-}
-
 export const listAuditLogs = async (
   context: RequestContext,
   params: Record<string, unknown>,
@@ -3424,7 +2742,16 @@ export const getAuditChainHead = async (
 
 export const getLineageGraphCtx = async (
   context: RequestContext,
-  params: { root: string; db_name: string },
+  params: {
+    root: string
+    db_name: string
+    branch?: string
+    direction?: 'upstream' | 'downstream' | 'both'
+    max_depth?: number
+    max_nodes?: number
+    max_edges?: number
+    as_of?: string
+  },
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     'lineage/graph',
@@ -3437,7 +2764,17 @@ export const getLineageGraphCtx = async (
 
 export const getLineageImpactCtx = async (
   context: RequestContext,
-  params: { root: string; db_name: string },
+  params: {
+    root: string
+    db_name: string
+    branch?: string
+    direction?: 'upstream' | 'downstream' | 'both'
+    max_depth?: number
+    max_nodes?: number
+    max_edges?: number
+    as_of?: string
+    artifact_kind?: string
+  },
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     'lineage/impact',
@@ -3450,10 +2787,171 @@ export const getLineageImpactCtx = async (
 
 export const getLineageMetrics = async (
   context: RequestContext,
-  params: { db_name: string; window_minutes?: number },
+  params: { db_name: string; branch?: string; window_minutes?: number },
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     'lineage/metrics',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineagePathCtx = async (
+  context: RequestContext,
+  params: {
+    source: string
+    target: string
+    db_name: string
+    branch?: string
+    direction?: 'upstream' | 'downstream' | 'both'
+    max_depth?: number
+    max_nodes?: number
+    max_edges?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/path',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageDiffCtx = async (
+  context: RequestContext,
+  params: {
+    root: string
+    from_as_of: string
+    db_name: string
+    to_as_of?: string
+    branch?: string
+    direction?: 'upstream' | 'downstream' | 'both'
+    max_depth?: number
+    max_nodes?: number
+    max_edges?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/diff',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageRunsCtx = async (
+  context: RequestContext,
+  params: {
+    db_name: string
+    branch?: string
+    since?: string
+    until?: string
+    edge_type?: string
+    run_limit?: number
+    freshness_slo_minutes?: number
+    include_impact_preview?: boolean
+    impact_preview_runs_limit?: number
+    impact_preview_artifacts_limit?: number
+    impact_preview_edge_limit?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/runs',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageRunImpactCtx = async (
+  context: RequestContext,
+  params: {
+    run_id: string
+    db_name: string
+    branch?: string
+    since?: string
+    until?: string
+    event_limit?: number
+    artifact_preview_limit?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/run-impact',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageTimelineCtx = async (
+  context: RequestContext,
+  params: {
+    db_name: string
+    branch?: string
+    since?: string
+    until?: string
+    edge_type?: string
+    projection_name?: string
+    bucket_minutes?: number
+    event_limit?: number
+    event_preview_limit?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/timeline',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageColumnLineageCtx = async (
+  context: RequestContext,
+  params: {
+    db_name: string
+    branch?: string
+    run_id?: string
+    source_field?: string
+    target_field?: string
+    target_class_id?: string
+    since?: string
+    until?: string
+    edge_limit?: number
+    pair_limit?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/column-lineage',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
+}
+
+export const getLineageOutOfDateCtx = async (
+  context: RequestContext,
+  params: {
+    db_name: string
+    branch?: string
+    artifact_kind?: string
+    as_of?: string
+    freshness_slo_minutes?: number
+    artifact_limit?: number
+    stale_preview_limit?: number
+    projection_limit?: number
+    projection_preview_limit?: number
+  },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'lineage/out-of-date',
     { method: 'GET' },
     context,
     params,

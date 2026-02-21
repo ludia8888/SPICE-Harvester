@@ -771,6 +771,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "ingest_request_id": ctx.ingest_request_id or "00000000-0000-0000-0000-000000000000",
         "connection_id": ctx.connection_id or "missing_connection",
         "connectionRid": "ri.spice.main.connection.smoke-missing",
+        "exportRunRid": "ri.spice.main.export-run.smoke-missing",
         "tableImportRid": "ri.spice.main.table-import.smoke-missing",
         "fileImportRid": "ri.spice.main.file-import.smoke-missing",
         "virtualTableRid": "ri.spice.main.virtual-table.smoke-missing",
@@ -808,6 +809,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "simulation_id": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
         "simulationId": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
         "version": str(ctx.simulation_version or 1),
+        "resource_type": "action-types",
         "drift_id": "00000000-0000-0000-0000-000000000000",
         "subscription_id": "00000000-0000-0000-0000-000000000000",
         # Agent control-plane placeholders
@@ -961,7 +963,15 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "goal": "openapi smoke pipeline run",
             "data_scope": {"db_name": ctx.db_name, "branch": "main", "dataset_ids": []},
         }
-        return RequestPlan(op.method, op.path, url, (200, 400, 422, 429), json_body=body, auth_mode="delegated_user")
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400, 422, 429, 503),
+            json_body=body,
+            auth_mode="delegated_user",
+            allow_5xx=True,
+        )
 
     if key == ("POST", "/api/v1/agent/pipeline-runs/stream"):
         url = f"{BFF_URL}{op.path}"
@@ -1427,6 +1437,16 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"pageSize": 10}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
+    if key == ("POST", "/api/v2/ontologies/{ontology}/objectTypes"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
+        # Validation-only (apiName required) to avoid mutating contracts in smoke.
+        return RequestPlan(op.method, op.path, url, (400, 403, 404, 409, 422), json_body={})
+
+    if key == ("PATCH", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': 'missing_object_type'})}"
+        body = {"metadata": {"source": "openapi_smoke"}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body)
+
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
@@ -1591,8 +1611,19 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409))
 
     # ---------- Ontology Extensions ----------
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/records/deployments"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "target_branch": "main",
+            "ontology_commit_id": "branch:main",
+            "deployed_by": "openapi_smoke",
+            "metadata": {"source": "openapi_smoke"},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 201, 400, 403, 404, 409, 422), json_body=body)
+
     ontology_resource_collections = {
         "/api/v1/databases/{db_name}/ontology/link-types",
+        "/api/v1/databases/{db_name}/ontology/resources/{resource_type}",
     }
     ontology_resource_items = {f"{p}/{{resource_id}}" for p in ontology_resource_collections}
 
@@ -2066,6 +2097,24 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
         body = {"exportSettings": {"exportsEnabled": True, "exportEnabledWithoutMarkingsValidation": False}}
         return RequestPlan(op.method, op.path, url, (204, 404, 400), params={"preview": "true"}, json_body=body)
+
+    if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/exportRuns"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
+        body = {
+            "targetUrl": "https://example.com/openapi-smoke-export",
+            "method": "POST",
+            "payload": {"source": "openapi_smoke"},
+            "dryRun": True,
+        }
+        return RequestPlan(op.method, op.path, url, (202, 400, 404, 409), params={"preview": "true"}, json_body=body)
+
+    if key == ("GET", "/api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing', 'exportRunRid': 'ri.spice.main.export-run.smoke-missing'})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params={"preview": "true"})
+
+    if key == ("GET", "/api/v2/connectivity/connections/{connectionRid}/exportRuns"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params={"preview": "true"})
 
     if key == ("POST", "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"

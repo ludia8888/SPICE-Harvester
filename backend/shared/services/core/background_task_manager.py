@@ -246,6 +246,10 @@ class BackgroundTaskManager:
             # Update status to processing
             task.status = TaskStatus.PROCESSING
             task.started_at = datetime.now(timezone.utc)
+            # Clear terminal fields from previous attempts before a new run starts.
+            task.completed_at = None
+            task.result = None
+            task.next_retry_at = None
             await self._save_task(task)
             await self._notify_task_status_changed(task)
             
@@ -256,6 +260,7 @@ class BackgroundTaskManager:
             # Update status to completed
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now(timezone.utc)
+            task.next_retry_at = None
             task.result = TaskResult(
                 success=True,
                 data=result,
@@ -271,6 +276,7 @@ class BackgroundTaskManager:
             # Task was cancelled
             task.status = TaskStatus.CANCELLED
             task.completed_at = datetime.now(timezone.utc)
+            task.next_retry_at = None
             task.result = TaskResult(
                 success=False,
                 error="Task was cancelled",
@@ -288,6 +294,7 @@ class BackgroundTaskManager:
             
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.now(timezone.utc)
+            task.next_retry_at = None
             task.result = TaskResult(
                 success=False,
                 error=str(e),
@@ -303,6 +310,10 @@ class BackgroundTaskManager:
                 task.next_retry_at = datetime.now(timezone.utc) + timedelta(
                     seconds=self.retry_delay * task.retry_count
                 )
+                # RETRYING means the task is not terminal yet.
+                task.completed_at = None
+                task.result = None
+                task.metadata["last_error"] = str(e)
                 await self._save_task(task)
                 await self._notify_task_retrying(task)
                 
@@ -312,6 +323,7 @@ class BackgroundTaskManager:
                 return await self._execute_task(task_id, func, args, kwargs)
             else:
                 # Max retries reached
+                task.next_retry_at = None
                 await self._save_task(task)
                 await self._notify_task_failed(task)
                 

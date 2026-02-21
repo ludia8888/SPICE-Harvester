@@ -79,6 +79,18 @@ class EventStore:
         self._lineage_store: Optional[Any] = None
         self._audit_store: Optional[Any] = None
 
+    def attach_observability_stores(
+        self,
+        *,
+        lineage_store: Optional[Any] = None,
+        audit_store: Optional[Any] = None,
+    ) -> None:
+        """Reuse already-initialized stores to avoid duplicate schema bootstrap."""
+        if lineage_store is not None:
+            self._lineage_store = lineage_store
+        if audit_store is not None:
+            self._audit_store = audit_store
+
     @property
     def _sequence_mode(self) -> str:
         value = str(get_settings().event_sourcing.event_store_sequence_allocator_mode or "").strip().lower()
@@ -151,9 +163,13 @@ class EventStore:
                         )
                         logger.info("✅ Enabled versioning for immutability")
 
-                # Initialize lineage/audit stores (Postgres-backed).
-                # Lineage may fail-closed depending on observability policy.
-                await self._initialize_lineage_and_audit()
+                # Initialize lineage/audit stores (Postgres-backed) only if absent.
+                # This avoids duplicate schema bootstrap work when callers already
+                # initialized and injected stores.
+                needs_lineage_bootstrap = self._lineage_enabled and self._lineage_store is None
+                needs_audit_bootstrap = self._audit_enabled and self._audit_store is None
+                if needs_lineage_bootstrap or needs_audit_bootstrap:
+                    await self._initialize_lineage_and_audit()
                 self._connected = True
 
             except Exception as e:

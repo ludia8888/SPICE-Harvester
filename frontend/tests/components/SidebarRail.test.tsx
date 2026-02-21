@@ -1,52 +1,41 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
-import { SidebarRail, type RailItem } from '../../src/components/SidebarRail'
+import { SidebarRail, type RailItem } from '../../src/components/layout/SidebarRail'
 
-const buildItems = (overrides?: Partial<RailItem>[]) => {
-  const base: RailItem[] = [
-    { id: 'home', icon: 'home', label: 'Home', active: true, onClick: vi.fn() },
-    { id: 'datasets', icon: 'folder-close', label: 'Files', onClick: vi.fn() },
-    { id: 'ai-agent', icon: 'predictive-analysis', label: 'AI Agent', onClick: vi.fn() },
-  ]
-  if (!overrides) {
-    return base
-  }
-  return base.map((item, index) => ({ ...item, ...overrides[index] }))
-}
+const buildItems = (): RailItem[] => [
+  { icon: 'home', label: 'Home', active: true, onClick: vi.fn() },
+  { icon: 'folder-close', label: 'Files', onClick: vi.fn() },
+  { icon: 'predictive-analysis', label: 'AI Agent', onClick: vi.fn() },
+]
 
 describe('SidebarRail', () => {
-  it('renders primary items including the AI agent', () => {
-    render(<SidebarRail items={buildItems()} />)
+  it('renders primary rail items and utility buttons', () => {
+    render(
+      <SidebarRail
+        items={buildItems()}
+        settingsContent={<div>Settings content</div>}
+        settingsLabel="Settings"
+        userLabel="User"
+      />,
+    )
 
     expect(screen.getByTitle('Home')).toBeInTheDocument()
     expect(screen.getByTitle('Files')).toBeInTheDocument()
-
-    const railContent = document.querySelector('.rail-content')
-    expect(railContent).not.toBeNull()
-    if (!railContent) {
-      return
-    }
-
-    const aiButton = screen.getByTitle('AI Agent')
-    expect(aiButton).toBeInTheDocument()
-    expect(railContent).toContainElement(aiButton)
+    expect(screen.getByTitle('AI Agent')).toBeInTheDocument()
+    expect(screen.getByTitle('Settings')).toBeInTheDocument()
+    expect(screen.getByTitle('User')).toBeInTheDocument()
   })
 
-  it('fires hover and click callbacks', () => {
-    const onHoverChange = vi.fn()
+  it('fires item click callback', () => {
     const items = buildItems()
-    render(<SidebarRail items={items} onHoverChange={onHoverChange} />)
-
-    const rail = document.querySelector('.sidebar-rail')
-    expect(rail).not.toBeNull()
-    if (!rail) {
-      return
-    }
-
-    fireEvent.mouseEnter(rail)
-    fireEvent.mouseLeave(rail)
-    expect(onHoverChange).toHaveBeenCalledWith(true)
-    expect(onHoverChange).toHaveBeenCalledWith(false)
+    render(
+      <SidebarRail
+        items={items}
+        settingsContent={<div>Settings content</div>}
+        settingsLabel="Settings"
+        userLabel="User"
+      />,
+    )
 
     fireEvent.click(screen.getByTitle('Files'))
     expect(items[1].onClick).toHaveBeenCalled()

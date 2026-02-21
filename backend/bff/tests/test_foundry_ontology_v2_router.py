@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -88,7 +89,7 @@ class _FakeOMSClient:
         self,
         db_name,
         *,
-        resource_type,
+        resource_type=None,
         branch="main",
         limit=200,
         offset=0,
@@ -151,6 +152,15 @@ class _FakeOMSClient:
                             "spec": {
                                 "status": "ACTIVE",
                                 "target_object_type": "Account",
+                                "permission_model": "ontology_roles",
+                                "edits_beyond_actions": False,
+                                "permission_policy": {
+                                    "effect": "ALLOW",
+                                    "principals": ["role:DomainModeler"],
+                                    "inherit_project_policy": True,
+                                    "project_policy_scope": "action_access",
+                                    "project_policy_subject_type": "project",
+                                },
                             },
                         }
                     ]
@@ -279,7 +289,19 @@ class _FakeOMSClient:
                     "id": "ApproveAccount",
                     "rid": "ri.action-type.approve-account",
                     "label": {"en": "Approve Account"},
-                    "spec": {"status": "ACTIVE", "target_object_type": "Account"},
+                    "spec": {
+                        "status": "ACTIVE",
+                        "target_object_type": "Account",
+                        "permission_model": "ontology_roles",
+                        "edits_beyond_actions": False,
+                        "permission_policy": {
+                            "effect": "ALLOW",
+                            "principals": ["role:DomainModeler"],
+                            "inherit_project_policy": True,
+                            "project_policy_scope": "action_access",
+                            "project_policy_subject_type": "project",
+                        },
+                    },
                 }
             }
         if resource_type == "function" and resource_id == "findAccounts":
@@ -604,6 +626,78 @@ class _FullMetadataPartialFailureOMSClient(_FakeOMSClient):
         )
 
 
+class _LegacyActionResourceOnlyOMSClient(_FakeOMSClient):
+    async def list_ontology_resources(
+        self,
+        db_name,
+        *,
+        resource_type=None,
+        branch="main",
+        limit=200,
+        offset=0,
+    ):  # noqa: ANN001, ANN003
+        _ = db_name, branch, limit, offset
+        if resource_type == "action_type":
+            return {"data": {"resources": []}}
+        if resource_type is None:
+            return {
+                "data": {
+                    "resources": [
+                        {
+                            "id": "HoldOrder",
+                            "rid": "ri.action-type.hold-order",
+                            "resource_type": "action",
+                            "label": {"en": "Hold Order"},
+                            "spec": {
+                                "status": "ACTIVE",
+                                "target_object_type": "Order",
+                                "input_schema": {"type": "object"},
+                            },
+                        }
+                    ]
+                }
+            }
+        return await super().list_ontology_resources(
+            db_name,
+            resource_type=resource_type,
+            branch=branch,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def get_ontology_resource(
+        self,
+        db_name,
+        *,
+        resource_type,
+        resource_id,
+        branch="main",
+    ):  # noqa: ANN001, ANN003
+        _ = db_name, branch
+        if resource_type == "action_type" and resource_id == "HoldOrder":
+            request = httpx.Request("GET", f"http://oms/api/v1/database/{db_name}/ontology/resources/action_type/{resource_id}")
+            response = httpx.Response(status_code=404, request=request, json={"detail": "not found"})
+            raise httpx.HTTPStatusError("Not found", request=request, response=response)
+        return await super().get_ontology_resource(
+            db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+
+
+class _ActionEvidenceOMSClient(_FakeOMSClient):
+    async def post(self, path, **kwargs):  # noqa: ANN001, ANN003
+        self.last_post = (path, kwargs)
+        if path.endswith("/apply"):
+            return {
+                "validation": {"result": "VALID"},
+                "action_log_id": "log-123",
+                "sideEffectDelivery": {"status": "SENT"},
+            }
+        return await super().post(path, **kwargs)
+
+
 class _PagedLinkTypesOMSClient(_FakeOMSClient):
     def __init__(self) -> None:
         super().__init__()
@@ -759,6 +853,115 @@ async def test_list_ontologies_v2_returns_foundry_raw_shape():
     assert [row["apiName"] for row in response["data"]] == ["test_db", "sales"]
     assert response["data"][0]["displayName"] == "test_db"
     assert "nextPageToken" not in response
+
+
+@pytest.mark.asyncio
+async def test_create_object_type_v2_routes_to_contract_service_with_backing_sources():
+    request = Request({"type": "http", "headers": []})
+    oms_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    original_create = router_v2.object_type_contract_service.create_object_type_contract
+    captured: dict[str, Any] = {}
+
+    async def _fake_create_object_type_contract(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(
+            data={
+                "object_type": {
+                    "id": "Order",
+                    "spec": {
+                        "status": "DRAFT",
+                        "pk_spec": {"primary_key": [], "title_key": []},
+                        "backing_source": {},
+                    },
+                }
+            }
+        )
+
+    router_v2._require_domain_role = _noop_require_domain_role
+    router_v2.object_type_contract_service.create_object_type_contract = _fake_create_object_type_contract
+    try:
+        response = await router_v2.create_object_type_v2(
+            ontology="test_db",
+            body=router_v2.ObjectTypeContractCreateRequestV2(
+                apiName="Order",
+                status="DRAFT",
+                backingSources=[{"dataset_id": "ds-1"}],
+            ),
+            request=request,
+            branch="main",
+            expected_head_commit=None,
+            oms_client=oms_client,
+            dataset_registry=SimpleNamespace(),
+            objectify_registry=SimpleNamespace(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+        router_v2.object_type_contract_service.create_object_type_contract = original_create
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "Order"
+    captured_body = captured["body"]
+    assert captured_body.class_id == "Order"
+    assert captured_body.status == "DRAFT"
+    assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
+    assert captured["expected_head_commit"] == "branch:main"
+
+
+@pytest.mark.asyncio
+async def test_update_object_type_v2_routes_to_contract_service():
+    request = Request({"type": "http", "headers": []})
+    oms_client = _FakeOMSClient()
+    original_require = router_v2._require_domain_role
+    original_update = router_v2.object_type_contract_service.update_object_type_contract
+    captured: dict[str, Any] = {}
+
+    async def _fake_update_object_type_contract(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(
+            data={
+                "object_type": {
+                    "id": "Order",
+                    "spec": {
+                        "status": "ACTIVE",
+                        "pk_spec": {"primary_key": ["order_id"], "title_key": ["order_id"]},
+                        "backing_source": {"dataset_id": "ds-1"},
+                    },
+                }
+            }
+        )
+
+    router_v2._require_domain_role = _noop_require_domain_role
+    router_v2.object_type_contract_service.update_object_type_contract = _fake_update_object_type_contract
+    try:
+        response = await router_v2.update_object_type_v2(
+            ontology="test_db",
+            objectType="Order",
+            body=router_v2.ObjectTypeContractUpdateRequestV2(
+                status="ACTIVE",
+                primaryKey="order_id",
+                titleProperty="order_id",
+                backingSource={"dataset_id": "ds-1"},
+            ),
+            request=request,
+            branch="main",
+            expected_head_commit=None,
+            oms_client=oms_client,
+            dataset_registry=SimpleNamespace(),
+            objectify_registry=SimpleNamespace(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+        router_v2.object_type_contract_service.update_object_type_contract = original_update
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "Order"
+    captured_body = captured["body"]
+    assert captured["class_id"] == "Order"
+    assert captured_body.status == "ACTIVE"
+    assert captured_body.pk_spec == {"primary_key": ["order_id"], "title_key": ["order_id"]}
+    assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
+    assert captured["expected_head_commit"] == "branch:main"
 
 
 @pytest.mark.asyncio
@@ -1003,7 +1206,32 @@ async def test_list_action_types_v2_returns_foundry_raw_shape():
     assert isinstance(response, dict)
     assert response["data"][0]["apiName"] == "ApproveAccount"
     assert response["data"][0]["displayName"] == "Approve Account"
+    assert response["data"][0]["permissionModel"] == "ontology_roles"
+    assert response["data"][0]["editsBeyondActions"] is False
+    assert response["data"][0]["dynamicSecurity"]["projectPolicyInheritance"]["enabled"] is True
     assert "nextPageToken" in response
+
+
+@pytest.mark.asyncio
+async def test_list_action_types_v2_falls_back_to_legacy_action_rows() -> None:
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.list_action_types_v2(
+            ontology="test_db",
+            request=request,
+            page_size=10,
+            page_token=None,
+            branch="main",
+            oms_client=_LegacyActionResourceOnlyOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["data"][0]["apiName"] == "HoldOrder"
+    assert response["data"][0]["displayName"] == "Hold Order"
 
 
 @pytest.mark.asyncio
@@ -1025,6 +1253,30 @@ async def test_get_action_type_v2_returns_foundry_raw_shape():
     assert isinstance(response, dict)
     assert response["apiName"] == "ApproveAccount"
     assert response["displayName"] == "Approve Account"
+    assert response["permissionModel"] == "ontology_roles"
+    assert response["editsBeyondActions"] is False
+    assert response["dynamicSecurity"]["projectPolicyInheritance"]["scope"] == "action_access"
+
+
+@pytest.mark.asyncio
+async def test_get_action_type_v2_falls_back_to_legacy_action_rows() -> None:
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_action_type_v2(
+            ontology="test_db",
+            actionType="HoldOrder",
+            request=request,
+            branch="main",
+            oms_client=_LegacyActionResourceOnlyOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "HoldOrder"
+    assert response["displayName"] == "Hold Order"
 
 
 @pytest.mark.asyncio
@@ -1046,6 +1298,26 @@ async def test_get_action_type_by_rid_v2_returns_foundry_raw_shape():
     assert isinstance(response, dict)
     assert response["apiName"] == "ApproveAccount"
     assert response["displayName"] == "Approve Account"
+
+
+@pytest.mark.asyncio
+async def test_get_action_type_by_rid_v2_falls_back_to_legacy_action_rows() -> None:
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.get_action_type_by_rid_v2(
+            ontology="test_db",
+            actionTypeRid="ri.action-type.hold-order",
+            request=request,
+            branch="main",
+            oms_client=_LegacyActionResourceOnlyOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["apiName"] == "HoldOrder"
 
 
 @pytest.mark.asyncio
@@ -1082,6 +1354,9 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
     assert response["validation"]["result"] == "VALID"
     assert response["parameters"]["ticket"]["result"] == "VALID"
     assert response["parameters"]["ticket"]["required"] is True
+    assert response["auditLogId"] is None
+    assert response["sideEffectDelivery"] is None
+    assert response["writebackStatus"] == "not_configured"
     assert fake_client.last_post is not None
     assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
     submit_payload = fake_client.last_post[1]["json"]
@@ -1130,12 +1405,50 @@ async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
     assert response["parameters"]["ticket"]["result"] == "VALID"
     assert response["parameters"]["ticket"]["required"] is True
     assert response["validation"]["submissionCriteria"] == []
+    assert response["auditLogId"] is None
+    assert response["sideEffectDelivery"] is None
+    assert response["writebackStatus"] == "not_configured"
     assert fake_client.last_post is not None
     assert fake_client.last_post[0] == "/api/v2/ontologies/test_db/actions/ApproveAccount/apply"
     simulate_payload = fake_client.last_post[1]["json"]
     assert simulate_payload["options"]["mode"] == "VALIDATE_ONLY"
     assert simulate_payload["metadata"]["user_id"] == "alice"
     assert "validate" not in fake_client.last_post[1]["params"]
+
+
+@pytest.mark.asyncio
+async def test_apply_action_v2_emits_standardized_action_evidence_fields():
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"alice"),
+                (b"x-user-type", b"user"),
+            ],
+        }
+    )
+    fake_client = _ActionEvidenceOMSClient()
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.apply_action_v2(
+            ontology="test_db",
+            action="ApproveAccount",
+            body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
+            request=request,
+            branch="main",
+            sdk_package_rid=None,
+            sdk_version=None,
+            transaction_id=None,
+            oms_client=fake_client,
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert response["auditLogId"] == "log-123"
+    assert response["action_log_id"] == "log-123"
+    assert response["sideEffectDelivery"] == {"status": "SENT"}
+    assert response["writebackStatus"] == "confirmed"
 
 
 @pytest.mark.asyncio

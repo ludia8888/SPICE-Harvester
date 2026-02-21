@@ -5,7 +5,6 @@ import {
   Callout,
   Card,
   FormGroup,
-  HTMLSelect,
   InputGroup,
   Intent,
   Text,
@@ -13,15 +12,12 @@ import {
 } from '@blueprintjs/core'
 import { useAppStore as useAppStoreNew } from '../store/useAppStore'
 import {
-  createOntology,
-  deleteOntology,
+  createObjectTypeV2,
+  getObjectTypeFullMetadataV2,
   getOntology,
-  getOntologySchema,
   getSummary,
   listOntology,
-  updateOntology,
-  validateOntologyCreate,
-  validateOntologyUpdate,
+  updateObjectTypeV2,
 } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
 import { DangerConfirmDialog } from '../components/DangerConfirmDialog'
@@ -40,24 +36,169 @@ import { qk } from '../query/queryKeys'
 type OntologyItem = Record<string, unknown>
 
 const buildNewOntologyDraft = (lang: string) => ({
+  id: '',
   label: lang === 'ko' ? '새 클래스' : 'NewClass',
   description: '',
   properties: [],
-  relationships: [],
   metadata: {},
 })
 
-const sanitizeUpdatePayload = (payload: Record<string, unknown>) => {
-  const clone = { ...payload }
-  delete clone.id
-  delete clone.version
-  delete clone.created_at
-  delete clone.updated_at
-  return clone
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+
+const toStringValue = (value: unknown) =>
+  typeof value === 'string' ? value.trim() : (typeof value === 'number' ? String(value) : '')
+
+const normalizeApiName = (value: string) =>
+  value
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+const toObjectArray = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .map((item) => asRecord(item))
+        .filter((item): item is Record<string, unknown> => Boolean(item))
+    : []
+
+type ObjectTypeContractDraft = {
+  apiName: string
+  createInput: Parameters<typeof createObjectTypeV2>[2]
+  updateInput: Parameters<typeof updateObjectTypeV2>[3]
 }
 
-const coerceExpectedSeq = (value: unknown) =>
-  typeof value === 'number' && Number.isFinite(value) ? value : null
+const buildObjectTypeContractDraft = (
+  payload: Record<string, unknown>,
+  fallbackClassId?: string | null,
+): ObjectTypeContractDraft => {
+  const draftApiName = normalizeApiName(
+    toStringValue(payload.id) ||
+      toStringValue(payload.apiName) ||
+      toStringValue(payload['@id']) ||
+      toStringValue(payload.label) ||
+      toStringValue(fallbackClassId),
+  )
+  if (!draftApiName) {
+    throw new Error('Class ID is required. Set "id" (or "apiName") in the draft.')
+  }
+
+  const draftLabel = toStringValue(payload.label) || draftApiName
+  const draftDescription = toStringValue(payload.description)
+  const draftProperties = toObjectArray(payload.properties).map((property) => ({
+    name: toStringValue(property.name || property.id || property.apiName),
+    label: toStringValue(property.label) || toStringValue(property.name || property.id || property.apiName),
+    type: toStringValue(property.type) || 'xsd:string',
+    required: Boolean(property.required),
+    primaryKey: Boolean(property.primaryKey),
+    titleKey: Boolean(property.titleKey),
+  }))
+  const primaryProperty =
+    draftProperties.find((property) => property.primaryKey && property.name) ??
+    draftProperties.find((property) => property.required && property.name) ??
+    draftProperties.find((property) => property.name)
+  const titleProperty =
+    draftProperties.find((property) => property.titleKey && property.name) ??
+    primaryProperty
+  const draftMetadata = asRecord(payload.metadata) ?? {}
+
+  const metadata: Record<string, unknown> = {
+    ...draftMetadata,
+    displayName: draftLabel,
+    description: draftDescription,
+    properties: draftProperties,
+    source: 'frontend_ontology_editor_v2',
+  }
+
+  const createInput: Parameters<typeof createObjectTypeV2>[2] = {
+    apiName: draftApiName,
+    status: toStringValue(payload.status) || 'ACTIVE',
+    primaryKey: primaryProperty?.name || undefined,
+    titleProperty: titleProperty?.name || undefined,
+    metadata,
+  }
+  const updateInput: Parameters<typeof updateObjectTypeV2>[3] = {
+    status: toStringValue(payload.status) || 'ACTIVE',
+    primaryKey: primaryProperty?.name || undefined,
+    titleProperty: titleProperty?.name || undefined,
+    metadata,
+  }
+
+  const explicitPkSpec = asRecord(payload.pkSpec)
+  if (explicitPkSpec) {
+    createInput.pkSpec = explicitPkSpec
+    updateInput.pkSpec = explicitPkSpec
+  }
+
+  const backingSource = asRecord(payload.backingSource)
+  if (backingSource) {
+    createInput.backingSource = backingSource
+    updateInput.backingSource = backingSource
+  }
+
+  const backingSources = toObjectArray(payload.backingSources)
+  if (backingSources.length > 0) {
+    createInput.backingSources = backingSources
+    updateInput.backingSources = backingSources
+  }
+
+  const mappingSpecId = toStringValue(payload.mappingSpecId)
+  if (mappingSpecId) {
+    createInput.mappingSpecId = mappingSpecId
+    updateInput.mappingSpecId = mappingSpecId
+  }
+
+  const mappingSpecVersion = Number(payload.mappingSpecVersion)
+  if (Number.isFinite(mappingSpecVersion)) {
+    createInput.mappingSpecVersion = mappingSpecVersion
+    updateInput.mappingSpecVersion = mappingSpecVersion
+  }
+
+  const backingDatasetId = toStringValue(payload.backingDatasetId)
+  if (backingDatasetId) {
+    createInput.backingDatasetId = backingDatasetId
+    updateInput.backingDatasetId = backingDatasetId
+  }
+
+  const backingDatasourceId = toStringValue(payload.backingDatasourceId)
+  if (backingDatasourceId) {
+    createInput.backingDatasourceId = backingDatasourceId
+    updateInput.backingDatasourceId = backingDatasourceId
+  }
+
+  const backingDatasourceVersionId = toStringValue(payload.backingDatasourceVersionId)
+  if (backingDatasourceVersionId) {
+    createInput.backingDatasourceVersionId = backingDatasourceVersionId
+    updateInput.backingDatasourceVersionId = backingDatasourceVersionId
+  }
+
+  const datasetVersionId = toStringValue(payload.datasetVersionId)
+  if (datasetVersionId) {
+    createInput.datasetVersionId = datasetVersionId
+    updateInput.datasetVersionId = datasetVersionId
+  }
+
+  const requiresDatasetVersion = Boolean(
+    mappingSpecId ||
+      backingDatasetId ||
+      backingDatasourceId ||
+      backingDatasourceVersionId ||
+      backingSource ||
+      backingSources.length > 0,
+  )
+  if (requiresDatasetVersion && !datasetVersionId) {
+    throw new Error(
+      'datasetVersionId is required when mapping/backing source metadata is provided.',
+    )
+  }
+
+  return {
+    apiName: draftApiName,
+    createInput,
+    updateInput,
+  }
+}
 
 export const OntologyPage = ({ dbName }: { dbName: string }) => {
   const queryClient = useQueryClient()
@@ -72,8 +213,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
   const [draft, setDraft] = useState(() => JSON.stringify(buildNewOntologyDraft(language), null, 2))
   const [draftError, setDraftError] = useState<string | null>(null)
   const [validationResult, setValidationResult] = useState<unknown>(null)
-  const [confirmAction, setConfirmAction] = useState<'apply' | 'delete' | null>(null)
-  const [schemaFormat, setSchemaFormat] = useState<'json' | 'jsonld' | 'owl'>('json')
+  const [confirmAction, setConfirmAction] = useState<'apply' | null>(null)
 
   const listQuery = useQuery({
     queryKey: qk.ontologyList(dbName, branch, requestContext.language),
@@ -95,10 +235,10 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
 
   const schemaQuery = useQuery({
     queryKey: selectedClass
-      ? qk.ontologySchema(dbName, selectedClass, branch, schemaFormat, requestContext.language)
+      ? qk.ontologySchema(dbName, selectedClass, branch, 'fullMetadata', requestContext.language)
       : ['ontology-schema', 'none'],
     queryFn: () =>
-      getOntologySchema(requestContext, dbName, selectedClass ?? '', branch, schemaFormat),
+      getObjectTypeFullMetadataV2(requestContext, dbName, selectedClass ?? '', { branch }),
     enabled: false,
   })
 
@@ -124,21 +264,18 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
     return list.ontologies ?? list.data?.ontologies ?? []
   }, [listQuery.data])
 
-  const selectedExpectedSeq = useMemo(() => {
-    if (!detailQuery.data || typeof detailQuery.data !== 'object') {
-      return null
-    }
-    return coerceExpectedSeq((detailQuery.data as { version?: number }).version)
-  }, [detailQuery.data])
-  const existingClassWritesDisabled = Boolean(selectedClass)
-
   const validateMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedClass) {
-        return validateOntologyCreate(requestContext, dbName, branch, JSON.parse(draft))
+      const parsed = JSON.parse(draft) as Record<string, unknown>
+      const normalized = buildObjectTypeContractDraft(parsed, selectedClass)
+      return {
+        valid: true,
+        mode: selectedClass ? 'update' : 'create',
+        branch,
+        objectType: normalized.apiName,
+        createPayload: normalized.createInput,
+        updatePayload: normalized.updateInput,
       }
-      const payload = sanitizeUpdatePayload(JSON.parse(draft))
-      return validateOntologyUpdate(requestContext, dbName, selectedClass, branch, payload)
     },
     onSuccess: (result) => setValidationResult(result),
     onError: (error) => {
@@ -148,23 +285,21 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
   })
 
   const applyMutation = useMutation({
-    mutationFn: async (reason?: string) => {
-      const parsed = JSON.parse(draft)
+    mutationFn: async () => {
+      const parsed = JSON.parse(draft) as Record<string, unknown>
+      const normalized = buildObjectTypeContractDraft(parsed, selectedClass)
       if (!selectedClass) {
-        return createOntology(requestContext, dbName, branch, parsed, reason ? { 'X-Change-Reason': reason } : undefined)
+        return createObjectTypeV2(requestContext, dbName, normalized.createInput, { branch })
       }
-      if (selectedExpectedSeq === null) {
-        throw new Error('expected_seq missing')
+      if (normalized.apiName !== selectedClass) {
+        throw new Error('Object type rename is not supported. Keep "id" equal to selected class.')
       }
-      const payload = sanitizeUpdatePayload(parsed)
-      return updateOntology(
+      return updateObjectTypeV2(
         requestContext,
         dbName,
         selectedClass,
-        branch,
-        selectedExpectedSeq,
-        payload,
-        reason ? { 'X-Change-Reason': reason } : undefined,
+        normalized.updateInput,
+        { branch },
       )
     },
     onSuccess: (payload) => {
@@ -198,38 +333,6 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
     onSettled: () => setConfirmAction(null),
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: async (reason?: string) => {
-      if (!selectedClass || selectedExpectedSeq === null) {
-        throw new Error('Select a class first')
-      }
-      return deleteOntology(
-        requestContext,
-        dbName,
-        selectedClass,
-        branch,
-        selectedExpectedSeq,
-        reason ? { 'X-Change-Reason': reason } : undefined,
-      )
-    },
-    onSuccess: (payload) => {
-      const commandId = extractCommandId(payload)
-      if (commandId) {
-        registerCommand({
-          commandId,
-          kind: 'DELETE_ONTOLOGY',
-          targetClassId: selectedClass ?? undefined,
-          title: selectedClass ? `Delete ontology: ${selectedClass}` : 'Delete ontology',
-        })
-      }
-      void showAppToast({ intent: Intent.WARNING, message: 'Delete submitted.' })
-      void queryClient.invalidateQueries({ queryKey: qk.ontologyList(dbName, branch, requestContext.language) })
-      setSelectedClass(null)
-    },
-    onError: (error) => toastApiError(error, language),
-    onSettled: () => setConfirmAction(null),
-  })
-
   const handleValidate = () => {
     setDraftError(null)
     try {
@@ -253,17 +356,6 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       return
     }
     applyMutation.mutate(undefined)
-  }
-
-  const handleDelete = () => {
-    if (!selectedClass) {
-      return
-    }
-    if (isProtected) {
-      setConfirmAction('delete')
-      return
-    }
-    deleteMutation.mutate(undefined)
   }
 
   return (
@@ -321,7 +413,6 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   icon="tick-circle"
                   onClick={handleValidate}
                   loading={validateMutation.isPending}
-                  disabled={existingClassWritesDisabled}
                 >
                   Validate
                 </Button>
@@ -331,7 +422,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   icon="cloud-upload"
                   onClick={handleApply}
                   loading={applyMutation.isPending}
-                  disabled={existingClassWritesDisabled || (isProtected && (!adminMode || !adminToken))}
+                  disabled={isProtected && (!adminMode || !adminToken)}
                 >
                   Apply
                 </Button>
@@ -339,21 +430,17 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   small
                   intent={Intent.DANGER}
                   icon="trash"
-                  onClick={handleDelete}
-                  loading={deleteMutation.isPending}
                   disabled
                 >
                   Delete
                 </Button>
               </div>
             </div>
-            {existingClassWritesDisabled ? (
-              <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
-                Existing class update/delete via legacy v1 endpoints has been removed. Use the Foundry object type contract flow.
-              </Callout>
-            ) : null}
-            <FormGroup label="Class ID (optional)">
-              <InputGroup value={selectedClass ?? ''} disabled placeholder="Auto-generated for new classes" />
+            <Callout intent={Intent.PRIMARY} style={{ marginBottom: 12 }}>
+              Create/update writes are handled by Foundry v2 object type contract APIs. Delete remains disabled until v2 delete endpoint is available.
+            </Callout>
+            <FormGroup label="Selected class">
+              <InputGroup value={selectedClass ?? '(new class)'} disabled />
             </FormGroup>
             <FormGroup label="JSON payload">
               <TextArea
@@ -372,40 +459,27 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
 
           <Card>
             <div className="card-title">
-              <Text>Schema export</Text>
+              <Text>Object Type Metadata</Text>
               <div className="form-row">
-                <HTMLSelect
-                  value={schemaFormat}
-                  options={[
-                    { label: 'json', value: 'json' },
-                    { label: 'jsonld', value: 'jsonld' },
-                    { label: 'owl', value: 'owl' },
-                  ]}
-                  onChange={(event) => setSchemaFormat(event.currentTarget.value as typeof schemaFormat)}
-                />
                 <Button
                   icon="download"
                   onClick={() => void schemaQuery.refetch()}
                   disabled={!selectedClass}
                 >
-                  Load schema
+                  Load metadata
                 </Button>
               </div>
             </div>
-            <JsonViewer value={schemaQuery.data} empty="Select a class to export schema." />
+            <JsonViewer value={schemaQuery.data} empty="Select a class to load full metadata." />
           </Card>
         </div>
       </div>
 
       <DangerConfirmDialog
         isOpen={Boolean(confirmAction)}
-        title={confirmAction === 'delete' ? 'Delete class' : 'Apply ontology changes'}
-        description={
-          confirmAction === 'delete'
-            ? 'This will delete the class on the protected branch.'
-            : 'This will apply changes on the protected branch.'
-        }
-        confirmLabel={confirmAction === 'delete' ? 'Delete' : 'Apply'}
+        title="Apply ontology changes"
+        description="This will apply object type contract changes on the protected branch."
+        confirmLabel="Apply"
         cancelLabel="Cancel"
         confirmTextToType={selectedClass ?? 'class'}
         reasonLabel="Change reason"
@@ -413,14 +487,12 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
         typedLabel="Type class id to confirm"
         typedPlaceholder={selectedClass ?? 'class'}
         onCancel={() => setConfirmAction(null)}
-        onConfirm={({ reason }) => {
-          if (confirmAction === 'delete') {
-            deleteMutation.mutate(reason)
-          } else if (confirmAction === 'apply') {
-            applyMutation.mutate(reason)
+        onConfirm={() => {
+          if (confirmAction === 'apply') {
+            applyMutation.mutate(undefined)
           }
         }}
-        loading={applyMutation.isPending || deleteMutation.isPending}
+        loading={applyMutation.isPending}
         footerHint="Protected branches require audit context."
       />
     </div>

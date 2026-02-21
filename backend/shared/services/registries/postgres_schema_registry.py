@@ -11,6 +11,7 @@ to concrete registries via the Template Method hook `_ensure_tables(...)`.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -36,6 +37,10 @@ class PostgresSchemaRegistry(ABC):
         self._pool_min = int(pool_min or 1)
         self._pool_max = int(pool_max or 5)
         self._command_timeout = int(command_timeout) if command_timeout is not None else 30
+        # Guard against startup races when multiple services ensure the same schema.
+        # We use non-blocking advisory lock polling to avoid command_timeout failures.
+        self._schema_lock_wait_seconds = max(60.0, float(self._command_timeout) * 4.0)
+        self._schema_lock_poll_interval_seconds = 0.2
 
     async def initialize(self) -> None:
         await self.connect()
@@ -75,8 +80,28 @@ class PostgresSchemaRegistry(ABC):
             raise RuntimeError(f"{self.__class__.__name__} not connected")
 
         async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-            await self._ensure_tables(conn)
+            lock_key = f"{self.__class__.__name__}:{self._schema}"
+            lock_acquired = False
+            try:
+                lock_acquired = await self._acquire_schema_lock(conn, lock_key)
+                await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
+                await self._ensure_tables(conn)
+            finally:
+                if lock_acquired:
+                    await conn.execute("SELECT pg_advisory_unlock(hashtext($1))", lock_key)
+
+    async def _acquire_schema_lock(self, conn: asyncpg.Connection, lock_key: str) -> bool:
+        deadline = asyncio.get_running_loop().time() + self._schema_lock_wait_seconds
+        while True:
+            acquired = await conn.fetchval("SELECT pg_try_advisory_lock(hashtext($1))", lock_key)
+            if acquired:
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for schema advisory lock: {lock_key} "
+                    f"(waited {self._schema_lock_wait_seconds:.1f}s)"
+                )
+            await asyncio.sleep(self._schema_lock_poll_interval_seconds)
 
     @abstractmethod
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:

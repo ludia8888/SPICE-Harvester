@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **256**
+- Total documented endpoints: **261**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
 | `v1` | 155 |
-| `v2` | 101 |
+| `v2` | 106 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
-| `ontologies` | 46 |
+| `ontologies` | 48 |
+| `connectivity` | 31 |
 | `pipelines` | 29 |
-| `connectivity` | 28 |
 | `databases` | 22 |
 | `datasets` | 16 |
 | `admin` | 13 |
@@ -179,6 +179,9 @@
 | `POST` | `/api/v2/connectivity/connections/getConfigurationBatch` | Get Connection Configuration Batch V2 | `v2` | no | no | `get_connection_configuration_batch_v2_api_v2_connectivity_connections_getConfigurationBatch_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}` | Get Connection V2 | `v2` | no | no | `get_connection_v2_api_v2_connectivity_connections__connectionRid__get` |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}` | Delete Connection V2 | `v2` | no | no | `delete_connection_v2_api_v2_connectivity_connections__connectionRid__delete` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns` | List Connection Export Runs V2 | `v2` | no | no | `list_connection_export_runs_v2_api_v2_connectivity_connections__connectionRid__exportRuns_get` |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns` | Create Connection Export Run V2 | `v2` | no | no | `create_connection_export_run_v2_api_v2_connectivity_connections__connectionRid__exportRuns_post` |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}` | Get Connection Export Run V2 | `v2` | no | no | `get_connection_export_run_v2_api_v2_connectivity_connections__connectionRid__exportRuns__exportRunRid__get` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | List File Imports V2 | `v2` | no | no | `list_file_imports_v2_api_v2_connectivity_connections__connectionRid__fileImports_get` |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | Create File Import V2 | `v2` | no | no | `create_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports_post` |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Get File Import V2 | `v2` | no | no | `get_file_import_v2_api_v2_connectivity_connections__connectionRid__fileImports__fileImportRid__get` |
@@ -247,7 +250,9 @@
 | `POST` | `/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces` | Load Object Set Objects Or Interfaces V2 | `v2` | no | no | `load_object_set_objects_or_interfaces_v2_api_v2_ontologies__ontology__objectSets_loadObjectsOrInterfaces_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | `v2` | no | no | `get_object_set_v2_api_v2_ontologies__ontology__objectSets__objectSetRid__get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes` | List Object Types V2 | `v2` | no | no | `list_object_types_v2_api_v2_ontologies__ontology__objectTypes_get` |
+| `POST` | `/api/v2/ontologies/{ontology}/objectTypes` | Create Object Type V2 | `v2` | no | no | `create_object_type_v2_api_v2_ontologies__ontology__objectTypes_post` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | `v2` | no | no | `get_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__get` |
+| `PATCH` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Update Object Type V2 | `v2` | no | no | `update_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__patch` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | `v2` | no | no | `get_object_type_full_metadata_v2_api_v2_ontologies__ontology__objectTypes__objectType__fullMetadata_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes` | List Incoming Link Types V2 | `v2` | no | no | `list_incoming_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes_get` |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}` | Get Incoming Link Type V2 | `v2` | no | no | `get_incoming_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes__linkType__get` |

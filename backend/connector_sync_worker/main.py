@@ -24,6 +24,7 @@ from data_connector.adapters.factory import (
     import_config_key_for_source_type,
     table_import_source_type_for_kind,
 )
+from data_connector.adapters.import_config_validators import CDC_COMPAT_IMPORT_MODES, normalize_import_mode
 from data_connector.adapters.runtime_credentials import resolve_source_runtime_credentials
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
@@ -331,7 +332,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         connector_kind = connector_kind_from_source_type(source_type, strict=True)
         adapter = self.adapter_factory.get_adapter(connector_kind)
         source_cfg = dict(source.config_json or {})
-        import_mode = str(source_cfg.get("import_mode") or "SNAPSHOT").strip().upper()
+        import_mode = normalize_import_mode(source_cfg.get("import_mode"), mode_field_name="import_mode")
         import_config_key = import_config_key_for_source_type(source_type, strict=True)
         import_config = source_cfg.get(import_config_key) if isinstance(source_cfg.get(import_config_key), dict) else {}
 
@@ -357,7 +358,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                 import_config=import_config,
                 sync_state=sync_state_json,
             )
-        elif import_mode == "CDC":
+        elif import_mode in CDC_COMPAT_IMPORT_MODES:
             extract = await adapter.cdc_extract(
                 config=runtime_config,
                 secrets=secrets,
@@ -371,7 +372,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                 import_config=import_config,
             )
         else:
-            raise ValueError("Unsupported import mode")
+            raise ValueError("import_mode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC, STREAMING")
 
         ingest = await self.ingest_service.ingest_rows(
             db_name=db_name,

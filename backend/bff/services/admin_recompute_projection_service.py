@@ -32,6 +32,7 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.storage.elasticsearch_service import ElasticsearchService, promote_alias_to_index
 from shared.services.storage.event_store import EventStore
 from shared.services.storage.redis_service import RedisService
+from shared.utils.language import coerce_localized_text, get_default_language, select_localized_text
 from shared.utils.ontology_version import split_ref_commit
 from shared.observability.tracing import trace_external_call, trace_db_operation
 
@@ -44,12 +45,131 @@ def _normalize_dt(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _text_with_keyword_field() -> Dict[str, Any]:
+    return {
+        "type": "text",
+        "fields": {
+            "keyword": {"type": "keyword"},
+        },
+    }
+
+
+def _i18n_text_mapping() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "en": _text_with_keyword_field(),
+            "ko": _text_with_keyword_field(),
+        },
+    }
+
+
+def _fallback_projection_mapping(*, projection: str) -> Dict[str, Any]:
+    base_settings = {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "refresh_interval": "1s",
+    }
+    if projection == "instances":
+        return {
+            "mappings": {
+                "properties": {
+                    "instance_id": {"type": "keyword"},
+                    "class_id": {"type": "keyword"},
+                    "class_label": _text_with_keyword_field(),
+                    "properties": {
+                        "type": "nested",
+                        "properties": {
+                            "name": {"type": "keyword"},
+                            "value": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {"type": "keyword"},
+                                    "numeric": {"type": "double", "ignore_malformed": True},
+                                },
+                            },
+                            "type": {"type": "keyword"},
+                        },
+                    },
+                    "data": {"enabled": False},
+                    "event_id": {"type": "keyword"},
+                    "event_timestamp": {"type": "date"},
+                    "version": {"type": "long"},
+                    "db_name": {"type": "keyword"},
+                    "branch": {"type": "keyword"},
+                    "ontology_ref": {"type": "keyword"},
+                    "ontology_commit": {"type": "keyword"},
+                    "created_at": {"type": "date"},
+                    "updated_at": {"type": "date"},
+                },
+            },
+            "settings": base_settings,
+        }
+    return {
+        "mappings": {
+            "properties": {
+                "class_id": {"type": "keyword"},
+                "label": _text_with_keyword_field(),
+                "label_i18n": _i18n_text_mapping(),
+                "description": {"type": "text"},
+                "description_i18n": _i18n_text_mapping(),
+                "properties": {
+                    "type": "nested",
+                    "properties": {
+                        "name": {"type": "keyword"},
+                        "label": _text_with_keyword_field(),
+                        "label_i18n": _i18n_text_mapping(),
+                        "type": {"type": "keyword"},
+                        "required": {"type": "boolean"},
+                        "description": {"type": "text"},
+                        "description_i18n": _i18n_text_mapping(),
+                    },
+                },
+                "relationships": {
+                    "type": "nested",
+                    "properties": {
+                        "predicate": {"type": "keyword"},
+                        "target": {"type": "keyword"},
+                        "label": _text_with_keyword_field(),
+                        "label_i18n": _i18n_text_mapping(),
+                        "cardinality": {"type": "keyword"},
+                        "description": {"type": "text"},
+                        "description_i18n": _i18n_text_mapping(),
+                        "inverse_label": _text_with_keyword_field(),
+                        "inverse_label_i18n": _i18n_text_mapping(),
+                    },
+                },
+                "parent_classes": {"type": "keyword"},
+                "child_classes": {"type": "keyword"},
+                "db_name": {"type": "keyword"},
+                "branch": {"type": "keyword"},
+                "ontology_ref": {"type": "keyword"},
+                "ontology_commit": {"type": "keyword"},
+                "version": {"type": "long"},
+                "event_id": {"type": "keyword"},
+                "event_timestamp": {"type": "date"},
+                "created_at": {"type": "date"},
+                "updated_at": {"type": "date"},
+            },
+        },
+        "settings": base_settings,
+    }
+
+
 def _load_projection_mapping(*, projection: str) -> Dict[str, Any]:
     filename = "instances_mapping.json" if projection == "instances" else "ontologies_mapping.json"
     backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     mapping_path = os.path.join(backend_dir, "projection_worker", "mappings", filename)
-    with open(mapping_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(mapping_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning(
+            "Projection mapping file missing (%s); using in-code fallback mapping for %s",
+            mapping_path,
+            projection,
+        )
+        return _fallback_projection_mapping(projection=projection)
 
 
 async def _ensure_es_connected(es: ElasticsearchService) -> None:
@@ -77,6 +197,100 @@ def _validate_recompute_projection_mode(*, projection: str) -> None:
             "write_path_mode": "dataset_primary_index",
         },
     )
+
+
+def _normalize_localized_field(value: Any, *, default_lang: str) -> tuple[str, Dict[str, str]]:
+    i18n_map = coerce_localized_text(value, default_lang=default_lang)
+    text = select_localized_text(value, lang=default_lang)
+    if not text and value is not None and not i18n_map:
+        try:
+            text = str(value).strip()
+        except Exception:
+            logger.warning(
+                "Failed to coerce localized field to string during projection recompute",
+                exc_info=True,
+            )
+            text = ""
+    return text, i18n_map
+
+
+def _normalize_ontology_properties(
+    properties: Any,
+    *,
+    default_lang: str,
+) -> list[Dict[str, Any]]:
+    normalized: list[Dict[str, Any]] = []
+    if not isinstance(properties, list):
+        return normalized
+    for prop in properties:
+        if not isinstance(prop, dict):
+            continue
+        item = dict(prop)
+        label_text, label_i18n = _normalize_localized_field(prop.get("label"), default_lang=default_lang)
+        if label_text or "label" in item:
+            item["label"] = label_text
+        if label_i18n:
+            item["label_i18n"] = label_i18n
+        else:
+            item.pop("label_i18n", None)
+
+        description_text, description_i18n = _normalize_localized_field(
+            prop.get("description"),
+            default_lang=default_lang,
+        )
+        if description_text or "description" in item:
+            item["description"] = description_text
+        if description_i18n:
+            item["description_i18n"] = description_i18n
+        else:
+            item.pop("description_i18n", None)
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_ontology_relationships(
+    relationships: Any,
+    *,
+    default_lang: str,
+) -> list[Dict[str, Any]]:
+    normalized: list[Dict[str, Any]] = []
+    if not isinstance(relationships, list):
+        return normalized
+    for rel in relationships:
+        if not isinstance(rel, dict):
+            continue
+        item = dict(rel)
+        label_text, label_i18n = _normalize_localized_field(rel.get("label"), default_lang=default_lang)
+        if label_text or "label" in item:
+            item["label"] = label_text
+        if label_i18n:
+            item["label_i18n"] = label_i18n
+        else:
+            item.pop("label_i18n", None)
+
+        description_text, description_i18n = _normalize_localized_field(
+            rel.get("description"),
+            default_lang=default_lang,
+        )
+        if description_text or "description" in item:
+            item["description"] = description_text
+        if description_i18n:
+            item["description_i18n"] = description_i18n
+        else:
+            item.pop("description_i18n", None)
+
+        inverse_label_text, inverse_label_i18n = _normalize_localized_field(
+            rel.get("inverse_label"),
+            default_lang=default_lang,
+        )
+        if inverse_label_text or "inverse_label" in item:
+            item["inverse_label"] = inverse_label_text
+        if inverse_label_i18n:
+            item["inverse_label_i18n"] = inverse_label_i18n
+        else:
+            item.pop("inverse_label_i18n", None)
+        normalized.append(item)
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -244,12 +458,26 @@ class OntologiesProjectionStrategy:
             created_at_cache[doc_id] = created_at
 
         if envelope.event_type in {"ONTOLOGY_CLASS_CREATED", "ONTOLOGY_CLASS_UPDATED"}:
+            default_lang = get_default_language()
+            label_text, label_i18n = _normalize_localized_field(data.get("label"), default_lang=default_lang)
+            description_text, description_i18n = _normalize_localized_field(
+                data.get("description"),
+                default_lang=default_lang,
+            )
+            normalized_properties = _normalize_ontology_properties(
+                data.get("properties", []),
+                default_lang=default_lang,
+            )
+            normalized_relationships = _normalize_ontology_relationships(
+                data.get("relationships", []),
+                default_lang=default_lang,
+            )
             doc = {
                 "class_id": doc_id,
-                "label": data.get("label"),
-                "description": data.get("description"),
-                "properties": data.get("properties", []),
-                "relationships": data.get("relationships", []),
+                "label": label_text,
+                "description": description_text,
+                "properties": normalized_properties,
+                "relationships": normalized_relationships,
                 "parent_classes": data.get("parent_classes", []),
                 "child_classes": data.get("child_classes", []),
                 "db_name": db_name,
@@ -263,6 +491,10 @@ class OntologiesProjectionStrategy:
                 "created_at": created_at or event_ts.isoformat(),
                 "updated_at": event_ts.isoformat(),
             }
+            if label_i18n:
+                doc["label_i18n"] = label_i18n
+            if description_i18n:
+                doc["description_i18n"] = description_i18n
             return IndexDecision(action="index", doc_id=doc_id, document=doc, record_lineage=True)
 
         if envelope.event_type == "ONTOLOGY_CLASS_DELETED":
@@ -322,6 +554,7 @@ async def start_recompute_projection(
         redis_service=redis_service,
         audit_store=audit_store,
         lineage_store=lineage_store,
+        task_manager=task_manager,
         requested_by=requested_by,
         request_ip=request_ip,
         task_name=f"Recompute projection: {request.projection} ({request.db_name})",
@@ -357,7 +590,14 @@ async def get_recompute_projection_result(
     if not task:
         raise classified_http_exception(404, f"Task {task_id} not found", code=ErrorCode.RESOURCE_NOT_FOUND)
     if not task.is_complete:
-        raise classified_http_exception(400, f"Task {task_id} is not complete. Current status: {task.status.value}", code=ErrorCode.REQUEST_VALIDATION_FAILED)
+        return {
+            "task_id": task_id,
+            "status": "processing",
+            "task_status": task.status.value,
+            "progress": task.progress.model_dump(mode="json") if task.progress else None,
+            "started_at": task.started_at.isoformat() if task.started_at else None,
+            "message": f"Task {task_id} is still running",
+        }
     if task.status == TaskStatus.FAILED:
         return {
             "task_id": task_id,
@@ -437,6 +677,7 @@ async def recompute_projection_task(  # noqa: PLR0915
     redis_service: RedisService,
     audit_store: Any,
     lineage_store: LineageStore,
+    task_manager: Any | None = None,
     requested_by: Optional[str] = None,
     request_ip: Optional[str] = None,
 ) -> None:
@@ -492,6 +733,24 @@ async def recompute_projection_task(  # noqa: PLR0915
 
     await elasticsearch_service.create_index(new_index, mappings=mapping.get("mappings"), settings=settings_payload)
 
+    if task_manager is not None:
+        try:
+            initial_total = max(int(request.max_events) if request.max_events is not None else 1, 1)
+            await task_manager.update_progress(
+                task_id=task_id,
+                current=0,
+                total=initial_total,
+                message=f"Initializing {projection} projection replay ({db_name}/{branch})",
+                metadata={
+                    "projection": projection,
+                    "db_name": db_name,
+                    "branch": branch,
+                    "processed_events": 0,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to initialize recompute projection task progress", exc_info=True)
+
     event_store = EventStore()
     await event_store.connect()
 
@@ -502,11 +761,47 @@ async def recompute_projection_task(  # noqa: PLR0915
 
     created_at_cache: Dict[str, str] = {}
 
+    if task_manager is not None:
+        try:
+            replay_total = max(int(request.max_events) if request.max_events is not None else 1, 1)
+            await task_manager.update_progress(
+                task_id=task_id,
+                current=0,
+                total=replay_total,
+                message=f"Starting {projection} projection replay ({db_name}/{branch})",
+                metadata={
+                    "projection": projection,
+                    "db_name": db_name,
+                    "branch": branch,
+                    "processed_events": 0,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to initialize replay progress state", exc_info=True)
+
     async for envelope in event_store.replay_events(from_dt, to_dt, event_types=list(strategy.event_types)):
         if request.max_events is not None and processed >= int(request.max_events):
             break
 
         processed += 1
+        if task_manager is not None and (processed == 1 or processed % 100 == 0):
+            progress_total = int(request.max_events) if request.max_events is not None else processed + 1
+            progress_total = max(progress_total, processed)
+            try:
+                await task_manager.update_progress(
+                    task_id=task_id,
+                    current=processed,
+                    total=progress_total,
+                    message=f"Recomputing {projection} projection ({db_name}/{branch}): processed {processed} events",
+                    metadata={
+                        "projection": projection,
+                        "db_name": db_name,
+                        "branch": branch,
+                        "processed_events": processed,
+                    },
+                )
+            except Exception:
+                logger.warning("Failed to update recompute projection task progress", exc_info=True)
 
         data = envelope.data if isinstance(envelope.data, dict) else {}
         if str(data.get("db_name") or "") != db_name:
@@ -583,6 +878,27 @@ async def recompute_projection_task(  # noqa: PLR0915
             continue
 
         skipped += 1
+
+    if task_manager is not None:
+        try:
+            completed_total = max(processed, 1)
+            await task_manager.update_progress(
+                task_id=task_id,
+                current=completed_total,
+                total=completed_total,
+                message=f"Recompute projection completed with {processed} processed events",
+                metadata={
+                    "projection": projection,
+                    "db_name": db_name,
+                    "branch": branch,
+                    "processed_events": processed,
+                    "indexed_docs": indexed,
+                    "deleted_docs": deleted,
+                    "skipped_events": skipped,
+                },
+            )
+        except Exception:
+            logger.warning("Failed to finalize recompute projection task progress", exc_info=True)
 
     await elasticsearch_service.refresh_index(new_index)
 

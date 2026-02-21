@@ -13,11 +13,17 @@ from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
 
+from bff.routers.objectify_job_queue_deps import get_objectify_job_queue
+from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry
 from bff.dependencies import get_elasticsearch_service
 from bff.schemas.admin_projection_requests import RecomputeProjectionRequest, RecomputeProjectionResponse
-from bff.services import admin_recompute_projection_service
+from bff.services import admin_recompute_projection_service, admin_reindex_instances_service
 from shared.dependencies.providers import AuditLogStoreDep, BackgroundTaskManagerDep, LineageStoreDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
+from shared.security.input_sanitizer import validate_branch_name, validate_db_name
+from shared.services.events.objectify_job_queue import ObjectifyJobQueue
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 
 router = APIRouter(tags=["Admin Operations"])
@@ -79,6 +85,9 @@ async def reindex_instances_endpoint(
     db_name: str = Query(..., description="Database name"),
     branch: str = Query(default="main", description="Branch"),
     delete_index_first: bool = Query(default=False, description="Delete ES index before rebuild"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
 ) -> Dict[str, Any]:
     """Rebuild the ES instances index by re-running all active objectify jobs.
@@ -87,15 +96,15 @@ async def reindex_instances_endpoint(
     re-executes objectify from source datasets — following the Palantir principle
     that dataset artifacts are the source of truth for instances.
     """
-    # NOTE: objectify_registry, dataset_registry, and job_queue are obtained
-    # from the router dependency overrides set by the composition root.
-    # For now, return a descriptive stub that matches the service interface.
-    return {
-        "status": "endpoint_registered",
-        "message": (
-            "Reindex instances endpoint is registered. Wire objectify_registry, "
-            "dataset_registry, and job_queue dependencies to enable full functionality."
-        ),
-        "db_name": db_name,
-        "branch": branch,
-    }
+    validated_db_name = validate_db_name(db_name)
+    validated_branch = validate_branch_name(branch)
+
+    return await admin_reindex_instances_service.reindex_all_instances(
+        db_name=validated_db_name,
+        branch=validated_branch,
+        objectify_registry=objectify_registry,
+        dataset_registry=dataset_registry,
+        job_queue=job_queue,
+        delete_index_first=bool(delete_index_first),
+        elasticsearch_service=elasticsearch_service,
+    )

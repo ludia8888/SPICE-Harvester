@@ -1,8 +1,10 @@
 import hashlib
 import logging
 from typing import Any, Dict
+from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+import httpx
 from fastapi import APIRouter, Body, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
@@ -27,15 +29,16 @@ from data_connector.adapters.factory import (
     virtual_table_source_type_for_kind,
 )
 from data_connector.adapters.import_config_validators import (
-    TABLE_IMPORT_MODES,
     is_jdbc_connector_kind,
     normalize_import_mode,
     validate_resource_import_config,
 )
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.settings import get_settings
-from shared.dependencies.providers import LineageStoreDep
+from shared.dependencies.providers import AuditLogStoreDep, BackgroundTaskManagerDep, LineageStoreDep
+from shared.models.background_task import TaskStatus
 from shared.observability.tracing import trace_endpoint
+from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorRegistry, ConnectorSource
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -66,6 +69,10 @@ _VIRTUAL_TABLE_RID_PREFIXES = (
 _DATASET_RID_PREFIXES = (
     "ri.spice.main.dataset.",
     "ri.foundry.main.dataset.",
+)
+_EXPORT_RUN_RID_PREFIXES = (
+    "ri.spice.main.export-run.",
+    "ri.foundry.main.export-run.",
 )
 
 _TABLE_IMPORT_CONFIG_TYPES = {
@@ -235,6 +242,226 @@ def _dataset_rid(dataset_id: str) -> str:
     return f"ri.spice.main.dataset.{dataset_id}"
 
 
+def _export_run_rid(run_id: str) -> str:
+    return f"ri.spice.main.export-run.{run_id}"
+
+
+def _export_run_id_from_rid(export_run_rid: str) -> str | None:
+    text = str(export_run_rid or "").strip()
+    if not text:
+        return None
+    for prefix in _EXPORT_RUN_RID_PREFIXES:
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip() or None
+    if text.startswith("ri."):
+        return None
+    return text
+
+
+def _coerce_bool(raw: Any, *, default: bool) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    text = str(raw or "").strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return default
+
+
+def _normalize_export_run_method(raw: Any) -> str:
+    method = str(raw or "POST").strip().upper() or "POST"
+    if method not in {"GET", "POST", "PUT", "PATCH"}:
+        raise ValueError("method must be one of GET, POST, PUT, PATCH")
+    return method
+
+
+def _normalize_export_run_headers(raw: Any) -> Dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    normalized: Dict[str, str] = {}
+    for key, value in raw.items():
+        header_name = str(key or "").strip()
+        if not header_name:
+            continue
+        lower = header_name.lower()
+        if lower in {"host", "content-length"}:
+            continue
+        normalized[header_name] = str(value if value is not None else "")
+    return normalized
+
+
+def _normalize_export_run_timeout_seconds(raw: Any) -> float:
+    try:
+        timeout_ms = int(raw)
+    except (TypeError, ValueError):
+        timeout_ms = 10_000
+    timeout_ms = max(1_000, min(timeout_ms, 60_000))
+    return timeout_ms / 1000.0
+
+
+def _is_valid_http_url(raw: Any) -> bool:
+    parsed = urlparse(str(raw or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _task_status_to_export_status(task_status: TaskStatus) -> str:
+    if task_status == TaskStatus.PENDING:
+        return "QUEUED"
+    if task_status in {TaskStatus.PROCESSING, TaskStatus.RETRYING}:
+        return "RUNNING"
+    if task_status == TaskStatus.COMPLETED:
+        return "SUCCEEDED"
+    if task_status == TaskStatus.CANCELLED:
+        return "CANCELLED"
+    return "FAILED"
+
+
+def _export_run_response_from_task(*, connection_id: str, task: Any) -> Dict[str, Any]:
+    result_data = {}
+    result = getattr(task, "result", None)
+    if result is not None and getattr(result, "data", None) and isinstance(result.data, dict):
+        result_data = dict(result.data)
+    metadata = getattr(task, "metadata", {}) if isinstance(getattr(task, "metadata", {}), dict) else {}
+
+    audit_log_id = result_data.get("auditLogId") or metadata.get("audit_log_id")
+    side_effect_delivery = result_data.get("sideEffectDelivery")
+    writeback_status = result_data.get("writebackStatus")
+
+    task_status = getattr(task, "status", TaskStatus.FAILED)
+    if not isinstance(task_status, TaskStatus):
+        try:
+            task_status = TaskStatus(str(task_status))
+        except ValueError:
+            task_status = TaskStatus.FAILED
+
+    response: Dict[str, Any] = {
+        "rid": _export_run_rid(str(getattr(task, "task_id", ""))),
+        "connectionRid": _connection_rid(connection_id),
+        "status": _task_status_to_export_status(task_status),
+        "taskId": str(getattr(task, "task_id", "")),
+        "createdTime": _iso_timestamp(getattr(task, "created_at", None)),
+        "startedTime": _iso_timestamp(getattr(task, "started_at", None)),
+        "completedTime": _iso_timestamp(getattr(task, "completed_at", None)),
+    }
+    if isinstance(audit_log_id, str) and audit_log_id.strip():
+        response["auditLogId"] = audit_log_id
+    if isinstance(side_effect_delivery, dict):
+        response["sideEffectDelivery"] = side_effect_delivery
+    if writeback_status not in (None, ""):
+        response["writebackStatus"] = str(writeback_status)
+    if result is not None and getattr(result, "error", None):
+        response["error"] = str(result.error)
+    return response
+
+
+async def _run_connection_export(
+    *,
+    task_id: str,
+    connection_id: str,
+    connection_rid: str,
+    target_url: str,
+    method: str,
+    request_headers: Dict[str, str],
+    payload: Any,
+    timeout_seconds: float,
+    dry_run: bool,
+    actor: str | None,
+    audit_store: AuditLogStore,
+) -> Dict[str, Any]:
+    occurred_at = utcnow()
+    delivery: Dict[str, Any] = {
+        "targetUrl": target_url,
+        "method": method,
+        "dryRun": bool(dry_run),
+    }
+    audit_log_id: str | None = None
+    partition_key = f"connectivity:{connection_id}"
+    action = "CONNECTIVITY_EXPORT_RUN"
+
+    try:
+        if dry_run:
+            delivery["status"] = "SKIPPED"
+            delivery["httpStatus"] = None
+            delivery["responseSnippet"] = None
+        else:
+            request_kwargs: Dict[str, Any] = {
+                "method": method,
+                "url": target_url,
+                "headers": request_headers,
+            }
+            if method in {"POST", "PUT", "PATCH"}:
+                request_kwargs["json"] = payload
+            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+                response = await client.request(**request_kwargs)
+            response_snippet = response.text[:512]
+            delivery["httpStatus"] = int(response.status_code)
+            delivery["responseSnippet"] = response_snippet
+            delivery["status"] = "DELIVERED" if response.status_code < 400 else "FAILED"
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Export webhook returned HTTP {response.status_code}: {response_snippet}"
+                )
+
+        audit_id = await audit_store.log(
+            partition_key=partition_key,
+            actor=actor or "system",
+            action=action,
+            status="success",
+            resource_type="connection",
+            resource_id=connection_id,
+            command_id=task_id,
+            metadata={
+                "connectionRid": connection_rid,
+                "targetUrl": target_url,
+                "method": method,
+                "dryRun": bool(dry_run),
+                "delivery": delivery,
+            },
+            occurred_at=occurred_at,
+        )
+        audit_log_id = str(audit_id)
+
+        return {
+            "rid": _export_run_rid(task_id),
+            "connectionRid": connection_rid,
+            "status": "SUCCEEDED",
+            "auditLogId": audit_log_id,
+            "sideEffectDelivery": delivery,
+            "writebackStatus": "SUCCEEDED" if not dry_run else "SKIPPED",
+        }
+    except Exception as exc:
+        try:
+            audit_id = await audit_store.log(
+                partition_key=partition_key,
+                actor=actor or "system",
+                action=action,
+                status="failure",
+                resource_type="connection",
+                resource_id=connection_id,
+                command_id=task_id,
+                metadata={
+                    "connectionRid": connection_rid,
+                    "targetUrl": target_url,
+                    "method": method,
+                    "dryRun": bool(dry_run),
+                    "delivery": delivery,
+                },
+                error=str(exc),
+                occurred_at=utcnow(),
+            )
+            audit_log_id = str(audit_id)
+        except Exception:
+            pass
+
+        error_message = str(exc)
+        if audit_log_id:
+            error_message = f"{error_message} (auditLogId={audit_log_id})"
+        raise RuntimeError(error_message) from exc
+
+
 def _table_import_pipeline_id(*, connection_id: str, source_type: str, source_id: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"spice:table-import:{connection_id}:{source_type}:{source_id}"))
 
@@ -289,6 +516,10 @@ def _cdc_enabled_for_db(db_name: str | None) -> bool:
         allowlist_raw=str(getattr(flags, "foundry_connectivity_cdc_db_allowlist", "") or ""),
         db_name=db_name,
     )
+
+
+def _requires_cdc_feature(import_mode: str) -> bool:
+    return str(import_mode or "").strip().upper() in {"CDC", "STREAMING"}
 
 
 def _connection_source_types() -> tuple[str, ...]:
@@ -366,6 +597,23 @@ def _normalize_export_settings(value: Any) -> Dict[str, Any]:
         "exportsEnabled": _coerce_bool(exports_enabled_raw, default=True),
         "exportEnabledWithoutMarkingsValidation": _coerce_bool(without_markings_raw, default=False),
     }
+
+
+def _normalize_markings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(token)
+    return normalized
 
 
 def _normalize_jdbc_driver_file_name(file_name: str) -> str | None:
@@ -605,6 +853,13 @@ def _resource_import_mode_from_source(*, source_cfg: Dict[str, Any], resource_ki
     return normalize_import_mode(source_cfg.get("import_mode"))
 
 
+def _safe_import_mode(raw_mode: Any) -> str:
+    try:
+        return normalize_import_mode(raw_mode)
+    except ValueError:
+        return "SNAPSHOT"
+
+
 def _resource_import_config_from_source(*, source_cfg: Dict[str, Any], resource_kind: str) -> Dict[str, Any]:
     config_key = {
         "table_import": "table_import_config",
@@ -772,9 +1027,7 @@ async def _build_table_import_response(
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
-    import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in TABLE_IMPORT_MODES:
-        import_mode = "SNAPSHOT"
+    import_mode = _safe_import_mode(cfg.get("import_mode"))
 
     table_import_config = cfg.get("table_import_config") if isinstance(cfg.get("table_import_config"), dict) else {}
     if not table_import_config:
@@ -814,9 +1067,7 @@ async def _build_file_import_response(
     connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
     dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
 
-    import_mode = str(cfg.get("import_mode") or "SNAPSHOT").strip().upper()
-    if import_mode not in TABLE_IMPORT_MODES:
-        import_mode = "SNAPSHOT"
+    import_mode = _safe_import_mode(cfg.get("import_mode"))
 
     file_import_config = cfg.get("file_import_config") if isinstance(cfg.get("file_import_config"), dict) else {}
     if not file_import_config:
@@ -924,8 +1175,9 @@ async def _connection_response(
         str(cfg.get("parent_folder_rid") or cfg.get("parentFolderRid") or "").strip() or _DEFAULT_PARENT_FOLDER_RID
     )
     export_settings = _normalize_export_settings(cfg.get("export_settings") or cfg.get("exportSettings"))
+    markings = _normalize_markings(cfg.get("markings"))
 
-    return {
+    response = {
         "rid": _connection_rid(source.source_id),
         "displayName": display_name,
         "connectionConfiguration": connection_configuration,
@@ -937,6 +1189,9 @@ async def _connection_response(
         "createdTime": _iso_timestamp(source.created_at),
         "updatedTime": _iso_timestamp(source.updated_at),
     }
+    if markings:
+        response["markings"] = markings
+    return response
 
 
 def _iso_timestamp(value: Any) -> str | None:
@@ -1232,7 +1487,7 @@ async def create_table_import_v2(
         import_mode = normalize_import_mode(payload.get("importMode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
-    if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1620,7 +1875,7 @@ async def replace_table_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
-    if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1828,7 +2083,7 @@ async def execute_table_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
-    if import_mode == "CDC" and not _cdc_enabled_for_db(target_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -1988,7 +2243,7 @@ async def create_file_import_v2(
         import_mode = normalize_import_mode(payload.get("importMode"))
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-    if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2280,7 +2535,7 @@ async def replace_file_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
-    if import_mode == "CDC" and not _cdc_enabled_for_db(resolved_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -2476,7 +2731,7 @@ async def execute_file_import_v2(
             error_name="ConnectivityFeatureDisabled",
             parameters={"message": "JDBC connectivity is disabled for this ontology"},
         )
-    if import_mode == "CDC" and not _cdc_enabled_for_db(target_db):
+    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(target_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
             error_code="PERMISSION_DENIED",
@@ -3255,6 +3510,7 @@ async def create_connection_v2(
     source_type = connection_source_type_for_kind(kind)
     parent_folder_rid = str(payload.get("parentFolderRid") or "").strip() or _DEFAULT_PARENT_FOLDER_RID
     export_settings = _normalize_export_settings(payload.get("exportSettings"))
+    markings = _normalize_markings(payload.get("markings"))
 
     config_json = _normalize_connection_config_for_storage(configuration, kind=kind)
     config_json.update(
@@ -3267,6 +3523,8 @@ async def create_connection_v2(
             "export_settings": export_settings,
         }
     )
+    if markings:
+        config_json["markings"] = markings
 
     try:
         await connector_registry.upsert_source(
@@ -3618,9 +3876,12 @@ async def update_connection_export_settings_v2(
 
     settings_payload = payload.get("exportSettings") if isinstance(payload.get("exportSettings"), dict) else payload
     export_settings = _normalize_export_settings(settings_payload)
+    markings = _normalize_markings(payload.get("markings"))
 
     cfg = dict(source.config_json or {})
     cfg["export_settings"] = export_settings
+    if markings:
+        cfg["markings"] = markings
     await connector_registry.upsert_source(
         source_type=source.source_type,
         source_id=source.source_id,
@@ -3628,6 +3889,232 @@ async def update_connection_export_settings_v2(
         config_json=cfg,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/connections/{connectionRid}/exportRuns")
+@trace_endpoint("bff.foundry_v2_connectivity.create_connection_export_run")
+async def create_connection_export_run_v2(
+    connectionRid: str,
+    payload: Dict[str, Any],
+    request: Request,
+    task_manager: BackgroundTaskManagerDep,
+    audit_store: AuditLogStoreDep,
+    preview: bool = Query(default=False),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> JSONResponse:
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+    connection_id, source, error = await _load_connection_source_or_404(
+        connector_registry=connector_registry,
+        connection_rid=connectionRid,
+    )
+    if error is not None:
+        return error
+    assert connection_id is not None
+    assert source is not None
+
+    cfg = dict(source.config_json or {})
+    export_settings = _normalize_export_settings(cfg.get("export_settings") or cfg.get("exportSettings"))
+    markings = _normalize_markings(cfg.get("markings"))
+    if not bool(export_settings.get("exportsEnabled", True)):
+        return _foundry_error(
+            status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+            error_name="ExportDisabled",
+            parameters={"message": "exportsEnabled is false for this connection"},
+        )
+
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    target_url = str(
+        payload.get("targetUrl")
+        or payload.get("webhookUrl")
+        or target.get("url")
+        or ""
+    ).strip()
+    if not _is_valid_http_url(target_url):
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "targetUrl/webhookUrl must be an absolute http(s) URL"},
+        )
+
+    try:
+        method = _normalize_export_run_method(payload.get("method") or target.get("method"))
+    except ValueError as exc:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+
+    request_headers = _normalize_export_run_headers(payload.get("headers") or target.get("headers"))
+    timeout_seconds = _normalize_export_run_timeout_seconds(payload.get("timeoutMs"))
+    dry_run = _coerce_bool(payload.get("dryRun"), default=False)
+    export_payload = payload.get("payload")
+    bypass_markings_validation = bool(export_settings.get("exportEnabledWithoutMarkingsValidation", False))
+    if not dry_run and not bypass_markings_validation and not markings:
+        return _foundry_error(
+            status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+            error_name="ExportMarkingsRequired",
+            parameters={
+                "message": "markings are required unless exportEnabledWithoutMarkingsValidation=true",
+            },
+        )
+
+    run_id = str(uuid4())
+    actor = (request.headers.get("X-User-ID") or "").strip() or None
+    task_id = await task_manager.create_task(
+        _run_connection_export,
+        task_id=run_id,
+        task_name=f"Connectivity export run ({connection_id})",
+        task_type="connectivity_export_run",
+        metadata={
+            "connection_id": connection_id,
+            "connection_rid": _connection_rid(connection_id),
+            "target_url": target_url,
+            "method": method,
+            "dry_run": bool(dry_run),
+            "requested_at": _iso_timestamp(utcnow()),
+            "requested_by": actor,
+        },
+        connection_id=connection_id,
+        connection_rid=_connection_rid(connection_id),
+        target_url=target_url,
+        method=method,
+        request_headers=request_headers,
+        payload=export_payload,
+        timeout_seconds=timeout_seconds,
+        dry_run=dry_run,
+        actor=actor,
+        audit_store=audit_store,
+    )
+
+    task = await task_manager.get_task_status(task_id)
+    if task is None:
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="ExportRunFailed",
+            parameters={"message": "Failed to create export run task"},
+        )
+
+    response = _export_run_response_from_task(connection_id=connection_id, task=task)
+    response["status"] = "QUEUED" if response.get("status") == "RUNNING" else response.get("status")
+    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response)
+
+
+@router.get("/connections/{connectionRid}/exportRuns/{exportRunRid}")
+@trace_endpoint("bff.foundry_v2_connectivity.get_connection_export_run")
+async def get_connection_export_run_v2(
+    connectionRid: str,
+    exportRunRid: str,
+    task_manager: BackgroundTaskManagerDep,
+    preview: bool = Query(default=False),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> JSONResponse:
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+    connection_id, source, error = await _load_connection_source_or_404(
+        connector_registry=connector_registry,
+        connection_rid=connectionRid,
+    )
+    if error is not None:
+        return error
+    assert connection_id is not None
+    assert source is not None
+
+    run_id = _export_run_id_from_rid(exportRunRid)
+    if not run_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "exportRunRid is invalid"},
+        )
+
+    task = await task_manager.get_task_status(run_id)
+    if task is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ExportRunNotFound",
+            parameters={"exportRunRid": exportRunRid, "connectionRid": connectionRid},
+        )
+
+    metadata = getattr(task, "metadata", {}) if isinstance(getattr(task, "metadata", {}), dict) else {}
+    if str(metadata.get("connection_id") or "").strip() != connection_id:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ExportRunNotFound",
+            parameters={"exportRunRid": exportRunRid, "connectionRid": connectionRid},
+        )
+
+    return JSONResponse(content=_export_run_response_from_task(connection_id=connection_id, task=task))
+
+
+@router.get("/connections/{connectionRid}/exportRuns")
+@trace_endpoint("bff.foundry_v2_connectivity.list_connection_export_runs")
+async def list_connection_export_runs_v2(
+    connectionRid: str,
+    task_manager: BackgroundTaskManagerDep,
+    preview: bool = Query(default=False),
+    pageSize: int = Query(default=100, ge=1, le=500),
+    pageToken: str | None = Query(default=None),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> JSONResponse:
+    preview_error = _require_preview_or_400(preview)
+    if preview_error is not None:
+        return preview_error
+    connection_id, source, error = await _load_connection_source_or_404(
+        connector_registry=connector_registry,
+        connection_rid=connectionRid,
+    )
+    if error is not None:
+        return error
+    assert connection_id is not None
+    assert source is not None
+
+    offset = 0
+    if pageToken:
+        try:
+            offset = int(pageToken)
+        except (TypeError, ValueError):
+            return _foundry_error(
+                status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+        if offset < 0:
+            return _foundry_error(
+                status.HTTP_400_BAD_REQUEST,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "pageToken is invalid"},
+            )
+
+    tasks = await task_manager.get_all_tasks(task_type="connectivity_export_run", limit=5000)
+    scoped_tasks = []
+    for task in tasks:
+        metadata = getattr(task, "metadata", {}) if isinstance(getattr(task, "metadata", {}), dict) else {}
+        if str(metadata.get("connection_id") or "").strip() == connection_id:
+            scoped_tasks.append(task)
+
+    page = scoped_tasks[offset : offset + pageSize]
+    data = [_export_run_response_from_task(connection_id=connection_id, task=item) for item in page]
+    next_token = offset + len(page)
+    return JSONResponse(
+        content={
+            "data": data,
+            "nextPageToken": str(next_token) if next_token < len(scoped_tasks) else None,
+        }
+    )
 
 
 @router.post("/connections/{connectionRid}/uploadCustomJdbcDrivers")

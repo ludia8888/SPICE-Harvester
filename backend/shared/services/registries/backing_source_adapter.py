@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from shared.utils.object_type_backing import select_primary_backing_source
+
 logger = logging.getLogger(__name__)
 
 # Prefix used to distinguish OMS-sourced mapping specs from PostgreSQL ones.
@@ -93,7 +95,7 @@ async def get_mapping_from_oms(
 
     resource = _normalize_oms_response(raw)
     spec = resource.get("spec") or {}
-    backing = spec.get("backing_source") or {}
+    backing = select_primary_backing_source(spec)
 
     property_mappings = backing.get("property_mappings")
     if not property_mappings or not isinstance(property_mappings, list):
@@ -165,7 +167,7 @@ async def find_class_id_by_dataset(
         if not isinstance(resource, dict):
             continue
         spec = resource.get("spec") or {}
-        backing = spec.get("backing_source") or {}
+        backing = select_primary_backing_source(spec)
         res_dataset_id = str(backing.get("dataset_id") or "").strip()
         if res_dataset_id == dataset_id:
             return str(resource.get("resource_id") or resource.get("id") or "").strip() or None

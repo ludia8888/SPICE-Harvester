@@ -190,9 +190,14 @@ async def test_connector_ingest_service_append_deduplicates_rows(monkeypatch: py
             [{"id": "2", "name": "Bob"}, {"id": "4", "name": "Dan"}],
             [["1", "Alice"], ["2", "Bob"], ["4", "Dan"]],
         ),
+        (
+            "STREAMING",
+            [{"id": "2", "name": "Bob"}, {"id": "5", "name": "Eve"}],
+            [["1", "Alice"], ["2", "Bob"], ["5", "Eve"]],
+        ),
     ],
 )
-async def test_connector_ingest_service_incremental_and_cdc_use_append_merge(
+async def test_connector_ingest_service_incremental_cdc_streaming_use_append_merge(
     monkeypatch: pytest.MonkeyPatch,
     mode: str,
     incoming_rows: list[dict[str, str]],

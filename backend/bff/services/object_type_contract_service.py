@@ -28,6 +28,7 @@ from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.key_spec import normalize_key_spec
+from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
 from shared.utils.schema_columns import extract_schema_columns
 from shared.utils.schema_hash import compute_schema_hash
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -35,6 +36,9 @@ from shared.errors.external_codes import ExternalErrorCode
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
+
+_CONTRACT_STATUS_ACTIVE = "ACTIVE"
+_CONTRACT_STATUS_DRAFT = "DRAFT"
 
 
 def _extract_resource_payload(response: Any) -> Dict[str, Any]:
@@ -56,6 +60,91 @@ def _schema_hash_from_version(sample_json: Any, schema_json: Any) -> Optional[st
         if isinstance(columns, list) and columns:
             return compute_schema_hash(columns)
     return None
+
+
+def _normalize_contract_status(raw_status: Any, *, default: str = _CONTRACT_STATUS_ACTIVE) -> str:
+    status_value = str(raw_status or default).strip().upper()
+    return status_value or default
+
+
+def _is_effective_backing_source(backing: Any) -> bool:
+    if not isinstance(backing, dict) or not backing:
+        return False
+    return bool(
+        str(backing.get("dataset_id") or "").strip()
+        or str(backing.get("ref") or "").strip()
+        or str(backing.get("kind") or "").strip()
+    )
+
+
+def _extract_backing_sources(spec: Any) -> List[Dict[str, Any]]:
+    return list_backing_sources(spec)
+
+
+def _extract_primary_backing_source(spec: Any) -> Dict[str, Any]:
+    return select_primary_backing_source(spec)
+
+
+def _build_backing_source(
+    *,
+    dataset: Any,
+    backing: Any,
+    backing_version: Any,
+    version: Any,
+    resolved_schema_hash: str,
+) -> Dict[str, Any]:
+    return {
+        "kind": "backing_datasource",
+        "ref": backing.backing_id,
+        "version_id": backing_version.version_id,
+        "schema_hash": resolved_schema_hash,
+        "dataset_id": dataset.dataset_id,
+        "dataset_version_id": version.version_id,
+        "artifact_key": version.artifact_key,
+        "branch": dataset.branch,
+    }
+
+
+def _apply_backing_hints_from_sources(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+
+    normalized = dict(payload)
+    if any(
+        str(normalized.get(key) or "").strip()
+        for key in (
+            "backing_dataset_id",
+            "backing_datasource_id",
+            "backing_datasource_version_id",
+            "dataset_version_id",
+            "schema_hash",
+        )
+    ):
+        return normalized
+
+    source_candidates = list_backing_sources(normalized)
+    if not source_candidates:
+        return normalized
+
+    source = source_candidates[0]
+    normalized["backing_dataset_id"] = (
+        str(source.get("backing_dataset_id") or source.get("dataset_id") or "").strip() or None
+    )
+    normalized["backing_datasource_id"] = (
+        str(source.get("backing_datasource_id") or source.get("ref") or "").strip() or None
+    )
+    normalized["backing_datasource_version_id"] = (
+        str(
+            source.get("backing_datasource_version_id")
+            or source.get("version_id")
+            or source.get("backing_version_id")
+            or ""
+        ).strip()
+        or None
+    )
+    normalized["dataset_version_id"] = str(source.get("dataset_version_id") or "").strip() or None
+    normalized["schema_hash"] = str(source.get("schema_hash") or source.get("schemaHash") or "").strip() or None
+    return normalized
 
 
 async def _resolve_backing(
@@ -169,6 +258,60 @@ def _extract_ontology_property_names(payload: Any) -> set[str]:
     return names
 
 
+def _infer_pk_spec_from_ontology(
+    *,
+    ontology_payload: Any,
+    class_id: str,
+) -> Dict[str, Any]:
+    if isinstance(ontology_payload, dict) and isinstance(ontology_payload.get("data"), dict):
+        ontology_payload = ontology_payload.get("data")
+    properties = ontology_payload.get("properties") if isinstance(ontology_payload, dict) else None
+    if not isinstance(properties, list):
+        return {}
+
+    names: List[str] = []
+    primary_candidates: List[str] = []
+    title_candidates: List[str] = []
+    for entry in properties:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or entry.get("id") or "").strip()
+        if not name:
+            continue
+        names.append(name)
+        if bool(entry.get("primary_key") or entry.get("primaryKey")):
+            primary_candidates.append(name)
+        if bool(entry.get("title_key") or entry.get("titleKey")):
+            title_candidates.append(name)
+
+    if not names:
+        return {}
+
+    primary = primary_candidates[:]
+    if not primary:
+        expected_pk = f"{class_id.lower()}_id".strip() if class_id else ""
+        if expected_pk and expected_pk in names:
+            primary = [expected_pk]
+        elif "id" in names:
+            primary = ["id"]
+        else:
+            primary = [names[0]]
+
+    title = title_candidates[:]
+    if not title:
+        if "name" in names:
+            title = ["name"]
+        elif primary:
+            title = [primary[0]]
+
+    if not primary or not title:
+        return {}
+    return {
+        "primary_key": primary,
+        "title_key": title,
+    }
+
+
 def _normalize_and_validate_pk_spec(raw_pk_spec: Any, *, ontology_property_names: set[str]) -> Dict[str, Any]:
     pk_spec = normalize_key_spec(raw_pk_spec or {}, columns=sorted(ontology_property_names))
     if not pk_spec.get("primary_key"):
@@ -200,7 +343,9 @@ async def create_object_type_contract(
     objectify_registry: ObjectifyRegistry,
 ) -> ApiResponse:
     try:
-        payload = sanitize_input(body.model_dump(exclude_unset=True))
+        payload = _apply_backing_hints_from_sources(
+            sanitize_input(body.model_dump(exclude_unset=True))
+        )
         class_id = str(payload.get("class_id") or "").strip()
         if not class_id:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "class_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
@@ -209,24 +354,65 @@ async def create_object_type_contract(
         if not ontology_payload:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Ontology class not found", code=ErrorCode.ONTOLOGY_NOT_FOUND)
 
-        dataset, backing, backing_version, version, resolved_schema_hash = await _resolve_backing(
-            db_name=db_name,
-            request=request,
-            dataset_registry=dataset_registry,
-            backing_dataset_id=payload.get("backing_dataset_id"),
-            backing_datasource_id=payload.get("backing_datasource_id"),
-            backing_datasource_version_id=payload.get("backing_datasource_version_id"),
-            dataset_version_id=payload.get("dataset_version_id"),
-            schema_hash=payload.get("schema_hash"),
+        status_value = _normalize_contract_status(payload.get("status"))
+        active_contract = status_value == _CONTRACT_STATUS_ACTIVE
+        mapping_requested = bool(str(payload.get("mapping_spec_id") or "").strip())
+        auto_generate_mapping = bool(payload.get("auto_generate_mapping"))
+        backing_hints_present = any(
+            str(payload.get(key) or "").strip()
+            for key in (
+                "backing_dataset_id",
+                "backing_datasource_id",
+                "backing_datasource_version_id",
+                "dataset_version_id",
+                "schema_hash",
+            )
         )
 
+        dataset = None
+        backing = None
+        backing_version = None
+        version = None
+        resolved_schema_hash = None
+        if active_contract or mapping_requested or auto_generate_mapping or backing_hints_present:
+            dataset, backing, backing_version, version, resolved_schema_hash = await _resolve_backing(
+                db_name=db_name,
+                request=request,
+                dataset_registry=dataset_registry,
+                backing_dataset_id=payload.get("backing_dataset_id"),
+                backing_datasource_id=payload.get("backing_datasource_id"),
+                backing_datasource_version_id=payload.get("backing_datasource_version_id"),
+                dataset_version_id=payload.get("dataset_version_id"),
+                schema_hash=payload.get("schema_hash"),
+            )
+
         ontology_props = _extract_ontology_property_names(ontology_payload)
-        pk_spec = _normalize_and_validate_pk_spec(payload.get("pk_spec"), ontology_property_names=ontology_props)
+        raw_pk_spec = payload.get("pk_spec")
+        if isinstance(raw_pk_spec, dict) and raw_pk_spec:
+            pk_spec = _normalize_and_validate_pk_spec(raw_pk_spec, ontology_property_names=ontology_props)
+        elif active_contract:
+            pk_spec = _normalize_and_validate_pk_spec(raw_pk_spec, ontology_property_names=ontology_props)
+        else:
+            inferred_pk_spec = _infer_pk_spec_from_ontology(
+                ontology_payload=ontology_payload,
+                class_id=class_id,
+            )
+            pk_spec = (
+                _normalize_and_validate_pk_spec(inferred_pk_spec, ontology_property_names=ontology_props)
+                if inferred_pk_spec
+                else {}
+            )
 
         mapping_spec_id = str(payload.get("mapping_spec_id") or "").strip() or None
         mapping_spec_version = payload.get("mapping_spec_version")
         mapping_spec_payload = None
         if mapping_spec_id:
+            if not dataset:
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Mapping spec requires backing dataset context",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                )
             mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
             if not mapping_spec:
                 raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Mapping spec not found", code=ErrorCode.RESOURCE_NOT_FOUND)
@@ -249,16 +435,18 @@ async def create_object_type_contract(
                 "status": mapping_spec.status,
             }
 
-        backing_source = {
-            "kind": "backing_datasource",
-            "ref": backing.backing_id,
-            "version_id": backing_version.version_id,
-            "schema_hash": resolved_schema_hash,
-            "dataset_id": dataset.dataset_id,
-            "dataset_version_id": version.version_id,
-            "artifact_key": version.artifact_key,
-            "branch": dataset.branch,
-        }
+        backing_source = (
+            _build_backing_source(
+                dataset=dataset,
+                backing=backing,
+                backing_version=backing_version,
+                version=version,
+                resolved_schema_hash=resolved_schema_hash or "",
+            )
+            if dataset and backing and backing_version and version and resolved_schema_hash
+            else {}
+        )
+        backing_sources = [backing_source] if _is_effective_backing_source(backing_source) else []
 
         resource_payload: Dict[str, Any] = {
             "id": class_id,
@@ -267,9 +455,10 @@ async def create_object_type_contract(
             "metadata": payload.get("metadata") or {},
             "spec": {
                 "backing_source": backing_source,
+                "backing_sources": backing_sources,
                 "pk_spec": pk_spec,
                 "mapping_spec": mapping_spec_payload or {},
-                "status": str(payload.get("status") or "ACTIVE").upper(),
+                "status": status_value,
             },
         }
 
@@ -288,7 +477,19 @@ async def create_object_type_contract(
         )
         resource = _extract_resource_payload(response)
 
-        if payload.get("auto_generate_mapping") and not mapping_spec_id:
+        if auto_generate_mapping and status_value != _CONTRACT_STATUS_ACTIVE:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Auto-generated mapping requires ACTIVE object type contract",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+            )
+        if auto_generate_mapping and not mapping_spec_id:
+            if not dataset or not backing or not backing_version or not version or not resolved_schema_hash:
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "Backing dataset and version are required for auto mapping generation",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                )
             source_schema = extract_schema_columns(version.sample_json or dataset.schema_json)
             target_schema: List[Dict[str, Any]] = []
             if isinstance(ontology_payload, dict):
@@ -357,13 +558,17 @@ async def create_object_type_contract(
                 )
                 resource = _extract_resource_payload(response)
 
+        data: Dict[str, Any] = {
+            "object_type": resource,
+        }
+        if backing is not None:
+            data["backing_datasource"] = backing.__dict__
+        if backing_version is not None:
+            data["backing_datasource_version"] = backing_version.__dict__
+
         return ApiResponse.success(
             message="Object type contract created",
-            data={
-                "object_type": resource,
-                "backing_datasource": backing.__dict__,
-                "backing_datasource_version": backing_version.__dict__,
-            },
+            data=data,
         )
     except httpx.HTTPStatusError as exc:
         try:
@@ -416,14 +621,10 @@ def _has_effective_pk_spec(spec: Dict[str, Any]) -> bool:
 def _has_effective_backing_source(spec: Dict[str, Any]) -> bool:
     if not isinstance(spec, dict):
         return False
-    backing = spec.get("backing_source")
-    if not isinstance(backing, dict) or not backing:
-        return False
-    return bool(
-        str(backing.get("dataset_id") or "").strip()
-        or str(backing.get("ref") or "").strip()
-        or str(backing.get("kind") or "").strip()
-    )
+    for source in _extract_backing_sources(spec):
+        if _is_effective_backing_source(source):
+            return True
+    return False
 
 
 @trace_external_call("bff.object_type_contract.update_object_type_contract")
@@ -455,22 +656,24 @@ async def update_object_type_contract(
         if not isinstance(existing_spec, dict):
             existing_spec = {}
 
-        payload = sanitize_input(body.model_dump(exclude_unset=True))
+        payload = _apply_backing_hints_from_sources(
+            sanitize_input(body.model_dump(exclude_unset=True))
+        )
         dataset = None
         backing = None
         backing_version = None
         version = None
-        backing_spec = existing_spec.get("backing_source") if isinstance(existing_spec.get("backing_source"), dict) else {}
-        if any(
-            key in payload
-            for key in (
-                "backing_dataset_id",
-                "backing_datasource_id",
-                "backing_datasource_version_id",
-                "dataset_version_id",
-                "schema_hash",
-            )
-        ):
+        backing_spec = _extract_primary_backing_source(existing_spec)
+        backing_sources_spec = _extract_backing_sources(existing_spec)
+        backing_payload_keys = (
+            "backing_dataset_id",
+            "backing_datasource_id",
+            "backing_datasource_version_id",
+            "dataset_version_id",
+            "schema_hash",
+        )
+        backing_inputs_provided = any(key in payload for key in backing_payload_keys)
+        if backing_inputs_provided:
             dataset, backing, backing_version, version, resolved_schema_hash = await _resolve_backing(
                 db_name=db_name,
                 request=request,
@@ -481,16 +684,14 @@ async def update_object_type_contract(
                 dataset_version_id=payload.get("dataset_version_id"),
                 schema_hash=payload.get("schema_hash"),
             )
-            backing_spec = {
-                "kind": "backing_datasource",
-                "ref": backing.backing_id,
-                "version_id": backing_version.version_id,
-                "schema_hash": resolved_schema_hash,
-                "dataset_id": dataset.dataset_id,
-                "dataset_version_id": version.version_id,
-                "artifact_key": version.artifact_key,
-                "branch": dataset.branch,
-            }
+            backing_spec = _build_backing_source(
+                dataset=dataset,
+                backing=backing,
+                backing_version=backing_version,
+                version=version,
+                resolved_schema_hash=resolved_schema_hash,
+            )
+            backing_sources_spec = [backing_spec]
 
         pk_spec = existing_spec.get("pk_spec") if isinstance(existing_spec.get("pk_spec"), dict) else {}
         if isinstance(payload.get("pk_spec"), dict):
@@ -519,7 +720,21 @@ async def update_object_type_contract(
             else:
                 mapping_spec_payload = {}
 
-        status_value = payload.get("status") or existing_spec.get("status") or "ACTIVE"
+        status_value = _normalize_contract_status(payload.get("status") or existing_spec.get("status") or _CONTRACT_STATUS_ACTIVE)
+        if status_value == _CONTRACT_STATUS_ACTIVE and not _is_effective_backing_source(backing_spec):
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Backing source is required when status is ACTIVE",
+                code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+            )
+        if status_value == _CONTRACT_STATUS_ACTIVE:
+            normalized_pk = normalize_key_spec(pk_spec if isinstance(pk_spec, dict) else {})
+            if not normalized_pk.get("primary_key") or not normalized_pk.get("title_key"):
+                raise classified_http_exception(
+                    status.HTTP_409_CONFLICT,
+                    "pk_spec.primary_key and pk_spec.title_key are required when status is ACTIVE",
+                    code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
+                )
         metadata = payload.get("metadata") if payload.get("metadata") is not None else existing_resource.get("metadata")
         mapping_spec_id_value = None
         mapping_spec_version_value = None
@@ -528,7 +743,7 @@ async def update_object_type_contract(
             mapping_spec_version_value = mapping_spec_payload.get("mapping_spec_version")
         mapping_spec_record = None
 
-        existing_backing = existing_spec.get("backing_source") if isinstance(existing_spec.get("backing_source"), dict) else {}
+        existing_backing = _extract_primary_backing_source(existing_spec)
         backing_changed = False
         if backing_spec:
             if str(backing_spec.get("ref") or "") != str(existing_backing.get("ref") or ""):
@@ -809,9 +1024,10 @@ async def update_object_type_contract(
             "spec": {
                 **existing_spec,
                 "backing_source": backing_spec,
+                "backing_sources": backing_sources_spec,
                 "pk_spec": pk_spec,
                 "mapping_spec": mapping_spec_payload,
-                "status": str(status_value).upper(),
+                "status": status_value,
             },
         }
 

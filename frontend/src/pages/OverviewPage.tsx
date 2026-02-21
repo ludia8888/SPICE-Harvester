@@ -37,9 +37,9 @@ export const OverviewPage = ({ dbName }: { dbName: string }) => {
           <div className="card-title">Next steps</div>
           <div className="form-row">
             <Button onClick={() => navigate(`${base}/ontology`)}>Define ontology</Button>
-            <Button onClick={() => navigate(`${base}/data/sheets`)}>Preview sheets</Button>
-            <Button onClick={() => navigate(`${base}/data/schema-suggestion`)}>Suggest schema</Button>
-            <Button onClick={() => navigate(`${base}/data/import/sheets`)}>Import data</Button>
+            <Button onClick={() => navigate(`${base}/mappings`)}>Manage mappings</Button>
+            <Button onClick={() => navigate(`${base}/instances`)}>Manage instances</Button>
+            <Button onClick={() => navigate(`${base}/lineage`)}>Inspect lineage</Button>
             <Button onClick={() => navigate(`${base}/explore/graph`)}>Graph explorer</Button>
           </div>
         </Card>

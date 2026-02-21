@@ -21,8 +21,12 @@ class _FakeTracing:
 class _FakeAdapter:
     def __init__(self) -> None:
         self.last_import_config = None
+        self.snapshot_calls = 0
+        self.incremental_calls = 0
+        self.cdc_calls = 0
 
     async def snapshot_extract(self, *, config, secrets, import_config):  # noqa: ANN001, ANN003
+        self.snapshot_calls += 1
         self.last_import_config = import_config
         _ = config, secrets, import_config
         from data_connector.adapters.base import ConnectorExtractResult
@@ -34,9 +38,11 @@ class _FakeAdapter:
         )
 
     async def incremental_extract(self, *, config, secrets, import_config, sync_state):  # noqa: ANN001, ANN003
+        self.incremental_calls += 1
         return await self.snapshot_extract(config=config, secrets=secrets, import_config=import_config)
 
     async def cdc_extract(self, *, config, secrets, import_config, sync_state):  # noqa: ANN001, ANN003
+        self.cdc_calls += 1
         return await self.snapshot_extract(config=config, secrets=secrets, import_config=import_config)
 
 
@@ -308,6 +314,70 @@ async def test_sync_worker_process_connector_update_file_import_uses_file_config
 
     assert version_id == "version-1"
     assert adapter_factory.adapter.last_import_config == {"type": "jdbcImportConfig", "query": "SELECT * FROM file_source"}
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_process_connector_update_streaming_uses_cdc_extract() -> None:
+    worker = ConnectorSyncWorker()
+    registry = _FakeRegistry()
+    ingest = _FakeIngestService()
+    adapter_factory = _FakeAdapterFactory()
+
+    registry.source = ConnectorSource(
+        source_type="postgresql_table_import",
+        source_id="table-1",
+        enabled=True,
+        config_json={
+            "connection_id": "conn-streaming-1",
+            "import_mode": "STREAMING",
+            "table_import_config": {
+                "type": "postgreSqlImportConfig",
+                "query": "SELECT * FROM orders",
+                "watermarkColumn": "updated_at",
+            },
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.connection_source = ConnectorSource(
+        source_type="postgresql_connection",
+        source_id="conn-streaming-1",
+        enabled=True,
+        config_json={"type": "PostgreSqlConnectionConfig", "host": "localhost", "database": "demo"},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.mapping = ConnectorMapping(
+        mapping_id="map-streaming-1",
+        source_type="postgresql_table_import",
+        source_id="table-1",
+        status="active",
+        enabled=True,
+        target_db_name="demo",
+        target_branch="main",
+        target_class_label="Order",
+        field_mappings=[],
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    worker.registry = registry
+    worker.adapter_factory = adapter_factory
+    worker.ingest_service = ingest
+    worker.tracing = _FakeTracing()
+
+    envelope = EventEnvelope.from_connector_update(
+        source_type="postgresql_table_import",
+        source_id="table-1",
+        cursor="cursor-2",
+        data={"source_type": "postgresql_table_import", "source_id": "table-1"},
+    )
+    version_id = await worker._process_connector_update(envelope)
+
+    assert version_id == "version-1"
+    assert adapter_factory.adapter.cdc_calls == 1
+    assert adapter_factory.adapter.incremental_calls == 0
+    assert ingest.calls[0]["import_mode"] == "STREAMING"
 
 
 @pytest.mark.asyncio

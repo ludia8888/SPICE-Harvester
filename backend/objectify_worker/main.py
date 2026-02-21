@@ -54,6 +54,7 @@ from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
 from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
+from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.blank_utils import is_blank_value
 from shared.utils.string_list_utils import normalize_string_list
@@ -412,7 +413,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
             if not isinstance(spec, dict):
                 spec = {}
-            backing_source = spec.get("backing_source") if isinstance(spec.get("backing_source"), dict) else {}
+            backing_sources = list_backing_sources(spec)
+            backing_source = select_primary_backing_source(spec)
             if not backing_source:
                 return
 
@@ -431,7 +433,12 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             backing_source["version_id"] = backing_version_id
             if job.dataset_version_id:
                 backing_source["dataset_version_id"] = job.dataset_version_id
+            if backing_sources:
+                backing_sources[0] = backing_source
+            else:
+                backing_sources = [backing_source]
             spec["backing_source"] = backing_source
+            spec["backing_sources"] = backing_sources
             resource["spec"] = spec
 
             branch = job.ontology_branch or job.dataset_branch or "main"
@@ -1282,7 +1289,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         fail_job: Any,
     ) -> Any:
         if not job.mapping_spec_id:
-            # OMS mode: resolve from object_type backing_source
+            # OMS mode: resolve from object_type backing source
             try:
                 ot_contract = await self._fetch_object_type_contract(job)
             except Exception as oms_fetch_exc:
@@ -1298,17 +1305,28 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             # OMS wraps response in {"data": {...}} — unwrap if needed
             ot_resource = ot_contract.get("data") if isinstance(ot_contract.get("data"), dict) else ot_contract
             ot_spec = (ot_resource.get("spec") if isinstance(ot_resource, dict) else {}) or {}
-            backing = ot_spec.get("backing_source") or {}
+            backing = select_primary_backing_source(ot_spec)
+            backing_dataset_id = str(backing.get("dataset_id") or "").strip()
+            if backing_dataset_id and backing_dataset_id != job.dataset_id:
+                await fail_job(
+                    f"oms_backing_dataset_mismatch(job={job.dataset_id} backing={backing_dataset_id})"
+                )
             prop_mappings = backing.get("property_mappings")
             if not prop_mappings or not isinstance(prop_mappings, list):
                 await fail_job(f"oms_backing_source_no_property_mappings:{job.target_class_id}")
             from shared.services.registries.backing_source_adapter import BackingSourceMappingSpec
 
+            dataset_branch = str(
+                backing.get("dataset_branch")
+                or backing.get("branch")
+                or job.dataset_branch
+                or "main"
+            ).strip() or "main"
             return BackingSourceMappingSpec(
                 mapping_spec_id=f"oms:{job.target_class_id}",
-                dataset_id=job.dataset_id,
-                dataset_branch=job.dataset_branch,
-                artifact_output_name=job.artifact_output_name,
+                dataset_id=backing_dataset_id or job.dataset_id,
+                dataset_branch=dataset_branch,
+                artifact_output_name=str(backing.get("artifact_output_name") or job.artifact_output_name or "").strip() or None,
                 schema_hash=backing.get("schema_hash"),
                 target_class_id=job.target_class_id,
                 mappings=[
@@ -1320,6 +1338,13 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 auto_sync=backing.get("auto_sync", True),
                 version=int(backing.get("mapping_version") or 1),
                 status=str(ot_spec.get("status") or "ACTIVE"),
+                backing_datasource_id=str(backing.get("backing_datasource_id") or backing.get("ref") or "").strip() or None,
+                backing_datasource_version_id=str(
+                    backing.get("backing_datasource_version_id")
+                    or backing.get("version_id")
+                    or backing.get("backing_version_id")
+                    or ""
+                ).strip() or None,
             )
 
         mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)

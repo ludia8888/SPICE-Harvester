@@ -40,6 +40,7 @@ from shared.services.kafka.processed_event_worker import (
     StrictHeartbeatKafkaWorker,
     WorkerRuntimeConfig,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.kafka.retry_classifier import (
     ONTOLOGY_COMMAND_RETRY_PROFILE,
     classify_retryable_with_profile,
@@ -125,6 +126,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         self.event_store: Optional[EventStore] = None
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self.observability = WorkerObservability(

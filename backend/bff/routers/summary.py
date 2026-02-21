@@ -51,6 +51,8 @@ async def get_summary(
     es_health: Optional[Dict[str, Any]] = None
     es_error: Optional[str] = None
     try:
+        # Service container provides a singleton ES service. Keep the pooled
+        # client open and reuse it across requests to avoid churn/leaks.
         await es_service.connect()
         es_ok = await es_service.ping()
         if es_ok:
@@ -58,8 +60,6 @@ async def get_summary(
     except Exception as e:
         logging.getLogger(__name__).warning("Exception fallback at bff/routers/summary.py:77", exc_info=True)
         es_error = str(e)
-    finally:
-        await es_service.disconnect()
 
     return ApiResponse.success(
         message="Summary fetched",

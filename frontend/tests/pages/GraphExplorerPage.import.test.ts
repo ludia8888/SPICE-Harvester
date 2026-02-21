@@ -15,10 +15,9 @@ vi.mock('reactflow', () => ({
   useEdgesState: (initial: unknown[]) => [initial, () => undefined, () => undefined],
 }))
 
-describe('GraphPage module', () => {
+describe('GraphExplorerPage module', () => {
   it('imports without side effects', async () => {
-    const mod = await import('../../src/pages/GraphPage')
-    expect(mod.GraphPage).toBeTypeOf('function')
+    const mod = await import('../../src/pages/GraphExplorerPage')
+    expect(mod.GraphExplorerPage).toBeTypeOf('function')
   })
 })
-

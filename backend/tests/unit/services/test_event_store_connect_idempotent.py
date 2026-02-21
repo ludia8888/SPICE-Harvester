@@ -76,6 +76,34 @@ async def test_event_store_connect_is_idempotent_under_concurrency(monkeypatch: 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_event_store_connect_skips_store_bootstrap_when_pre_attached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counters = {"head_bucket": 0, "create_bucket": 0, "put_bucket_versioning": 0, "init_lineage_audit": 0}
+    dummy_s3 = _DummyS3(counters)
+
+    monkeypatch.setenv("ENABLE_LINEAGE", "true")
+    monkeypatch.setenv("ENABLE_AUDIT_LOGS", "true")
+    monkeypatch.setattr(event_store_module.aioboto3, "Session", lambda: _DummySession(dummy_s3))
+
+    store = EventStore()
+    store.attach_observability_stores(lineage_store=object(), audit_store=object())
+
+    async def _init_noop() -> None:
+        counters["init_lineage_audit"] += 1
+
+    monkeypatch.setattr(store, "_initialize_lineage_and_audit", _init_noop)
+    await store.connect()
+
+    assert counters["head_bucket"] == 1
+    assert counters["create_bucket"] == 0
+    assert counters["put_bucket_versioning"] == 0
+    assert counters["init_lineage_audit"] == 0
+    assert getattr(store, "_connected", False) is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_event_store_connect_fails_when_lineage_required_and_store_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

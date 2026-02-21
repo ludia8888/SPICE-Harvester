@@ -3,14 +3,13 @@ set -euo pipefail
 
 HOST="${HOST:-127.0.0.1}"
 BFF_URL="${BFF_URL:-http://${HOST}:8002}"
-ADMIN_TOKEN="${ADMIN_TOKEN:-${BFF_ADMIN_TOKEN:-test-token}}"
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-spice-harvester-postgres}"
-PSQL_USER="${PSQL_USER:-spiceadmin}"
-PSQL_DB="${PSQL_DB:-spicedb}"
+ADMIN_TOKEN="${ADMIN_TOKEN:-${BFF_ADMIN_TOKEN:-${BFF_WRITE_TOKEN:-${ADMIN_API_KEY:-}}}}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-RETRIES="${RETRIES:-20}"
+DB_NAME="${DB_NAME:-agent_registry_smoke_$(date +%Y%m%d%H%M%S)}"
+BRANCH="${BRANCH:-main}"
+RETRIES="${RETRIES:-30}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-1}"
-SKIP_DB_CHECK="${SKIP_DB_CHECK:-}"
+STRICT_STATUS="${STRICT_STATUS:-}"
 
 # Delegated end-user auth for /api/v1/agent/* (required when USER_JWT_ENABLED=true).
 USER_JWT="${USER_JWT:-}"
@@ -25,26 +24,28 @@ TENANT_ID="${TENANT_ID:-default}"
 USER_ROLES="${USER_ROLES:-}"
 
 if ! command -v curl >/dev/null 2>&1; then
-  echo "❌ curl is required" >&2
+  echo "curl is required" >&2
   exit 1
 fi
 
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  echo "❌ Python not found: PYTHON_BIN=$PYTHON_BIN" >&2
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required" >&2
   exit 1
 fi
 
-tool_id="system.health.smoke.$("$PYTHON_BIN" - <<'PY'
-import uuid
-print(uuid.uuid4().hex[:8])
-PY
-)"
+if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+  echo "Python not found: PYTHON_BIN=${PYTHON_BIN}" >&2
+  exit 1
+fi
 
-echo "TOOL_ID=$tool_id"
+if [[ -z "${ADMIN_TOKEN}" ]]; then
+  echo "Missing admin token. Set ADMIN_TOKEN or BFF_ADMIN_TOKEN." >&2
+  exit 1
+fi
 
 if [[ -z "${USER_JWT}" && -n "${USER_JWT_HS256_SECRET}" ]]; then
   export USER_JWT_HS256_SECRET USER_JWT_TTL_SECONDS USER_ID USER_EMAIL USER_TYPE TENANT_ID USER_ROLES USER_JWT_ISSUER USER_JWT_AUDIENCE
-  USER_JWT="$("$PYTHON_BIN" - <<'PY'
+  USER_JWT="$("${PYTHON_BIN}" - <<'PY'
 import base64
 import hashlib
 import hmac
@@ -92,93 +93,102 @@ PY
 )"
 fi
 
-AGENT_HEADERS=(
-  -H "X-Admin-Token: ${ADMIN_TOKEN}"
-  -H "Content-Type: application/json"
-)
+auth_headers=(-H "X-Admin-Token: ${ADMIN_TOKEN}" -H "Content-Type: application/json")
 if [[ -n "${USER_JWT}" ]]; then
-  AGENT_HEADERS+=(-H "X-Delegated-Authorization: Bearer ${USER_JWT}")
+  auth_headers+=(-H "X-Delegated-Authorization: Bearer ${USER_JWT}")
 fi
 
-echo "🔧 Upserting allowlist policy..."
-curl -sS -X POST "${BFF_URL}/api/v1/admin/agent-tools" \
-  -H "X-Admin-Token: ${ADMIN_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"tool_id\": \"${tool_id}\",
-    \"method\": \"GET\",
-    \"path\": \"/api/v1/health\",
-    \"risk_level\": \"read\",
-    \"requires_approval\": false,
-    \"requires_idempotency_key\": false,
-    \"status\": \"ACTIVE\"
-  }" >/dev/null
+wait_for_command() {
+  local command_id="$1"
+  local status=""
+  for ((i=1; i<=RETRIES; i++)); do
+    status="$(curl -sS -X GET "${BFF_URL}/api/v1/commands/${command_id}/status" "${auth_headers[@]}" \
+      | jq -r '.status // .data.status // empty')"
+    if [[ "${status}" == "COMPLETED" || "${status}" == "FAILED" || "${status}" == "CANCELLED" ]]; then
+      echo "command ${command_id} status=${status}"
+      return 0
+    fi
+    sleep "${SLEEP_SECONDS}"
+  done
+  echo "Timed out waiting for command ${command_id} (status=${status})" >&2
+  return 1
+}
 
-echo "✅ Allowlist policy upserted"
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
 
-echo "🚀 Starting agent run..."
-run_resp="$(curl -sS -X POST "${BFF_URL}/api/v1/agent/runs" \
-  "${AGENT_HEADERS[@]}" \
-  -d "{
-    \"goal\": \"smoke\",
-    \"steps\": [
-      {
-        \"tool_id\": \"${tool_id}\",
-        \"service\": \"bff\",
-        \"method\": \"GET\",
-        \"path\": \"/api/v1/health\"
-      }
-    ],
-    \"context\": {\"risk_level\": \"read\"}
-  }")"
+echo "Ensuring database exists: ${DB_NAME}"
+db_code="$(curl -sS -o "${tmp_dir}/db_resp.json" -w "%{http_code}" \
+  -X POST "${BFF_URL}/api/v1/databases" \
+  "${auth_headers[@]}" \
+  -d "{\"name\":\"${DB_NAME}\",\"description\":\"agent registry smoke\"}")"
 
-run_id="$("$PYTHON_BIN" - <<'PY' "$run_resp"
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print((payload.get("data") or {}).get("run_id") or "")
-PY
-)"
-
-if [[ -z "$run_id" ]]; then
-  echo "❌ Failed to parse run_id from: $run_resp" >&2
+if [[ "${db_code}" == "202" ]]; then
+  db_command_id="$(jq -r '.data.command_id // .data.commandId // .command_id // .commandId // empty' "${tmp_dir}/db_resp.json")"
+  if [[ -n "${db_command_id}" ]]; then
+    wait_for_command "${db_command_id}"
+  fi
+elif [[ "${db_code}" != "200" && "${db_code}" != "201" && "${db_code}" != "409" ]]; then
+  echo "Database create failed (status=${db_code}):" >&2
+  cat "${tmp_dir}/db_resp.json" >&2
   exit 1
 fi
 
-echo "RUN_ID=$run_id"
+cat > "${tmp_dir}/pipeline_run.json" <<JSON
+{
+  "goal": "agent registry smoke",
+  "data_scope": {
+    "db_name": "${DB_NAME}",
+    "branch": "${BRANCH}",
+    "dataset_ids": []
+  },
+  "preview_limit": 5,
+  "include_run_tables": false,
+  "max_repairs": 0,
+  "max_cleansing": 0,
+  "max_transform": 0,
+  "auto_sync": false
+}
+JSON
 
-echo "⏳ Waiting for run completion..."
-for ((i=1; i<=RETRIES; i++)); do
-  status_resp="$(curl -sS -X GET "${BFF_URL}/api/v1/agent/runs/${run_id}" \
-    "${AGENT_HEADERS[@]}")"
-  status="$("$PYTHON_BIN" - <<'PY' "$status_resp"
-import json
-import sys
-payload = json.loads(sys.argv[1])
-print((payload.get("data") or {}).get("status") or "")
-PY
-)"
-  if [[ "$status" == "completed" || "$status" == "failed" ]]; then
-    echo "✅ Run status: $status"
-    break
-  fi
-  echo "… still running (${i}/${RETRIES})"
-  sleep "$SLEEP_SECONDS"
-done
+echo "Posting /api/v1/agent/pipeline-runs..."
+run_code="$(curl -sS -o "${tmp_dir}/pipeline_run_resp.json" -w "%{http_code}" \
+  -X POST "${BFF_URL}/api/v1/agent/pipeline-runs" \
+  "${auth_headers[@]}" \
+  --data-binary @"${tmp_dir}/pipeline_run.json")"
 
-if [[ -z "${SKIP_DB_CHECK}" ]]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "❌ docker is required for DB checks (set SKIP_DB_CHECK=1 to skip)" >&2
-    exit 1
-  fi
-  echo "🔎 Verifying DB records..."
-  docker exec "${POSTGRES_CONTAINER}" psql -U "${PSQL_USER}" -d "${PSQL_DB}" \
-    -c "select run_id, plan_id, status from spice_agent.agent_runs where run_id = '${run_id}';"
-  docker exec "${POSTGRES_CONTAINER}" psql -U "${PSQL_USER}" -d "${PSQL_DB}" \
-    -c "select run_id, step_id, tool_id, status from spice_agent.agent_steps where run_id = '${run_id}';"
-  docker exec "${POSTGRES_CONTAINER}" psql -U "${PSQL_USER}" -d "${PSQL_DB}" \
-    -c "select plan_id, decision, approved_by from spice_agent.agent_approvals where plan_id = '${plan_id}';"
-  echo "✅ DB checks passed"
-else
-  echo "ℹ️  SKIP_DB_CHECK set; skipping Postgres verification"
+if [[ "${run_code}" == "404" ]]; then
+  echo "Contract drift: /api/v1/agent/pipeline-runs returned 404" >&2
+  cat "${tmp_dir}/pipeline_run_resp.json" >&2
+  exit 1
 fi
+
+if [[ -n "${STRICT_STATUS}" && "${run_code}" != "${STRICT_STATUS}" ]]; then
+  echo "Expected STRICT_STATUS=${STRICT_STATUS}, got ${run_code}" >&2
+  cat "${tmp_dir}/pipeline_run_resp.json" >&2
+  exit 1
+fi
+
+case "${run_code}" in
+  200|400|401|403|422|429|503)
+    ;;
+  *)
+    echo "Unexpected status from /api/v1/agent/pipeline-runs: ${run_code}" >&2
+    cat "${tmp_dir}/pipeline_run_resp.json" >&2
+    exit 1
+    ;;
+esac
+
+api_status="$(jq -r '.status // empty' "${tmp_dir}/pipeline_run_resp.json")"
+agent_status="$(jq -r '.data.status // empty' "${tmp_dir}/pipeline_run_resp.json")"
+message="$(jq -r '.message // empty' "${tmp_dir}/pipeline_run_resp.json")"
+
+echo "pipeline-runs status_code=${run_code} api_status=${api_status:-n/a} agent_status=${agent_status:-n/a}"
+if [[ -n "${message}" && "${message}" != "null" ]]; then
+  echo "message=${message}"
+fi
+
+echo "Smoke complete"

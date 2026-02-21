@@ -8,12 +8,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:8002',
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8002',
         changeOrigin: true,
         ws: true,
       },
       '/api/v2': {
-        target: 'http://localhost:8002',
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8002',
         changeOrigin: true,
         ws: true,
       },
@@ -23,7 +23,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './tests/setupTests.ts',
-    include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    include: ['tests/**/*.test.{ts,tsx}'],
+    exclude: ['tests/e2e/**'],
     css: false,
     coverage: {
       provider: 'istanbul',

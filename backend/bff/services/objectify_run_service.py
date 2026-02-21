@@ -62,10 +62,17 @@ async def run_objectify(
 
         artifact_id = str(body.artifact_id or "").strip() or None
         artifact_output_name = str(body.artifact_output_name or "").strip() or None
-        if artifact_id and body.dataset_version_id:
+        requested_dataset_version_id = str(body.dataset_version_id or "").strip() or None
+        if artifact_id and requested_dataset_version_id:
             raise classified_http_exception(
                 status.HTTP_400_BAD_REQUEST,
                 "dataset_version_id and artifact_id are mutually exclusive",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        if not artifact_id and not requested_dataset_version_id:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "dataset_version_id is required when artifact_id is not provided",
                 code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
@@ -110,10 +117,7 @@ async def run_objectify(
             if not resolved_schema_hash:
                 raise classified_http_exception(status.HTTP_409_CONFLICT, "Artifact output is missing schema_hash", code=ErrorCode.CONFLICT)
         else:
-            if body.dataset_version_id:
-                version = await dataset_registry.get_version(version_id=body.dataset_version_id)
-            else:
-                version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            version = await dataset_registry.get_version(version_id=requested_dataset_version_id)
             if not version:
                 raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
             if version.dataset_id != dataset_id:
@@ -209,7 +213,7 @@ async def run_objectify(
                     "Backing datasource version dataset not found",
                     code=ErrorCode.RESOURCE_NOT_FOUND,
                 )
-            if body.dataset_version_id and str(body.dataset_version_id) != version.version_id:
+            if requested_dataset_version_id and requested_dataset_version_id != version.version_id:
                 raise classified_http_exception(
                     status.HTTP_409_CONFLICT,
                     "Dataset version does not match mapping spec backing datasource version",

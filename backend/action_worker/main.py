@@ -49,6 +49,7 @@ from shared.services.kafka.processed_event_worker import (
     StrictHeartbeatKafkaWorker,
     WorkerRuntimeConfig,
 )
+from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.core.object_type_meta_resolver import build_object_type_meta_resolver
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
@@ -155,6 +156,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         self.enable_processed_event_registry = settings.event_sourcing.enable_processed_event_registry
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
+        self.consumer: Optional[SafeKafkaConsumer] = None
 
         self.action_logs = ActionLogRegistry()
         self.dataset_registry: Optional[DatasetRegistry] = None

@@ -42,3 +42,15 @@ export type ClosedLoopVerificationResult = {
   }
   status: 'verified' | 'partial' | 'failed'
 }
+
+export type DatasetIntegrityEvidence = {
+  datasetName: string
+  datasetId: string
+  expectedSha256: string
+  actualSha256: string | null
+  expectedBytes: number
+  actualBytes: number | null
+  checksumMatch: boolean
+  byteLengthMatch: boolean
+  versionId?: string | null
+}

@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+from data_connector.adapters.import_config_validators import APPEND_MERGE_IMPORT_MODES, TABLE_IMPORT_MODES
 from shared.config.settings import get_settings
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
@@ -19,7 +20,7 @@ from shared.utils.schema_hash import compute_schema_hash
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_IMPORT_MODES = {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC"}
+_SUPPORTED_IMPORT_MODES = TABLE_IMPORT_MODES
 
 
 def _row_hash(row: List[Any]) -> str:
@@ -300,7 +301,7 @@ class ConnectorIngestService:
 
         mode = str(import_mode or "SNAPSHOT").strip().upper()
         if mode not in _SUPPORTED_IMPORT_MODES:
-            raise ValueError("import_mode must be one of SNAPSHOT|APPEND|UPDATE|INCREMENTAL|CDC")
+            raise ValueError("import_mode must be one of SNAPSHOT|APPEND|UPDATE|INCREMENTAL|CDC|STREAMING")
 
         branch_name = str(branch or "main").strip() or "main"
         source_ref_value = str(source_ref or f"{source_type}:{source_id}").strip()
@@ -340,7 +341,7 @@ class ConnectorIngestService:
         final_rows = list(incoming_rows)
 
         repository = _resolve_raw_repo()
-        if mode in {"APPEND", "UPDATE", "INCREMENTAL", "CDC"}:
+        if mode in APPEND_MERGE_IMPORT_MODES or mode == "UPDATE":
             existing_columns, existing_rows = await self._load_existing_csv(dataset=dataset, repository=repository)
             if mode == "UPDATE":
                 final_columns, final_rows = _apply_update_mode(

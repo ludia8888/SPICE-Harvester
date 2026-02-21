@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -107,8 +108,11 @@ class AuditLogStore(PostgresSchemaRegistry):
 
     @staticmethod
     def _coerce_metadata(value: Any) -> Dict[str, Any]:
-        if isinstance(value, dict):
-            return dict(value)
+        if isinstance(value, Mapping):
+            try:
+                return {str(key): item for key, item in value.items()}
+            except Exception:
+                return {}
         if isinstance(value, str):
             raw = value.strip()
             if not raw:

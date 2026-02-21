@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
-import { useAppStore } from '../src/state/store'
+import { useAppStore } from '../src/store/useAppStore'
 
 export const createTestQueryClient = () =>
   new QueryClient({
@@ -24,7 +24,13 @@ export const renderWithClient = (ui: ReactElement, options?: { client?: QueryCli
 
 export const resetAppStore = () => {
   useAppStore.setState({
-    activeNav: 'home',
-    pipelineContext: null,
+    context: { project: null, branch: 'main', language: 'ko' },
+    theme: 'light',
+    adminToken: '',
+    rememberToken: false,
+    adminMode: false,
+    settingsOpen: false,
+    inspector: null,
+    commands: {},
   })
 }

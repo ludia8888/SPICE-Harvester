@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,7 +22,12 @@ from bff.routers.pipeline_deps import (
     get_pipeline_job_queue,
     get_pipeline_registry,
 )
-from shared.dependencies.providers import get_audit_log_store, get_lineage_store
+from shared.models.background_task import BackgroundTask, TaskResult, TaskStatus
+from shared.dependencies.providers import (
+    get_audit_log_store,
+    get_background_task_manager,
+    get_lineage_store,
+)
 
 
 def _param_names(schema: dict, *, path: str, method: str) -> list[str]:
@@ -51,6 +57,8 @@ def test_foundry_platform_v2_paths_exist_in_openapi():
         "/api/v2/connectivity/connections/getConfigurationBatch",
         "/api/v2/connectivity/connections/{connectionRid}/updateSecrets",
         "/api/v2/connectivity/connections/{connectionRid}/updateExportSettings",
+        "/api/v2/connectivity/connections/{connectionRid}/exportRuns",
+        "/api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}",
         "/api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports",
         "/api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}",
@@ -347,6 +355,113 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_foundry_connectivity_table_import_create_accepts_streaming_mode_when_cdc_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-stream"): SimpleNamespace(
+                    source_id="conn-stream",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "PG", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                )
+            }
+            self.mappings: dict[tuple[str, str], Any] = {}
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            source = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=None,
+                updated_at=None,
+            )
+            self.sources[(source_type, source_id)] = source
+            return source
+
+        async def upsert_mapping(self, **kwargs: Any):  # noqa: ANN401
+            mapping = SimpleNamespace(
+                target_db_name=kwargs.get("target_db_name"),
+                target_branch=kwargs.get("target_branch"),
+                target_class_label=kwargs.get("target_class_label"),
+                enabled=kwargs.get("enabled"),
+                status=kwargs.get("status"),
+                field_mappings=[],
+            )
+            key = (str(kwargs.get("source_type") or ""), str(kwargs.get("source_id") or ""))
+            self.mappings[key] = mapping
+            return mapping
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.mappings.get((source_type, source_id))
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            _ = enabled, limit
+            return [v for (kind, _), v in self.sources.items() if kind == source_type]
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-stream/tableImports",
+            params={"preview": "true"},
+            json={
+                "displayName": "orders-stream",
+                "importMode": "STREAMING",
+                "destination": {"ontology": "sales_db", "branchName": "main", "objectType": "Order"},
+                "config": {
+                    "type": "postgreSqlImportConfig",
+                    "query": "SELECT * FROM orders",
+                    "watermarkColumn": "updated_at",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["importMode"] == "STREAMING"
+    table_import_id = payload["rid"].split(".")[-1]
+    source = registry.sources.get(("postgresql_table_import", table_import_id))
+    assert source is not None
+    assert source.config_json.get("import_mode") == "STREAMING"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -500,6 +615,182 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
 
     assert delete_resp.status_code == 204
     assert ("google_sheets", "sheet-123") not in registry.sources
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connectivity_export_runs_create_get_and_list():
+    now = datetime.now(timezone.utc)
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("google_sheets_connection", "conn-1"): SimpleNamespace(
+                    source_id="conn-1",
+                    source_type="google_sheets_connection",
+                    enabled=True,
+                    config_json={
+                        "display_name": "Sheets Conn",
+                        "export_settings": {"exportsEnabled": True, "exportEnabledWithoutMarkingsValidation": False},
+                    },
+                    created_at=now,
+                    updated_at=now,
+                )
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def list_sources(self, *, source_type: str, enabled: bool, limit: int):  # noqa: ANN001
+            _ = enabled, limit
+            return [value for (kind, _), value in self.sources.items() if kind == source_type]
+
+    class _TaskManager:
+        def __init__(self) -> None:
+            self.tasks: dict[str, BackgroundTask] = {}
+
+        async def create_task(self, func, *args, **kwargs):  # noqa: ANN001, ANN003
+            task_id = str(kwargs.pop("task_id"))
+            task_name = str(kwargs.pop("task_name", "connectivity export"))
+            task_type = str(kwargs.pop("task_type", "connectivity_export_run"))
+            metadata = kwargs.pop("metadata", {}) or {}
+            _ = kwargs.pop("priority", None)
+            kwargs.setdefault("task_id", task_id)
+            result = await func(*args, **kwargs)
+            task = BackgroundTask(
+                task_id=task_id,
+                task_name=task_name,
+                task_type=task_type,
+                status=TaskStatus.COMPLETED,
+                created_at=now,
+                started_at=now,
+                completed_at=now,
+                metadata=dict(metadata),
+                result=TaskResult(success=True, data=result, message="ok"),
+            )
+            self.tasks[task_id] = task
+            return task_id
+
+        async def get_task_status(self, task_id: str):
+            return self.tasks.get(task_id)
+
+        async def get_all_tasks(self, status=None, task_type=None, limit: int = 100):  # noqa: ANN001, ANN003
+            _ = status, limit
+            if not task_type:
+                return list(self.tasks.values())
+            return [task for task in self.tasks.values() if task.task_type == task_type]
+
+    class _AuditStore:
+        async def log(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return uuid.uuid4()
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    task_manager = _TaskManager()
+    app.dependency_overrides[get_background_task_manager] = lambda: task_manager
+    app.dependency_overrides[get_audit_log_store] = lambda: _AuditStore()
+
+    base = "/api/v2/connectivity/connections/ri.spice.main.connection.conn-1/exportRuns"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            base,
+            params={"preview": "true"},
+            json={
+                "targetUrl": "https://example.com/webhook",
+                "method": "POST",
+                "dryRun": True,
+                "payload": {"hello": "world"},
+            },
+        )
+
+        assert create_resp.status_code == 202
+        created_payload = create_resp.json()
+        run_rid = str(created_payload["rid"])
+        assert run_rid.startswith("ri.spice.main.export-run.")
+        assert created_payload["connectionRid"] == "ri.spice.main.connection.conn-1"
+        assert created_payload["status"] in {"SUCCEEDED", "QUEUED", "RUNNING"}
+        assert created_payload.get("writebackStatus") in {"SKIPPED", "SUCCEEDED"}
+
+        get_resp = await client.get(
+            f"{base}/{run_rid}",
+            params={"preview": "true"},
+        )
+        assert get_resp.status_code == 200
+        get_payload = get_resp.json()
+        assert get_payload["rid"] == run_rid
+        assert get_payload["status"] == "SUCCEEDED"
+        assert get_payload.get("auditLogId")
+
+        list_resp = await client.get(base, params={"preview": "true", "pageSize": "50"})
+        assert list_resp.status_code == 200
+        list_payload = list_resp.json()
+        assert isinstance(list_payload.get("data"), list)
+        assert any(item.get("rid") == run_rid for item in list_payload["data"])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_connectivity_export_run_requires_markings_when_enforced():
+    now = datetime.now(timezone.utc)
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("google_sheets_connection", "conn-guard"): SimpleNamespace(
+                    source_id="conn-guard",
+                    source_type="google_sheets_connection",
+                    enabled=True,
+                    config_json={
+                        "display_name": "Sheets Conn",
+                        "export_settings": {
+                            "exportsEnabled": True,
+                            "exportEnabledWithoutMarkingsValidation": False,
+                        },
+                    },
+                    created_at=now,
+                    updated_at=now,
+                )
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+    class _TaskManager:
+        async def create_task(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("task manager must not be invoked when markings guard blocks request")
+
+        async def get_task_status(self, _task_id: str):
+            return None
+
+    class _AuditStore:
+        async def log(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return uuid.uuid4()
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_background_task_manager] = lambda: _TaskManager()
+    app.dependency_overrides[get_audit_log_store] = lambda: _AuditStore()
+
+    base = "/api/v2/connectivity/connections/ri.spice.main.connection.conn-guard/exportRuns"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        blocked_resp = await client.post(
+            base,
+            params={"preview": "true"},
+            json={
+                "targetUrl": "https://example.com/webhook",
+                "method": "POST",
+                "dryRun": False,
+                "payload": {"hello": "world"},
+            },
+        )
+
+    assert blocked_resp.status_code == 409
+    blocked_payload = blocked_resp.json()
+    assert blocked_payload["errorName"] == "ExportMarkingsRequired"
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +1056,7 @@ async def test_foundry_connection_create_get_list_delete():
                     "accountEmail": "test@example.com",
                 },
                 "parentFolderRid": "ri.compass.main.folder.connectivity",
+                "markings": ["qa.internal", "pii.none"],
                 "exportSettings": {
                     "exportsEnabled": True,
                     "exportEnabledWithoutMarkingsValidation": False,
@@ -777,6 +1069,7 @@ async def test_foundry_connection_create_get_list_delete():
         assert conn_body["rid"].startswith("ri.spice.main.connection.")
         assert conn_body["status"] == "CONNECTED"
         assert conn_body["parentFolderRid"] == "ri.compass.main.folder.connectivity"
+        assert conn_body["markings"] == ["qa.internal", "pii.none"]
         assert conn_body["exportSettings"]["exportsEnabled"] is True
         assert conn_body["exportSettings"]["exportEnabledWithoutMarkingsValidation"] is False
         assert conn_body["connectionConfiguration"]["type"] == "GoogleSheetsConnectionConfig"
@@ -792,6 +1085,7 @@ async def test_foundry_connection_create_get_list_delete():
         assert get_resp.status_code == 200
         assert get_resp.json()["rid"] == connection_rid
         assert get_resp.json()["displayName"] == "My Google Sheets Connection"
+        assert get_resp.json()["markings"] == ["qa.internal", "pii.none"]
         assert get_resp.json()["connectionConfiguration"]["accountEmail"] == "test@example.com"
         assert get_resp.json()["configuration"]["accountEmail"] == "test@example.com"
 
@@ -801,6 +1095,7 @@ async def test_foundry_connection_create_get_list_delete():
         list_body = list_resp.json()
         assert len(list_body["data"]) == 1
         assert list_body["data"][0]["rid"] == connection_rid
+        assert list_body["data"][0]["markings"] == ["qa.internal", "pii.none"]
         assert list_body["data"][0]["connectionConfiguration"]["accountEmail"] == "test@example.com"
         assert list_body["data"][0]["configuration"]["accountEmail"] == "test@example.com"
 

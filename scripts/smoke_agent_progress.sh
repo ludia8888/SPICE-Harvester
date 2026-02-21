@@ -5,7 +5,7 @@ HOST="${HOST:-127.0.0.1}"
 BFF_URL="${BFF_URL:-http://${HOST}:8002}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 INSTANCE_COUNT="${INSTANCE_COUNT:-25}"
-DB_NAME="${DB_NAME:-agent_progress_smoke}"
+DB_NAME="${DB_NAME:-agent_progress_smoke_$(date +%Y%m%d%H%M%S)}"
 BASE_CLASS_ID="${CLASS_ID:-SmokeItem_$(date +%Y%m%d%H%M%S)}"
 PK_FIELDS="${PK_FIELDS:-}"
 BRANCH="${BRANCH:-main}"
@@ -56,7 +56,8 @@ truthy() {
 cleanup() {
   rm -rf "${tmp_dir}"
   if truthy "${CLEANUP_OBJECT_STORE}" && [[ -f "${SCRIPT_DIR}/dev_cleanup_object_store.py" ]]; then
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/dev_cleanup_object_store.py" --yes --db "${DB_NAME}" --quiet || true
+    PYTHONPATH="${SCRIPT_DIR}/../backend:${PYTHONPATH:-}" \
+      "${PYTHON_BIN}" "${SCRIPT_DIR}/dev_cleanup_object_store.py" --yes --db "${DB_NAME}" --quiet || true
   fi
 }
 trap cleanup EXIT
@@ -87,6 +88,20 @@ wait_for_command() {
   return 1
 }
 
+wait_for_database() {
+  for ((i=1; i<=RETRIES; i++)); do
+    if curl -sS -X GET "${BFF_URL}/api/v1/databases/${DB_NAME}" "${auth_headers[@]}" \
+      | jq -e '
+          (.data.data.exists // .data.exists // .exists // false) == true
+        ' >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${SLEEP_SECONDS}"
+  done
+  echo "Timed out waiting for database visibility: ${DB_NAME}" >&2
+  return 1
+}
+
 echo "Creating database: ${DB_NAME}"
 "${PYTHON_BIN}" - <<'PY' > "${tmp_dir}/db.json"
 import json
@@ -114,6 +129,8 @@ elif [[ "${db_code}" != "200" && "${db_code}" != "201" && "${db_code}" != "409" 
   cat "${tmp_dir}/db_resp.json" >&2
   exit 1
 fi
+
+wait_for_database
 
 for pk_field_raw in "${pk_field_list[@]}"; do
   pk_field="$(printf '%s' "${pk_field_raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -196,89 +213,48 @@ PY
     exit 1
   fi
 
-  echo "Starting agent run for bulk-create..."
-  "${PYTHON_BIN}" - <<'PY' > "${tmp_dir}/run.json"
+  echo "Submitting async bulk-create command..."
+  "${PYTHON_BIN}" - <<'PY' > "${tmp_dir}/bulk_create.json"
 import json
 import os
 count = int(os.environ["INSTANCE_COUNT"])
-db_name = os.environ["DB_NAME"]
-class_id = os.environ["CLASS_ID"]
 pk_field = os.environ["PK_FIELD"]
 instances = [
     {pk_field: f"item_{idx:04d}", "name": f"Item {idx}"}
     for idx in range(1, count + 1)
 ]
 payload = {
-    "goal": "agent progress smoke",
-    "steps": [
-        {
-            "service": "bff",
-            "method": "POST",
-            "path": f"/api/v1/databases/{db_name}/instances/{class_id}/bulk-create",
-            "body": {
-                "instances": instances,
-                "metadata": {"source": "agent_progress_smoke"},
-            },
-        }
-    ],
-    "context": {"risk_level": "write"},
+    "instances": instances,
+    "metadata": {"source": "agent_progress_smoke"},
 }
 print(json.dumps(payload))
 PY
 
-  run_resp="$(curl -sS -X POST "${BFF_URL}/api/v1/agent/runs" \
+  bulk_code="$(curl -sS -o "${tmp_dir}/bulk_create_resp.json" -w "%{http_code}" \
+    -X POST "${BFF_URL}/api/v1/databases/${DB_NAME}/instances/${CLASS_ID}/bulk-create?branch=${BRANCH}" \
     "${auth_headers[@]}" \
-    --data-binary @"${tmp_dir}/run.json")"
-  run_id="$(echo "${run_resp}" | jq -r '.data.run_id // empty')"
+    --data-binary @"${tmp_dir}/bulk_create.json")"
 
-  if [[ -z "${run_id}" ]]; then
-    echo "Failed to parse run_id from: ${run_resp}" >&2
+  if [[ "${bulk_code}" != "200" && "${bulk_code}" != "202" ]]; then
+    echo "Bulk-create submit failed (status=${bulk_code}):" >&2
+    cat "${tmp_dir}/bulk_create_resp.json" >&2
     exit 1
   fi
 
-  echo "RUN_ID=${run_id}"
-
-  progress_updates=0
-  last_progress=""
-  final_status=""
-  command_id=""
-
-  for ((i=1; i<=RETRIES; i++)); do
-    run_status="$(curl -sS -X GET "${BFF_URL}/api/v1/agent/runs/${run_id}" "${auth_headers[@]}")"
-    final_status="$(echo "${run_status}" | jq -r '.data.status // empty')"
-    progress="$(echo "${run_status}" | jq -r '.data.progress.progress.percentage // empty')"
-    progress_message="$(echo "${run_status}" | jq -r '.data.progress.progress.message // empty')"
-    command_id="$(echo "${run_status}" | jq -r '.data.progress.command_id // empty')"
-
-    if [[ -n "${progress}" && "${progress}" != "${last_progress}" ]]; then
-      progress_updates=$((progress_updates + 1))
-      last_progress="${progress}"
-      if [[ -n "${progress_message}" ]]; then
-        echo "progress: ${progress}% (${progress_message})"
-      else
-        echo "progress: ${progress}%"
-      fi
-    fi
-
-    if [[ "${final_status}" == "completed" || "${final_status}" == "failed" ]]; then
-      echo "agent run status=${final_status}"
-      break
-    fi
-    sleep "${SLEEP_SECONDS}"
-  done
-
-  if [[ "${final_status}" != "completed" ]]; then
-    echo "Agent run did not complete (status=${final_status})" >&2
+  command_id="$(jq -r '.command_id // .commandId // .data.command_id // .data.commandId // empty' \
+    "${tmp_dir}/bulk_create_resp.json")"
+  if [[ -z "${command_id}" ]]; then
+    echo "Missing command_id in bulk-create response:" >&2
+    cat "${tmp_dir}/bulk_create_resp.json" >&2
     exit 1
   fi
 
-  if [[ "${progress_updates}" -lt 1 ]]; then
-    echo "No progress updates observed from agent run" >&2
+  wait_for_command "${command_id}"
+  final_status="$(curl -sS -X GET "${BFF_URL}/api/v1/commands/${command_id}/status" "${auth_headers[@]}" \
+    | jq -r '.status // .data.status // empty')"
+  if [[ "${final_status}" != "COMPLETED" ]]; then
+    echo "Bulk-create command did not complete successfully (status=${final_status})" >&2
     exit 1
-  fi
-
-  if [[ -n "${command_id}" ]]; then
-    wait_for_command "${command_id}"
   fi
 done
 

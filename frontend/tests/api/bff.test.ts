@@ -1,10 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const makeResponse = (payload: unknown, ok = true) => ({
-  ok,
-  statusText: 'Bad Request',
+const makeJsonResponse = (
+  payload: unknown,
+  options?: {
+    ok?: boolean
+    status?: number
+    statusText?: string
+    headers?: Record<string, string>
+  },
+) => ({
+  ok: options?.ok ?? true,
+  status: options?.status ?? 200,
+  statusText: options?.statusText ?? 'OK',
+  headers: new Headers(options?.headers),
   json: () => Promise.resolve(payload),
 })
+
+const defaultContext = {
+  language: 'ko' as const,
+  adminToken: 'admin-token',
+  adminActor: 'qa-bot',
+}
 
 const loadModule = async (env?: Record<string, string | undefined>) => {
   vi.resetModules()
@@ -31,151 +47,223 @@ describe('bff api helpers', () => {
     vi.resetAllMocks()
   })
 
-  it('builds urls from the base and attaches auth headers', async () => {
-    const { listDatabases } = await loadModule({
+  it('listDatabasesCtx uses RequestContext headers and lang query', async () => {
+    const { listDatabasesCtx } = await loadModule({
       VITE_API_BASE_URL: 'http://example.com/api/v1',
-      VITE_BFF_TOKEN: 'token',
-      VITE_USER_JWT: 'user.jwt.token',
-      VITE_USER_ID: 'user-1',
-      VITE_USER_NAME: 'User One',
     })
 
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(makeResponse({ status: 'success', data: { databases: [] } }))
-
-    await listDatabases()
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://example.com/api/v1/databases',
-      expect.objectContaining({
-        headers: expect.any(Headers),
-      }),
-    )
-
-    const headers = fetchMock.mock.calls[0][1]?.headers as Headers
-    expect(headers.get('X-Admin-Token')).toBe('token')
-    expect(headers.get('X-Delegated-Authorization')).toBe('Bearer user.jwt.token')
-    expect(headers.get('X-User-ID')).toBe('user-1')
-    expect(headers.get('X-User-Name')).toBe('User One')
-  })
-
-  it('throws when requests fail', async () => {
-    const { deleteDatabase } = await loadModule()
-    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(makeResponse({ message: 'nope' }, false))
-
-    await expect(deleteDatabase('core')).rejects.toThrow('nope')
-  })
-
-  it('uploads datasets and injects idempotency keys', async () => {
-    vi.stubGlobal('crypto', { randomUUID: () => 'uuid-123' })
-    const { uploadDataset } = await loadModule()
-    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     fetchMock.mockResolvedValue(
-      makeResponse({
-        status: 'success',
+      makeJsonResponse({
         data: {
-          dataset: { dataset_id: 'ds-1', name: 'orders' },
-          ingest_request_id: 'ingest-1',
-          schema_status: 'PENDING',
+          databases: [{ name: 'core' }],
         },
       }),
     )
 
-    const file = new File(['id,name\n1,A'], 'orders.csv', { type: 'text/csv' })
-    const result = await uploadDataset({ dbName: 'core', file, mode: 'structured' })
+    const result = await listDatabasesCtx(defaultContext)
+    expect(result).toEqual(['core'])
 
-    expect(result.dataset.dataset_id).toBe('ds-1')
-    expect(result.schema_status).toBe('PENDING')
-    const headers = fetchMock.mock.calls[0][1]?.headers as Headers
-    expect(headers.get('Idempotency-Key')).toBe('uuid-123')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://example.com/api/v1/databases?lang=ko')
+    const headers = init.headers as Headers
+    expect(headers.get('Accept-Language')).toBe('ko')
+    expect(headers.get('X-Admin-Token')).toBe('admin-token')
+    expect(headers.get('X-Admin-Actor')).toBe('qa-bot')
   })
 
-  it('supports media uploads', async () => {
-    const { uploadDataset } = await loadModule()
+  it('createDatasetV2 hits v2 endpoint and sends project headers', async () => {
+    const { createDatasetV2 } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
+
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     fetchMock.mockResolvedValue(
-      makeResponse({
-        status: 'success',
-        data: { dataset: { dataset_id: 'media-1', name: 'files' } },
+      makeJsonResponse({
+        rid: 'ri.dataset.orders',
+        name: 'orders',
       }),
     )
 
-    const file = new File(['blob'], 'image.png', { type: 'image/png' })
-    await uploadDataset({ dbName: 'core', file, mode: 'media' })
+    await createDatasetV2(defaultContext, { dbName: 'core', name: 'orders' })
 
-    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/pipelines/datasets/media-upload')
-  })
-
-  it('approves dataset schema with project headers', async () => {
-    const { approveDatasetSchema } = await loadModule()
-    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(
-      makeResponse({
-        status: 'success',
-        data: {
-          dataset: { dataset_id: 'ds-1', name: 'orders' },
-          ingest_request: { ingest_request_id: 'ingest-1', schema_status: 'APPROVED' },
-        },
-      }),
-    )
-
-    await approveDatasetSchema({ ingestRequestId: 'ingest-1', dbName: 'core' })
-
-    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/pipelines/datasets/ingest-requests/ingest-1/schema/approve')
-    const headers = fetchMock.mock.calls[0][1]?.headers as Headers
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('http://example.com/api/v2/datasets?lang=ko')
+    const headers = init.headers as Headers
     expect(headers.get('X-DB-Name')).toBe('core')
     expect(headers.get('X-Project')).toBe('core')
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: 'orders',
+      description: undefined,
+      branchName: 'main',
+      parentFolderRid: 'ri.spice.main.folder.core',
+    })
   })
 
-  it('calls dataset and pipeline endpoints with project headers', async () => {
-    const {
-      listDatasets,
-      listPipelines,
-      listPipelineArtifacts,
-      getPipelineReadiness,
-      getPipeline,
-      updatePipeline,
-      submitPipelineProposal,
-      deployPipeline,
-      createPipeline,
-      createDatabase,
-    } = await loadModule()
+  it('listConnectionsV2 keeps preview mode and clamps pageSize', async () => {
+    const { listConnectionsV2 } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
+
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValue(makeJsonResponse({ data: [] }))
+
+    await listConnectionsV2(defaultContext, { dbName: 'core', pageSize: 2000 })
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    const parsed = new URL(url)
+    expect(parsed.origin).toBe('http://example.com')
+    expect(parsed.pathname).toBe('/api/v2/connectivity/connections')
+    expect(parsed.searchParams.get('preview')).toBe('true')
+    expect(parsed.searchParams.get('pageSize')).toBe('500')
+    expect(parsed.searchParams.get('lang')).toBe('ko')
+  })
+
+  it('listActionTypesV2 normalizes nested actionTypes payload', async () => {
+    const { listActionTypesV2 } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
+
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValue(
+      makeJsonResponse({
+        data: {
+          actionTypes: [{ apiName: 'HoldOrder', displayName: 'Hold Order' }],
+          nextPageToken: 'token-1',
+        },
+      }),
+    )
+
+    const result = await listActionTypesV2(defaultContext, 'core')
+    expect(result).toEqual({
+      data: [{ apiName: 'HoldOrder', displayName: 'Hold Order' }],
+      nextPageToken: 'token-1',
+    })
+  })
+
+  it('applyActionV2 normalizes audit and writeback evidence fields', async () => {
+    const { applyActionV2 } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
+
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValue(
+      makeJsonResponse({
+        data: {
+          command_id: 'cmd-123',
+          sideEffectDelivery: { provider: 'webhook', status: 'delivered' },
+        },
+      }),
+    )
+
+    const response = await applyActionV2(
+      defaultContext,
+      'core',
+      'HoldOrder',
+      { parameters: { orderId: 'o-1' } },
+      { branch: 'main' },
+    )
+
+    expect(response.auditLogId).toBe('cmd-123')
+    expect(response.action_log_id).toBe('cmd-123')
+    expect(response.writebackStatus).toBe('confirmed')
+    expect(response.sideEffectDelivery).toEqual({ provider: 'webhook', status: 'delivered' })
+  })
+
+  it('access policy helpers use v1 contract and parse envelope', async () => {
+    const { upsertAccessPolicyV1, listAccessPoliciesV1 } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
 
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     fetchMock
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { datasets: [] } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { pipelines: [] } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { artifacts: [] } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { status: 'READY', inputs: [] } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { pipeline: { pipeline_id: 'p-1' } } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { pipeline: { pipeline_id: 'p-1' } } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { proposal: { id: 'prop-1' } } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { status: 'ok' } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { pipeline: { pipeline_id: 'p-2' } } }))
-      .mockResolvedValueOnce(makeResponse({ status: 'success', data: { name: 'core' } }))
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'success',
+          data: {
+            access_policy: {
+              policy_id: 'policy-1',
+              db_name: 'core',
+              subject_type: 'role',
+              subject_id: 'ops',
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'success',
+          data: {
+            access_policies: [{ policy_id: 'policy-1', status: 'active' }],
+          },
+        }),
+      )
 
-    await listDatasets('core')
-    await listPipelines('core')
-    await listPipelineArtifacts('pipe-1', { mode: 'build', limit: 10, dbName: 'core' })
-    await getPipelineReadiness('pipe-1', { branch: 'main', dbName: 'core' })
-    await getPipeline('pipe-1', { branch: 'main', previewNodeId: 'node-1', dbName: 'core' })
-    await updatePipeline('pipe-1', { definition_json: { nodes: [] }, dbName: 'core' })
-    await submitPipelineProposal('pipe-1', { title: 'Proposal', dbName: 'core' })
-    await deployPipeline('pipe-1', { promoteBuild: true, dbName: 'core' })
-    await createPipeline({ dbName: 'core', name: 'pipeline', pipelineType: 'batch' })
-    await createDatabase('core')
+    const upserted = await upsertAccessPolicyV1(defaultContext, {
+      db_name: 'core',
+      scope: 'project',
+      subject_type: 'role',
+      subject_id: 'ops',
+      policy: { allow: ['action.apply'] },
+    })
+    expect(upserted.policy_id).toBe('policy-1')
 
-    const headers = fetchMock.mock.calls[0][1]?.headers as Headers
-    expect(headers.get('X-DB-Name')).toBe('core')
-    expect(headers.get('X-Project')).toBe('core')
+    const listed = await listAccessPoliciesV1(defaultContext, {
+      db_name: 'core',
+      subject_type: 'role',
+      subject_id: 'ops',
+    })
+    expect(listed).toEqual([{ policy_id: 'policy-1', status: 'active' }])
+
+    const firstCallUrl = new URL((fetchMock.mock.calls[0] as [string])[0])
+    expect(firstCallUrl.pathname).toBe('/api/v1/access-policies')
+    expect(firstCallUrl.searchParams.get('lang')).toBe('ko')
+    const secondCallUrl = new URL((fetchMock.mock.calls[1] as [string])[0])
+    expect(secondCallUrl.searchParams.get('db_name')).toBe('core')
+    expect(secondCallUrl.searchParams.get('subject_type')).toBe('role')
+    expect(secondCallUrl.searchParams.get('subject_id')).toBe('ops')
   })
 
-  it('rejects unsupported structured uploads', async () => {
-    const { uploadDataset } = await loadModule()
-    const file = new File(['data'], 'notes.txt', { type: 'text/plain' })
-    await expect(uploadDataset({ dbName: 'core', file, mode: 'structured' })).rejects.toThrow(
-      'Only .csv, .xls, .xlsx, or .xlsm files are supported for structured uploads.',
+  it('throws HttpError with retryAfter and opens settings on 503', async () => {
+    const { listDatabasesCtx, HttpError } = await loadModule({
+      VITE_API_BASE_URL: 'http://example.com/api/v1',
+    })
+    const { useAppStore } = await import('../../src/store/useAppStore')
+
+    const originalSetSettingsOpen = useAppStore.getState().setSettingsOpen
+    const setSettingsOpenSpy = vi.fn()
+    ;(useAppStore as unknown as { setState: (next: Partial<unknown>) => void }).setState({
+      setSettingsOpen: setSettingsOpenSpy,
+    })
+
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValue(
+      makeJsonResponse(
+        { detail: 'service unavailable' },
+        {
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Retry-After': '120' },
+        },
+      ),
     )
+
+    try {
+      await listDatabasesCtx(defaultContext)
+      throw new Error('expected error')
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError)
+      const httpError = error as InstanceType<typeof HttpError>
+      expect(httpError.status).toBe(503)
+      expect(httpError.retryAfter).toBe(120)
+    } finally {
+      ;(useAppStore as unknown as { setState: (next: Partial<unknown>) => void }).setState({
+        setSettingsOpen: originalSetSettingsOpen,
+      })
+    }
+
+    expect(setSettingsOpenSpy).toHaveBeenCalledWith(true)
   })
 })

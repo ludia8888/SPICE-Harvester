@@ -4,7 +4,10 @@ from typing import Any, Dict
 
 from data_connector.adapters.sql_query_guard import normalize_sql_query
 
-TABLE_IMPORT_MODES = {"SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC"}
+_TABLE_IMPORT_MODE_ORDER = ("SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC", "STREAMING")
+TABLE_IMPORT_MODES = frozenset(_TABLE_IMPORT_MODE_ORDER)
+CDC_COMPAT_IMPORT_MODES = frozenset({"CDC", "STREAMING"})
+APPEND_MERGE_IMPORT_MODES = frozenset({"APPEND", "INCREMENTAL", "CDC", "STREAMING"})
 FILE_IMPORT_SELECTOR_FIELDS = ("fileImportFilters", "path", "subfolder", "filePattern", "fileFormat")
 
 
@@ -15,7 +18,8 @@ def is_jdbc_connector_kind(connector_kind: str) -> bool:
 def normalize_import_mode(raw_mode: Any, *, mode_field_name: str = "importMode") -> str:
     mode = str(raw_mode or "SNAPSHOT").strip().upper()
     if mode not in TABLE_IMPORT_MODES:
-        raise ValueError(f"{mode_field_name} must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
+        allowed = ", ".join(_TABLE_IMPORT_MODE_ORDER)
+        raise ValueError(f"{mode_field_name} must be one of {allowed}")
     return mode
 
 
@@ -46,13 +50,13 @@ def validate_jdbc_mode_requirements(
         if not watermark:
             raise ValueError(f"{resource_label} watermarkColumn is required for INCREMENTAL mode")
         return
-    if import_mode == "CDC":
+    if import_mode in CDC_COMPAT_IMPORT_MODES:
         if cdc_query:
             return
         if not query:
-            raise ValueError(f"{resource_label} config.cdcQuery or config.query is required for CDC mode")
+            raise ValueError(f"{resource_label} config.cdcQuery or config.query is required for CDC/STREAMING mode")
         if not watermark:
-            raise ValueError(f"{resource_label} watermarkColumn is required for CDC mode without cdcQuery")
+            raise ValueError(f"{resource_label} watermarkColumn is required for CDC/STREAMING mode without cdcQuery")
 
 
 def validate_resource_import_config(

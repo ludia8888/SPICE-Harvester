@@ -11,11 +11,12 @@ from typing import Any, Dict
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
+from bff.routers.object_types_deps import get_dataset_registry, get_objectify_registry
 from bff.routers.link_types_read import (
     _extract_resources as _extract_link_resources,
     _normalize_object_ref,
@@ -27,7 +28,9 @@ from bff.routers.object_types import (
     _extract_resources as _extract_object_resources,
     _to_foundry_object_type,
 )
+from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.oms_client import OMSClient
+from bff.services import object_type_contract_service
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
@@ -35,7 +38,11 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
+from shared.utils.object_type_backing import list_backing_sources
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +64,21 @@ _FORWARDED_ACTOR_HEADER_KEYS = (
     "X-Actor",
     "X-User-Roles",
 )
+_ACTION_TYPE_RESOURCE_TYPE_ALIASES = {
+    "action_type",
+    "action_types",
+    "action-type",
+    "action-types",
+    "action",
+    "actions",
+}
+_ACTION_TYPE_SPEC_HINT_FIELDS = {
+    "input_schema",
+    "writeback_target",
+    "implementation",
+    "validation_rules",
+    "target_object_type",
+}
 
 
 class OntologyNotFoundError(Exception):
@@ -101,6 +123,124 @@ class BatchApplyActionRequestV2(BaseModel):
 class ExecuteQueryRequestV2(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     options: Dict[str, Any] | None = None
+
+
+class ObjectTypeContractCreateRequestV2(BaseModel):
+    apiName: str = Field(..., min_length=1)
+    status: str | None = None
+    primaryKey: str | None = None
+    titleProperty: str | None = None
+    pkSpec: Dict[str, Any] | None = None
+    backingSource: Dict[str, Any] | None = None
+    backingSources: list[Dict[str, Any]] | None = None
+    backingDatasetId: str | None = None
+    backingDatasourceId: str | None = None
+    backingDatasourceVersionId: str | None = None
+    datasetVersionId: str | None = None
+    schemaHash: str | None = None
+    mappingSpecId: str | None = None
+    mappingSpecVersion: int | None = None
+    autoGenerateMapping: bool | None = None
+    metadata: Dict[str, Any] | None = None
+
+
+class ObjectTypeContractUpdateRequestV2(BaseModel):
+    status: str | None = None
+    primaryKey: str | None = None
+    titleProperty: str | None = None
+    pkSpec: Dict[str, Any] | None = None
+    backingSource: Dict[str, Any] | None = None
+    backingSources: list[Dict[str, Any]] | None = None
+    backingDatasetId: str | None = None
+    backingDatasourceId: str | None = None
+    backingDatasourceVersionId: str | None = None
+    datasetVersionId: str | None = None
+    schemaHash: str | None = None
+    mappingSpecId: str | None = None
+    mappingSpecVersion: int | None = None
+    metadata: Dict[str, Any] | None = None
+    migration: Dict[str, Any] | None = None
+
+
+def _build_pk_spec_from_v2_payload(
+    *,
+    pk_spec: Dict[str, Any] | None,
+    primary_key: str | None,
+    title_property: str | None,
+) -> Dict[str, Any]:
+    if isinstance(pk_spec, dict) and pk_spec:
+        return pk_spec
+    normalized_primary = str(primary_key or "").strip()
+    normalized_title = str(title_property or "").strip()
+    if not normalized_primary and not normalized_title:
+        return {}
+    return {
+        "primary_key": [normalized_primary] if normalized_primary else [],
+        "title_key": [normalized_title] if normalized_title else [],
+    }
+
+
+def _build_backing_sources_from_v2_payload(
+    *,
+    backing_source: Dict[str, Any] | None,
+    backing_sources: list[Dict[str, Any]] | None,
+) -> list[Dict[str, Any]]:
+    return list_backing_sources(
+        {
+            "backing_source": backing_source if isinstance(backing_source, dict) else None,
+            "backing_sources": backing_sources if isinstance(backing_sources, list) else None,
+        }
+    )
+
+
+def _extract_api_response_data(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict):
+            return data
+        return payload
+    data = getattr(payload, "data", None)
+    if isinstance(data, dict):
+        return data
+    return {}
+
+
+def _service_http_error_response(
+    exc: HTTPException,
+    *,
+    ontology: str,
+    object_type: str | None = None,
+) -> JSONResponse:
+    status_code = int(getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR))
+    detail = getattr(exc, "detail", None)
+    message = str(exc)
+    if isinstance(detail, dict):
+        message = str(detail.get("message") or detail.get("detail") or detail.get("error") or message)
+    elif detail:
+        message = str(detail)
+
+    if status_code == status.HTTP_404_NOT_FOUND:
+        if object_type:
+            return _not_found_error("ObjectTypeNotFound", ontology=ontology, object_type=object_type)
+        return _not_found_error("OntologyNotFound", ontology=ontology)
+    if status_code == status.HTTP_403_FORBIDDEN:
+        return _permission_denied(ontology=ontology, message=message)
+
+    error_code = "INVALID_ARGUMENT" if 400 <= status_code < 500 else "INTERNAL"
+    error_name = "InvalidArgument" if 400 <= status_code < 500 else "Internal"
+    parameters = _error_parameters(
+        ontology=ontology,
+        object_type=object_type,
+        parameters={"message": message},
+    )
+    return _foundry_error(status_code, error_code=error_code, error_name=error_name, parameters=parameters)
+
+
+def _default_expected_head_commit(branch: str) -> str:
+    normalized = str(branch or "").strip() or "main"
+    if normalized.lower().startswith("branch:"):
+        return normalized
+    return f"branch:{normalized}"
 
 
 def _foundry_error(
@@ -1756,6 +1896,95 @@ def _list_or_none(value: Any) -> list[Any] | None:
     return list(value) if isinstance(value, list) else None
 
 
+def _first_non_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _extract_project_policy_inheritance(
+    *,
+    permission_policy: dict[str, Any] | None,
+    spec: dict[str, Any],
+) -> dict[str, Any] | None:
+    policy = permission_policy if isinstance(permission_policy, dict) else {}
+    inherit = _coerce_optional_bool(
+        _first_non_none(
+            policy.get("inherit_project_policy"),
+            policy.get("inheritProjectPolicy"),
+            spec.get("inherit_project_policy"),
+            spec.get("inheritProjectPolicy"),
+        ),
+        default=False,
+    )
+    if not inherit:
+        return None
+
+    scope = str(
+        _first_non_none(
+            policy.get("project_policy_scope"),
+            policy.get("projectPolicyScope"),
+            spec.get("project_policy_scope"),
+            spec.get("projectPolicyScope"),
+            "action_access",
+        )
+        or "action_access"
+    ).strip() or "action_access"
+    subject_type = str(
+        _first_non_none(
+            policy.get("project_policy_subject_type"),
+            policy.get("projectPolicySubjectType"),
+            spec.get("project_policy_subject_type"),
+            spec.get("projectPolicySubjectType"),
+            "project",
+        )
+        or "project"
+    ).strip() or "project"
+    subject_id = str(
+        _first_non_none(
+            policy.get("project_policy_subject_id"),
+            policy.get("projectPolicySubjectId"),
+            spec.get("project_policy_subject_id"),
+            spec.get("projectPolicySubjectId"),
+            "",
+        )
+        or ""
+    ).strip()
+    require_policy = _coerce_optional_bool(
+        _first_non_none(
+            policy.get("require_project_policy"),
+            policy.get("requireProjectPolicy"),
+            spec.get("require_project_policy"),
+            spec.get("requireProjectPolicy"),
+        ),
+        default=True,
+    )
+    out: dict[str, Any] = {
+        "enabled": True,
+        "scope": scope,
+        "subjectType": subject_type,
+        "requirePolicy": require_policy,
+    }
+    if subject_id:
+        out["subjectId"] = subject_id
+    return out
+
+
 def _to_foundry_action_type(resource: dict[str, Any]) -> dict[str, Any] | None:
     mapped = _to_foundry_named_metadata(resource)
     if mapped is None:
@@ -1783,6 +2012,117 @@ def _to_foundry_action_type(resource: dict[str, Any]) -> dict[str, Any] | None:
     )
     if tool_description:
         mapped["toolDescription"] = tool_description
+
+    permission_policy = (
+        _dict_or_none(resource.get("permissionPolicy"))
+        or _dict_or_none(resource.get("permission_policy"))
+        or _dict_or_none(spec.get("permission_policy"))
+        or _dict_or_none(spec.get("permissionPolicy"))
+        or _dict_or_none(metadata.get("permission_policy"))
+        or _dict_or_none(metadata.get("permissionPolicy"))
+    )
+    if permission_policy:
+        mapped["permissionPolicy"] = permission_policy
+
+    writeback_target = (
+        _dict_or_none(resource.get("writebackTarget"))
+        or _dict_or_none(resource.get("writeback_target"))
+        or _dict_or_none(spec.get("writeback_target"))
+        or _dict_or_none(spec.get("writebackTarget"))
+        or _dict_or_none(metadata.get("writeback_target"))
+        or _dict_or_none(metadata.get("writebackTarget"))
+    )
+    if writeback_target:
+        mapped["writebackTarget"] = writeback_target
+
+    conflict_policy = str(
+        _first_non_none(
+            resource.get("conflictPolicy"),
+            resource.get("conflict_policy"),
+            spec.get("conflict_policy"),
+            spec.get("conflictPolicy"),
+            metadata.get("conflict_policy"),
+            metadata.get("conflictPolicy"),
+            "",
+        )
+        or ""
+    ).strip()
+    if conflict_policy:
+        mapped["conflictPolicy"] = conflict_policy
+
+    target_object_type = str(
+        _first_non_none(
+            resource.get("targetObjectType"),
+            resource.get("target_object_type"),
+            spec.get("target_object_type"),
+            spec.get("targetObjectType"),
+            metadata.get("target_object_type"),
+            metadata.get("targetObjectType"),
+            "",
+        )
+        or ""
+    ).strip()
+    if target_object_type:
+        mapped["targetObjectType"] = target_object_type
+
+    validation_rules = (
+        _list_or_none(resource.get("validationRules"))
+        or _list_or_none(resource.get("validation_rules"))
+        or _list_or_none(spec.get("validation_rules"))
+        or _list_or_none(spec.get("validationRules"))
+        or _list_or_none(metadata.get("validation_rules"))
+        or _list_or_none(metadata.get("validationRules"))
+    )
+    if validation_rules:
+        mapped["validationRules"] = validation_rules
+
+    project_policy_inheritance = _extract_project_policy_inheritance(
+        permission_policy=permission_policy,
+        spec=spec,
+    )
+    if project_policy_inheritance:
+        mapped["projectPolicyInheritance"] = project_policy_inheritance
+
+    permission_model = "ontology_roles"
+    edits_beyond_actions = False
+    try:
+        profile = resolve_action_permission_profile(spec)
+        permission_model = profile.permission_model
+        edits_beyond_actions = profile.edits_beyond_actions
+    except ActionPermissionProfileError:
+        raw_permission_model = str(
+            _first_non_none(
+                spec.get("permission_model"),
+                spec.get("permissionModel"),
+                metadata.get("permission_model"),
+                metadata.get("permissionModel"),
+                "",
+            )
+            or ""
+        ).strip()
+        if raw_permission_model:
+            permission_model = raw_permission_model
+        edits_beyond_actions = _coerce_optional_bool(
+            _first_non_none(
+                spec.get("edits_beyond_actions"),
+                spec.get("editsBeyondActions"),
+                metadata.get("edits_beyond_actions"),
+                metadata.get("editsBeyondActions"),
+            ),
+            default=False,
+        )
+
+    mapped["permissionModel"] = permission_model
+    mapped["editsBeyondActions"] = edits_beyond_actions
+    dynamic_security: dict[str, Any] = {
+        "permissionModel": permission_model,
+        "editsBeyondActions": edits_beyond_actions,
+    }
+    if permission_policy:
+        dynamic_security["permissionPolicy"] = permission_policy
+    if project_policy_inheritance:
+        dynamic_security["projectPolicyInheritance"] = project_policy_inheritance
+    mapped["dynamicSecurity"] = dynamic_security
     return mapped
 
 
@@ -2407,7 +2747,7 @@ async def _list_all_resources_for_type(
     *,
     db_name: str,
     branch: str,
-    resource_type: str,
+    resource_type: str | None,
     oms_client: OMSClient,
     page_size: int = 500,
 ) -> list[dict[str, Any]]:
@@ -2432,6 +2772,91 @@ async def _list_all_resources_for_type(
     return rows
 
 
+def _looks_like_action_type_resource(resource: dict[str, Any]) -> bool:
+    if not isinstance(resource, dict):
+        return False
+    resource_type_raw = str(resource.get("resource_type") or resource.get("resourceType") or "").strip().lower()
+    if resource_type_raw in _ACTION_TYPE_RESOURCE_TYPE_ALIASES:
+        return True
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    return any(field in spec for field in _ACTION_TYPE_SPEC_HINT_FIELDS)
+
+
+async def _list_action_type_resources_with_fallback(
+    *,
+    db_name: str,
+    branch: str,
+    oms_client: OMSClient,
+) -> list[dict[str, Any]]:
+    rows = await _list_all_resources_for_type(
+        db_name=db_name,
+        branch=branch,
+        resource_type="action_type",
+        oms_client=oms_client,
+    )
+    if rows:
+        return rows
+    all_rows = await _list_all_resources_for_type(
+        db_name=db_name,
+        branch=branch,
+        resource_type=None,
+        oms_client=oms_client,
+    )
+    filtered = [row for row in all_rows if _looks_like_action_type_resource(row)]
+    deduped: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in filtered:
+        resource_id = str(row.get("id") or "").strip()
+        if resource_id and resource_id in seen_ids:
+            continue
+        if resource_id:
+            seen_ids.add(resource_id)
+        deduped.append(row)
+    return deduped
+
+
+async def _find_action_type_resource_by_id(
+    *,
+    db_name: str,
+    branch: str,
+    action_type: str,
+    oms_client: OMSClient,
+) -> dict[str, Any] | None:
+    normalized_action_type = str(action_type or "").strip()
+    if not normalized_action_type:
+        return None
+    rows = await _list_action_type_resources_with_fallback(
+        db_name=db_name,
+        branch=branch,
+        oms_client=oms_client,
+    )
+    for row in rows:
+        if str(row.get("id") or "").strip() == normalized_action_type:
+            return row
+    return None
+
+
+async def _find_action_type_resource_by_rid(
+    *,
+    db_name: str,
+    branch: str,
+    action_type_rid: str,
+    oms_client: OMSClient,
+) -> dict[str, Any] | None:
+    normalized_rid = str(action_type_rid or "").strip()
+    if not normalized_rid:
+        return None
+    rows = await _list_action_type_resources_with_fallback(
+        db_name=db_name,
+        branch=branch,
+        oms_client=oms_client,
+    )
+    for row in rows:
+        if str(row.get("rid") or "").strip() == normalized_rid:
+            return row
+    return None
+
+
 async def _list_resources_best_effort(
     *,
     db_name: str,
@@ -2452,6 +2877,28 @@ async def _list_resources_best_effort(
             db_name,
             branch,
             resource_type,
+            exc,
+        )
+        return []
+
+
+async def _list_action_type_resources_best_effort(
+    *,
+    db_name: str,
+    branch: str,
+    oms_client: OMSClient,
+) -> list[dict[str, Any]]:
+    try:
+        return await _list_action_type_resources_with_fallback(
+            db_name=db_name,
+            branch=branch,
+            oms_client=oms_client,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Failed to list action type resources for full metadata (%s/%s): %s",
+            db_name,
+            branch,
             exc,
         )
         return []
@@ -2632,10 +3079,9 @@ async def get_full_metadata_v2(
                 resource_type="link_type",
                 oms_client=oms_client,
             ),
-            _list_resources_best_effort(
+            _list_action_type_resources_best_effort(
                 db_name=db_name,
                 branch=branch,
-                resource_type="action_type",
                 oms_client=oms_client,
             ),
             _list_resources_best_effort(
@@ -2785,13 +3231,27 @@ async def list_action_types_v2(
             limit=page_size,
             offset=offset,
         )
-        resources = _extract_ontology_resource_rows(payload)
+        raw_resources = _extract_ontology_resource_rows(payload)
+        resources = raw_resources
+        total_available: int | None = None
+        if not resources:
+            fallback_resources = await _list_action_type_resources_with_fallback(
+                db_name=db_name,
+                branch=branch,
+                oms_client=oms_client,
+            )
+            total_available = len(fallback_resources)
+            resources = fallback_resources[offset : offset + page_size]
         data = [
             mapped
             for mapped in (_to_foundry_action_type(resource) for resource in resources)
             if mapped is not None
         ]
-        next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
+        if total_available is not None:
+            consumed = offset + len(resources)
+            next_page_token = _encode_page_token(consumed, scope=page_scope) if consumed < total_available else None
+        else:
+            next_page_token = _encode_page_token(offset + len(raw_resources), scope=page_scope) if len(raw_resources) == page_size else None
         return {"data": data, "nextPageToken": next_page_token}
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
@@ -2833,13 +3293,28 @@ async def get_action_type_v2(
         )
 
     try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="action_type",
-            resource_id=action_type,
-            branch=branch,
-        )
-        resource = _extract_ontology_resource(payload)
+        resource: dict[str, Any] | None = None
+        try:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="action_type",
+                resource_id=action_type,
+                branch=branch,
+            )
+            resource = _extract_ontology_resource(payload)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+            if status_code != status.HTTP_404_NOT_FOUND:
+                raise
+
+        if not resource:
+            resource = await _find_action_type_resource_by_id(
+                db_name=db_name,
+                branch=branch,
+                action_type=action_type,
+                oms_client=oms_client,
+            )
+
         if not resource:
             return _not_found_error(
                 "ActionTypeNotFound",
@@ -2911,6 +3386,13 @@ async def get_action_type_by_rid_v2(
             oms_client=oms_client,
         )
         if not resource:
+            resource = await _find_action_type_resource_by_rid(
+                db_name=db_name,
+                branch=branch,
+                action_type_rid=action_type_rid,
+                oms_client=oms_client,
+            )
+        if not resource:
             return _not_found_error(
                 "ActionTypeNotFound",
                 ontology=db_name,
@@ -2974,6 +3456,36 @@ def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict
     return results
 
 
+def _extract_action_audit_log_id(payload: Dict[str, Any], data_payload: Dict[str, Any]) -> str | None:
+    candidates = (
+        payload.get("auditLogId"),
+        payload.get("action_log_id"),
+        data_payload.get("auditLogId"),
+        data_payload.get("action_log_id"),
+        payload.get("command_id"),
+        data_payload.get("command_id"),
+    )
+    for raw_value in candidates:
+        text = str(raw_value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _normalize_action_writeback_status(
+    raw_status: Any,
+    *,
+    audit_log_id: str | None,
+    side_effect_delivery: Any,
+) -> str:
+    normalized = str(raw_status or "").strip().lower()
+    if normalized in {"confirmed", "missing", "not_configured"}:
+        return normalized
+    if audit_log_id or side_effect_delivery is not None:
+        return "confirmed"
+    return "not_configured"
+
+
 def _normalize_apply_action_response_payload(
     *,
     response: Any,
@@ -2984,6 +3496,10 @@ def _normalize_apply_action_response_payload(
         return {
             "validation": {"result": "VALID"},
             "parameters": fallback_parameters,
+            "auditLogId": None,
+            "action_log_id": None,
+            "sideEffectDelivery": None,
+            "writebackStatus": "not_configured",
         }
 
     normalized: Dict[str, Any] = dict(response)
@@ -3014,6 +3530,29 @@ def _normalize_apply_action_response_payload(
     normalized_validation["parameters"] = top_parameters
     normalized["validation"] = normalized_validation
     normalized["parameters"] = top_parameters
+    data_payload = normalized.get("data") if isinstance(normalized.get("data"), dict) else {}
+
+    audit_log_id = _extract_action_audit_log_id(normalized, data_payload)
+    side_effect_delivery = normalized.get("sideEffectDelivery")
+    if side_effect_delivery is None:
+        side_effect_delivery = data_payload.get("sideEffectDelivery")
+    writeback_status = _normalize_action_writeback_status(
+        normalized.get("writebackStatus") or data_payload.get("writebackStatus"),
+        audit_log_id=audit_log_id,
+        side_effect_delivery=side_effect_delivery,
+    )
+
+    normalized["auditLogId"] = audit_log_id
+    normalized["action_log_id"] = audit_log_id
+    normalized["sideEffectDelivery"] = side_effect_delivery
+    normalized["writebackStatus"] = writeback_status
+
+    if isinstance(data_payload, dict):
+        data_payload.setdefault("auditLogId", audit_log_id)
+        data_payload.setdefault("action_log_id", audit_log_id)
+        data_payload.setdefault("sideEffectDelivery", side_effect_delivery)
+        data_payload.setdefault("writebackStatus", writeback_status)
+        normalized["data"] = data_payload
     return normalized
 
 
@@ -3932,6 +4471,204 @@ async def list_object_types_v2(
             error_code="INTERNAL",
             error_name="Internal",
             parameters={"ontology": db_name},
+        )
+
+
+@router.post("/{ontology}/objectTypes")
+@trace_endpoint("bff.foundry_v2_ontology.create_object_type")
+async def create_object_type_v2(
+    ontology: str,
+    body: ObjectTypeContractCreateRequestV2,
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
+    oms_client: OMSClient = OMSClientDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        object_type = str(body.apiName or "").strip()
+        if not object_type:
+            raise ValueError("apiName is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(getattr(body, "apiName", "") or "")},
+        )
+
+    try:
+        payload = body.model_dump(exclude_unset=True)
+        resolved_expected_head_commit = (
+            str(expected_head_commit or "").strip() or _default_expected_head_commit(branch)
+        )
+        request_payload = ObjectTypeContractRequest(
+            class_id=object_type,
+            backing_dataset_id=payload.get("backingDatasetId"),
+            backing_datasource_id=payload.get("backingDatasourceId"),
+            backing_datasource_version_id=payload.get("backingDatasourceVersionId"),
+            backing_sources=_build_backing_sources_from_v2_payload(
+                backing_source=payload.get("backingSource"),
+                backing_sources=payload.get("backingSources"),
+            ),
+            dataset_version_id=payload.get("datasetVersionId"),
+            schema_hash=payload.get("schemaHash"),
+            pk_spec=_build_pk_spec_from_v2_payload(
+                pk_spec=payload.get("pkSpec"),
+                primary_key=payload.get("primaryKey"),
+                title_property=payload.get("titleProperty"),
+            ),
+            mapping_spec_id=payload.get("mappingSpecId"),
+            mapping_spec_version=payload.get("mappingSpecVersion"),
+            status=payload.get("status") or "ACTIVE",
+            auto_generate_mapping=bool(payload.get("autoGenerateMapping", False)),
+            metadata=payload.get("metadata") or {},
+        )
+        service_response = await object_type_contract_service.create_object_type_contract(
+            db_name=db_name,
+            body=request_payload,
+            request=request,
+            branch=branch,
+            expected_head_commit=resolved_expected_head_commit,
+            oms_client=oms_client,
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+        )
+        service_data = _extract_api_response_data(service_response)
+        resource = service_data.get("object_type") if isinstance(service_data.get("object_type"), dict) else {}
+        if not resource:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="object_type",
+                resource_id=object_type,
+                branch=branch,
+            )
+            resource = _extract_object_resource(payload)
+        ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
+        out = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
+        if not out.get("apiName"):
+            out["apiName"] = object_type
+        return out
+    except HTTPException as exc:
+        return _service_http_error_response(exc, ontology=db_name, object_type=object_type)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to create object type (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
+        )
+
+
+@router.patch("/{ontology}/objectTypes/{objectType}")
+@trace_endpoint("bff.foundry_v2_ontology.update_object_type")
+async def update_object_type_v2(
+    ontology: str,
+    objectType: str,
+    body: ObjectTypeContractUpdateRequestV2,
+    request: Request,
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
+    oms_client: OMSClient = OMSClientDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+):
+    try:
+        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = _validate_branch(branch)
+        object_type = str(objectType or "").strip()
+        if not object_type:
+            raise ValueError("objectType is required")
+        await _require_domain_role(request, db_name=db_name)
+    except Exception as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"objectType": str(objectType)},
+        )
+
+    try:
+        payload = body.model_dump(exclude_unset=True)
+        resolved_expected_head_commit = (
+            str(expected_head_commit or "").strip() or _default_expected_head_commit(branch)
+        )
+        update_payload: Dict[str, Any] = {}
+
+        if any(
+            key in payload
+            for key in ("primaryKey", "titleProperty", "pkSpec")
+        ):
+            update_payload["pk_spec"] = _build_pk_spec_from_v2_payload(
+                pk_spec=payload.get("pkSpec"),
+                primary_key=payload.get("primaryKey"),
+                title_property=payload.get("titleProperty"),
+            )
+        if any(
+            key in payload
+            for key in ("backingSource", "backingSources")
+        ):
+            update_payload["backing_sources"] = _build_backing_sources_from_v2_payload(
+                backing_source=payload.get("backingSource"),
+                backing_sources=payload.get("backingSources"),
+            )
+        if "backingDatasetId" in payload:
+            update_payload["backing_dataset_id"] = payload.get("backingDatasetId")
+        if "backingDatasourceId" in payload:
+            update_payload["backing_datasource_id"] = payload.get("backingDatasourceId")
+        if "backingDatasourceVersionId" in payload:
+            update_payload["backing_datasource_version_id"] = payload.get("backingDatasourceVersionId")
+        if "datasetVersionId" in payload:
+            update_payload["dataset_version_id"] = payload.get("datasetVersionId")
+        if "schemaHash" in payload:
+            update_payload["schema_hash"] = payload.get("schemaHash")
+        if "mappingSpecId" in payload:
+            update_payload["mapping_spec_id"] = payload.get("mappingSpecId")
+        if "mappingSpecVersion" in payload:
+            update_payload["mapping_spec_version"] = payload.get("mappingSpecVersion")
+        if "status" in payload:
+            update_payload["status"] = payload.get("status")
+        if "metadata" in payload:
+            update_payload["metadata"] = payload.get("metadata")
+        if "migration" in payload:
+            update_payload["migration"] = payload.get("migration")
+
+        service_response = await object_type_contract_service.update_object_type_contract(
+            db_name=db_name,
+            class_id=object_type,
+            body=ObjectTypeContractUpdate(**update_payload),
+            request=request,
+            branch=branch,
+            expected_head_commit=resolved_expected_head_commit,
+            oms_client=oms_client,
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+        )
+        service_data = _extract_api_response_data(service_response)
+        resource = service_data.get("object_type") if isinstance(service_data.get("object_type"), dict) else {}
+        if not resource:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="object_type",
+                resource_id=object_type,
+                branch=branch,
+            )
+            resource = _extract_object_resource(payload)
+        ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
+        out = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
+        if not out.get("apiName"):
+            out["apiName"] = object_type
+        return out
+    except HTTPException as exc:
+        return _service_http_error_response(exc, ontology=db_name, object_type=object_type)
+    except Exception as exc:
+        return _internal_error_response(
+            log_message="Failed to update object type (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"objectType": object_type},
         )
 
 

@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from bff.routers.pipeline_datasets_ops import (
+    _resolve_lakefs_raw_repository,
     _select_sample_row,
 )
 
@@ -70,6 +71,18 @@ async def get_dataset_raw_file(
 
         version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
         if not version or not version.artifact_key:
+            # Best-effort self-heal for cases where ingest reached RAW_COMMITTED but
+            # version publication lagged (or worker restarted between phases).
+            try:
+                await dataset_registry.reconcile_ingest_state(
+                    stale_after_seconds=60,
+                    limit=50,
+                    use_lock=False,
+                )
+                version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            except Exception as reconcile_exc:
+                logger.warning("Dataset ingest reconcile before raw-file lookup failed: %s", reconcile_exc)
+        if not version or not version.artifact_key:
             raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset version not found", code=ErrorCode.RESOURCE_NOT_FOUND)
 
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() if request else ""
@@ -100,9 +113,17 @@ async def get_dataset_raw_file(
             target_uri = str(version.artifact_key or "").strip()
 
         parsed_target = parse_s3_uri(target_uri)
-        if not parsed_target:
-            raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "artifact_key must be an s3:// URI", code=ErrorCode.REQUEST_VALIDATION_FAILED)
-        bucket, key = parsed_target
+        if parsed_target:
+            bucket, key = parsed_target
+        else:
+            if row and row.get("s3_uri"):
+                raise classified_http_exception(
+                    status.HTTP_400_BAD_REQUEST,
+                    "artifact_key must be an s3:// URI",
+                    code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                )
+            bucket = _resolve_lakefs_raw_repository()
+            key = f"{(dataset.branch or 'main').strip() or 'main'}/{target_uri.lstrip('/')}"
         if row and row.get("s3_uri"):
             parsed_prefix = parse_s3_uri(str(version.artifact_key or "").strip())
             if not parsed_prefix:
@@ -134,11 +155,19 @@ async def get_dataset_raw_file(
             content = base64.b64encode(blob).decode("ascii")
             encoding = "base64"
 
+        version_created_at = None
+        if getattr(version, "created_at", None) is not None:
+            created_at = getattr(version, "created_at")
+            version_created_at = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+
         return ApiResponse.success(
             message="Dataset raw file",
             data={
                 "file": {
                     "dataset_id": dataset.dataset_id,
+                    "version_id": version.version_id,
+                    "lakefs_commit_id": version.lakefs_commit_id,
+                    "version_created_at": version_created_at,
                     "filename": filename,
                     "content_type": content_type,
                     "size_bytes": size_bytes,

@@ -40,17 +40,11 @@ const copyByLang = {
     nav: {
       databases: 'Databases',
       overview: 'Overview',
-      branches: 'Branches',
       ontology: 'Ontology',
       mappings: 'Mappings',
-      sheets: 'Sheets',
-      importSheets: 'Import Sheets',
-      importExcel: 'Import Excel',
-      schemaSuggestion: 'Schema Suggestion',
       instances: 'Instances',
       graph: 'Graph Explorer',
       query: 'Query Builder',
-      merge: 'Merge',
       audit: 'Audit',
       lineage: 'Lineage',
       tasks: 'Tasks',
@@ -72,7 +66,7 @@ const copyByLang = {
     },
     steps: [
       { id: 1, title: 'Project setup', description: 'Create or select a project' },
-      { id: 2, title: 'Branch setup', description: 'Create or select a branch' },
+      { id: 2, title: 'Data ingest', description: 'Ingest and validate source datasets' },
       { id: 3, title: 'Ontology', description: 'Define classes and relationships' },
       { id: 4, title: 'Mappings', description: 'Connect source fields' },
     ],
@@ -135,17 +129,11 @@ const copyByLang = {
     nav: {
       databases: '프로젝트',
       overview: '요약',
-      branches: '브랜치',
       ontology: '온톨로지',
       mappings: '매핑',
-      sheets: '시트',
-      importSheets: '시트 임포트',
-      importExcel: '엑셀 임포트',
-      schemaSuggestion: '스키마 제안',
       instances: '인스턴스',
       graph: '그래프 탐색',
       query: '쿼리 빌더',
-      merge: '머지',
       audit: '감사 로그',
       lineage: '리니지',
       tasks: '작업',
@@ -167,7 +155,7 @@ const copyByLang = {
     },
     steps: [
       { id: 1, title: '프로젝트 설정', description: '프로젝트 생성 또는 선택' },
-      { id: 2, title: '브랜치 설정', description: '브랜치 생성 또는 선택' },
+      { id: 2, title: '데이터 적재', description: '원본 데이터셋 적재 및 검증' },
       { id: 3, title: '온톨로지', description: '클래스와 관계 정의' },
       { id: 4, title: '매핑', description: '소스 필드 연결' },
     ],
@@ -247,11 +235,9 @@ const getNavSections = (project: string | null, copy: Copy) => {
       title: copy.sections.navigation,
       items: [
         { label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` },
-        { label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` },
         { label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` },
         { label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` },
         { label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` },
-        { label: copy.nav.merge, path: `${base}/merge`, match: `${base}/merge` },
         { label: copy.nav.audit, path: `${base}/audit`, match: `${base}/audit` },
         { label: copy.nav.lineage, path: `${base}/lineage`, match: `${base}/lineage` },
       ],
@@ -287,7 +273,6 @@ const getRailItems = (
   } else {
     const base = `/db/${encodeURIComponent(project)}`
     items.push({ icon: 'home', label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` })
-    items.push({ icon: 'git-branch', label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
     items.push({ icon: 'flow-branch', label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` })
     items.push({ icon: 'database', label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` })
@@ -376,7 +361,7 @@ const AppShell = () => {
                 <Tag icon="git-branch">{context.branch}</Tag>
                 <Tag>{language.toUpperCase()}</Tag>
               </div>
-              <Text className="muted small">/api/v1</Text>
+              <Text className="muted small">BFF public contract only (no internal API bypass)</Text>
             </Card>
           </div>
           <div className="nav-section">

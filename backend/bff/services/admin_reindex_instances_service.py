@@ -23,6 +23,12 @@ from shared.observability.tracing import trace_external_call
 logger = logging.getLogger(__name__)
 
 
+def _extract_spec_field(spec: Any, field: str) -> Any:
+    if isinstance(spec, dict):
+        return spec.get(field)
+    return getattr(spec, field, None)
+
+
 @trace_external_call("bff.admin_reindex.reindex_all_instances")
 async def reindex_all_instances(
     *,
@@ -86,18 +92,44 @@ async def reindex_all_instances(
             "message": f"No active mapping specs found for {db_name}/{branch}",
         }
 
-    # Filter mapping specs for this database
+    # Filter mapping specs for this database.
+    # Legacy records may not carry db_name, so resolve via dataset registry.
     db_specs = []
+    errors: List[Dict[str, Any]] = []
     for spec in mapping_specs:
-        spec_db = getattr(spec, "db_name", None) or (spec.get("db_name") if isinstance(spec, dict) else None)
+        spec_db = _extract_spec_field(spec, "db_name")
         if spec_db and str(spec_db).strip() == db_name:
             db_specs.append(spec)
-        elif not spec_db:
-            # If no db_name filter, include all (backward compat)
+            continue
+        if spec_db and str(spec_db).strip() != db_name:
+            continue
+
+        dataset_id = str(_extract_spec_field(spec, "dataset_id") or "").strip()
+        if not dataset_id:
+            errors.append(
+                {
+                    "mapping_spec_id": str(_extract_spec_field(spec, "mapping_spec_id") or ""),
+                    "target_class_id": str(_extract_spec_field(spec, "target_class_id") or ""),
+                    "error": "Missing dataset_id on mapping spec",
+                }
+            )
+            continue
+        try:
+            dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        except Exception as exc:
+            logger.warning("Failed to resolve dataset %s for mapping spec filter: %s", dataset_id, exc)
+            errors.append(
+                {
+                    "mapping_spec_id": str(_extract_spec_field(spec, "mapping_spec_id") or ""),
+                    "target_class_id": str(_extract_spec_field(spec, "target_class_id") or ""),
+                    "error": f"Failed to resolve dataset metadata: {exc}",
+                }
+            )
+            continue
+        if dataset and str(dataset.db_name).strip() == db_name:
             db_specs.append(spec)
 
     submitted_jobs: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
 
     for spec in db_specs:
         # Extract spec fields (handle both object and dict)

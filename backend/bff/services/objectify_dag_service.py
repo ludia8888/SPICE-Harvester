@@ -33,6 +33,7 @@ from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.observability.tracing import trace_external_call
+from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,8 @@ class _ObjectifyDagOrchestrator:
         class_id = validate_class_id(class_id)
         contract = await self._fetch_object_type_contract(class_id)
         spec = contract.get("spec") if isinstance(contract.get("spec"), dict) else {}
-        backing_source = spec.get("backing_source") if isinstance(spec.get("backing_source"), dict) else {}
+        backing_sources = list_backing_sources(spec)
+        backing_source = select_primary_backing_source(spec)
 
         mapping_spec, dataset_id, dataset_branch = await self._resolve_mapping_spec_for_object_type(
             class_id=class_id,
@@ -206,6 +208,7 @@ class _ObjectifyDagOrchestrator:
             "object_type": contract.get("resource") or {},
             "object_type_spec": spec,
             "backing_source": backing_source,
+            "backing_sources": backing_sources,
             "dataset_id": dataset_id,
             "dataset_branch": dataset_branch,
             "dataset_version_id": str(getattr(version, "version_id", "")),

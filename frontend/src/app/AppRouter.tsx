@@ -4,18 +4,15 @@ import { useAppStore } from '../store/useAppStore'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { DatabasesPage } from '../pages/DatabasesPage'
 import { OverviewPage } from '../pages/OverviewPage'
-import { BranchesPage } from '../pages/BranchesPage'
 import { OntologyPage } from '../pages/OntologyPage'
 import { MappingsPage } from '../pages/MappingsPage'
 import { InstancesPage } from '../pages/InstancesPage'
 import { GraphExplorerPage } from '../pages/GraphExplorerPage'
 import { QueryBuilderPage } from '../pages/QueryBuilderPage'
-import { MergePage } from '../pages/MergePage'
 import { AuditPage } from '../pages/AuditPage'
 import { LineagePage } from '../pages/LineagePage'
 import { TasksPage } from '../pages/TasksPage'
 import { AdminPage } from '../pages/AdminPage'
-import { LegacyDataToolsRemovedPage } from '../pages/LegacyDataToolsRemovedPage'
 
 export const AppRouter = () => {
   const pathname = usePathname()
@@ -44,17 +41,11 @@ export const AppRouter = () => {
     if (section === 'overview') {
       return <OverviewPage dbName={dbName} />
     }
-    if (section === 'branches') {
-      return <BranchesPage dbName={dbName} />
-    }
     if (section === 'ontology') {
       return <OntologyPage dbName={dbName} />
     }
     if (section === 'mappings') {
       return <MappingsPage dbName={dbName} />
-    }
-    if (section === 'data') {
-      return <LegacyDataToolsRemovedPage />
     }
     if (section === 'instances') {
       return <InstancesPage dbName={dbName} />
@@ -67,9 +58,6 @@ export const AppRouter = () => {
       if (sub === 'query') {
         return <QueryBuilderPage dbName={dbName} />
       }
-    }
-    if (section === 'merge') {
-      return <MergePage dbName={dbName} />
     }
     if (section === 'audit') {
       return <AuditPage dbName={dbName} />

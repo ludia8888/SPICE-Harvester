@@ -201,3 +201,115 @@ async def test_object_type_requires_title_key():
         assert detail["message"] == "pk_spec.title_key is required"
     finally:
         object_types_router.enforce_database_role = original_enforce
+
+
+@pytest.mark.asyncio
+async def test_object_type_draft_allows_no_backing_context():
+    registry = _build_registry()
+    oms_client = _FakeOMSClient()
+    objectify_registry = _FakeObjectifyRegistry()
+    request = Request({"type": "http", "headers": []})
+
+    original_enforce = object_types_router.enforce_database_role
+
+    async def _noop_enforce_database_role(**kwargs):
+        return None
+
+    object_types_router.enforce_database_role = _noop_enforce_database_role
+    try:
+        body = object_types_router.ObjectTypeContractRequest(
+            class_id="Account",
+            status="DRAFT",
+        )
+        response = await object_types_router.create_object_type_contract(
+            db_name="test_db",
+            body=body,
+            request=request,
+            branch="main",
+            expected_head_commit="head",
+            oms_client=oms_client,
+            dataset_registry=registry,
+            objectify_registry=objectify_registry,
+        )
+        assert response.data["object_type"]["spec"]["status"] == "DRAFT"
+        assert response.data["object_type"]["spec"]["backing_source"] == {}
+        assert response.data["object_type"]["spec"]["backing_sources"] == []
+        assert response.data["object_type"]["spec"]["pk_spec"]["primary_key"] == ["account_id"]
+        assert response.data["object_type"]["spec"]["pk_spec"]["title_key"] == ["account_id"]
+    finally:
+        object_types_router.enforce_database_role = original_enforce
+
+
+@pytest.mark.asyncio
+async def test_object_type_active_requires_backing_context():
+    registry = _build_registry()
+    oms_client = _FakeOMSClient()
+    objectify_registry = _FakeObjectifyRegistry()
+    request = Request({"type": "http", "headers": []})
+
+    original_enforce = object_types_router.enforce_database_role
+
+    async def _noop_enforce_database_role(**kwargs):
+        return None
+
+    object_types_router.enforce_database_role = _noop_enforce_database_role
+    try:
+        body = object_types_router.ObjectTypeContractRequest(
+            class_id="Account",
+            pk_spec={"primary_key": ["account_id"], "title_key": ["account_id"]},
+            status="ACTIVE",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await object_types_router.create_object_type_contract(
+                db_name="test_db",
+                body=body,
+                request=request,
+                branch="main",
+                expected_head_commit="head",
+                oms_client=oms_client,
+                dataset_registry=registry,
+                objectify_registry=objectify_registry,
+            )
+        assert exc_info.value.status_code == 400
+        detail = exc_info.value.detail
+        assert detail["code"] == "REQUEST_VALIDATION_FAILED"
+        assert detail["message"] == "backing_dataset_id or backing_datasource_id or backing_datasource_version_id is required"
+    finally:
+        object_types_router.enforce_database_role = original_enforce
+
+
+@pytest.mark.asyncio
+async def test_object_type_accepts_backing_sources_hint():
+    registry = _build_registry()
+    oms_client = _FakeOMSClient()
+    objectify_registry = _FakeObjectifyRegistry()
+    request = Request({"type": "http", "headers": []})
+
+    original_enforce = object_types_router.enforce_database_role
+
+    async def _noop_enforce_database_role(**kwargs):
+        return None
+
+    object_types_router.enforce_database_role = _noop_enforce_database_role
+    try:
+        body = object_types_router.ObjectTypeContractRequest(
+            class_id="Account",
+            backing_sources=[{"dataset_id": "ds-1", "dataset_version_id": "ver-1"}],
+            pk_spec={"primary_key": ["account_id"], "title_key": ["account_id"]},
+            status="ACTIVE",
+        )
+        response = await object_types_router.create_object_type_contract(
+            db_name="test_db",
+            body=body,
+            request=request,
+            branch="main",
+            expected_head_commit="head",
+            oms_client=oms_client,
+            dataset_registry=registry,
+            objectify_registry=objectify_registry,
+        )
+        spec = response.data["object_type"]["spec"]
+        assert spec["backing_source"]["dataset_id"] == "ds-1"
+        assert spec["backing_sources"][0]["dataset_id"] == "ds-1"
+    finally:
+        object_types_router.enforce_database_role = original_enforce

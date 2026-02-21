@@ -12,6 +12,13 @@ _DB_SCOPE_HEADER_KEYS = (
 )
 
 BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
+OMS_SERVICE_TOKEN_ENV_KEYS = (
+    "OMS_CLIENT_TOKEN",
+    "OMS_ADMIN_TOKEN",
+    "OMS_WRITE_TOKEN",
+    "ADMIN_API_KEY",
+    "ADMIN_TOKEN",
+)
 
 
 def get_expected_token(env_keys: Iterable[str]) -> Optional[str]:

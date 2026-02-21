@@ -5,6 +5,9 @@ import { Counter, Rate, Trend } from "k6/metrics";
 const BASE_URL = (__ENV.K6_BASE_URL || "http://host.docker.internal:8002/api/v1").replace(/\/+$/, "");
 const ADMIN_TOKEN = __ENV.K6_ADMIN_TOKEN || __ENV.ADMIN_TOKEN || "change_me";
 const BRANCH = __ENV.K6_BRANCH || "main";
+const COMMAND_TIMEOUT_MS = parseInt(__ENV.K6_COMMAND_TIMEOUT_MS || "240000", 10);
+const COMMAND_POLL_INTERVAL_MS = parseInt(__ENV.K6_COMMAND_POLL_INTERVAL_MS || "500", 10);
+const SETUP_TIMEOUT = __ENV.K6_SETUP_TIMEOUT || "10m";
 
 const headers = {
   "Content-Type": "application/json",
@@ -23,6 +26,7 @@ const commandTimedOut = new Rate("async_command_timed_out");
 const pollResponseOk = http.expectedStatuses({ min: 200, max: 399 }, 404);
 
 export const options = {
+  setupTimeout: SETUP_TIMEOUT,
   scenarios: {
     async_instance_create: {
       executor: "shared-iterations",
@@ -207,7 +211,10 @@ export default function (data) {
   }
 
   const waitStart = Date.now();
-  const result = waitForCommand(cmdId, { timeoutMs: 90000, pollIntervalMs: 500 });
+  const result = waitForCommand(cmdId, {
+    timeoutMs: COMMAND_TIMEOUT_MS,
+    pollIntervalMs: COMMAND_POLL_INTERVAL_MS,
+  });
   completeMs.add(Date.now() - waitStart);
   pollsPerCommand.add(result.polls);
   commandsTotal.add(1);
@@ -217,6 +224,12 @@ export default function (data) {
   commandOk.add(succeeded);
   commandTimedOut.add(timedOutNow);
   commandFailed.add(!succeeded && !timedOutNow);
+
+  if (timedOutNow) {
+    console.warn(
+      `[k6] command timeout command_id=${cmdId} timeout_ms=${COMMAND_TIMEOUT_MS} last_status=${result.lastStatus} polls=${result.polls}`
+    );
+  }
 
   // Small think time to avoid tight polling loops when users increase iterations.
   sleep(parseFloat(__ENV.K6_THINK_TIME_SECONDS || "0.1"));

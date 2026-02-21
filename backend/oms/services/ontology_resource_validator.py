@@ -38,6 +38,7 @@ _SPEC_ALIASES = {
     "baseType": "base_type",
     "pkSpec": "pk_spec",
     "backingSource": "backing_source",
+    "backingSources": "backing_sources",
     "inputSchema": "input_schema",
     "permissionPolicy": "permission_policy",
     "targetInterfaces": "target_interfaces",
@@ -380,111 +381,162 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
             )
     elif resource_type == "object_type":
         pk_spec = spec.get("pk_spec")
+        status_value = str(spec.get("status") or "ACTIVE").strip().upper()
+        draft_mode = status_value == "DRAFT"
+
+        normalized_backing_sources: List[Dict[str, Any]] = []
+        raw_backing_sources = spec.get("backing_sources")
+        if raw_backing_sources is not None:
+            if not isinstance(raw_backing_sources, list):
+                _append_spec_issue(
+                    issues,
+                    message="object_type backing_sources must be a list",
+                    invalid_fields=["backing_sources"],
+                )
+            else:
+                for idx, item in enumerate(raw_backing_sources):
+                    if not isinstance(item, dict):
+                        _append_spec_issue(
+                            issues,
+                            message=f"backing_sources[{idx}] must be a dict",
+                            invalid_fields=[f"backing_sources[{idx}]"],
+                        )
+                    else:
+                        normalized_backing_sources.append(item)
+
         backing_source = spec.get("backing_source")
-        if not isinstance(pk_spec, dict) or not pk_spec:
+        if backing_source is not None and not isinstance(backing_source, dict):
+            _append_spec_issue(
+                issues,
+                message="object_type backing_source must be an object",
+                invalid_fields=["backing_source"],
+            )
+        if isinstance(backing_source, dict) and backing_source and not normalized_backing_sources:
+            normalized_backing_sources.append(backing_source)
+
+        effective_backing = None
+        for source in normalized_backing_sources:
+            if (
+                str(source.get("dataset_id") or "").strip()
+                or str(source.get("ref") or "").strip()
+                or str(source.get("kind") or "").strip()
+            ):
+                effective_backing = source
+                break
+
+        if not draft_mode and (not isinstance(pk_spec, dict) or not pk_spec):
             _append_spec_issue(
                 issues,
                 message="object_type requires non-empty pk_spec",
                 missing_fields=["pk_spec"],
             )
-        if not isinstance(backing_source, dict) or not backing_source:
+        if not draft_mode and not effective_backing:
             _append_spec_issue(
                 issues,
                 message="object_type requires non-empty backing_source",
-                missing_fields=["backing_source"],
+                missing_fields=["backing_source", "backing_sources"],
             )
-        if isinstance(backing_source, dict):
-            # If dataset_id is provided, allow skipping kind/ref/schema_hash
-            # These can be resolved later when objectify runs
-            has_dataset_id = bool(str(backing_source.get("dataset_id") or "").strip())
+
+        if isinstance(effective_backing, dict):
+            backing_field_prefix = "backing_source"
+            if (
+                isinstance(raw_backing_sources, list)
+                and normalized_backing_sources
+                and normalized_backing_sources[0] is effective_backing
+                and not (isinstance(backing_source, dict) and backing_source)
+            ):
+                backing_field_prefix = "backing_sources[0]"
+
+            # If dataset_id is provided, allow skipping kind/ref/schema_hash.
+            # These can be resolved later when objectify runs.
+            has_dataset_id = bool(str(effective_backing.get("dataset_id") or "").strip())
             if not has_dataset_id:
-                if not str(backing_source.get("kind") or "").strip():
+                if not str(effective_backing.get("kind") or "").strip():
                     _append_spec_issue(
                         issues,
                         message="object_type backing_source requires kind",
-                        missing_fields=["backing_source.kind"],
+                        missing_fields=[f"{backing_field_prefix}.kind"],
                     )
-                if not str(backing_source.get("ref") or "").strip():
+                if not str(effective_backing.get("ref") or "").strip():
                     _append_spec_issue(
                         issues,
                         message="object_type backing_source requires ref",
-                        missing_fields=["backing_source.ref"],
+                        missing_fields=[f"{backing_field_prefix}.ref"],
                     )
-                schema_hash = backing_source.get("schema_hash") or backing_source.get("schemaHash")
+                schema_hash = effective_backing.get("schema_hash") or effective_backing.get("schemaHash")
                 if not str(schema_hash or "").strip():
                     _append_spec_issue(
                         issues,
                         message="object_type backing_source requires schema_hash",
-                        missing_fields=["backing_source.schema_hash"],
+                        missing_fields=[f"{backing_field_prefix}.schema_hash"],
                     )
-            # ── property_mappings validation (Foundry-style backing_source) ──
-            prop_mappings = backing_source.get("property_mappings")
+            # Foundry-style property_mappings in backing source.
+            prop_mappings = effective_backing.get("property_mappings")
             if prop_mappings is not None:
                 if not isinstance(prop_mappings, list):
                     _append_spec_issue(
                         issues,
-                        message="backing_source.property_mappings must be a list",
-                        invalid_fields=["backing_source.property_mappings"],
+                        message=f"{backing_field_prefix}.property_mappings must be a list",
+                        invalid_fields=[f"{backing_field_prefix}.property_mappings"],
                     )
                 else:
                     for idx, mapping in enumerate(prop_mappings):
                         if not isinstance(mapping, dict):
                             _append_spec_issue(
                                 issues,
-                                message=f"backing_source.property_mappings[{idx}] must be a dict",
-                                invalid_fields=[f"backing_source.property_mappings[{idx}]"],
+                                message=f"{backing_field_prefix}.property_mappings[{idx}] must be a dict",
+                                invalid_fields=[f"{backing_field_prefix}.property_mappings[{idx}]"],
                             )
                             continue
                         if not str(mapping.get("source_field") or "").strip():
                             _append_spec_issue(
                                 issues,
-                                message=f"backing_source.property_mappings[{idx}] requires source_field",
-                                missing_fields=[f"backing_source.property_mappings[{idx}].source_field"],
+                                message=f"{backing_field_prefix}.property_mappings[{idx}] requires source_field",
+                                missing_fields=[f"{backing_field_prefix}.property_mappings[{idx}].source_field"],
                             )
                         if not str(mapping.get("target_field") or "").strip():
                             _append_spec_issue(
                                 issues,
-                                message=f"backing_source.property_mappings[{idx}] requires target_field",
-                                missing_fields=[f"backing_source.property_mappings[{idx}].target_field"],
+                                message=f"{backing_field_prefix}.property_mappings[{idx}] requires target_field",
+                                missing_fields=[f"{backing_field_prefix}.property_mappings[{idx}].target_field"],
                             )
 
-            target_field_types = backing_source.get("target_field_types")
+            target_field_types = effective_backing.get("target_field_types")
             if target_field_types is not None and not isinstance(target_field_types, dict):
                 _append_spec_issue(
                     issues,
-                    message="backing_source.target_field_types must be a dict",
-                    invalid_fields=["backing_source.target_field_types"],
+                    message=f"{backing_field_prefix}.target_field_types must be a dict",
+                    invalid_fields=[f"{backing_field_prefix}.target_field_types"],
                 )
 
-            auto_sync = backing_source.get("auto_sync")
+            auto_sync = effective_backing.get("auto_sync")
             if auto_sync is not None and not isinstance(auto_sync, bool):
                 _append_spec_issue(
                     issues,
-                    message="backing_source.auto_sync must be a boolean",
-                    invalid_fields=["backing_source.auto_sync"],
+                    message=f"{backing_field_prefix}.auto_sync must be a boolean",
+                    invalid_fields=[f"{backing_field_prefix}.auto_sync"],
                 )
 
-            mapping_version = backing_source.get("mapping_version")
+            mapping_version = effective_backing.get("mapping_version")
             if mapping_version is not None and not isinstance(mapping_version, int):
                 _append_spec_issue(
                     issues,
-                    message="backing_source.mapping_version must be an integer",
-                    invalid_fields=["backing_source.mapping_version"],
+                    message=f"{backing_field_prefix}.mapping_version must be an integer",
+                    invalid_fields=[f"{backing_field_prefix}.mapping_version"],
                 )
 
-            status_value = str(spec.get("status") or "ACTIVE").strip().upper()
-            # Skip version_id requirement when dataset_id is provided (will be resolved by objectify)
+            # Skip version_id requirement when dataset_id is provided (resolved by objectify).
             if status_value == "ACTIVE" and not has_dataset_id:
                 version_id = (
-                    backing_source.get("version_id")
-                    or backing_source.get("versionId")
-                    or backing_source.get("backing_version_id")
+                    effective_backing.get("version_id")
+                    or effective_backing.get("versionId")
+                    or effective_backing.get("backing_version_id")
                 )
                 if not str(version_id or "").strip():
                     _append_spec_issue(
                         issues,
                         message="object_type backing_source requires version_id when ACTIVE",
-                        missing_fields=["backing_source.version_id"],
+                        missing_fields=[f"{backing_field_prefix}.version_id"],
                     )
 
         conflict_policy = spec.get("conflict_policy")
@@ -496,14 +548,17 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                     message="object_type conflict_policy must be one of: WRITEBACK_WINS, BASE_WINS, FAIL, MANUAL_REVIEW",
                     invalid_fields=["conflict_policy"],
                 )
-        normalized_pk = normalize_key_spec(pk_spec if isinstance(pk_spec, dict) else {})
-        if not normalized_pk.get("primary_key"):
+        if isinstance(pk_spec, dict) and pk_spec:
+            normalized_pk = normalize_key_spec(pk_spec)
+        else:
+            normalized_pk = normalize_key_spec({})
+        if not draft_mode and not normalized_pk.get("primary_key"):
             _append_spec_issue(
                 issues,
                 message="object_type pk_spec requires primary_key",
                 missing_fields=["pk_spec.primary_key"],
             )
-        if not normalized_pk.get("title_key"):
+        if not draft_mode and not normalized_pk.get("title_key"):
             _append_spec_issue(
                 issues,
                 message="object_type pk_spec requires title_key",
@@ -913,6 +968,82 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
             message="permission_policy alias fields are not supported; use permission_policy.principals",
             invalid_fields=[f"permission_policy.{field}" for field in sorted(alias_fields)],
         )
+
+    inherit_project_policy = policy.get("inherit_project_policy")
+    inherit_project_policy_camel = policy.get("inheritProjectPolicy")
+    if inherit_project_policy is not None and not isinstance(inherit_project_policy, bool):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.inherit_project_policy must be a boolean",
+            invalid_fields=["permission_policy.inherit_project_policy"],
+        )
+    if inherit_project_policy_camel is not None and not isinstance(inherit_project_policy_camel, bool):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.inheritProjectPolicy must be a boolean",
+            invalid_fields=["permission_policy.inheritProjectPolicy"],
+        )
+    if (
+        isinstance(inherit_project_policy, bool)
+        and isinstance(inherit_project_policy_camel, bool)
+        and inherit_project_policy != inherit_project_policy_camel
+    ):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.inherit_project_policy and inheritProjectPolicy must match when both are provided",
+            invalid_fields=[
+                "permission_policy.inherit_project_policy",
+                "permission_policy.inheritProjectPolicy",
+            ],
+        )
+
+    require_project_policy = policy.get("require_project_policy")
+    require_project_policy_camel = policy.get("requireProjectPolicy")
+    if require_project_policy is not None and not isinstance(require_project_policy, bool):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.require_project_policy must be a boolean",
+            invalid_fields=["permission_policy.require_project_policy"],
+        )
+    if require_project_policy_camel is not None and not isinstance(require_project_policy_camel, bool):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.requireProjectPolicy must be a boolean",
+            invalid_fields=["permission_policy.requireProjectPolicy"],
+        )
+    if (
+        isinstance(require_project_policy, bool)
+        and isinstance(require_project_policy_camel, bool)
+        and require_project_policy != require_project_policy_camel
+    ):
+        _append_spec_issue(
+            issues,
+            message="permission_policy.require_project_policy and requireProjectPolicy must match when both are provided",
+            invalid_fields=[
+                "permission_policy.require_project_policy",
+                "permission_policy.requireProjectPolicy",
+            ],
+        )
+
+    for field in (
+        "project_policy_scope",
+        "projectPolicyScope",
+        "project_policy_subject_type",
+        "projectPolicySubjectType",
+        "project_policy_subject_id",
+        "projectPolicySubjectId",
+    ):
+        if field not in policy:
+            continue
+        raw_value = policy.get(field)
+        if raw_value is None:
+            continue
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            _append_spec_issue(
+                issues,
+                message=f"permission_policy.{field} must be a non-empty string",
+                invalid_fields=[f"permission_policy.{field}"],
+            )
 
     unsupported_keys = [
         field

@@ -52,6 +52,7 @@ from shared.services.storage.lakefs_client import (
     LakeFSError,
     LakeFSNotFoundError,
 )
+from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ _TRANSACTION_RID_PREFIXES = (
     "ri.spice.main.transaction.",
     "ri.foundry.main.transaction.",
 )
+_CSV_PREVIEW_ROW_LIMIT = 100
 
 
 def _dataset_id_from_rid(dataset_rid: str) -> str | None:
@@ -212,6 +214,137 @@ def _map_txn_status(raw: str | None) -> str:
         "COMMITTED": "COMMITTED",
         "ABORTED": "ABORTED",
     }.get(raw, "OPEN")
+
+
+def _dataset_object_prefix(dataset: Any) -> str:
+    return f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/"
+
+
+def _normalize_dataset_object_key(dataset: Any, object_key: str) -> str:
+    raw_key = str(object_key or "").strip()
+    parsed = parse_s3_uri(raw_key)
+    if parsed:
+        _, parsed_key = parsed
+        key = parsed_key.lstrip("/")
+        branch_prefix = f"{(dataset.branch or 'main').strip('/')}/"
+        if key.startswith(branch_prefix):
+            key = key[len(branch_prefix):]
+    else:
+        key = raw_key.lstrip("/")
+    prefix = _dataset_object_prefix(dataset)
+    if not key:
+        return f"{prefix}source.csv"
+    found_prefix_at = key.find(prefix)
+    if found_prefix_at >= 0:
+        key = key[found_prefix_at:]
+    if key.startswith(prefix):
+        return key
+    return f"{prefix}{key}"
+
+
+def _artifact_s3_uri(*, repository: str, branch: str, object_key: str | None) -> str | None:
+    normalized_key = str(object_key or "").strip().lstrip("/")
+    if not normalized_key:
+        return None
+    normalized_branch = str(branch or "main").strip().strip("/") or "main"
+    return f"s3://{repository}/{normalized_branch}/{normalized_key}"
+
+
+def _normalized_csv_headers(raw_headers: List[str]) -> List[str]:
+    headers: list[str] = []
+    used: set[str] = set()
+    for idx, raw in enumerate(raw_headers):
+        base = str(raw or "").strip() or f"column_{idx + 1}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        headers.append(candidate)
+        used.add(candidate)
+    return headers
+
+
+def _build_csv_sample_and_schema(csv_bytes: bytes) -> tuple[Dict[str, Any], Dict[str, Any], int]:
+    decoded = csv_bytes.decode("utf-8-sig", errors="replace")
+    reader = csv.reader(io.StringIO(decoded))
+    all_rows = list(reader)
+    if not all_rows:
+        return {"columns": [], "rows": []}, {"columns": []}, 0
+
+    headers = _normalized_csv_headers([str(cell) for cell in all_rows[0]])
+    columns = [{"name": header, "type": "string"} for header in headers]
+    sample_rows: list[list[str | None]] = []
+    row_count = 0
+
+    for raw_row in all_rows[1:]:
+        row = [str(value) for value in raw_row]
+        if len(row) < len(headers):
+            row.extend([None] * (len(headers) - len(row)))
+        elif len(row) > len(headers):
+            row = row[: len(headers)]
+        row_count += 1
+        if len(sample_rows) < _CSV_PREVIEW_ROW_LIMIT:
+            sample_rows.append(row)
+
+    sample_json = {"columns": columns, "rows": sample_rows}
+    schema_json = {"columns": columns}
+    return sample_json, schema_json, row_count
+
+
+def _default_sample_and_schema(dataset: Any) -> tuple[Dict[str, Any], Dict[str, Any], int]:
+    raw_schema = dataset.schema_json if isinstance(dataset.schema_json, dict) else {}
+    raw_columns = raw_schema.get("columns") if isinstance(raw_schema.get("columns"), list) else []
+    columns = [col for col in raw_columns if isinstance(col, dict)]
+    schema_json = {"columns": columns}
+    sample_json = {"columns": columns, "rows": []}
+    return sample_json, schema_json, 0
+
+
+async def _extract_commit_preview(
+    *,
+    dataset: Any,
+    branch: str,
+    repository: str,
+    lakefs_client: LakeFSClient,
+    lakefs_storage_service: Any,
+) -> tuple[str | None, Dict[str, Any], Dict[str, Any], int]:
+    dataset_prefix = _dataset_object_prefix(dataset)
+    candidate_keys = [_normalize_dataset_object_key(dataset, "source.csv")]
+
+    try:
+        objects = await lakefs_client.list_objects(
+            repository=repository,
+            ref=branch,
+            prefix=dataset_prefix,
+            amount=200,
+        )
+    except Exception as exc:
+        logger.warning("Failed to list dataset objects for transaction preview: %s", exc)
+        objects = []
+
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        object_path = str(obj.get("path") or "").strip()
+        if not object_path or not object_path.lower().endswith(".csv"):
+            continue
+        candidate_keys.append(_normalize_dataset_object_key(dataset, object_path))
+
+    for key in dict.fromkeys(candidate_keys):
+        try:
+            csv_bytes = await lakefs_storage_service.load_bytes(repository, f"{branch}/{key}")
+        except (FileNotFoundError, LakeFSNotFoundError):
+            continue
+        except Exception as exc:
+            logger.warning("Failed to load candidate CSV object during commit preview (%s): %s", key, exc)
+            continue
+
+        sample_json, schema_json, row_count = _build_csv_sample_and_schema(csv_bytes)
+        return key, sample_json, schema_json, row_count
+
+    sample_json, schema_json, row_count = _default_sample_and_schema(dataset)
+    return None, sample_json, schema_json, row_count
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +543,11 @@ async def update_schema_v2(
 async def _get_lakefs_client(pipeline_registry: PipelineRegistry, request: Request) -> LakeFSClient:
     actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
     return await pipeline_registry.get_lakefs_client(user_id=actor_user_id)
+
+
+async def _get_lakefs_storage(pipeline_registry: PipelineRegistry, request: Request) -> Any:
+    actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+    return await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
 
 
 @router.get(
@@ -686,11 +824,107 @@ async def commit_transaction_v2(
             parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
         )
 
-    committed_txn = await dataset_registry.mark_ingest_transaction_committed(
-        ingest_request_id=txn.ingest_request_id,
-        lakefs_commit_id=commit_id,
-        artifact_key=None,
+    ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=txn.ingest_request_id)
+    if not ingest_request:
+        return _foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="TransactionCommitFailed",
+            parameters={
+                "transactionRid": transactionRid,
+                "datasetRid": datasetRid,
+                "message": "Ingest request not found",
+            },
+        )
+
+    lakefs_storage_service = await _get_lakefs_storage(pipeline_registry, request)
+    artifact_key, sample_json, schema_json, row_count = await _extract_commit_preview(
+        dataset=dataset,
+        branch=branch,
+        repository=repo,
+        lakefs_client=lakefs_client,
+        lakefs_storage_service=lakefs_storage_service,
     )
+    committed_artifact_key = _artifact_s3_uri(
+        repository=repo,
+        branch=branch,
+        object_key=artifact_key,
+    )
+    if not committed_artifact_key:
+        committed_artifact_key = _artifact_s3_uri(
+            repository=repo,
+            branch=branch,
+            object_key=_normalize_dataset_object_key(dataset, "source.csv"),
+        )
+    try:
+        await dataset_registry.mark_ingest_committed(
+            ingest_request_id=ingest_request.ingest_request_id,
+            lakefs_commit_id=commit_id,
+            artifact_key=committed_artifact_key,
+        )
+        await dataset_registry.mark_ingest_transaction_committed(
+            ingest_request_id=ingest_request.ingest_request_id,
+            lakefs_commit_id=commit_id,
+            artifact_key=committed_artifact_key,
+        )
+    except Exception as raw_commit_exc:
+        logger.warning("Failed to mark ingest RAW_COMMITTED before publish: %s", raw_commit_exc)
+
+    try:
+        apply_schema = bool(schema_json.get("columns")) if isinstance(schema_json, dict) else False
+        await dataset_registry.publish_ingest_request(
+            ingest_request_id=ingest_request.ingest_request_id,
+            dataset_id=dataset_id,
+            lakefs_commit_id=commit_id,
+            artifact_key=committed_artifact_key,
+            row_count=row_count,
+            sample_json=sample_json,
+            schema_json=schema_json,
+            apply_schema=apply_schema,
+        )
+    except ValueError as exc:
+        return _foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="TransactionCommitFailed",
+            parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
+        )
+    except Exception as exc:
+        logger.error("Failed to publish ingest request during transaction commit: %s", exc)
+        try:
+            await dataset_registry.reconcile_ingest_state(
+                stale_after_seconds=60,
+                limit=50,
+                use_lock=False,
+            )
+            recovered = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            recovered_commit_id = str(getattr(recovered, "lakefs_commit_id", "") or "").strip()
+            if recovered is None or recovered_commit_id != str(commit_id):
+                return _foundry_error(
+                    500,
+                    error_code="INTERNAL",
+                    error_name="TransactionCommitFailed",
+                    parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
+                )
+            logger.warning(
+                "Recovered dataset version through reconcile after publish failure "
+                "(dataset_id=%s, commit_id=%s)",
+                dataset_id,
+                commit_id,
+            )
+        except Exception as reconcile_exc:
+            return _foundry_error(
+                500,
+                error_code="INTERNAL",
+                error_name="TransactionCommitFailed",
+                parameters={
+                    "transactionRid": transactionRid,
+                    "datasetRid": datasetRid,
+                    "message": f"{exc} (reconcile failed: {reconcile_exc})",
+                },
+            )
+
+    committed_txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not committed_txn:
         return _foundry_error(500, error_code="INTERNAL", error_name="TransactionCommitFailed", parameters={"transactionRid": transactionRid})
 
@@ -882,6 +1116,11 @@ async def upload_file_v2(
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
         storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
         await storage_service.save_bytes(repo, f"{branch}/{object_key}", body_bytes, content_type=content_type)
+        # Keep a canonical CSV object so commit/readTable can materialize even when
+        # callers upload arbitrary CSV file paths instead of source.csv.
+        if file_path.lower().endswith(".csv") and file_path.lower() != "source.csv":
+            canonical_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/source.csv"
+            await storage_service.save_bytes(repo, f"{branch}/{canonical_key}", body_bytes, content_type=content_type)
     except Exception as exc:
         logger.error("Failed to upload file: %s", exc)
         return _foundry_error(500, error_code="INTERNAL", error_name="FileUploadFailed", parameters={"message": str(exc)})
@@ -930,6 +1169,16 @@ async def read_table_v2(
     # Load latest version
     version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
     if not version:
+        try:
+            await dataset_registry.reconcile_ingest_state(
+                stale_after_seconds=60,
+                limit=50,
+                use_lock=False,
+            )
+            version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+        except Exception as reconcile_exc:
+            logger.warning("Dataset ingest reconcile before readTable failed: %s", reconcile_exc)
+    if not version:
         return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
 
     # Try loading sample from cached sample_json first
@@ -971,21 +1220,46 @@ async def read_table_v2(
     try:
         repo = _resolve_lakefs_raw_repository()
         branch = dataset.branch or "main"
-        object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/source.csv"
-        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
-        storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
-        csv_bytes = await storage_service.load_bytes(repo, f"{branch}/{object_key}")
-        reader = csv.reader(io.StringIO(csv_bytes.decode("utf-8")))
-        all_rows = list(reader)
-        if all_rows:
-            header = all_rows[0]
+        storage_service = await _get_lakefs_storage(pipeline_registry, request)
+        fallback_keys = []
+        artifact_key = getattr(version, "artifact_key", None)
+        if isinstance(artifact_key, str) and artifact_key.strip():
+            fallback_keys.append(_normalize_dataset_object_key(dataset, artifact_key))
+        fallback_keys.append(_normalize_dataset_object_key(dataset, "source.csv"))
+
+        for object_key in dict.fromkeys(fallback_keys):
+            try:
+                csv_bytes = await storage_service.load_bytes(repo, f"{branch}/{object_key}")
+            except (FileNotFoundError, LakeFSNotFoundError):
+                continue
+
+            reader = csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig", errors="replace")))
+            all_rows = list(reader)
+            if not all_rows:
+                continue
+            header = _normalized_csv_headers([str(cell) for cell in all_rows[0]])
             data_rows = all_rows[1: 1 + row_limit]
             columns_out = [{"name": h, "type": "string"} for h in header]
+            if requested_columns and isinstance(requested_columns, list):
+                col_indices: list[int] = []
+                columns_out = []
+                for requested_name in [str(col) for col in requested_columns]:
+                    for idx, name in enumerate(header):
+                        if name == requested_name:
+                            col_indices.append(idx)
+                            columns_out.append({"name": header[idx], "type": "string"})
+                            break
+                projected_rows: list[list[Any]] = []
+                for row in data_rows:
+                    projected_rows.append([row[idx] if idx < len(row) else None for idx in col_indices])
+                data_rows = projected_rows
+
             return JSONResponse(content={
                 "columns": columns_out,
                 "rows": data_rows,
                 "totalRowCount": len(all_rows) - 1,
             })
+        return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
     except (FileNotFoundError, LakeFSNotFoundError):
         # Dataset can legitimately exist before any source object is materialized.
         return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})

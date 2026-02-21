@@ -11,7 +11,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v2 endpoints: 101**
+**Total v2 endpoints: 106**
 
 ### Ontologies (12 endpoints)
 
@@ -30,12 +30,14 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}` | Get Object Set V2 | No |
 | `POST` | `/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute` | Execute Query V2 | No |
 
-### Object Types (16 endpoints)
+### Object Types (18 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes` | List Object Types V2 | No |
+| `POST` | `/api/v2/ontologies/{ontology}/objectTypes` | Create Object Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get Object Type V2 | No |
+| `PATCH` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Update Object Type V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata` | Get Object Type Full Metadata V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes` | List Incoming Link Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/objects/{objectType}` | List Objects V2 | No |
@@ -99,7 +101,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes` | List Value Types V2 | No |
 | `GET` | `/api/v2/ontologies/{ontology}/valueTypes/{valueType}` | Get Value Type V2 | No |
 
-### Other v2 Endpoints (55 endpoints)
+### Other v2 Endpoints (58 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -108,6 +110,9 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v2/connectivity/connections/getConfigurationBatch` | Get Connection Configuration Batch V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}` | Get Connection V2 | No |
 | `DELETE` | `/api/v2/connectivity/connections/{connectionRid}` | Delete Connection V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns` | List Connection Export Runs V2 | No |
+| `POST` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns` | Create Connection Export Run V2 | No |
+| `GET` | `/api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}` | Get Connection Export Run V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | List File Imports V2 | No |
 | `POST` | `/api/v2/connectivity/connections/{connectionRid}/fileImports` | Create File Import V2 | No |
 | `GET` | `/api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}` | Get File Import V2 | No |

@@ -26,6 +26,10 @@ classifiers = [
 # 이전 문제: backend/pyproject.toml과 개별 requirements.txt가 서로 다른 버전 요구사항 정의
 # 해결: shared/pyproject.toml이 모든 외부 라이브러리 버전을 중앙집중 관리
 dependencies = [
+    # ✅ Runtime compatibility for OpenTelemetry instrumentation import paths
+    # (pkg_resources is provided by setuptools; missing in minimal images otherwise)
+    "setuptools>=70.0.0,<81.0.0",
+
     # 🚀 Web Framework - MSA Core Stack
     "fastapi==0.115.0",        # 통일된 버전: BFF, OMS, Funnel 등 모든 API 서비스
     "uvicorn[standard]==0.31.1", # ASGI 서버 - 개발/프로덕션 환경 일관성

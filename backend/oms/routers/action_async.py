@@ -5,8 +5,6 @@ This endpoint accepts intent-only payloads (action_type_id + input) and writes a
 to the Event Store for the action worker to execute.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set

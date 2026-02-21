@@ -351,6 +351,85 @@ def _coerce_overlay_branch(*, db_name: str, writeback_target: Dict[str, Any], ov
     return AppConfig.get_ontology_writeback_branch(db_name)
 
 
+def _first_defined(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _resolve_project_policy_contract(action_spec: Dict[str, Any]) -> Dict[str, Any]:
+    spec = action_spec if isinstance(action_spec, dict) else {}
+    permission_policy = spec.get("permission_policy") if isinstance(spec.get("permission_policy"), dict) else {}
+
+    inherit_project_policy = _coerce_optional_bool(
+        _first_defined(
+            permission_policy.get("inherit_project_policy"),
+            permission_policy.get("inheritProjectPolicy"),
+            spec.get("inherit_project_policy"),
+            spec.get("inheritProjectPolicy"),
+        ),
+        default=False,
+    )
+    require_project_policy = _coerce_optional_bool(
+        _first_defined(
+            permission_policy.get("require_project_policy"),
+            permission_policy.get("requireProjectPolicy"),
+            spec.get("require_project_policy"),
+            spec.get("requireProjectPolicy"),
+        ),
+        default=True,
+    )
+    scope = str(
+        _first_defined(
+            permission_policy.get("project_policy_scope"),
+            permission_policy.get("projectPolicyScope"),
+            spec.get("project_policy_scope"),
+            spec.get("projectPolicyScope"),
+            "action_access",
+        )
+        or "action_access"
+    ).strip() or "action_access"
+    subject_type = str(
+        _first_defined(
+            permission_policy.get("project_policy_subject_type"),
+            permission_policy.get("projectPolicySubjectType"),
+            spec.get("project_policy_subject_type"),
+            spec.get("projectPolicySubjectType"),
+            "project",
+        )
+        or "project"
+    ).strip() or "project"
+    raw_subject_id = _first_defined(
+        permission_policy.get("project_policy_subject_id"),
+        permission_policy.get("projectPolicySubjectId"),
+        spec.get("project_policy_subject_id"),
+        spec.get("projectPolicySubjectId"),
+    )
+    subject_id = str(raw_subject_id or "").strip() or None
+    return {
+        "inherit_project_policy": inherit_project_policy,
+        "require_project_policy": require_project_policy,
+        "scope": scope,
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+    }
+
+
 @trace_external_call("oms.action_simulation.enforce_action_permission")
 async def enforce_action_permission(
     *,
@@ -409,6 +488,63 @@ async def enforce_action_permission(
                 _attach_enterprise({"error": ErrorCode.PERMISSION_DENIED.value, "message": "Permission denied"}),
                 status_code=403,
             )
+        project_policy_contract = _resolve_project_policy_contract(action_spec)
+        if project_policy_contract["inherit_project_policy"]:
+            dataset_registry = DatasetRegistry()
+            try:
+                await dataset_registry.connect()
+                access_policy = await dataset_registry.get_access_policy(
+                    db_name=db_name,
+                    scope=str(project_policy_contract["scope"]),
+                    subject_type=str(project_policy_contract["subject_type"]),
+                    subject_id=str(project_policy_contract["subject_id"] or db_name),
+                )
+            except Exception as exc:
+                raise ActionSimulationRejected(
+                    _attach_enterprise(
+                        {
+                            "error": "project_policy_unverifiable",
+                            "message": "Unable to verify inherited project policy",
+                            "scope": str(project_policy_contract["scope"]),
+                            "subject_type": str(project_policy_contract["subject_type"]),
+                            "subject_id": str(project_policy_contract["subject_id"] or db_name),
+                            "detail": str(exc),
+                        }
+                    ),
+                    status_code=503,
+                ) from exc
+            inherited_policy = access_policy.policy if access_policy is not None else None
+            if (not isinstance(inherited_policy, dict) or not inherited_policy) and bool(
+                project_policy_contract["require_project_policy"]
+            ):
+                raise ActionSimulationRejected(
+                    _attach_enterprise(
+                        {
+                            "error": ErrorCode.PERMISSION_DENIED.value,
+                            "message": "Permission denied",
+                            "scope": str(project_policy_contract["scope"]),
+                            "subject_type": str(project_policy_contract["subject_type"]),
+                            "subject_id": str(project_policy_contract["subject_id"] or db_name),
+                        }
+                    ),
+                    status_code=403,
+                )
+            if isinstance(inherited_policy, dict) and inherited_policy and not policy_allows(
+                policy=inherited_policy,
+                principal_tags=tags,
+            ):
+                raise ActionSimulationRejected(
+                    _attach_enterprise(
+                        {
+                            "error": ErrorCode.PERMISSION_DENIED.value,
+                            "message": "Permission denied",
+                            "scope": str(project_policy_contract["scope"]),
+                            "subject_type": str(project_policy_contract["subject_type"]),
+                            "subject_id": str(project_policy_contract["subject_id"] or db_name),
+                        }
+                    ),
+                    status_code=403,
+                )
 
     if permission_profile.edits_beyond_actions and role not in DATA_ENGINEER_ROLES:
         raise ActionSimulationRejected(

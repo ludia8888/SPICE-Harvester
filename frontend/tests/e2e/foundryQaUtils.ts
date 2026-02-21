@@ -3,12 +3,14 @@ import { access, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 import type { QABugRecord, QABugSeverity } from './foundryQaTypes'
+import { assertAllowedFoundryQaEndpoint } from './foundryApiAllowlist'
 
 type ApiRequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   headers?: Record<string, string>
   query?: Record<string, string | number | boolean | undefined>
   json?: unknown
+  body?: string | Buffer | ArrayBuffer | Uint8Array
   multipart?: Record<string, unknown>
 }
 
@@ -75,10 +77,11 @@ export const apiCall = async (
   options: ApiRequestOptions = {},
 ): Promise<ApiCallResult> => {
   const method = options.method ?? 'GET'
+  assertAllowedFoundryQaEndpoint(method, endpoint)
   const response = await request.fetch(makeUrl(endpoint, options.query), {
     method,
     headers: options.headers,
-    data: options.json,
+    data: options.json ?? options.body,
     multipart: options.multipart,
     failOnStatusCode: false,
   })

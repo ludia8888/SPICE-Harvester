@@ -8,10 +8,21 @@ export type FoundryQaApiContractRow = {
 
 export const FOUNDRY_QA_API_CONTRACT: FoundryQaApiContractRow[] = [
   {
-    phase: 'Ingest',
-    bffMethod: 'uploadDataset / approveDatasetIngestSchema',
-    endpoint: 'POST /api/v1/pipelines/datasets/csv-upload, POST /api/v1/pipelines/datasets/ingest-requests/{id}/schema/approve',
-    backendSurface: 'bff_v1',
+    phase: 'Ingest (Foundry v2 datasets)',
+    bffMethod: 'createDatasetV2 / createTransactionV2 / uploadFileV2 / commitTransactionV2 / readTableV2',
+    endpoint:
+      'POST /api/v2/datasets, POST /api/v2/datasets/{datasetRid}/transactions, POST /api/v2/datasets/{datasetRid}/files:upload, POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit, POST /api/v2/datasets/{datasetRid}/readTable',
+    backendSurface: 'foundry_v2',
+  },
+  {
+    phase: 'Connectivity (Foundry v2)',
+    bffMethod:
+      'createConnectionV2 / listConnectionsV2 / testConnectionV2 / updateConnectionExportSettingsV2 / createConnectionExportRunV2|getConnectionExportRunV2|listConnectionExportRunsV2 / createTableImportV2|createFileImportV2|createVirtualTableV2 / execute*ImportV2',
+    endpoint:
+      'POST|GET /api/v2/connectivity/connections, POST /api/v2/connectivity/connections/{connectionRid}/test, POST /api/v2/connectivity/connections/{connectionRid}/updateExportSettings, POST|GET /api/v2/connectivity/connections/{connectionRid}/exportRuns, POST /api/v2/connectivity/connections/{connectionRid}/tableImports|fileImports|virtualTables, POST /api/v2/connectivity/connections/{connectionRid}/{resource}/{resourceRid}/execute',
+    backendSurface: 'foundry_v2',
+    notes:
+      'All connectivity endpoints are preview-gated (`preview=true`) and must be called through FE/BFF contract only. Non-dry-run exportRuns now require connection markings unless explicitly bypassed by export settings.',
   },
   {
     phase: 'Transform',
@@ -21,8 +32,8 @@ export const FOUNDRY_QA_API_CONTRACT: FoundryQaApiContractRow[] = [
   },
   {
     phase: 'Ontology object types',
-    bffMethod: 'createOntology / listObjectTypesV2',
-    endpoint: 'POST /api/v1/databases/{db}/ontology, GET /api/v2/ontologies/{ontology}/objectTypes',
+    bffMethod: 'createObjectTypeV2 / updateObjectTypeV2 / listObjectTypesV2 / getObjectTypeFullMetadataV2',
+    endpoint: 'POST /api/v2/ontologies/{ontology}/objectTypes, PATCH /api/v2/ontologies/{ontology}/objectTypes/{objectType}, GET /api/v2/ontologies/{ontology}/objectTypes, GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata',
     backendSurface: 'foundry_v2',
   },
   {
@@ -30,6 +41,7 @@ export const FOUNDRY_QA_API_CONTRACT: FoundryQaApiContractRow[] = [
     bffMethod: 'createObjectifyMappingSpec / runObjectifyDataset',
     endpoint: 'POST /api/v1/objectify/mapping-specs, POST /api/v1/objectify/datasets/{datasetId}/run',
     backendSurface: 'bff_v1',
+    notes: 'runObjectifyDataset is version-pinned and must include dataset_version_id (artifact mode 제외).',
   },
   {
     phase: 'Projection and multihop',
@@ -44,15 +56,39 @@ export const FOUNDRY_QA_API_CONTRACT: FoundryQaApiContractRow[] = [
     backendSurface: 'bff_v1',
   },
   {
+    phase: 'Dynamic security',
+    bffMethod: 'upsertAccessPolicyV1 / listAccessPoliciesV1 / getActionTypeV2',
+    endpoint:
+      'POST /api/v1/access-policies, GET /api/v1/access-policies, GET /api/v2/ontologies/{ontology}/actionTypes/{actionType}',
+    backendSurface: 'bff_v1',
+    notes: 'Action permission profile + project-policy inheritance must be visible on FE/BFF contract and verifiable via policy CRUD.',
+  },
+  {
+    phase: 'Kinetic query types',
+    bffMethod: 'createOntologyResourceV1(functions) / listQueryTypesV2 / getQueryTypeV2 / executeQueryTypeV2',
+    endpoint:
+      'POST /api/v1/databases/{db}/ontology/resources/functions, GET /api/v2/ontologies/{ontology}/queryTypes, GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}, POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute',
+    backendSurface: 'foundry_v2',
+  },
+  {
     phase: 'Closed loop + audit',
-    bffMethod: 'createInstance / searchObjectsV2 / listAuditLogs',
-    endpoint: 'POST /api/v1/databases/{db}/instances/{class}/create, POST /api/v2/ontologies/{ontology}/objects/{objectType}/search, GET /api/v1/audit/logs',
+    bffMethod: 'createInstance / getObjectV2 / searchObjectsV2 / listAuditLogs',
+    endpoint: 'POST /api/v1/databases/{db}/instances/{class}/create, GET /api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}, POST /api/v2/ontologies/{ontology}/objects/{objectType}/search, GET /api/v1/audit/logs',
     backendSurface: 'foundry_v2',
   },
   {
     phase: 'Lineage',
-    bffMethod: 'getLineageMetrics',
-    endpoint: 'GET /api/v1/lineage/metrics',
+    bffMethod:
+      'getLineageGraphCtx / getLineagePathCtx / getLineageImpactCtx / getLineageDiffCtx / getLineageMetrics / getLineageRunsCtx / getLineageRunImpactCtx / getLineageTimelineCtx / getLineageColumnLineageCtx / getLineageOutOfDateCtx',
+    endpoint:
+      'GET /api/v1/lineage/graph, GET /api/v1/lineage/path, GET /api/v1/lineage/impact, GET /api/v1/lineage/diff, GET /api/v1/lineage/metrics, GET /api/v1/lineage/runs, GET /api/v1/lineage/run-impact, GET /api/v1/lineage/timeline, GET /api/v1/lineage/column-lineage, GET /api/v1/lineage/out-of-date',
     backendSurface: 'bff_v1',
+  },
+  {
+    phase: 'Control plane',
+    bffMethod: 'listDatabasesCtx / createDatabaseCtx / getSummary / getCommandStatus',
+    endpoint: 'GET|POST /api/v1/databases, GET /api/v1/summary, GET /api/v1/commands/{commandId}/status',
+    backendSurface: 'bff_v1',
+    notes: 'Foundry QA allowlist includes control-plane endpoints that mandatory UI screens call.',
   },
 ]

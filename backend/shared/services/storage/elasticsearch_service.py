@@ -5,9 +5,12 @@ Provides a centralized Elasticsearch client with connection pooling,
 error handling, and common operations for search and indexing.
 """
 
+import asyncio
+import importlib
 import logging
+import os
 from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple, Union
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch, __versionstr__ as _ELASTIC_CLIENT_VERSION
 # elasticsearch>=8.11.0 is now required in shared/pyproject.toml
 from elasticsearch.exceptions import (
     ApiError as ElasticsearchException,  # ElasticsearchException renamed to ApiError in v9+
@@ -24,6 +27,47 @@ if TYPE_CHECKING:
     from shared.config.settings import ApplicationSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_compat_version() -> Optional[str]:
+    explicit = str(
+        os.getenv("ELASTICSEARCH_COMPAT_VERSION")
+        or os.getenv("ES_COMPAT_VERSION")
+        or ""
+    ).strip()
+    if explicit:
+        return explicit
+    try:
+        major = int(str(_ELASTIC_CLIENT_VERSION).split(".", maxsplit=1)[0])
+    except Exception:
+        return None
+    # elasticsearch-py 9 defaults to `compatible-with=9`; our runtime ES is 8.x.
+    return "8" if major >= 9 else None
+
+
+def _apply_compat_mimetype_patch(compat_version: Optional[str]) -> None:
+    """Patch elasticsearch-py v9 compatibility media type to target ES8 clusters.
+
+    elasticsearch-py 9 hardcodes ``compatible-with=9`` in its generated request
+    layer. Our local/runtime clusters are ES8, so we patch the internal template
+    before instantiating clients.
+    """
+
+    normalized = str(compat_version or "").strip()
+    if not normalized:
+        return
+
+    template = f"application/vnd.elasticsearch+%s; compatible-with={normalized}"
+    for module_name in ("elasticsearch._async.client._base", "elasticsearch._sync.client._base"):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        try:
+            setattr(module, "_COMPAT_MIMETYPE_TEMPLATE", template)
+            setattr(module, "_COMPAT_MIMETYPE_SUB", template % (r"\g<1>",))
+        except Exception as exc:
+            logger.debug("Failed to patch Elasticsearch compatibility template (%s): %s", module_name, exc)
 
 
 class ElasticsearchService(AsyncClientPingMixin):
@@ -70,27 +114,61 @@ class ElasticsearchService(AsyncClientPingMixin):
             "max_retries": max_retries,
             "retry_on_timeout": retry_on_timeout
         }
+
+        compat_version = _resolve_compat_version()
+        if compat_version:
+            _apply_compat_mimetype_patch(compat_version)
+            media_type = f"application/vnd.elasticsearch+json; compatible-with={compat_version}"
+            self.config["headers"] = {
+                "accept": media_type,
+                "content-type": media_type,
+            }
         
         # Add authentication if provided
         if username and password:
             self.config["basic_auth"] = (username, password)
             
         self._client: Optional[AsyncElasticsearch] = None
+        self._connect_lock = asyncio.Lock()
         
     @trace_storage_operation("es.connect", system="elasticsearch")
     async def connect(self) -> None:
         """Initialize Elasticsearch connection."""
-        try:
-            self._client = AsyncElasticsearch(**self.config)
-            # Test connection
-            info = await self._client.info()
+        async with self._connect_lock:
+            existing = self._client
+            if existing is not None:
+                try:
+                    await existing.ping()
+                    return
+                except Exception:
+                    try:
+                        await existing.close()
+                    except Exception:
+                        pass
+                    self._client = None
+
+            client = AsyncElasticsearch(**self.config)
+            try:
+                info = await client.info()
+            except ESConnectionError as e:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                logger.error(f"Failed to connect to Elasticsearch: {e}")
+                raise
+            except Exception:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                raise
+
+            self._client = client
             logger.info(
                 f"Connected to Elasticsearch {info['version']['number']} "
                 f"at {self.host}:{self.port}"
             )
-        except ESConnectionError as e:
-            logger.error(f"Failed to connect to Elasticsearch: {e}")
-            raise
 
     async def initialize(self) -> None:
         """ServiceContainer lifecycle hook — delegates to ``connect()``.
@@ -105,9 +183,11 @@ class ElasticsearchService(AsyncClientPingMixin):
     @trace_storage_operation("es.disconnect", system="elasticsearch")
     async def disconnect(self) -> None:
         """Close Elasticsearch connection."""
+        client = self._client
+        self._client = None
         try:
-            if self._client:
-                await self._client.close()
+            if client:
+                await client.close()
                 logger.info("Disconnected from Elasticsearch")
         except Exception as e:
             logger.error(f"Error disconnecting from Elasticsearch: {e}")

@@ -166,6 +166,11 @@ except Exception:  # pragma: no cover - depends on environment
 
 try:  # optional
     from opentelemetry.instrumentation.kafka import KafkaInstrumentor
+except ModuleNotFoundError:
+    logging.getLogger(__name__).info(
+        "Kafka OpenTelemetry instrumentation module is not installed; continuing without Kafka instrumentation."
+    )
+    KafkaInstrumentor = None
 except Exception:  # pragma: no cover - depends on environment
     logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:156", exc_info=True)
     KafkaInstrumentor = None

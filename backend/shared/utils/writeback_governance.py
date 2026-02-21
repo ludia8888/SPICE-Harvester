@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from shared.utils.object_type_backing import list_backing_sources
+
 
 def extract_backing_dataset_id(object_type_spec: Any) -> Optional[str]:
     if not isinstance(object_type_spec, dict):
         return None
-    backing_source = object_type_spec.get("backing_source")
-    if not isinstance(backing_source, dict):
-        return None
-    dataset_id = backing_source.get("dataset_id")
-    if not isinstance(dataset_id, str):
-        return None
-    dataset_id = dataset_id.strip()
-    return dataset_id or None
+
+    for source in list_backing_sources(object_type_spec):
+        dataset_id = source.get("dataset_id")
+        if isinstance(dataset_id, str) and dataset_id.strip():
+            return dataset_id.strip()
+
+    return None
 
 
 def policies_aligned(backing_policy: Any, writeback_policy: Any) -> bool:

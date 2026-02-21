@@ -22,6 +22,7 @@ from data_connector.adapters.factory import (
     connector_kind_from_source_type,
 )
 from data_connector.adapters.import_config_validators import (
+    CDC_COMPAT_IMPORT_MODES,
     normalize_import_mode,
     validate_resource_import_config,
 )
@@ -680,7 +681,7 @@ async def _start_pipelining_connector_import(
             import_config=import_config,
             sync_state=sync_state_json,
         )
-    elif import_mode == "CDC":
+    elif import_mode in CDC_COMPAT_IMPORT_MODES:
         extract = await adapter.cdc_extract(
             config=config,
             secrets=secrets,
@@ -695,7 +696,7 @@ async def _start_pipelining_connector_import(
             import_config=import_config,
         )
     else:
-        raise ValueError("import_mode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC")
+        raise ValueError("import_mode must be one of SNAPSHOT, APPEND, UPDATE, INCREMENTAL, CDC, STREAMING")
 
     ingest_service = ConnectorIngestService(
         dataset_registry=dataset_registry,

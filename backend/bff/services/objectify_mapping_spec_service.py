@@ -33,6 +33,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
+from shared.utils.object_type_backing import select_primary_backing_source
 from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
@@ -300,7 +301,7 @@ async def create_mapping_spec(
         options = options or {}
         link_index_mode = str(options.get("mode") or options.get("job_type") or "").strip().lower() == "link_index"
 
-        backing_source = object_type_spec.get("backing_source") if isinstance(object_type_spec.get("backing_source"), dict) else {}
+        backing_source = select_primary_backing_source(object_type_spec)
         backing_kind = str(backing_source.get("kind") or "").strip().lower()
         backing_ref = str(backing_source.get("ref") or "").strip()
         backing_schema = str(backing_source.get("schema_hash") or backing_source.get("schemaHash") or "").strip()

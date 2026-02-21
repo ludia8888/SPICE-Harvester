@@ -16,6 +16,10 @@ setup(
     packages=find_packages(),
     python_requires=">=3.9",
     install_requires=[
+        # ✅ Runtime compatibility for OpenTelemetry instrumentation import paths
+        # (pkg_resources is provided by setuptools; missing in minimal images otherwise)
+        "setuptools>=70.0.0,<81.0.0",
+
         # 🚀 Web Framework - MSA Core Stack
         "fastapi==0.115.0",
         "uvicorn[standard]==0.31.1",

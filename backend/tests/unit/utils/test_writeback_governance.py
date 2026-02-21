@@ -12,6 +12,11 @@ def test_extract_backing_dataset_id_returns_none_for_missing_shape():
     assert extract_backing_dataset_id({"backing_source": {}}) is None
 
 
+def test_extract_backing_dataset_id_reads_backing_sources_fallback():
+    spec = {"backing_sources": [{"dataset_id": "ds-2"}]}
+    assert extract_backing_dataset_id(spec) == "ds-2"
+
+
 def test_policies_aligned_requires_dicts_and_exact_match():
     assert policies_aligned({"a": 1}, {"a": 1}) is True
     assert policies_aligned({"a": 1}, {"a": 2}) is False

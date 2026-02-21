@@ -1,0 +1,27 @@
+NAME                                  CPU %     MEM USAGE / LIMIT     NET I/O
+spice_agent                           0.26%     93MiB / 7.738GiB      48kB / 49.5kB
+spice_bff                             7.98%     192.3MiB / 7.738GiB   9.87MB / 6.15MB
+spice_instance_worker                 0.54%     124.7MiB / 7.738GiB   1.1MB / 1.89MB
+spice_message_relay                   40.41%    101.5MiB / 7.738GiB   1.1GB / 38.5MB
+spice_oms                             24.75%    207.1MiB / 7.738GiB   137MB / 143MB
+spice_objectify_worker                0.74%     104.8MiB / 7.738GiB   43.7MB / 34.1MB
+spice-harvester-kafka                 1.96%     578.9MiB / 7.738GiB   2.24MB / 5.47MB
+spice-harvester-lakefs                0.00%     583.6MiB / 7.738GiB   171MB / 349MB
+spice-harvester-zookeeper             0.20%     281.4MiB / 7.738GiB   13.1MB / 19.8MB
+spice-harvester-postgres              1.53%     486.3MiB / 7.738GiB   424MB / 583MB
+spice-harvester-elasticsearch         7.65%     1.642GiB / 7.738GiB   209kB / 159kB
+spice-harvester-minio                 14.83%    468.3MiB / 7.738GiB   3.47GB / 25GB
+spice-harvester-redis                 0.44%     13.03MiB / 7.738GiB   40.8MB / 96.1MB
+spice_connector_sync_worker           0.61%     84.73MiB / 7.738GiB   33.6MB / 31.6MB
+spice_projection_worker               0.93%     102.1MiB / 7.738GiB   74.3MB / 66.9MB
+spice_ontology_worker                 0.45%     98.2MiB / 7.738GiB    68.5MB / 75.3MB
+spice_action_worker                   0.47%     112.2MiB / 7.738GiB   42.7MB / 39.1MB
+spice_grafana                         0.48%     40.66MiB / 7.738GiB   1.49MB / 283kB
+spice_connector_trigger_service       0.65%     74.11MiB / 7.738GiB   60.9MB / 67.4MB
+spice_pipeline_scheduler              0.48%     91.72MiB / 7.738GiB   1.02MB / 1.15MB
+spice-harvester-kafka-ui              0.08%     378.6MiB / 7.738GiB   260MB / 9.66MB
+spice_action_outbox_worker            0.17%     103.6MiB / 7.738GiB   8.84MB / 13.2MB
+spice_pipeline_worker                 1.87%     822.4MiB / 7.738GiB   73.9MB / 101MB
+spice_writeback_materializer_worker   0.03%     81.16MiB / 7.738GiB   230kB / 0B
+spice_ingest_reconciler_worker        4.81%     84.97MiB / 7.738GiB   5.51MB / 3.76MB
+spice_jaeger                          0.10%     10.07MiB / 7.738GiB   251kB / 0B

@@ -1,117 +1,179 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { OntologyPage } from '../../src/pages/OntologyPage'
 import { renderWithClient, resetAppStore } from '../testUtils'
-import { useAppStore } from '../../src/state/store'
+import { useAppStore } from '../../src/store/useAppStore'
 
-const makeResponse = (payload: unknown, ok = true) => ({
-  ok,
-  statusText: ok ? 'OK' : 'Bad Request',
-  json: () => Promise.resolve(payload),
-})
+const apiMocks = vi.hoisted(() => ({
+  createObjectTypeV2: vi.fn(),
+  getObjectTypeFullMetadataV2: vi.fn(),
+  getOntology: vi.fn(),
+  getSummary: vi.fn(),
+  listOntology: vi.fn(),
+  updateObjectTypeV2: vi.fn(),
+}))
+
+const registerCommandMock = vi.hoisted(() => vi.fn())
+const showAppToastMock = vi.hoisted(() => vi.fn())
+const toastApiErrorMock = vi.hoisted(() => vi.fn())
+
+vi.mock('../../src/api/bff', () => ({
+  createObjectTypeV2: apiMocks.createObjectTypeV2,
+  getObjectTypeFullMetadataV2: apiMocks.getObjectTypeFullMetadataV2,
+  getOntology: apiMocks.getOntology,
+  getSummary: apiMocks.getSummary,
+  listOntology: apiMocks.listOntology,
+  updateObjectTypeV2: apiMocks.updateObjectTypeV2,
+}))
+
+vi.mock('../../src/api/useRequestContext', () => ({
+  useRequestContext: () => ({
+    language: 'en',
+    adminToken: 'admin-token',
+    adminActor: 'qa-bot',
+  }),
+}))
+
+vi.mock('../../src/commands/useCommandRegistration', () => ({
+  useCommandRegistration: () => registerCommandMock,
+}))
+
+vi.mock('../../src/app/AppToaster', () => ({
+  showAppToast: showAppToastMock,
+}))
+
+vi.mock('../../src/errors/toastApiError', () => ({
+  toastApiError: toastApiErrorMock,
+}))
 
 describe('OntologyPage', () => {
   beforeEach(() => {
     resetAppStore()
     useAppStore.setState({
-      pipelineContext: { folderId: 'demo-project', folderName: 'Demo Project' },
+      context: { project: 'core', branch: 'main', language: 'en' },
+      adminToken: 'admin-token',
+      adminMode: true,
+    })
+    apiMocks.listOntology.mockReset()
+    apiMocks.getSummary.mockReset()
+    apiMocks.getOntology.mockReset()
+    apiMocks.getObjectTypeFullMetadataV2.mockReset()
+    apiMocks.createObjectTypeV2.mockReset()
+    apiMocks.updateObjectTypeV2.mockReset()
+
+    apiMocks.listOntology.mockResolvedValue({
+      ontologies: [{ id: 'Order', label: 'Order', description: 'Order object' }],
+    })
+    apiMocks.getSummary.mockResolvedValue({
+      data: {
+        policy: {
+          is_protected_branch: false,
+        },
+      },
+    })
+    apiMocks.getOntology.mockResolvedValue({
+      id: 'Order',
+      label: 'Order',
+      properties: [{ name: 'order_id', type: 'xsd:string', required: true, primaryKey: true }],
+      metadata: {},
+    })
+    apiMocks.getObjectTypeFullMetadataV2.mockResolvedValue({
+      properties: {
+        order_id: {
+          dataType: { type: 'STRING' },
+        },
+      },
+    })
+    apiMocks.createObjectTypeV2.mockResolvedValue({ command_id: 'cmd-create-1' })
+    apiMocks.updateObjectTypeV2.mockResolvedValue({ command_id: 'cmd-update-1' })
+    registerCommandMock.mockReset()
+    showAppToastMock.mockReset()
+    toastApiErrorMock.mockReset()
+  })
+
+  it('loads ontology class list and class detail via bff contract', async () => {
+    renderWithClient(<OntologyPage dbName="core" />)
+
+    const classButton = await screen.findByRole('button', { name: 'Order' })
+    fireEvent.click(classButton)
+
+    await waitFor(() => {
+      expect(apiMocks.getOntology).toHaveBeenCalledWith(expect.any(Object), 'core', 'Order', 'main')
+    })
+    expect(screen.getByDisplayValue('Order')).toBeInTheDocument()
+  })
+
+  it('applies selected object type update through v2 contract', async () => {
+    renderWithClient(<OntologyPage dbName="core" />)
+
+    const classButton = await screen.findByRole('button', { name: 'Order' })
+    fireEvent.click(classButton)
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Order')).toBeInTheDocument()
+      expect(screen.getByDisplayValue(/"id": "Order"/)).toBeInTheDocument()
     })
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((input: RequestInfo | URL) => {
-        const url = typeof input === 'string' ? input : input.toString()
+    const applyButton = screen.getByRole('button', { name: 'Apply' })
+    fireEvent.click(applyButton)
 
-        if (url.includes('/api/v1/ontology/demo-project/classes')) {
-          return Promise.resolve(
-            makeResponse({
-              status: 'success',
-              data: {
-                classes: [
-                  { id: 'Facility', label: 'Facility', description: '시설' },
-                  { id: 'Vendor', label: 'Vendor', description: '협력사' },
-                ],
-              },
-            }),
-          )
-        }
-
-        if (url.includes('/api/v1/ontology/demo-project/link-types')) {
-          return Promise.resolve(
-            makeResponse({
-              status: 'success',
-              data: {
-                linkTypes: [
-                  {
-                    id: 'facility_vendor',
-                    name: 'Facility ↔ Vendor',
-                    predicate: 'hasVendor',
-                    sourceClassName: 'Facility',
-                    targetClassName: 'Vendor',
-                    description: '시설과 협력사 관계',
-                  },
-                ],
-              },
-            }),
-          )
-        }
-
-        if (url.includes('/api/v1/ontology/demo-project/action-types')) {
-          return Promise.resolve(
-            makeResponse({
-              status: 'success',
-              data: {
-                actionTypes: [
-                  { id: 'normalize_address', name: 'Normalize Address', description: '주소 정규화' },
-                ],
-              },
-            }),
-          )
-        }
-
-        throw new Error(`Unexpected fetch: ${url}`)
-      }) as never,
+    await waitFor(() => {
+      expect(apiMocks.updateObjectTypeV2).toHaveBeenCalled()
+    })
+    expect(apiMocks.updateObjectTypeV2).toHaveBeenCalledWith(
+      expect.any(Object),
+      'core',
+      'Order',
+      expect.objectContaining({
+        status: 'ACTIVE',
+        primaryKey: 'order_id',
+      }),
+      { branch: 'main' },
+    )
+    expect(registerCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        commandId: 'cmd-update-1',
+        kind: 'UPDATE_ONTOLOGY',
+        targetClassId: 'Order',
+      }),
     )
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    vi.resetAllMocks()
-  })
+  it('blocks apply early when backing metadata is present without datasetVersionId', async () => {
+    renderWithClient(<OntologyPage dbName="core" />)
 
-  it('shows the default discover content', () => {
-    renderWithClient(<OntologyPage />)
-    expect(screen.getByText('Ontology Manager')).toBeInTheDocument()
-    const title = document.querySelector('.ontology-content-title')
-    expect(title).not.toBeNull()
-    expect(title).toHaveTextContent('Discover')
-  })
+    const classButton = await screen.findByRole('button', { name: 'Order' })
+    fireEvent.click(classButton)
 
-  it('filters search results and selects a resource', async () => {
-    renderWithClient(<OntologyPage />)
+    const payload = {
+      id: 'Order',
+      label: 'Order',
+      properties: [{ name: 'order_id', type: 'xsd:string', required: true, primaryKey: true }],
+      metadata: {},
+      backingDatasetId: 'dataset-orders',
+    }
 
-    const input = screen.getByLabelText('Search ontology resources')
-    fireEvent.focus(input)
-    fireEvent.change(input, { target: { value: 'Facility' } })
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/"id": "Order"/)).toBeInTheDocument()
+    })
 
-    const listbox = await screen.findByRole('listbox')
-    const options = await within(listbox).findAllByRole('option')
-    const objectTypeOption = options.find((option) => option.textContent?.includes('Object type'))
-    expect(objectTypeOption).toBeDefined()
-    fireEvent.click(objectTypeOption!)
+    const editor = screen
+      .getAllByRole('textbox')
+      .find((element) => element.tagName === 'TEXTAREA') as HTMLTextAreaElement | undefined
+    expect(editor).toBeDefined()
+    fireEvent.change(editor!, { target: { value: JSON.stringify(payload, null, 2) } })
 
-    expect((input as HTMLInputElement).value).toContain('Facility')
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
-  })
+    const applyButton = screen.getByRole('button', { name: 'Apply' })
+    fireEvent.click(applyButton)
 
-  it('switches navigation sections', () => {
-    renderWithClient(<OntologyPage />)
-    const functionsButton = screen.getByRole('button', { name: /Functions/i })
-    fireEvent.click(functionsButton)
-
-    expect(screen.getByText(/Object types/i)).toBeInTheDocument()
-    const title = document.querySelector('.ontology-content-title')
-    expect(title).not.toBeNull()
-    expect(title).toHaveTextContent('Functions')
+    await waitFor(() => {
+      expect(toastApiErrorMock).toHaveBeenCalled()
+    })
+    expect(apiMocks.updateObjectTypeV2).not.toHaveBeenCalled()
+    expect(toastApiErrorMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        message: 'datasetVersionId is required when mapping/backing source metadata is provided.',
+      }),
+    )
   })
 })

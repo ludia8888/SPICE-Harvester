@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from instance_worker.main import StrictInstanceWorker
+import instance_worker.main as instance_worker_main
+from instance_worker.main import StrictInstanceWorker, _InstanceCommandPayload
 from shared.models.event_envelope import EventEnvelope
 
 
@@ -60,6 +62,88 @@ def test_retryable_error_detection() -> None:
     assert StrictInstanceWorker._is_retryable_error(Exception("timeout waiting for response")) is True
     assert StrictInstanceWorker._is_retryable_error(Exception("409 conflict on version")) is True
     assert StrictInstanceWorker._is_retryable_error(Exception("invalid payload")) is False
+
+
+def test_es_outage_errors_expand_retry_budget() -> None:
+    worker = StrictInstanceWorker()
+    payload = _InstanceCommandPayload(command={"command_id": "cmd"}, envelope_metadata={})
+
+    retries = worker._max_retries_for_error(
+        Exception("ConnectionError: cannot connect to host elasticsearch:9200"),
+        payload=payload,
+        error="Connection error caused by: ConnectionError(Cannot connect to host elasticsearch:9200)",
+        retryable=True,
+    )
+    backoff = worker._backoff_seconds_for_error(
+        Exception("ConnectionError: cannot connect to host elasticsearch:9200"),
+        payload=payload,
+        error="Connection error caused by: ConnectionError(Cannot connect to host elasticsearch:9200)",
+        attempt_count=6,
+        retryable=True,
+    )
+
+    assert retries >= 20
+    assert backoff <= 8
+
+
+@pytest.mark.asyncio
+async def test_process_create_instance_does_not_mark_failed_before_terminal_retry() -> None:
+    worker = StrictInstanceWorker()
+    status_events: list[str] = []
+
+    async def _set_status(command_id: str, status: str, result=None):  # noqa: ANN001
+        status_events.append(status)
+
+    worker.set_command_status = _set_status  # type: ignore[assignment]
+    worker._stamp_ontology_version = AsyncMock(return_value={"ref": "branch:main"})  # type: ignore[assignment]
+    worker._apply_create_instance_side_effects = AsyncMock(side_effect=Exception("ConnectionError: es unavailable"))  # type: ignore[assignment]
+    worker._record_instance_edit = AsyncMock()  # type: ignore[assignment]
+    worker._apply_relationship_object_link_edits = AsyncMock()  # type: ignore[assignment]
+
+    command = {
+        "command_id": "cmd-create-1",
+        "command_type": "CREATE_INSTANCE",
+        "db_name": "qa_db",
+        "class_id": "Order",
+        "branch": "main",
+        "payload": {
+            "order_id": "order-1",
+            "order_status": "PENDING",
+        },
+    }
+
+    with pytest.raises(Exception, match="ConnectionError"):
+        await worker.process_create_instance(command)
+
+    assert status_events == ["processing"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_uses_disconnect_for_elasticsearch_service(monkeypatch) -> None:
+    worker = StrictInstanceWorker()
+    worker._close_consumer_runtime = AsyncMock()  # type: ignore[assignment]
+    monkeypatch.setattr(instance_worker_main, "close_kafka_producer", AsyncMock())
+
+    redis_client = SimpleNamespace(aclose=AsyncMock())
+    es_service = SimpleNamespace(disconnect=AsyncMock())
+    oms_http = SimpleNamespace(aclose=AsyncMock())
+    processed_registry = SimpleNamespace(close=AsyncMock())
+
+    worker.redis_client = redis_client
+    worker.elasticsearch_service = es_service
+    worker.oms_http = oms_http
+    worker.processed_event_registry = processed_registry
+    worker.dataset_registry = None
+    worker.objectify_registry = None
+
+    await worker.shutdown()
+
+    worker._close_consumer_runtime.assert_awaited_once()  # type: ignore[attr-defined]
+    instance_worker_main.close_kafka_producer.assert_awaited_once()  # type: ignore[attr-defined]
+    redis_client.aclose.assert_awaited_once()
+    es_service.disconnect.assert_awaited_once()
+    oms_http.aclose.assert_awaited_once()
+    processed_registry.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

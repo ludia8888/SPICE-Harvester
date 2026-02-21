@@ -17,14 +17,25 @@ class _AcquireCtx:
 
 
 class _Conn:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, lock_sequence: list[bool] | None = None) -> None:
         self.fail = fail
         self.executed: list[str] = []
+        self._lock_sequence = list(lock_sequence or [True])
 
-    async def execute(self, sql: str) -> None:
+    async def execute(self, sql: str, *_args) -> None:
         if self.fail:
             raise RuntimeError("boom")
         self.executed.append(sql)
+
+    async def fetchval(self, sql: str, *_args):
+        if self.fail:
+            raise RuntimeError("boom")
+        self.executed.append(sql)
+        if sql.startswith("SELECT pg_try_advisory_lock"):
+            if self._lock_sequence:
+                return self._lock_sequence.pop(0)
+            return False
+        return None
 
 
 class _Pool:
@@ -63,3 +74,47 @@ async def test_health_check_returns_false_on_query_failure() -> None:
     registry._pool = _Pool(_Conn(fail=True))
 
     assert await registry.health_check() is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_uses_advisory_lock() -> None:
+    registry = _Registry(dsn="postgres://unused", schema="spice_test")
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    assert conn.executed[0].startswith("SELECT pg_try_advisory_lock")
+    assert conn.executed[1] == "CREATE SCHEMA IF NOT EXISTS spice_test"
+    assert conn.executed[-1].startswith("SELECT pg_advisory_unlock")
+
+
+class _FailingRegistry(PostgresSchemaRegistry):
+    async def _ensure_tables(self, conn):  # type: ignore[override]
+        raise RuntimeError("table init failed")
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_unlocks_on_table_error() -> None:
+    registry = _FailingRegistry(dsn="postgres://unused", schema="spice_test")
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    with pytest.raises(RuntimeError, match="table init failed"):
+        await registry.ensure_schema()
+
+    assert conn.executed[0].startswith("SELECT pg_try_advisory_lock")
+    assert conn.executed[-1].startswith("SELECT pg_advisory_unlock")
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_retries_until_lock_available() -> None:
+    registry = _Registry(dsn="postgres://unused", schema="spice_test")
+    registry._schema_lock_poll_interval_seconds = 0
+    conn = _Conn(lock_sequence=[False, False, True])
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    attempts = [sql for sql in conn.executed if sql.startswith("SELECT pg_try_advisory_lock")]
+    assert len(attempts) == 3
