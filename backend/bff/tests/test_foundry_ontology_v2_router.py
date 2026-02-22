@@ -824,11 +824,11 @@ async def test_list_object_types_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_object_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -882,14 +882,14 @@ async def test_create_object_type_v2_routes_to_contract_service_with_backing_sou
     router_v2.object_type_contract_service.create_object_type_contract = _fake_create_object_type_contract
     try:
         response = await router_v2.create_object_type_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             body=router_v2.ObjectTypeContractCreateRequestV2(
                 apiName="Order",
                 status="DRAFT",
                 backingSources=[{"dataset_id": "ds-1"}],
             ),
             request=request,
-            branch="main",
+            branch="master",
             expected_head_commit=None,
             oms_client=oms_client,
             dataset_registry=SimpleNamespace(),
@@ -905,7 +905,7 @@ async def test_create_object_type_v2_routes_to_contract_service_with_backing_sou
     assert captured_body.class_id == "Order"
     assert captured_body.status == "DRAFT"
     assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
-    assert captured["expected_head_commit"] == "branch:main"
+    assert captured["expected_head_commit"] == "branch:master"
 
 
 @pytest.mark.asyncio
@@ -935,8 +935,8 @@ async def test_update_object_type_v2_routes_to_contract_service():
     router_v2.object_type_contract_service.update_object_type_contract = _fake_update_object_type_contract
     try:
         response = await router_v2.update_object_type_v2(
-            ontology="test_db",
-            objectType="Order",
+            ontologyRid="test_db",
+            objectTypeApiName="Order",
             body=router_v2.ObjectTypeContractUpdateRequestV2(
                 status="ACTIVE",
                 primaryKey="order_id",
@@ -944,7 +944,7 @@ async def test_update_object_type_v2_routes_to_contract_service():
                 backingSource={"dataset_id": "ds-1"},
             ),
             request=request,
-            branch="main",
+            branch="master",
             expected_head_commit=None,
             oms_client=oms_client,
             dataset_registry=SimpleNamespace(),
@@ -961,7 +961,7 @@ async def test_update_object_type_v2_routes_to_contract_service():
     assert captured_body.status == "ACTIVE"
     assert captured_body.pk_spec == {"primary_key": ["order_id"], "title_key": ["order_id"]}
     assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
-    assert captured["expected_head_commit"] == "branch:main"
+    assert captured["expected_head_commit"] == "branch:master"
 
 
 @pytest.mark.asyncio
@@ -983,7 +983,7 @@ async def test_get_ontology_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_ontology_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             oms_client=_FakeOMSClient(),
         )
@@ -1003,7 +1003,7 @@ async def test_get_ontology_v2_resolves_rid_identifier():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_ontology_v2(
-            ontology="ri.ontology.test_db",
+            ontologyRid="ri.ontology.test_db",
             request=request,
             oms_client=_FakeOMSClient(),
         )
@@ -1021,7 +1021,7 @@ async def test_get_ontology_v2_unknown_returns_ontology_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_ontology_v2(
-            ontology="unknown_ontology",
+            ontologyRid="unknown_ontology",
             request=request,
             oms_client=_FakeOMSClient(),
         )
@@ -1047,7 +1047,7 @@ async def test_get_ontology_v2_permission_denied_returns_foundry_403():
     router_v2.enforce_database_role = _deny_permission
     try:
         response = await router_v2.get_ontology_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             oms_client=_FakeOMSClient(),
         )
@@ -1073,7 +1073,7 @@ async def test_get_ontology_v2_non_permission_role_error_returns_invalid_argumen
     router_v2.enforce_database_role = _invalid_role
     try:
         response = await router_v2.get_ontology_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             oms_client=_FakeOMSClient(),
         )
@@ -1091,7 +1091,7 @@ async def test_get_ontology_v2_non_permission_role_error_returns_invalid_argumen
 async def test_get_ontology_v2_preflight_upstream_error_returns_upstream_contract():
     request = Request({"type": "http", "headers": []})
     response = await router_v2.get_ontology_v2(
-        ontology="test_db",
+        ontologyRid="test_db",
         request=request,
         oms_client=_ListDatabasesStatusErrorOMSClient(),
     )
@@ -1110,10 +1110,10 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_full_metadata_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=True,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1121,7 +1121,7 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
 
     assert isinstance(response, dict)
     assert response["ontology"]["apiName"] == "test_db"
-    assert response["branch"]["rid"] == "main"
+    assert response["branch"]["rid"] == "master"
 
     assert "Account" in response["objectTypes"]
     account_full_metadata = response["objectTypes"]["Account"]
@@ -1148,10 +1148,10 @@ async def test_get_full_metadata_v2_requires_preview_true():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_full_metadata_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=False,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1171,10 +1171,10 @@ async def test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavail
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_full_metadata_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=True,
-            branch="main",
+            branch="master",
             oms_client=_FullMetadataPartialFailureOMSClient(),
         )
     finally:
@@ -1193,11 +1193,11 @@ async def test_list_action_types_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_action_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1219,11 +1219,11 @@ async def test_list_action_types_v2_falls_back_to_legacy_action_rows() -> None:
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_action_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1241,10 +1241,10 @@ async def test_get_action_type_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_action_type_v2(
-            ontology="test_db",
-            actionType="ApproveAccount",
+            ontologyRid="test_db",
+            actionTypeApiName="ApproveAccount",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1265,10 +1265,10 @@ async def test_get_action_type_v2_falls_back_to_legacy_action_rows() -> None:
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_action_type_v2(
-            ontology="test_db",
-            actionType="HoldOrder",
+            ontologyRid="test_db",
+            actionTypeApiName="HoldOrder",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1286,10 +1286,10 @@ async def test_get_action_type_by_rid_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_action_type_by_rid_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             actionTypeRid="ri.action-type.approve-account",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1307,10 +1307,10 @@ async def test_get_action_type_by_rid_v2_falls_back_to_legacy_action_rows() -> N
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_action_type_by_rid_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             actionTypeRid="ri.action-type.hold-order",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1336,13 +1336,13 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(
                 parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
             ),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1364,7 +1364,7 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
     assert submit_payload["options"]["mode"] == "VALIDATE_AND_EXECUTE"
     assert submit_payload["metadata"]["user_id"] == "alice"
     assert submit_payload["metadata"]["user_type"] == "service"
-    assert fake_client.last_post[1]["params"]["branch"] == "main"
+    assert fake_client.last_post[1]["params"]["branch"] == "master"
     assert "preview" not in fake_client.last_post[1]["params"]
     assert "validate" not in fake_client.last_post[1]["params"]
 
@@ -1385,14 +1385,14 @@ async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(
                 options=router_v2.ApplyActionRequestOptionsV2(mode="VALIDATE_ONLY"),
                 parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
             ),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1432,11 +1432,11 @@ async def test_apply_action_v2_emits_standardized_action_evidence_fields():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1467,8 +1467,8 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_batch_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.BatchApplyActionRequestV2(
                 requests=[
                     router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}}),
@@ -1476,7 +1476,7 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
                 ]
             ),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1492,7 +1492,7 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
     assert submit_payload["requests"][0]["parameters"]["ticket"]["instance_id"] == "t1"
     assert submit_payload["requests"][1]["parameters"]["ticket"]["instance_id"] == "t2"
     assert submit_payload["metadata"]["user_id"] == "alice"
-    assert fake_client.last_post[1]["params"]["branch"] == "main"
+    assert fake_client.last_post[1]["params"]["branch"] == "master"
     assert "preview" not in fake_client.last_post[1]["params"]
 
 
@@ -1512,14 +1512,14 @@ async def test_apply_action_batch_v2_forwards_return_edits_option():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         await router_v2.apply_action_batch_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.BatchApplyActionRequestV2(
                 options=router_v2.BatchApplyActionRequestOptionsV2(returnEdits="ALL"),
                 requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
             ),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1540,8 +1540,8 @@ async def test_count_objects_v2_forwards_to_oms_count_path():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.count_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             branch="main",
             sdk_package_rid=None,
@@ -1581,11 +1581,11 @@ async def test_apply_action_v2_normalizes_non_foundry_validation_error():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1625,13 +1625,13 @@ async def test_apply_action_batch_v2_normalizes_non_foundry_validation_error():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.apply_action_batch_v2(
-            ontology="test_db",
-            action="ApproveAccount",
+            ontologyRid="test_db",
+            actionApiName="ApproveAccount",
             body=router_v2.BatchApplyActionRequestV2(
                 requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
             ),
             request=request,
-            branch="main",
+            branch="master",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1653,7 +1653,7 @@ async def test_list_query_types_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_query_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=10,
             page_token=None,
@@ -1675,7 +1675,7 @@ async def test_get_query_type_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_query_type_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             request=request,
             version="1.0.0",
@@ -1697,7 +1697,7 @@ async def test_get_query_type_v2_mismatched_version_returns_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_query_type_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             request=request,
             version="9.9.9",
@@ -1721,7 +1721,7 @@ async def test_execute_query_v2_runs_function_query_and_returns_value_envelope()
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.execute_query_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
             request=request,
@@ -1749,7 +1749,7 @@ async def test_execute_query_v2_missing_required_parameter_returns_invalid_argum
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.execute_query_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             body=router_v2.ExecuteQueryRequestV2(parameters={}),
             request=request,
@@ -1776,7 +1776,7 @@ async def test_execute_query_v2_without_execution_spec_returns_invalid_argument(
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.execute_query_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
             request=request,
@@ -1804,7 +1804,7 @@ async def test_execute_query_v2_prefers_canonical_object_type_field_over_fallbac
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.execute_query_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             queryApiName="findAccounts",
             body=router_v2.ExecuteQueryRequestV2(parameters={"accountId": "acc-1"}),
             request=request,
@@ -1830,12 +1830,12 @@ async def test_list_interface_types_v2_requires_preview_true():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_interface_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=False,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1855,12 +1855,12 @@ async def test_list_interface_types_v2_returns_foundry_raw_shape_with_preview():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_interface_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=True,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1878,12 +1878,12 @@ async def test_list_shared_property_types_v2_requires_preview_true():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_shared_property_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=False,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1903,12 +1903,12 @@ async def test_list_shared_property_types_v2_returns_foundry_raw_shape_with_prev
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_shared_property_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=True,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1927,11 +1927,11 @@ async def test_get_shared_property_type_v2_returns_foundry_raw_shape_with_previe
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_shared_property_type_v2(
-            ontology="test_db",
-            sharedPropertyType="TenantScope",
+            ontologyRid="test_db",
+            sharedPropertyTypeApiName="TenantScope",
             request=request,
             preview=True,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1949,11 +1949,11 @@ async def test_get_shared_property_type_v2_missing_returns_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_shared_property_type_v2(
-            ontology="test_db",
-            sharedPropertyType="MissingShared",
+            ontologyRid="test_db",
+            sharedPropertyTypeApiName="MissingShared",
             request=request,
             preview=True,
-            branch="main",
+            branch="master",
             oms_client=_MissingSharedPropertyOMSClient(),
         )
     finally:
@@ -1973,7 +1973,7 @@ async def test_list_value_types_v2_requires_preview_true():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_value_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=False,
             oms_client=_FakeOMSClient(),
@@ -1995,8 +1995,8 @@ async def test_get_value_type_v2_returns_foundry_raw_shape_with_preview():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_value_type_v2(
-            ontology="test_db",
-            valueType="Money",
+            ontologyRid="test_db",
+            valueTypeApiName="Money",
             request=request,
             preview=True,
             oms_client=_FakeOMSClient(),
@@ -2016,7 +2016,7 @@ async def test_list_value_types_v2_returns_foundry_raw_shape_without_pagination_
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_value_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             preview=True,
             oms_client=_FakeOMSClient(),
@@ -2036,10 +2036,10 @@ async def test_get_object_type_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_type_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2058,10 +2058,10 @@ async def test_get_object_type_full_metadata_v2_returns_foundry_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_type_full_metadata_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
-            branch="main",
+            branch="master",
             preview=True,
             oms_client=_FakeOMSClient(),
         )
@@ -2083,10 +2083,10 @@ async def test_get_object_type_full_metadata_v2_missing_returns_object_type_not_
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_type_full_metadata_v2(
-            ontology="test_db",
-            objectType="MissingType",
+            ontologyRid="test_db",
+            objectTypeApiName="MissingType",
             request=request,
-            branch="main",
+            branch="master",
             preview=True,
             oms_client=_MissingObjectTypeOMSClient(),
         )
@@ -2107,10 +2107,10 @@ async def test_get_object_type_v2_missing_returns_object_type_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_type_v2(
-            ontology="test_db",
-            objectType="MissingType",
+            ontologyRid="test_db",
+            objectTypeApiName="MissingType",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_MissingObjectTypeOMSClient(),
         )
     finally:
@@ -2130,8 +2130,8 @@ async def test_list_outgoing_link_types_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_outgoing_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=10,
             page_token=None,
@@ -2155,21 +2155,21 @@ async def test_list_outgoing_link_types_v2_filters_before_pagination():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_outgoing_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=2,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=client,
         )
         second = await router_v2.list_outgoing_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="main",
+            branch="master",
             oms_client=client,
         )
     finally:
@@ -2189,21 +2189,21 @@ async def test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_cha
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_outgoing_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=1,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=client,
         )
         second = await router_v2.list_outgoing_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="main",
+            branch="master",
             oms_client=client,
         )
     finally:
@@ -2222,11 +2222,11 @@ async def test_get_outgoing_link_type_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_outgoing_link_type_v2(
-            ontology="test_db",
-            objectType="Account",
-            linkType="owned_by",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
+            linkTypeApiName="owned_by",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2245,11 +2245,11 @@ async def test_get_outgoing_link_type_v2_missing_returns_link_type_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_outgoing_link_type_v2(
-            ontology="test_db",
-            objectType="Account",
-            linkType="unknown_link",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
+            linkTypeApiName="unknown_link",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2279,12 +2279,12 @@ async def test_list_incoming_link_types_v2_returns_foundry_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_incoming_link_types_v2(
-            ontology="test_db",
-            objectType="User",
+            ontologyRid="test_db",
+            objectTypeApiName="User",
             request=request,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2304,12 +2304,12 @@ async def test_list_incoming_link_types_v2_excludes_non_matching():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_incoming_link_types_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=10,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2329,21 +2329,21 @@ async def test_list_incoming_link_types_v2_filters_before_pagination():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_incoming_link_types_v2(
-            ontology="test_db",
-            objectType="User",
+            ontologyRid="test_db",
+            objectTypeApiName="User",
             request=request,
             page_size=2,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=client,
         )
         second = await router_v2.list_incoming_link_types_v2(
-            ontology="test_db",
-            objectType="User",
+            ontologyRid="test_db",
+            objectTypeApiName="User",
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="main",
+            branch="master",
             oms_client=client,
         )
     finally:
@@ -2362,11 +2362,11 @@ async def test_get_incoming_link_type_v2_returns_foundry_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_incoming_link_type_v2(
-            ontology="test_db",
-            objectType="User",
-            linkType="owned_by",
+            ontologyRid="test_db",
+            objectTypeApiName="User",
+            linkTypeApiName="owned_by",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2387,11 +2387,11 @@ async def test_get_incoming_link_type_v2_wrong_target_returns_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_incoming_link_type_v2(
-            ontology="test_db",
-            objectType="Account",
-            linkType="owned_by",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
+            linkTypeApiName="owned_by",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2411,11 +2411,11 @@ async def test_get_incoming_link_type_v2_unknown_link_returns_not_found():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_incoming_link_type_v2(
-            ontology="test_db",
-            objectType="User",
-            linkType="nonexistent_link",
+            ontologyRid="test_db",
+            objectTypeApiName="User",
+            linkTypeApiName="nonexistent_link",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2435,11 +2435,11 @@ async def test_search_objects_v2_passthrough_foundry_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.search_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             payload={"where": {"type": "eq", "field": "status", "value": "ACTIVE"}, "pageSize": 10},
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2458,8 +2458,8 @@ async def test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=10,
             page_token="MTA",
@@ -2467,7 +2467,7 @@ async def test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse():
             order_by="properties.account_id:desc,p.name:asc",
             exclude_rid=True,
             snapshot=False,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
     finally:
@@ -2478,7 +2478,7 @@ async def test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse():
     assert response["data"][0]["account_id"] == "acc-1"
     assert fake.last_post is not None
     _, kwargs = fake.last_post
-    assert kwargs["params"]["branch"] == "main"
+    assert kwargs["params"]["branch"] == "master"
     assert kwargs["json"]["pageSize"] == 10
     assert kwargs["json"]["pageToken"] == "MTA"
     assert kwargs["json"]["select"] == ["account_id", "name"]
@@ -2500,13 +2500,13 @@ async def test_get_object_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
             request=request,
             select=["account_id", "name"],
             exclude_rid=True,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2524,13 +2524,13 @@ async def test_get_object_v2_not_found_returns_foundry_error():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_object_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-404",
             request=request,
             select=None,
             exclude_rid=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2552,10 +2552,10 @@ async def test_list_linked_objects_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=10,
             page_token=None,
@@ -2563,7 +2563,7 @@ async def test_list_linked_objects_v2_returns_foundry_raw_shape():
             order_by="properties.user_id:asc",
             exclude_rid=True,
             snapshot=False,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
     finally:
@@ -2585,10 +2585,10 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=2,
             page_token=None,
@@ -2596,14 +2596,14 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
         second = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
@@ -2611,14 +2611,14 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
         third = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=2,
             page_token=second.get("nextPageToken"),
@@ -2626,7 +2626,7 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
     finally:
@@ -2648,10 +2648,10 @@ async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes(
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=2,
             page_token=None,
@@ -2659,14 +2659,14 @@ async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes(
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
         second = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             request=request,
             page_size=3,
             page_token=first.get("nextPageToken"),
@@ -2674,7 +2674,7 @@ async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes(
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
     finally:
@@ -2693,10 +2693,10 @@ async def test_list_linked_objects_v2_missing_link_type_returns_link_type_not_fo
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_linked_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="unknown_link",
+            linkTypeApiName="unknown_link",
             request=request,
             page_size=10,
             page_token=None,
@@ -2704,7 +2704,7 @@ async def test_list_linked_objects_v2_missing_link_type_returns_link_type_not_fo
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2724,15 +2724,15 @@ async def test_get_linked_object_v2_returns_foundry_raw_shape():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_linked_object_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             linkedObjectPrimaryKey="u-1",
             request=request,
             select=["user_id", "name"],
             exclude_rid=True,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2751,15 +2751,15 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_linked_object_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             primaryKey="acc-1",
-            linkType="owned_by",
+            linkTypeApiName="owned_by",
             linkedObjectPrimaryKey="u-404",
             request=request,
             select=None,
             exclude_rid=None,
-            branch="main",
+            branch="master",
             oms_client=fake,
         )
     finally:
@@ -2782,7 +2782,7 @@ async def test_load_object_set_objects_v2_supports_search_around():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.load_object_set_objects_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             payload={
                 "objectSet": {
                     "type": "searchAround",
@@ -2796,7 +2796,7 @@ async def test_load_object_set_objects_v2_supports_search_around():
                 "pageSize": 10,
             },
             request=request,
-            branch="main",
+            branch="master",
             transaction_id=None,
             sdk_package_rid=None,
             sdk_version=None,
@@ -2818,7 +2818,7 @@ async def test_load_object_set_objects_or_interfaces_v2_search_around_invalid_li
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.load_object_set_objects_or_interfaces_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             payload={
                 "objectSet": {
                     "type": "searchAround",
@@ -2849,11 +2849,11 @@ async def test_load_object_set_objects_or_interfaces_v2_search_around_invalid_li
 async def test_v2_invalid_ontology_returns_foundry_error_envelope():
     request = Request({"type": "http", "headers": []})
     response = await router_v2.list_object_types_v2(
-        ontology="INVALID NAME",
+        ontologyRid="INVALID NAME",
         request=request,
         page_size=10,
         page_token=None,
-        branch="main",
+        branch="master",
         oms_client=_FakeOMSClient(),
     )
 
@@ -2873,8 +2873,8 @@ async def test_list_objects_v2_rejects_invalid_orderby_expression():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=10,
             page_token=None,
@@ -2882,7 +2882,7 @@ async def test_list_objects_v2_rejects_invalid_orderby_expression():
             order_by="account_id:desc",
             exclude_rid=None,
             snapshot=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2902,8 +2902,8 @@ async def test_list_objects_v2_rejects_invalid_branch():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.list_objects_v2(
-            ontology="test_db",
-            objectType="Account",
+            ontologyRid="test_db",
+            objectTypeApiName="Account",
             request=request,
             page_size=10,
             page_token=None,
@@ -2931,11 +2931,11 @@ async def test_list_object_types_v2_rejects_expired_page_token():
     expired_token = encode_offset_page_token(10, issued_at=issued_at)
 
     response = await router_v2.list_object_types_v2(
-        ontology="test_db",
+        ontologyRid="test_db",
         request=request,
         page_size=10,
         page_token=expired_token,
-        branch="main",
+        branch="master",
         oms_client=_FakeOMSClient(),
     )
 
@@ -2951,11 +2951,11 @@ async def test_list_object_types_v2_rejects_page_token_scope_mismatch():
     mismatched_scope_token = encode_offset_page_token(10, scope="v2/objectTypes|other_db|main")
 
     response = await router_v2.list_object_types_v2(
-        ontology="test_db",
+        ontologyRid="test_db",
         request=request,
         page_size=10,
         page_token=mismatched_scope_token,
-        branch="main",
+        branch="master",
         oms_client=_FakeOMSClient(),
     )
 
@@ -2972,19 +2972,19 @@ async def test_list_object_types_v2_rejects_page_token_when_page_size_changes():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         first = await router_v2.list_object_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=1,
             page_token=None,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
         second = await router_v2.list_object_types_v2(
-            ontology="test_db",
+            ontologyRid="test_db",
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -3010,12 +3010,12 @@ async def test_timeseries_first_point_v2_requires_domain_role_and_returns_payloa
     router_v2._require_domain_role = _capture_require_domain_role
     try:
         response = await router_v2.get_timeseries_first_point_v2(
-            ontology="test_db",
-            objectType="Sensor",
+            ontologyRid="test_db",
+            objectTypeApiName="Sensor",
             primaryKey="sensor-001",
             property="temperature",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -3045,12 +3045,12 @@ async def test_timeseries_first_point_v2_forwards_actor_headers_to_oms():
     router_v2._require_domain_role = _noop_require_domain_role
     try:
         response = await router_v2.get_timeseries_first_point_v2(
-            ontology="test_db",
-            objectType="Sensor",
+            ontologyRid="test_db",
+            objectTypeApiName="Sensor",
             primaryKey="sensor-001",
             property="temperature",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=oms_client,
         )
     finally:
@@ -3120,12 +3120,12 @@ async def test_attachment_property_v2_requires_domain_role_and_returns_payload()
     router_v2._require_domain_role = _capture_require_domain_role
     try:
         response = await router_v2.list_attachment_property_v2(
-            ontology="test_db",
-            objectType="Employee",
+            ontologyRid="test_db",
+            objectTypeApiName="Employee",
             primaryKey="emp-001",
             property="resume",
             request=request,
-            branch="main",
+            branch="master",
             oms_client=_FakeOMSClient(),
         )
     finally:

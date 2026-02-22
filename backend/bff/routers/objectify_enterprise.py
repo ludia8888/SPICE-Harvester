@@ -34,7 +34,7 @@ async def detect_relationships(
     dataset_id: str,
     request: Request,
     body: DetectRelationshipsRequest = DetectRelationshipsRequest(),
-    branch: str = Query(default="main"),
+    branch: str = Query(default="master"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     """Detect potential FK relationships in a dataset."""
@@ -112,4 +112,3 @@ async def detect_relationships(
     except Exception as exc:
         logger.error("detect_relationships failed: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
-

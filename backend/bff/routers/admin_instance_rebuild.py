@@ -35,7 +35,7 @@ async def rebuild_instance_index_endpoint(
     db_name: str,
     background_tasks: BackgroundTasks,
     *,
-    branch: str = Query(default="main"),
+    branch: str = Query(default="master"),
     task_manager: BackgroundTaskManagerDep,
     redis_service: RedisServiceDep,
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),

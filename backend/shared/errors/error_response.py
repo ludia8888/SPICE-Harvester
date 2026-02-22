@@ -345,6 +345,24 @@ def install_error_handlers(
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError):
         code, message = _resolve_validation_error(exc)
+        request_path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        if request_path.startswith("/api/v2/"):
+            from shared.foundry.errors import foundry_error
+
+            raw_errors = exc.errors()
+            safe_errors = []
+            for err in raw_errors:
+                safe_err = dict(err)
+                ctx = safe_err.get("ctx")
+                if isinstance(ctx, dict):
+                    safe_err["ctx"] = {k: str(v) if isinstance(v, Exception) else v for k, v in ctx.items()}
+                safe_errors.append(safe_err)
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": message, "errors": safe_errors},
+            )
         status_code = (
             status.HTTP_400_BAD_REQUEST
             if code == ErrorCode.JSON_DECODE_ERROR
@@ -372,6 +390,16 @@ def install_error_handlers(
 
     @app.exception_handler(json.JSONDecodeError)
     async def json_decode_handler(request: Request, exc: json.JSONDecodeError):
+        request_path = str(getattr(getattr(request, "url", None), "path", "") or "")
+        if request_path.startswith("/api/v2/"):
+            from shared.foundry.errors import foundry_error
+
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "Invalid JSON format"},
+            )
         return _build_response(
             request,
             service_name=service_name,

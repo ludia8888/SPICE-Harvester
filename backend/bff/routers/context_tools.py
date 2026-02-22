@@ -79,7 +79,7 @@ async def describe_datasets(
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     db_name = validate_db_name(str(payload.get("db_name") or "").strip())
-    branch = str(payload.get("branch") or "main").strip() or "main"
+    branch = str(payload.get("branch") or "master").strip() or "master"
 
     allowed_db_names = _policy_set(data_policies.get("allowed_db_names"))
     _enforce_policy_value(allowed=allowed_db_names, value=db_name)
@@ -139,7 +139,7 @@ async def snapshot_ontology(
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     db_name = validate_db_name(str(payload.get("db_name") or "").strip())
-    branch = str(payload.get("branch") or "main").strip() or "main"
+    branch = str(payload.get("branch") or "master").strip() or "master"
     ontology_id = str(payload.get("ontology_id") or "").strip()
     if not ontology_id:
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "ontology_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)

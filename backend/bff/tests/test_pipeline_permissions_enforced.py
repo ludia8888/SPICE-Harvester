@@ -82,7 +82,7 @@ async def test_get_pipeline_requires_read_permission() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
-    assert exc_info.value.detail == "Permission denied"
+    assert exc_info.value.detail["message"] == "Permission denied"
 
 
 @pytest.mark.asyncio

@@ -59,7 +59,7 @@ class ActionSubmitRequest(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
     correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
-    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    base_branch: str = Field("master", description="Base branch for authoritative reads (default: master)")
     overlay_branch: Optional[str] = Field(
         default=None,
         description="Optional overlay branch override (default derived from writeback_target)",
@@ -107,7 +107,7 @@ class ActionSubmitBatchItemRequest(BaseModel):
 
 class ActionSubmitBatchRequest(BaseModel):
     items: List[ActionSubmitBatchItemRequest] = Field(default_factory=list, min_length=1, max_length=500)
-    base_branch: str = Field(default="main", description="Default base branch for items")
+    base_branch: str = Field(default="master", description="Default base branch for items")
     overlay_branch: Optional[str] = Field(default=None, description="Default overlay branch for items")
 
 
@@ -170,7 +170,7 @@ class ActionSimulateRequest(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
     correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
-    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    base_branch: str = Field("master", description="Base branch for authoritative reads (default: master)")
     overlay_branch: Optional[str] = Field(
         default=None,
         description="Optional overlay branch override (default derived from writeback_target)",
@@ -444,7 +444,7 @@ async def submit_action_batch_async(
     submit_results: Dict[str, ActionSubmitResponse] = {}
 
     for request_id, item in normalized_items:
-        item_base_branch = str(item.base_branch or request.base_branch or "main").strip() or "main"
+        item_base_branch = str(item.base_branch or request.base_branch or "master").strip() or "master"
         item_overlay_branch = str(item.overlay_branch or request.overlay_branch or "").strip() or None
         item_metadata = dict(item.metadata or {})
         item_metadata["__batch"] = {"batch_id": batch_id, "request_id": request_id}
@@ -578,7 +578,7 @@ async def simulate_action_async(
                 code=ErrorCode.REQUEST_VALIDATION_FAILED,
             )
 
-        resolved_base_branch = str(request.base_branch or "").strip() or "main"
+        resolved_base_branch = str(request.base_branch or "").strip() or "master"
 
         if request.use_branch_head:
             ontology_commit_id = f"branch:{resolved_base_branch}"
@@ -956,7 +956,7 @@ async def apply_action_v2_oms(
     action: str,
     *,
     body: ApplyActionRequestV2,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
     sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
     transaction_id: Optional[str] = Query(default=None, alias="transactionId"),
@@ -978,7 +978,7 @@ async def apply_action_v2_oms(
     mode = _resolve_v2_apply_mode(
         explicit_mode=body.options.mode if body.options else None,
     )
-    resolved_branch = str(branch or "").strip() or "main"
+    resolved_branch = str(branch or "").strip() or "master"
 
     if mode == "VALIDATE_ONLY":
         await simulate_action_async(
@@ -1033,7 +1033,7 @@ async def apply_action_batch_v2_oms(
     action: str,
     *,
     body: ApplyActionBatchRequestV2,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
     sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
     event_store=EventStoreDep,
@@ -1057,7 +1057,7 @@ async def apply_action_batch_v2_oms(
     base_metadata = dict(body.metadata or {})
     base_metadata.setdefault("user_id", "system")
     base_metadata.setdefault("user_type", "user")
-    resolved_branch = str(branch or "").strip() or "main"
+    resolved_branch = str(branch or "").strip() or "master"
 
     items: List[ActionSubmitBatchItemRequest] = []
     for item in body.requests:

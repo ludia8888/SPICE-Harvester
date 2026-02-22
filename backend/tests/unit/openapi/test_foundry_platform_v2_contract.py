@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 
 from bff.dependencies import BFFDependencyProvider
@@ -28,6 +28,8 @@ from shared.dependencies.providers import (
     get_background_task_manager,
     get_lineage_store,
 )
+from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
+from shared.security.user_context import UserPrincipal
 
 
 def _param_names(schema: dict, *, path: str, method: str) -> list[str]:
@@ -37,6 +39,29 @@ def _param_names(schema: dict, *, path: str, method: str) -> list[str]:
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
+    app.add_exception_handler(FoundryAPIError, foundry_exception_handler)
+
+    @app.middleware("http")
+    async def _inject_test_principal(request: Request, call_next):  # noqa: ANN001
+        request.state.user = UserPrincipal(
+            id="test-user",
+            claims={
+                "scope": " ".join(
+                    [
+                        "api:orchestration-read",
+                        "api:orchestration-write",
+                        "api:connectivity-read",
+                        "api:connectivity-write",
+                        "api:datasets-read",
+                        "api:datasets-write",
+                        "api:ontologies-read",
+                        "api:ontologies-write",
+                    ]
+                )
+            },
+        )
+        return await call_next(request)
+
     app.include_router(foundry_orchestration_v2.router, prefix="/api")
     app.include_router(foundry_connectivity_v2.router, prefix="/api")
     return app
@@ -111,7 +136,7 @@ async def test_foundry_orchestration_create_build_returns_foundry_build_shape(
 
     class _PipelineRegistry:
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
-            return SimpleNamespace(branch="main", pipeline_id=pipeline_id)
+            return SimpleNamespace(branch="master", pipeline_id=pipeline_id)
 
         async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
             return {
@@ -144,18 +169,18 @@ async def test_foundry_orchestration_create_build_returns_foundry_build_shape(
         response = await client.post(
             "/api/v2/orchestration/builds/create",
             json={
-                "target": {"targetRids": [f"ri.spice.main.pipeline.{pipeline_id}"]},
-                "branchName": "main",
+                "target": {"targetRids": [f"ri.foundry.main.pipeline.{pipeline_id}"]},
+                "branchName": "master",
             },
             headers={"X-User-ID": "user-123"},
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["rid"] == "ri.spice.main.build.build-test-1"
-    assert payload["branchName"] == "main"
+    assert payload["rid"] == "ri.foundry.main.build.build-test-1"
+    assert payload["branchName"] == "master"
     assert payload["createdBy"] == "user-123"
-    assert payload["jobRids"] == ["ri.spice.main.job.build-test-1"]
+    assert payload["jobRids"] == ["ri.foundry.main.job.build-test-1"]
     assert payload["status"] == "RUNNING"
 
 
@@ -168,7 +193,7 @@ async def test_foundry_orchestration_get_batch_jobs_and_cancel_flow():
 
     class _PipelineRegistry:
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
-            return SimpleNamespace(branch="main", pipeline_id=pipeline_id)
+            return SimpleNamespace(branch="master", pipeline_id=pipeline_id)
 
         async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
             return {
@@ -198,7 +223,7 @@ async def test_foundry_orchestration_get_batch_jobs_and_cancel_flow():
     app = _build_test_app()
     app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
 
-    build_rid = f"ri.spice.main.build.{job_id}"
+    build_rid = f"ri.foundry.main.build.{job_id}"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         batch_resp = await client.post(
@@ -217,7 +242,7 @@ async def test_foundry_orchestration_get_batch_jobs_and_cancel_flow():
     jobs_payload = jobs_resp.json()
     assert len(jobs_payload["data"]) == 1
     assert jobs_payload["data"][0]["jobStatus"] == "RUNNING"
-    assert jobs_payload["data"][0]["outputs"][0]["datasetRid"] == "ri.spice.main.dataset.dataset-1"
+    assert jobs_payload["data"][0]["outputs"][0]["datasetRid"] == "ri.foundry.main.dataset.dataset-1"
 
     assert cancel_resp.status_code == 204
     assert captured["status"] == "CANCELED"
@@ -339,16 +364,16 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
                 "destination": {
                     "ontology": "sales_db",
                     "objectType": "Order",
-                    "branchName": "main",
+                    "branchName": "master",
                 },
             },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["rid"] == "ri.spice.main.table-import.sheet-123"
-    assert payload["connectionRid"] == "ri.spice.main.connection.conn-1"
-    assert payload["datasetRid"] == "ri.spice.main.dataset.dataset-1"
+    assert payload["rid"] == "ri.foundry.main.table-import.sheet-123"
+    assert payload["connectionRid"] == "ri.foundry.main.connection.conn-1"
+    assert payload["datasetRid"] == "ri.foundry.main.dataset.dataset-1"
     assert payload["importMode"] == "SNAPSHOT"
     assert payload["allowSchemaChanges"] is True
 
@@ -603,13 +628,13 @@ async def test_foundry_connectivity_get_list_execute_and_delete_table_import(
         delete_resp = await client.delete(f"{base}/ri.spice.main.table-import.sheet-123", params=preview)
 
     assert get_resp.status_code == 200
-    assert get_resp.json()["rid"] == "ri.spice.main.table-import.sheet-123"
+    assert get_resp.json()["rid"] == "ri.foundry.main.table-import.sheet-123"
 
     assert list_resp.status_code == 200
     assert len(list_resp.json()["data"]) >= 1
 
     assert execute_resp.status_code == 200
-    assert execute_resp.json().startswith("ri.spice.main.build.build-")
+    assert execute_resp.json().startswith("ri.foundry.main.build.build-")
     assert orchestration_get_resp.status_code == 200
     assert orchestration_get_resp.json()["status"] == "SUCCEEDED"
 
@@ -708,8 +733,8 @@ async def test_foundry_connectivity_export_runs_create_get_and_list():
         assert create_resp.status_code == 202
         created_payload = create_resp.json()
         run_rid = str(created_payload["rid"])
-        assert run_rid.startswith("ri.spice.main.export-run.")
-        assert created_payload["connectionRid"] == "ri.spice.main.connection.conn-1"
+        assert run_rid.startswith("ri.foundry.main.export-run.")
+        assert created_payload["connectionRid"] == "ri.foundry.main.connection.conn-1"
         assert created_payload["status"] in {"SUCCEEDED", "QUEUED", "RUNNING"}
         assert created_payload.get("writebackStatus") in {"SKIPPED", "SUCCEEDED"}
 
@@ -828,7 +853,7 @@ async def test_foundry_schedule_create_get_pause_unpause_delete():
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
             return SimpleNamespace(
                 pipeline_id=pipeline_id,
-                branch="main",
+                branch="master",
                 status=self._status,
                 schedule_cron=self._schedule_cron,
                 schedule_interval_seconds=self._schedule_interval,
@@ -859,14 +884,14 @@ async def test_foundry_schedule_create_get_pause_unpause_delete():
     registry = _PipelineRegistry()
     app.dependency_overrides[get_pipeline_registry] = lambda: registry
 
-    schedule_rid = f"ri.spice.main.schedule.{pipeline_id}"
+    schedule_rid = f"ri.foundry.main.schedule.{pipeline_id}"
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Create schedule
         create_resp = await client.post(
             "/api/v2/orchestration/schedules",
             json={
-                "targetRid": f"ri.spice.main.pipeline.{pipeline_id}",
+                "targetRid": f"ri.foundry.main.pipeline.{pipeline_id}",
                 "trigger": {"cronExpression": "0 0 * * *"},
             },
         )
@@ -1066,7 +1091,7 @@ async def test_foundry_connection_create_get_list_delete():
         assert create_resp.status_code == 201
         conn_body = create_resp.json()
         assert conn_body["displayName"] == "My Google Sheets Connection"
-        assert conn_body["rid"].startswith("ri.spice.main.connection.")
+        assert conn_body["rid"].startswith("ri.foundry.main.connection.")
         assert conn_body["status"] == "CONNECTED"
         assert conn_body["parentFolderRid"] == "ri.compass.main.folder.connectivity"
         assert conn_body["markings"] == ["qa.internal", "pii.none"]
@@ -1167,7 +1192,7 @@ async def test_foundry_connection_test_endpoint():
         )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["connectionRid"] == "ri.spice.main.connection.conn-test"
+    assert body["connectionRid"] == "ri.foundry.main.connection.conn-test"
     # No credentials, so should get WARNING
     assert body["status"] == "WARNING"
 
@@ -1390,7 +1415,7 @@ async def test_foundry_connection_upload_custom_jdbc_drivers_v2():
     assert invalid_file_name_resp.json()["errorCode"] == "INVALID_ARGUMENT"
     assert upload_resp.status_code == 200
     body = upload_resp.json()
-    assert body["rid"] == "ri.spice.main.connection.conn-jdbc"
+    assert body["rid"] == "ri.foundry.main.connection.conn-jdbc"
     conn_cfg = body["connectionConfiguration"]
     assert conn_cfg["type"] == "PostgreSqlConnectionConfig"
     assert "customJdbcDrivers" in conn_cfg
@@ -1506,9 +1531,9 @@ async def test_foundry_file_import_requires_preview_and_supports_create(
         assert with_preview.status_code == 200
         payload = with_preview.json()
         assert payload["name"] == "FI"
-        assert payload["parentRid"] == "ri.spice.main.connection.conn-fi"
-        assert payload["connectionRid"] == "ri.spice.main.connection.conn-fi"
-        assert payload["rid"].startswith("ri.spice.main.file-import.")
+        assert payload["parentRid"] == "ri.foundry.main.connection.conn-fi"
+        assert payload["connectionRid"] == "ri.foundry.main.connection.conn-fi"
+        assert payload["rid"].startswith("ri.foundry.main.file-import.")
         file_import_id = payload["rid"].split(".")[-1]
         source = registry.sources.get(("postgresql_file_import", file_import_id))
         assert source is not None
@@ -1622,8 +1647,8 @@ async def test_foundry_virtual_table_supports_foundry_name_and_parent_rid(
         payload = with_preview.json()
         assert payload["name"] == "VT-Orders"
         assert payload["displayName"] == "VT-Orders"
-        assert payload["parentRid"] == "ri.spice.main.connection.conn-vt"
-        assert payload["rid"].startswith("ri.spice.main.virtual-table.")
+        assert payload["parentRid"] == "ri.foundry.main.connection.conn-vt"
+        assert payload["rid"].startswith("ri.foundry.main.virtual-table.")
 
 
 @pytest.mark.unit
@@ -1736,7 +1761,7 @@ async def test_foundry_virtual_table_execute_records_build_run(
         )
         assert execute_resp.status_code == 200
         build_rid = execute_resp.json()
-        assert build_rid.startswith("ri.spice.main.build.build-")
+        assert build_rid.startswith("ri.foundry.main.build.build-")
 
         orchestration_get_resp = await client.get(f"/api/v2/orchestration/builds/{build_rid}")
         assert orchestration_get_resp.status_code == 200

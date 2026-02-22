@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.requests import Request
 
-from bff.routers import link_types_ops as link_types_router
+from bff.services import link_types_mapping_service as link_types_service
 
 
 class _FakeDatasetRegistry:
@@ -80,7 +80,7 @@ async def test_ensure_join_dataset_auto_creates_dataset_and_version() -> None:
     registry = _FakeDatasetRegistry()
     request = Request({"type": "http", "headers": []})
 
-    dataset, version, schema_hash = await link_types_router._ensure_join_dataset(
+    dataset, version, schema_hash = await link_types_service.ensure_join_dataset(
         dataset_registry=registry,
         request=request,
         db_name="test_db",
@@ -106,4 +106,4 @@ async def test_ensure_join_dataset_auto_creates_dataset_and_version() -> None:
     assert columns[0]["type"] == "xsd:string"
     assert columns[1]["name"] == "user_id"
     assert columns[1]["type"] == "xsd:integer"
-    assert schema_hash == link_types_router._compute_schema_hash(version.sample_json)
+    assert schema_hash == link_types_service.compute_schema_hash(version.sample_json)

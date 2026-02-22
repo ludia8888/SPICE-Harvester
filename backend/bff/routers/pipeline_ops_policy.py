@@ -15,5 +15,5 @@ def _pipeline_requires_proposal(branch: str) -> bool:
     settings = get_settings()
     if not settings.pipeline.require_proposals:
         return False
-    resolved = (branch or "").strip() or "main"
+    resolved = (branch or "").strip() or "master"
     return resolved in settings.pipeline.protected_branches_set

@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -50,6 +51,44 @@ _AGENT_TOOL_PATH_RE_CACHE: dict[str, re.Pattern[str]] = {}
 _AGENT_TOOL_PATH_PARAMS_RE_CACHE: dict[str, re.Pattern[str]] = {}
 _TENANT_POLICY_CACHE: dict[str, tuple[float, object]] = {}
 _TENANT_POLICY_CACHE_TTL_S = 30.0
+_PLATFORM_API_SCOPES = (
+    "api:datasets-read",
+    "api:datasets-write",
+    "api:ontologies-read",
+    "api:ontologies-write",
+    "api:orchestration-read",
+    "api:orchestration-write",
+    "api:connectivity-read",
+    "api:connectivity-write",
+)
+
+
+def _attach_pytest_scoped_principal(request: Request) -> None:
+    if getattr(request.state, "user", None) is not None:
+        return
+    user_id = (
+        str(request.headers.get("X-User-ID") or "").strip()
+        or str(request.headers.get("X-Actor") or "").strip()
+        or "pytest-user"
+    )
+    user_type = (
+        str(request.headers.get("X-User-Type") or "").strip()
+        or str(request.headers.get("X-Actor-Type") or "").strip()
+        or "user"
+    )
+    principal = UserPrincipal(
+        id=user_id,
+        type=user_type,
+        roles=("admin", "platform_admin"),
+        tenant_id="default",
+        org_id="default",
+        verified=True,
+        claims={
+            "pytest": True,
+            "scope": " ".join(_PLATFORM_API_SCOPES),
+        },
+    )
+    _attach_verified_principal(request, principal)
 
 
 def _dev_master_auth_enabled() -> bool:
@@ -71,10 +110,27 @@ def _attach_dev_master_principal(request: Request) -> None:
         tenant_id="default",
         org_id="default",
         verified=True,
-        claims={"dev_master": True},
+        claims={"dev_master": True, "scope": " ".join(_PLATFORM_API_SCOPES)},
     )
     _attach_verified_principal(request, principal)
     request.state.dev_master_auth = True
+
+
+def _attach_admin_token_principal(request: Request) -> None:
+    if getattr(request.state, "user", None) is not None:
+        return
+    principal = UserPrincipal(
+        # Treat admin-token traffic as a system actor. This keeps action validation/apply
+        # usable in unconfigured dev stacks (edit policy enforcement is skipped for `system`).
+        id="system",
+        type="user",
+        roles=("admin", "platform_admin"),
+        tenant_id="default",
+        org_id="default",
+        verified=True,
+        claims={"admin_token": True, "scope": " ".join(_PLATFORM_API_SCOPES)},
+    )
+    _attach_verified_principal(request, principal)
 
 
 def _approx_token_count(payload: Any) -> int:
@@ -1273,6 +1329,31 @@ async def _bff_auth_handle_expected_token(request: Request, call_next: _CallNext
                 code=ErrorCode.AUTH_INVALID,
                 category=ErrorCategory.AUTH,
             )
+
+    # For all other expected-token traffic, attach a verified principal so Foundry-style
+    # scope enforcement (`require_scopes`) has a concrete user context.
+    if getattr(request.state, "user", None) is None:
+        bearer = extract_bearer_token(request.headers.get("Authorization"))
+        if bearer and ctx.auth.user_jwt_enabled:
+            try:
+                principal = await verify_user_token(
+                    bearer,
+                    jwt_enabled=bool(ctx.auth.user_jwt_enabled),
+                    jwt_issuer=ctx.auth.user_jwt_issuer,
+                    jwt_audience=ctx.auth.user_jwt_audience,
+                    jwt_jwks_url=ctx.auth.user_jwt_jwks_url,
+                    jwt_public_key=ctx.auth.user_jwt_public_key,
+                    jwt_hs256_secret=ctx.auth.user_jwt_hs256_secret,
+                    jwt_algorithms=ctx.auth.user_jwt_algorithms,
+                )
+                _attach_verified_principal(request, principal)
+            except UserTokenError:
+                # Keep the admin-token as the effective credential; fall back to an internal principal.
+                pass
+
+    if getattr(request.state, "user", None) is None:
+        _attach_admin_token_principal(request)
+
     return await call_next(request)
 
 
@@ -1331,6 +1412,8 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
         settings = get_settings()
         auth = settings.auth
         if not auth.is_bff_auth_required(allow_pytest=True, default_required=True):
+            if settings.is_pytest or bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                _attach_pytest_scoped_principal(request)
             return await call_next(request)
 
         exempt_paths = auth.resolve_bff_exempt_paths(defaults=_EXEMPT_PATHS_DEFAULT)

@@ -73,9 +73,14 @@ def _build_dataset_upload_response(
     tabular_analysis: Any,
     schema_json: Dict[str, Any],
 ) -> Dict[str, Any]:
+    dataset_payload: Dict[str, Any] = dict(getattr(result.dataset, "__dict__", {}) or {})
+    version_payload: Dict[str, Any] = dict(getattr(result.version, "__dict__", {}) or {})
+    if "schema_json" not in version_payload or not version_payload.get("schema_json"):
+        version_payload["schema_json"] = schema_json
+
     data: Dict[str, Any] = {
-        "dataset": result.dataset.__dict__,
-        "version": result.version.__dict__,
+        "dataset": dataset_payload,
+        "version": version_payload,
         "preview": preview,
         "source": source,
         "tabular_analysis": tabular_analysis,

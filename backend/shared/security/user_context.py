@@ -31,6 +31,9 @@ class UserPrincipal:
     verified: bool = True
     claims: Dict[str, Any] = field(default_factory=dict)
 
+    def scopes(self) -> Tuple[str, ...]:
+        return _claim_scopes(self.claims, ("scope", "scp"))
+
 
 _DEFAULT_JWT_ALGORITHMS = ("RS256", "HS256")
 _JWKS_CACHE_TTL_S = 300
@@ -80,6 +83,63 @@ def _claim_list_str(claims: Dict[str, Any], keys: Sequence[str]) -> Tuple[str, .
             if values:
                 return tuple(values)
     return ()
+
+
+def _claim_scopes(claims: Dict[str, Any], keys: Sequence[str]) -> Tuple[str, ...]:
+    """Parse OAuth scopes from OIDC claims.
+
+    Supports:
+    - `scope`: space-delimited string (OAuth2 standard)
+    - `scp`: string or array (commonly used by Azure AD)
+    """
+
+    def _split(raw: str) -> list[str]:
+        value = str(raw or "").strip()
+        if not value:
+            return []
+        # Prefer whitespace (OAuth2), but accept commas as well.
+        tokens: list[str] = []
+        for part in value.replace(",", " ").split():
+            token = part.strip()
+            if token:
+                tokens.append(token)
+        return tokens
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    for key in keys:
+        raw = claims.get(key)
+        if raw is None:
+            continue
+        candidates: list[str] = []
+        if isinstance(raw, str):
+            candidates = _split(raw)
+        elif isinstance(raw, (list, tuple, set)):
+            for item in raw:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    candidates.extend(_split(item))
+                else:
+                    token = str(item).strip()
+                    if token:
+                        candidates.append(token)
+        else:
+            token = str(raw).strip()
+            if token:
+                candidates = _split(token) or [token]
+
+        for token in candidates:
+            if token in seen:
+                continue
+            seen.add(token)
+            ordered.append(token)
+
+        if ordered:
+            break
+
+    return tuple(ordered)
 
 
 async def _fetch_jwks(url: str) -> Dict[str, Any]:

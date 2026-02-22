@@ -50,11 +50,11 @@ async def test_executor_preview_supports_node_level_preview_and_row_count() -> N
     dataset_id = "ds-demo-ds1-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "name", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[dataset_id] = _Version(
@@ -98,11 +98,11 @@ async def test_executor_compute_structured_target_column_overwrites_existing() -
     dataset_id = "ds-demo-ds1-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "amount", "type": "xsd:integer"}]},
     )
     registry.versions_by_dataset_id[dataset_id] = _Version(
@@ -140,11 +140,11 @@ async def test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists(
     dataset_id = "ds-demo-ds1-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "amount", "type": "xsd:integer"}]},
     )
     registry.versions_by_dataset_id[dataset_id] = _Version(
@@ -180,18 +180,18 @@ async def test_executor_stream_join_dynamic_uses_backward_time_direction_by_defa
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -253,18 +253,18 @@ async def test_executor_stream_join_dynamic_supports_forward_direction() -> None
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -324,18 +324,18 @@ async def test_executor_stream_join_dynamic_applies_cache_expiration_window() ->
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -397,18 +397,18 @@ async def test_executor_stream_join_dynamic_selects_single_best_match_per_left_r
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={
             "columns": [
                 {"name": "id", "type": "xsd:integer"},
@@ -483,18 +483,18 @@ async def test_executor_stream_join_dynamic_emits_unmatched_rows_as_outer_join()
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -555,18 +555,18 @@ async def test_executor_stream_join_left_lookup_forces_left_join_semantics() -> 
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -624,18 +624,18 @@ async def test_executor_stream_join_static_forces_left_join_semantics_even_when_
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(
@@ -691,18 +691,18 @@ async def test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_w
     right_id = "ds-demo-right-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_left", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "value_right", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(

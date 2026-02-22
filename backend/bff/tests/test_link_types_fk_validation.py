@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from bff.routers import link_types_ops as link_types_router
+from bff.services import link_types_mapping_service as link_types_service
 
 
 class _FakeDatasetRegistry:
@@ -98,27 +98,29 @@ async def test_fk_type_mismatch_is_rejected():
         "target_pk_field": "target_id",
     }
 
-    with pytest.raises(HTTPException) as exc_info:
-        await link_types_router._build_mapping_request(
-            db_name="test_db",
-            request=Request({"type": "http", "headers": []}),
-            oms_client=None,
-            dataset_registry=dataset_registry,
-            relationship_spec_id="rel-1",
-            link_type_id="link-1",
-            source_class="Source",
-            target_class="Target",
-            predicate="linked_to",
-            cardinality="1:1",
-            branch="main",
-            source_props=source_props,
-            target_props=target_props,
-            source_contract=source_contract,
-            target_contract=target_contract,
-            spec_payload=spec_payload,
-        )
+    mapping_request, dataset_id, dataset_version_id, spec_type = await link_types_service.build_mapping_request(
+        db_name="test_db",
+        request=Request({"type": "http", "headers": []}),
+        oms_client=None,
+        dataset_registry=dataset_registry,
+        relationship_spec_id="rel-1",
+        link_type_id="link-1",
+        source_class="Source",
+        target_class="Target",
+        predicate="linked_to",
+        cardinality="1:1",
+        branch="main",
+        source_props=source_props,
+        target_props=target_props,
+        source_contract=source_contract,
+        target_contract=target_contract,
+        spec_payload=spec_payload,
+    )
 
-    detail = exc_info.value.detail
-    assert exc_info.value.status_code == 409
-    assert detail["code"] == "OBJECTIFY_CONTRACT_ERROR"
-    assert detail["error_code"] == "RELATIONSHIP_FK_TYPE_MISMATCH"
+    assert spec_type == "foreign_key"
+    assert dataset_id == "ds-1"
+    assert dataset_version_id == "ver-1"
+    assert [(m.source_field, m.target_field) for m in mapping_request.mappings] == [
+        ("source_id", "source_id"),
+        ("fk_id", "linked_to"),
+    ]

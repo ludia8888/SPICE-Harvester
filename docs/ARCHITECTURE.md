@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **622**, functions **5970**, classes **867**, internal cross-imports **1476**
+- Population: files **627**, functions **5998**, classes **868**, internal cross-imports **1492**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 1/1476 (0.07%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 1/1492 (0.07%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 2/22 (9.09%) | <= 0.00% | **FAIL** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/92 (3.26%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 50/622 (8.04%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 57/622 (9.16%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 320/5970 (5.36%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/867 (1.73%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 716/5970 (11.99%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 400/5970 (6.70%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 50/627 (7.97%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 58/627 (9.25%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 324/5998 (5.40%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/868 (1.73%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 727/5998 (12.12%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 411/5998 (6.85%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 

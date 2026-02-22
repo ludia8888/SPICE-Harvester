@@ -22,6 +22,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from shared.config.search_config import get_instances_index_name
 from shared.config.settings import get_settings
+from shared.security.database_access import list_database_names
 from shared.services.core.projection_consistency import (
     INSTANCE_EVENT_TYPES,
     build_instance_expectations,
@@ -79,6 +80,14 @@ async def _run(args: argparse.Namespace) -> int:
     await es.connect()
 
     try:
+        active_databases: Optional[set[str]] = None
+        if not (args.db_name or "").strip():
+            try:
+                active_databases = set(await list_database_names())
+            except Exception as exc:
+                print(f"[warn] Failed to list active databases (continuing without DB filter): {exc}", file=sys.stderr)
+                active_databases = None
+
         events = await _collect_instance_events(
             event_store=event_store,
             from_ts=from_ts,
@@ -93,6 +102,7 @@ async def _run(args: argparse.Namespace) -> int:
 
         mismatches: List[Dict[str, Any]] = []
         mismatch_reasons: Counter[str] = Counter()
+        skipped_inactive_db_expectations = 0
 
         for expectation in sorted(
             build_result.expectations.values(),
@@ -103,6 +113,10 @@ async def _run(args: argparse.Namespace) -> int:
                 x.key.instance_id,
             ),
         ):
+            if active_databases is not None and expectation.key.db_name not in active_databases:
+                skipped_inactive_db_expectations += 1
+                continue
+
             index_name = get_instances_index_name(expectation.key.db_name, branch=expectation.key.branch)
             try:
                 doc = await es.get_document(index=index_name, doc_id=expectation.key.instance_id)
@@ -152,6 +166,7 @@ async def _run(args: argparse.Namespace) -> int:
             "scanned_events": len(events),
             "skipped_events": len(build_result.skipped_event_ids),
             "expected_instances": len(build_result.expectations),
+            "skipped_inactive_db_instances": skipped_inactive_db_expectations,
             "mismatch_count": len(mismatches),
             "mismatch_reasons": dict(mismatch_reasons),
             "mismatches": mismatches[: int(args.max_mismatch_details)],

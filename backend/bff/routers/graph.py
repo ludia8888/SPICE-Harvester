@@ -42,7 +42,7 @@ async def execute_graph_query(
     lineage_store: LineageStoreDep,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (default: main)"),
+    base_branch: str = Query("master", description="Base branch (default: master)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
 ):
     return await execute_graph_query_service(
@@ -65,7 +65,7 @@ async def execute_simple_graph_query(
     request: Request,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (default: main)"),
+    base_branch: str = Query("master", description="Base branch (default: master)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
 ):
     return await execute_simple_graph_query_service(
@@ -87,7 +87,7 @@ async def execute_multi_hop_query(
     request: Request,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    base_branch: str = Query("main", description="Base branch (default: main)"),
+    base_branch: str = Query("master", description="Base branch (default: master)"),
     overlay_branch: Optional[str] = Query(default=None, description="ES overlay branch (writeback)"),
 ):
     return await execute_multi_hop_query_service(
@@ -109,7 +109,7 @@ async def find_relationship_paths(
     target_class: str,
     max_depth: int = 5,
     graph_service: GraphFederationServiceES = Depends(get_graph_federation_service),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
 ):
     return await find_relationship_paths_service(
         db_name=db_name,

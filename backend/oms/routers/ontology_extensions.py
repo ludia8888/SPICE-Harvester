@@ -49,7 +49,7 @@ class OntologyResourceRequest(BaseModel):
 
 
 class OntologyDeploymentRecordRequest(BaseModel):
-    target_branch: str = Field("main", description="Deployment target branch")
+    target_branch: str = Field("master", description="Deployment target branch")
     ontology_commit_id: Optional[str] = Field(
         None,
         description="Deployed ontology commit id (defaults to branch:<target_branch>)",
@@ -131,7 +131,7 @@ def _normalize_occ_branch_token(branch: str) -> str:
     raw = str(branch or "").strip()
     if raw.lower().startswith("branch:"):
         raw = raw.split(":", 1)[1].strip()
-    return raw or "main"
+    return raw or "master"
 
 
 async def _assert_expected_head_commit(
@@ -209,7 +209,7 @@ async def record_deployment(
 ):
     try:
         db_name = validate_db_name(db_name)
-        target_branch = validate_branch_name(payload.target_branch or "main")
+        target_branch = validate_branch_name(payload.target_branch or "master")
         ontology_commit_id = str(payload.ontology_commit_id or "").strip() or f"branch:{target_branch}"
         deployed_by = str(payload.deployed_by or "").strip() or "system"
 
@@ -242,7 +242,7 @@ async def record_deployment(
 async def list_resources(
     db_name: str,
     resource_type: Optional[str] = Query(None, description="Resource type filter"),
-    branch: str = Query("main", description="Target branch"),
+    branch: str = Query("master", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -284,7 +284,7 @@ async def list_resources(
 async def list_resources_by_type(
     db_name: str,
     resource_type: str,
-    branch: str = Query("main", description="Target branch"),
+    branch: str = Query("master", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -383,7 +383,7 @@ async def get_resource(
     db_name: str,
     resource_type: str,
     resource_id: str,
-    branch: str = Query("main", description="Target branch"),
+    branch: str = Query("master", description="Target branch"),
 ):
     try:
         db_name = validate_db_name(db_name)

@@ -45,6 +45,7 @@ OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhos
 SMOKE_GOOGLE_SHEET_URL = (os.getenv("SMOKE_GOOGLE_SHEET_URL") or "").strip()
 SMOKE_GOOGLE_SHEET_API_KEY = (os.getenv("SMOKE_GOOGLE_SHEET_API_KEY") or "").strip()
 SMOKE_OPENAI_ENABLED = bool((os.getenv("LLM_API_KEY") or "").strip() or (os.getenv("OPENAI_API_KEY") or "").strip())
+SKIP_AGENT_E2E = (os.getenv("SKIP_AGENT_E2E") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 _ENV_SMOKE_TOKEN = (
     (os.getenv("SMOKE_ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
 )
@@ -199,7 +200,7 @@ async def _get_ontology_head_commit(
     session: aiohttp.ClientSession,
     *,
     db_name: str,
-    branch: str = "main",
+    branch: str = "master",
 ) -> str:
     _ = session, db_name
     return f"branch:{branch}"
@@ -663,6 +664,10 @@ def _is_ops_only(op: Operation) -> bool:
     return False
 
 
+def _is_agent(op: Operation) -> bool:
+    return op.path.startswith("/api/v1/agent") or op.path.startswith("/api/v1/ontology-agent")
+
+
 @dataclass
 class SmokeContext:
     db_name: str
@@ -693,7 +698,8 @@ class SmokeContext:
 
     @property
     def instance_aggregate_id(self) -> str:
-        return f"{self.db_name}:main:{self.class_id}:{self.instance_id}"
+        # Instance write-side endpoints default to the platform's default branch (Foundry parity: master).
+        return f"{self.db_name}:master:{self.class_id}:{self.instance_id}"
 
     @property
     def pipeline_name(self) -> str:
@@ -711,6 +717,7 @@ class RequestPlan:
     expected_statuses: Tuple[int, ...]
     params: Optional[Dict[str, Any]] = None
     json_body: Any = None
+    data: Any = None
     form: Optional[aiohttp.FormData] = None
     headers: Optional[Dict[str, str]] = None
     note: Optional[str] = None
@@ -737,6 +744,8 @@ async def _request(
     kwargs["headers"] = headers
     if plan.form is not None:
         kwargs["data"] = plan.form
+    elif plan.data is not None:
+        kwargs["data"] = plan.data
     else:
         kwargs["json"] = plan.json_body
 
@@ -786,20 +795,28 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "link_type_id": ctx.link_type_id or "missing_link_type",
         # Foundry Ontologies v2 placeholders
         "ontology": ctx.db_name,
+        "ontologyRid": f"ri.spice.main.ontology.{ctx.db_name}",
         "objectType": ctx.class_id,
+        "objectTypeApiName": ctx.class_id,
         "primaryKey": ctx.instance_id,
         "linkType": ctx.link_type_id or "missing_link_type",
+        "linkTypeApiName": ctx.link_type_id or "missing_link_type",
         "linkedObjectPrimaryKey": ctx.instance_id,
-        "objectSetRid": "ri.object-set.main.versioned-object-set.openapi-smoke",
+        "objectSetRid": "ri.spice.main.object-set.openapi-smoke",
         "actionTypeRid": (
             f"ri.spice.main.action-type.{ctx.db_name}.{ctx.action_type_id or 'missing_action_type'}"
         ),
         "actionType": ctx.action_type_id or "missing_action_type",
+        "actionTypeApiName": ctx.action_type_id or "missing_action_type",
         "action": ctx.action_type_id or "missing_action_type",
+        "actionApiName": ctx.action_type_id or "missing_action_type",
         "queryApiName": "missing_query_type",
         "interfaceType": "BaseInterface",
+        "interfaceTypeApiName": "BaseInterface",
         "sharedPropertyType": "sharedName",
+        "sharedPropertyTypeApiName": "sharedName",
         "valueType": "string",
+        "valueTypeApiName": "string",
         "mapping_spec_id": "00000000-0000-0000-0000-000000000000",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
@@ -961,7 +978,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         # Intentionally minimal -> clarification_required without building a plan.
         body = {
             "goal": "openapi smoke pipeline run",
-            "data_scope": {"db_name": ctx.db_name, "branch": "main", "dataset_ids": []},
+            "data_scope": {"db_name": ctx.db_name, "branch": "master", "dataset_ids": []},
         }
         return RequestPlan(
             op.method,
@@ -987,12 +1004,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     # ---------- Context Tools (User JWT required) ----------
     if key == ("POST", "/api/v1/context-tools/datasets/describe"):
         url = f"{BFF_URL}{op.path}"
-        body = {"db_name": ctx.db_name, "branch": "main"}
+        body = {"db_name": ctx.db_name, "branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 401, 403, 422), json_body=body, auth_mode="user")
 
     if key == ("POST", "/api/v1/context-tools/ontology/snapshot"):
         url = f"{BFF_URL}{op.path}"
-        body = {"db_name": ctx.db_name, "branch": "main", "ontology_id": ctx.class_id}
+        body = {"db_name": ctx.db_name, "branch": "master", "ontology_id": ctx.class_id}
         return RequestPlan(op.method, op.path, url, (200, 400, 401, 403, 404, 422), json_body=body, auth_mode="user")
 
     # ---------- Document Bundles (User JWT + Context7) ----------
@@ -1031,7 +1048,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v1/context7/analyze/ontology"):
         url = f"{BFF_URL}{op.path}"
-        body = {"ontology_id": ctx.class_id, "db_name": ctx.db_name, "branch": "main", "include_relationships": False, "include_suggestions": True}
+        body = {"ontology_id": ctx.class_id, "db_name": ctx.db_name, "branch": "master", "include_relationships": False, "include_suggestions": True}
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 422, 503), json_body=body, allow_5xx=True)
 
     # ---------- Database ----------
@@ -1050,7 +1067,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     # ---------- Pipelines ----------
     if key == ("GET", "/api/v1/pipelines"):
         url = f"{BFF_URL}{op.path}"
-        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name, "branch": "main"})
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name, "branch": "master"})
 
     if key == ("GET", "/api/v1/pipelines/datasets"):
         url = f"{BFF_URL}{op.path}"
@@ -1092,7 +1109,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "description": "openapi smoke pipeline",
             "pipeline_type": "batch",
             "location": f"/projects/{ctx.db_name}/pipelines",
-            "branch": "main",
+            "branch": "master",
             "definition_json": {"nodes": [], "edges": [], "parameters": []},
         }
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
@@ -1110,7 +1127,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = {
             "description": "openapi smoke pipeline update",
             "definition_json": {"nodes": [], "edges": []},
-            "branch": "main",
+            "branch": "master",
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
 
@@ -1144,7 +1161,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v1/pipelines/{pipeline_id}/rebase"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"onto_branch": "main"}
+        body = {"onto_branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
 
     if key == ("POST", "/api/v1/pipelines/{pipeline_id}/deploy"):
@@ -1247,7 +1264,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         headers = {"X-DB-Name": ctx.db_name, "X-User-ID": "openapi-smoke", "X-User-Type": "user"}
         # Dry-run only (no writes). Many environments won't have object_type contracts; expect a clean 409.
-        body = {"class_ids": [ctx.class_id], "branch": "main", "include_dependencies": True, "dry_run": True}
+        body = {"class_ids": [ctx.class_id], "branch": "master", "include_dependencies": True, "dry_run": True}
         return RequestPlan(op.method, op.path, url, (200, 403, 404, 409, 422), json_body=body, headers=headers)
 
     if key == ("POST", "/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships"):
@@ -1419,17 +1436,17 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/fullMetadata"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/actionTypes/{actionType}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes"):
@@ -1437,13 +1454,19 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"pageSize": 10}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectTypes"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectTypes"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectTypes"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         # Validation-only (apiName required) to avoid mutating contracts in smoke.
         return RequestPlan(op.method, op.path, url, (400, 403, 404, 409, 422), json_body={})
 
-    if key == ("PATCH", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': 'missing_object_type'})}"
+    if key in {
+        ("PATCH", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}"),
+        ("PATCH", "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': 'missing_object_type', 'objectTypeApiName': 'missing_object_type'})}"
         body = {"metadata": {"source": "openapi_smoke"}}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body)
 
@@ -1462,27 +1485,27 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/interfaceTypes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main", "preview": "true", "pageSize": 10}
+        params = {"branch": "master", "preview": "true", "pageSize": 10}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'interfaceType': 'BaseInterface'})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/sharedPropertyTypes"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main", "preview": "true", "pageSize": 10}
+        params = {"branch": "master", "preview": "true", "pageSize": 10}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'sharedPropertyType': 'sharedName'})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params)
 
     if key == ("GET", "/api/v2/ontologies/{ontology}/valueTypes"):
@@ -1499,22 +1522,31 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'queryApiName': 'missing_query_type'})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404))
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/queries/{queryApiName}/execute"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'queryApiName': 'missing_query_type'})}"
         body = {"parameters": {}}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/search"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/search"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/search"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'objectTypeApiName': ctx.class_id})}"
         body = {
             "where": {"type": "eq", "field": "class_id", "value": ctx.class_id},
             "pageSize": 10,
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjects"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjects"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjects"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         body = {
             "objectSet": {"objectType": ctx.class_id},
             "select": [f"{ctx.class_id.lower()}_id"],
@@ -1522,18 +1554,24 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params, json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadLinks"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadLinks"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/loadLinks"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         body = {
             "objectSet": {"objectType": ctx.class_id},
             "links": [ctx.link_type_id or "missing_link_type"],
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params, json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         body = {
             "objectSet": {"objectType": ctx.class_id},
             "select": [f"{ctx.class_id.lower()}_id"],
@@ -1541,9 +1579,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params, json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main", "preview": "true"}
+        params = {"branch": "master", "preview": "true"}
         body = {
             "objectSet": {"objectType": ctx.class_id},
             "select": [f"{ctx.class_id.lower()}_id"],
@@ -1551,9 +1592,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params, json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/aggregate"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/aggregate"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/aggregate"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         body = {
             "objectSet": {"objectType": ctx.class_id},
             "aggregation": [{"type": "count", "name": "rowCount"}],
@@ -1561,7 +1605,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), params=params, json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objectSets/createTemporary"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objectSets/createTemporary"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objectSets/createTemporary"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         body = {"objectSet": {"objectType": ctx.class_id}}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404), json_body=body)
@@ -1614,8 +1661,8 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("POST", "/api/v1/databases/{db_name}/ontology/records/deployments"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
-            "target_branch": "main",
-            "ontology_commit_id": "branch:main",
+            "target_branch": "master",
+            "ontology_commit_id": "branch:master",
             "deployed_by": "openapi_smoke",
             "metadata": {"source": "openapi_smoke"},
         }
@@ -1777,7 +1824,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             (200, 400, 404),
             params={
                 "db_name": ctx.db_name,
-                "branch": "main",
+                "branch": "master",
                 "source_field": "name",
                 "target_field": "name",
                 "pair_limit": 100,
@@ -2133,7 +2180,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = {
             "displayName": "smoke-table-import",
             "importMode": "SNAPSHOT",
-            "destination": {"ontology": ctx.db_name, "branchName": "main", "objectType": ctx.class_id},
+            "destination": {"ontology": ctx.db_name, "branchName": "master", "objectType": ctx.class_id},
             "config": {"type": "postgreSqlImportConfig", "query": "select 1 as id"},
         }
         return RequestPlan(op.method, op.path, url, (200, 404, 400, 403, 422), params={"preview": "true"}, json_body=body)
@@ -2156,7 +2203,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = {
             "displayName": "smoke-file-import",
             "importMode": "SNAPSHOT",
-            "destination": {"ontology": ctx.db_name, "branchName": "main", "objectType": ctx.class_id},
+            "destination": {"ontology": ctx.db_name, "branchName": "master", "objectType": ctx.class_id},
             "config": {"type": "postgreSqlFileImportConfig", "query": "select 1 as id"},
         }
         return RequestPlan(op.method, op.path, url, (200, 404, 400, 403, 422), params={"preview": "true"}, json_body=body)
@@ -2178,7 +2225,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'connectionRid': 'ri.spice.main.connection.smoke-missing'})}"
         body = {
             "displayName": "smoke-virtual-table",
-            "destination": {"ontology": ctx.db_name, "branchName": "main", "objectType": ctx.class_id},
+            "destination": {"ontology": ctx.db_name, "branchName": "master", "objectType": ctx.class_id},
             "config": {"type": "postgreSqlVirtualTableConfig", "query": "select 1 as id"},
         }
         return RequestPlan(op.method, op.path, url, (200, 404, 400, 403, 422), params={"preview": "true"}, json_body=body)
@@ -2197,16 +2244,11 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200, 404, 409, 400, 403, 500), params={"preview": "true"})
 
     # ---------- Datasets v2 ----------
-    if key == ("GET", "/api/v2/datasets"):
-        url = f"{BFF_URL}{op.path}"
-        return RequestPlan(op.method, op.path, url, (200, 400, 404), params={"dbName": ctx.db_name, "pageSize": 10})
-
     if key == ("POST", "/api/v2/datasets"):
         url = f"{BFF_URL}{op.path}"
         body = {
             "name": f"openapi-smoke-dataset-{uuid.uuid4().hex[:8]}",
-            "parentFolderRid": f"ri.spice.main.folder.{ctx.db_name}",
-            "branchName": "main",
+            "parentFolderRid": f"ri.foundry.main.folder.{ctx.db_name}",
         }
         return RequestPlan(op.method, op.path, url, (200, 201, 400, 403, 409, 422), json_body=body)
 
@@ -2220,11 +2262,11 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v2/datasets/{datasetRid}/branches"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
-        body = {"branchName": f"smoke-{uuid.uuid4().hex[:6]}", "sourceBranchName": "main"}
+        body = {"name": f"smoke-{uuid.uuid4().hex[:6]}", "sourceBranchName": "master"}
         return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409, 422), json_body=body)
 
     if key == ("GET", "/api/v2/datasets/{datasetRid}/branches/{branchName}"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'branchName': 'main'})}"
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'branchName': 'master'})}"
         return RequestPlan(op.method, op.path, url, (200, 404, 400))
 
     if key == ("DELETE", "/api/v2/datasets/{datasetRid}/branches/{branchName}"):
@@ -2239,32 +2281,53 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'filePath': 'missing.csv'})}"
         return RequestPlan(op.method, op.path, url, (200, 404, 400))
 
-    if key == ("POST", "/api/v2/datasets/{datasetRid}/files:upload"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
-        form = aiohttp.FormData()
-        form.add_field("branchName", "main")
-        form.add_field("path", "smoke.csv")
-        form.add_field("file", b"id,name\n1,smoke\n", filename="smoke.csv", content_type="text/csv")
-        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409, 422), form=form)
-
-    if key == ("POST", "/api/v2/datasets/{datasetRid}/readTable"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
-        body = {"branchName": "main", "path": "missing.csv", "pageSize": 10}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body)
-
-    if key == ("GET", "/api/v2/datasets/{datasetRid}/schema"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
+    if key == ("GET", "/api/v2/datasets/{datasetRid}/files/{filePath}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'filePath': 'missing.csv'})}"
         return RequestPlan(op.method, op.path, url, (200, 404, 400))
 
-    if key == ("PUT", "/api/v2/datasets/{datasetRid}/schema"):
+    if key == ("POST", "/api/v2/datasets/{datasetRid}/files/{filePath}/upload"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'filePath': 'smoke.csv'})}"
+        headers = {"Content-Type": "text/csv"}
+        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409), params={"branchName": "master"}, data=b"id,name\n1,smoke\n", headers=headers)
+
+    if key == ("GET", "/api/v2/datasets/{datasetRid}/readTable"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
-        body = {"fieldSchemaList": [{"fieldPath": f"{ctx.class_id.lower()}_id", "type": {"type": "string"}}]}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400, 404),
+            params={"branchName": "master", "format": "CSV", "rowLimit": 10},
+        )
+
+    if key == ("GET", "/api/v2/datasets/{datasetRid}/getSchema"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
+        return RequestPlan(op.method, op.path, url, (200, 404, 400), params={"preview": "true", "branchName": "master"})
+
+    if key == ("GET", "/api/v2/datasets/{datasetRid}/transactions"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 404, 400),
+            params={"preview": "true", "branchName": "master", "pageSize": 10},
+        )
+
+    if key == ("PUT", "/api/v2/datasets/{datasetRid}/putSchema"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
+        body = {"schema": {"fieldSchemaList": [{"fieldPath": f"{ctx.class_id.lower()}_id", "type": {"type": "string"}}]}}
+        return RequestPlan(op.method, op.path, url, (204, 400, 404, 409), params={"preview": "true", "branchName": "master"}, json_body=body)
+
+    if key == ("POST", "/api/v2/datasets/getSchemaBatch"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"datasetRids": ["ri.spice.main.dataset.00000000-0000-0000-0000-000000000000"]}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params={"preview": "true"}, json_body=body)
 
     if key == ("POST", "/api/v2/datasets/{datasetRid}/transactions"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000'})}"
-        body = {"transactionType": "APPEND", "branchName": "main"}
-        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409, 422), json_body=body)
+        body = {"transactionType": "APPEND"}
+        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409, 422), params={"branchName": "master"}, json_body=body)
 
     if key == ("POST", "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'datasetRid': 'ri.spice.main.dataset.00000000-0000-0000-0000-000000000000', 'transactionRid': 'ri.spice.main.transaction.00000000-0000-0000-0000-000000000000'})}"
@@ -2277,7 +2340,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     # ---------- Orchestration v2 ----------
     if key == ("POST", "/api/v2/orchestration/builds/create"):
         url = f"{BFF_URL}{op.path}"
-        body = {"target": {"targetRids": ["ri.spice.main.pipeline.00000000-0000-0000-0000-000000000000"]}, "branchName": "main"}
+        body = {"target": {"targetRids": ["ri.spice.main.pipeline.00000000-0000-0000-0000-000000000000"]}, "branchName": "master"}
         return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 409, 422), json_body=body)
 
     if key == ("POST", "/api/v2/orchestration/builds/getBatch"):
@@ -2330,23 +2393,35 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 422), json_body={})
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/count"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/count"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/count"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'objectTypeApiName': ctx.class_id})}"
         body = {"where": {"type": "eq", "field": "class_id", "value": ctx.class_id}}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id})}"
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/aggregate"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'objectTypeApiName': ctx.class_id})}"
         body = {"where": {"type": "eq", "field": "class_id", "value": ctx.class_id}, "aggregation": [{"type": "count", "name": "rowCount"}]}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints"):
-        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'primaryKey': ctx.instance_id, 'property': 'missing_property'})}"
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/streamPoints"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name, 'objectType': ctx.class_id, 'objectTypeApiName': ctx.class_id, 'primaryKey': ctx.instance_id, 'property': 'missing_property'})}"
         body = {"pageSize": 10}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body)
 
     # ---------- Actions (writeback) ----------
-    if key == ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/apply"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/apply"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/apply"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         body = {
             "options": {"mode": "VALIDATE_ONLY"},
@@ -2356,11 +2431,14 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             }
         }
         params = {
-            "branch": "main",
+            "branch": "master",
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422, 503), json_body=body, params=params)
 
-    if key == ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch"):
+    if key in {
+        ("POST", "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch"),
+        ("POST", "/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/applyBatch"),
+    }:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'ontology': ctx.db_name})}"
         body = {
             "requests": [
@@ -2372,7 +2450,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
                 }
             ]
         }
-        params = {"branch": "main"}
+        params = {"branch": "master"}
         return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, params=params)
 
     # ---------- AI (LLM) ----------
@@ -2383,16 +2461,17 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key in {("POST", "/api/v1/ai/query/{db_name}"), ("POST", "/api/v1/ai/translate/query-plan/{db_name}")}:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        body = {"question": "List Product by product_id", "mode": "auto", "branch": "main", "limit": 5}
-        # Without OPENAI_API_KEY, this must degrade to a clear 503 (not 500).
-        expected = (200, 503, 400, 422) if not SMOKE_OPENAI_ENABLED else (200, 400, 422)
+        # Validation-only: avoid any outbound LLM calls in E2E smoke.
+        # Missing required fields -> deterministic 422 without invoking providers.
+        body = {}
+        expected = (422,)
         return RequestPlan(
             op.method,
             op.path,
             url,
             expected,
             json_body=body,
-            allow_5xx=not SMOKE_OPENAI_ENABLED,
+            allow_5xx=False,
         )
 
     # ---------- Fallback ----------
@@ -2516,10 +2595,18 @@ async def test_openapi_stable_contract_smoke():
 
     wip = [op for op in operations if _is_wip(op)]
     ops_only = [op for op in operations if _is_ops_only(op)]
-    included = [op for op in operations if not _is_wip(op) and not _is_ops_only(op)]
+    excluded_agent = [op for op in operations if _is_agent(op)] if SKIP_AGENT_E2E else []
+    included = [
+        op
+        for op in operations
+        if not _is_wip(op) and not _is_ops_only(op) and (not SKIP_AGENT_E2E or not _is_agent(op))
+    ]
 
     # Ensure this test stays honest about what's excluded.
-    print(f"[openapi] total_ops={len(operations)} included={len(included)} wip={len(wip)} ops_only={len(ops_only)}")
+    print(
+        f"[openapi] total_ops={len(operations)} included={len(included)} "
+        f"wip={len(wip)} ops_only={len(ops_only)} agent_excluded={len(excluded_agent)}"
+    )
     if wip:
         print("[openapi] excluded_wip:")
         for op in sorted(wip, key=lambda o: (o.path, o.method)):
@@ -2528,6 +2615,10 @@ async def test_openapi_stable_contract_smoke():
     if ops_only:
         print("[openapi] excluded_ops_only:")
         for op in sorted(ops_only, key=lambda o: (o.path, o.method)):
+            print(f"  - {op.method} {op.path} tags={list(op.tags)} summary={op.summary!r}")
+    if excluded_agent:
+        print("[openapi] excluded_agent:")
+        for op in sorted(excluded_agent, key=lambda o: (o.path, o.method)):
             print(f"  - {op.method} {op.path} tags={list(op.tags)} summary={op.summary!r}")
 
     # Setup minimal shared state for path params.
@@ -2577,7 +2668,7 @@ async def test_openapi_stable_contract_smoke():
             # In that case, write to ctx.branch_name and merge/deploy into main via proposals.
             deployment_recorded = False
             action_type_created = False
-            action_branch_for_runtime = "main"
+            action_branch_for_runtime = "master"
 
             ontology_ops = [
                 (
@@ -2773,7 +2864,7 @@ async def test_openapi_stable_contract_smoke():
                     "/api/v1/pipelines/datasets/csv-upload",
                     dataset_upload_url,
                     (200,),
-                    params={"db_name": ctx.db_name, "branch": "main"},
+                    params={"db_name": ctx.db_name, "branch": "master"},
                     form=dataset_form,
                     headers={"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-dataset", "X-DB-Name": ctx.db_name},
                     note="smoke: bootstrap dataset for ontology approval gates",
@@ -2904,10 +2995,10 @@ async def test_openapi_stable_contract_smoke():
 
                 # Legacy BFF proposal/deploy routes are removed. For smoke setup, mark
                 # the latest main-head ontology commit as deployed via registry helper.
-                main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="master")
                 await _record_deployed_commit(
                     db_name=ctx.db_name,
-                    target_branch="main",
+                    target_branch="master",
                     ontology_commit_id=main_head,
                 )
                 deployment_recorded = True
@@ -2935,7 +3026,7 @@ async def test_openapi_stable_contract_smoke():
 
             # Create one action type and mark the current ontology commit as deployed so Action simulation can run.
             if not action_type_created:
-                head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="master")
                 action_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
@@ -2976,7 +3067,7 @@ async def test_openapi_stable_contract_smoke():
                 async with session.post(
                     action_type_url,
                     headers=BFF_HEADERS,
-                    params={"branch": "main", "expected_head_commit": head_commit},
+                    params={"branch": "master", "expected_head_commit": head_commit},
                     json=action_type_body,
                 ) as resp:
                     status = resp.status
@@ -2984,7 +3075,7 @@ async def test_openapi_stable_contract_smoke():
 
                 if status == 201:
                     action_type_created = True
-                    action_branch_for_runtime = "main"
+                    action_branch_for_runtime = "master"
                 elif status == 409:
                     # Some stacks protect ontology resources (including action-types) on main, even if
                     # class creation is allowed (or already happened). In that case, create the action
@@ -3006,10 +3097,10 @@ async def test_openapi_stable_contract_smoke():
 
                     # Legacy BFF proposal/deploy routes are removed. For smoke setup, mark
                     # the latest main-head ontology commit as deployed via registry helper.
-                    main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                    main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="master")
                     await _record_deployed_commit(
                         db_name=ctx.db_name,
-                        target_branch="main",
+                        target_branch="master",
                         ontology_commit_id=main_head,
                     )
                     deployment_recorded = True
@@ -3018,10 +3109,10 @@ async def test_openapi_stable_contract_smoke():
                     raise AssertionError(f"Failed to create action type (http={status}): {text[:800]}")
 
             if not deployment_recorded:
-                deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-                await _record_deployed_commit(db_name=ctx.db_name, target_branch="main", ontology_commit_id=deployed_commit)
+                deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="master")
+                await _record_deployed_commit(db_name=ctx.db_name, target_branch="master", ontology_commit_id=deployed_commit)
                 deployment_recorded = True
-            if action_branch_for_runtime != "main":
+            if action_branch_for_runtime != "master":
                 action_branch_head = await _get_ontology_head_commit(
                     session,
                     db_name=ctx.db_name,

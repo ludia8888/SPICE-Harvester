@@ -52,7 +52,7 @@ def test_normalize_branch_for_write_strips_branch_prefix() -> None:
 
     assert service._normalize_branch_for_write("branch:main") == "main"  # noqa: SLF001
     assert service._normalize_branch_for_write("main") == "main"  # noqa: SLF001
-    assert service._normalize_branch_for_write("   ") == "main"  # noqa: SLF001
+    assert service._normalize_branch_for_write("   ") == "master"  # noqa: SLF001
 
 
 @pytest.mark.unit

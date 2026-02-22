@@ -184,7 +184,16 @@ def _install_openapi_language_contract(app: FastAPI) -> None:
             "example": "en-US,en;q=0.9,ko;q=0.8",
         }
 
-        for _, methods in (schema.get("paths") or {}).items():
+        excluded_prefixes = (
+            "/api/v2/datasets",
+            "/api/v2/ontologies",
+            "/api/v2/orchestration",
+            "/api/v2/connectivity",
+        )
+
+        for path, methods in (schema.get("paths") or {}).items():
+            if isinstance(path, str) and path.startswith(excluded_prefixes):
+                continue
             for method, operation in (methods or {}).items():
                 if method.lower() not in {"get", "post", "put", "patch", "delete"}:
                     continue

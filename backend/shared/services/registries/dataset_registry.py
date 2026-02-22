@@ -1295,6 +1295,67 @@ class DatasetRegistry(PostgresSchemaRegistry):
             )
         return output
 
+    async def list_all_datasets(
+        self,
+        *,
+        branch: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        order_by: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+
+        resolved_limit = max(1, int(limit))
+        resolved_offset = max(0, int(offset))
+
+        clause = ""
+        values: List[Any] = []
+        if branch:
+            clause = "WHERE d.branch = $1"
+            values.append(str(branch))
+
+        normalized_order = str(order_by or "").strip().upper()
+        if "CREATED" in normalized_order:
+            order_clause = "ORDER BY d.created_at DESC"
+        elif "NAME" in normalized_order:
+            order_clause = "ORDER BY d.name ASC"
+        else:
+            order_clause = "ORDER BY d.updated_at DESC"
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT d.dataset_id, d.db_name, d.name, d.description, d.source_type,
+                       d.source_ref, d.branch, d.schema_json, d.created_at, d.updated_at
+                FROM {self._schema}.datasets d
+                {clause}
+                {order_clause}
+                LIMIT ${len(values) + 1} OFFSET ${len(values) + 2}
+                """,
+                *values,
+                resolved_limit,
+                resolved_offset,
+            )
+
+        output: List[Dict[str, Any]] = []
+        for row in rows or []:
+            output.append(
+                {
+                    "dataset_id": str(row["dataset_id"]),
+                    "db_name": str(row["db_name"]),
+                    "name": str(row["name"]),
+                    "description": row["description"],
+                    "source_type": str(row["source_type"]),
+                    "source_ref": row["source_ref"],
+                    "branch": str(row["branch"]),
+                    "schema_json": coerce_json_dataset(row["schema_json"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return output
+
     async def count_datasets_by_db_names(
         self,
         *,
@@ -3340,6 +3401,57 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 committed_at=row["committed_at"],
                 aborted_at=row["aborted_at"],
             )
+
+    async def list_ingest_transactions_for_dataset(
+        self,
+        *,
+        dataset_id: str,
+        branch: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[DatasetIngestTransactionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+
+        resolved_limit = max(1, int(limit))
+        resolved_offset = max(0, int(offset))
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT t.transaction_id, t.ingest_request_id, t.status, t.lakefs_commit_id, t.artifact_key,
+                       t.error, t.created_at, t.updated_at, t.committed_at, t.aborted_at
+                FROM {self._schema}.dataset_ingest_transactions t
+                JOIN {self._schema}.dataset_ingest_requests r
+                  ON r.ingest_request_id = t.ingest_request_id
+                WHERE r.dataset_id = $1::uuid
+                  AND r.branch = $2
+                ORDER BY t.created_at DESC
+                LIMIT $3 OFFSET $4
+                """,
+                dataset_id,
+                branch,
+                resolved_limit,
+                resolved_offset,
+            )
+
+        results: List[DatasetIngestTransactionRecord] = []
+        for row in rows or []:
+            results.append(
+                DatasetIngestTransactionRecord(
+                    transaction_id=str(row["transaction_id"]),
+                    ingest_request_id=str(row["ingest_request_id"]),
+                    status=row["status"],
+                    lakefs_commit_id=row["lakefs_commit_id"],
+                    artifact_key=row["artifact_key"],
+                    error=row["error"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    committed_at=row["committed_at"],
+                    aborted_at=row["aborted_at"],
+                )
+            )
+        return results
 
     async def create_ingest_transaction(
         self,

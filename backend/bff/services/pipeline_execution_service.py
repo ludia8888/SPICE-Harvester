@@ -1136,10 +1136,12 @@ def _assert_build_preflight_passes(preflight: Dict[str, Any]) -> None:
     if preflight.get("has_blocking_errors"):
         raise classified_http_exception(
             status.HTTP_409_CONFLICT,
-            "Pipeline preflight checks failed",
-            code=ErrorCode.CONFLICT,
-            category=ErrorCategory.CONFLICT,
-            extra={"preflight": preflight},
+            {
+                "message": "Pipeline preflight checks failed",
+                "code": "PIPELINE_PREFLIGHT_FAILED",
+                "category": ErrorCategory.CONFLICT.value,
+                "preflight": preflight,
+            },
         )
 
 

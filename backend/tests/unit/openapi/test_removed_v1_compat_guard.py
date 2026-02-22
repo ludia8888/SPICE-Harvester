@@ -204,7 +204,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     full_metadata_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/fullMetadata",
+        path="/api/v2/ontologies/{ontologyRid}/fullMetadata",
     )
     assert {"branch", "preview"} <= full_metadata_params
     assert "sdkPackageRid" not in full_metadata_params
@@ -212,7 +212,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     action_types_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/actionTypes",
+        path="/api/v2/ontologies/{ontologyRid}/actionTypes",
     )
     assert {"pageSize", "pageToken", "branch"} <= action_types_params
     assert "preview" not in action_types_params
@@ -221,7 +221,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     action_type_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/actionTypes/{actionType}",
+        path="/api/v2/ontologies/{ontologyRid}/actionTypes/{actionTypeApiName}",
     )
     assert {"branch"} <= action_type_params
     assert "pageSize" not in action_type_params
@@ -232,7 +232,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     action_type_by_rid_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}",
+        path="/api/v2/ontologies/{ontologyRid}/actionTypes/byRid/{actionTypeRid}",
     )
     assert {"branch"} <= action_type_by_rid_params
     assert "pageSize" not in action_type_by_rid_params
@@ -243,7 +243,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     apply_action_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/actions/{action}/apply",
+        path="/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/apply",
         method="post",
     )
     assert {"branch", "sdkPackageRid", "sdkVersion", "transactionId"} <= apply_action_params
@@ -252,7 +252,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     apply_action_batch_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/actions/{action}/applyBatch",
+        path="/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/applyBatch",
         method="post",
     )
     assert {"branch", "sdkPackageRid", "sdkVersion"} <= apply_action_batch_params
@@ -260,31 +260,31 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
     assert "preview" not in apply_action_batch_params
 
     # Foundry 공식 공개 surface 기준: action logs/simulations dedicated routes are not exposed.
-    assert "post" not in (paths.get("/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo") or {})
-    assert "get" not in (paths.get("/api/v2/ontologies/{ontology}/actions/logs") or {})
-    assert "get" not in (paths.get("/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}") or {})
-    assert "get" not in (paths.get("/api/v2/ontologies/{ontology}/actions/simulations") or {})
-    assert "get" not in (paths.get("/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}") or {})
-    assert "get" not in (paths.get("/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions") or {})
+    assert "post" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}/undo") or {})
+    assert "get" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/logs") or {})
+    assert "get" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}") or {})
+    assert "get" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/simulations") or {})
+    assert "get" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}") or {})
+    assert "get" not in (paths.get("/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions") or {})
     assert "get" not in (
-        paths.get("/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions/{version}") or {}
+        paths.get("/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions/{version}") or {}
     )
 
     interface_types_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/interfaceTypes",
+        path="/api/v2/ontologies/{ontologyRid}/interfaceTypes",
     )
     assert {"preview", "pageSize", "pageToken", "branch"} <= interface_types_params
 
     interface_type_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}",
+        path="/api/v2/ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}",
     )
     assert {"preview", "branch", "sdkPackageRid", "sdkVersion"} <= interface_type_params
 
     value_types_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/valueTypes",
+        path="/api/v2/ontologies/{ontologyRid}/valueTypes",
     )
     assert "preview" in value_types_params
     assert "pageSize" not in value_types_params
@@ -293,7 +293,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     query_types_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/queryTypes",
+        path="/api/v2/ontologies/{ontologyRid}/queryTypes",
     )
     assert {"pageSize", "pageToken"} <= query_types_params
     assert "branch" not in query_types_params
@@ -303,13 +303,13 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     query_type_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}",
+        path="/api/v2/ontologies/{ontologyRid}/queryTypes/{queryApiName}",
     )
     assert {"version", "sdkPackageRid", "sdkVersion"} <= query_type_params
 
     query_execute_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute",
+        path="/api/v2/ontologies/{ontologyRid}/queries/{queryApiName}/execute",
         method="post",
     )
     assert {"version", "sdkPackageRid", "sdkVersion", "transactionId"} <= query_execute_params
@@ -318,13 +318,13 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     object_type_full_metadata_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata",
+        path="/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/fullMetadata",
     )
     assert {"branch", "preview", "sdkPackageRid", "sdkVersion"} <= object_type_full_metadata_params
 
     object_set_load_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjects",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjects",
         method="post",
     )
     assert {"branch", "transactionId", "sdkPackageRid", "sdkVersion"} <= object_set_load_params
@@ -334,7 +334,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     object_set_load_links_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadLinks",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
         method="post",
     )
     assert {"branch", "preview", "sdkPackageRid", "sdkVersion"} <= object_set_load_links_params
@@ -342,14 +342,14 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     object_set_load_multiple_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
         method="post",
     )
     assert {"branch", "preview", "transactionId", "sdkPackageRid", "sdkVersion"} <= object_set_load_multiple_params
 
     object_set_load_or_interfaces_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
         method="post",
     )
     assert {"branch", "preview", "sdkPackageRid", "sdkVersion"} <= object_set_load_or_interfaces_params
@@ -357,7 +357,7 @@ def test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract() -
 
     object_set_aggregate_params = _param_names(
         paths,
-        path="/api/v2/ontologies/{ontology}/objectSets/aggregate",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/aggregate",
         method="post",
     )
     assert {"branch", "transactionId", "sdkPackageRid", "sdkVersion"} <= object_set_aggregate_params
@@ -443,13 +443,13 @@ def test_removed_v1_compat_path_literals_absent_from_runtime_code() -> None:
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}",
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions",
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}",
-        "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo",
-        "/api/v2/ontologies/{ontology}/actions/logs",
-        "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}",
-        "/api/v2/ontologies/{ontology}/actions/simulations",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions/{version}",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}/undo",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions/{version}",
         "/api/v1/databases/{db_name}/ontology/link-types",
         "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}",
         "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits",
@@ -829,7 +829,7 @@ def test_legacy_action_simulation_registry_module_deleted() -> None:
 def test_migration_docs_do_not_reintroduce_fullmetadata_preview_contradiction() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     migration_text = (repo_root / "docs" / "FOUNDRY_V1_TO_V2_MIGRATION.md").read_text(encoding="utf-8")
-    forbidden = "`GET /api/v2/ontologies/{ontology}/fullMetadata`는 `preview` 파라미터를 사용하지 않음"
+    forbidden = "`GET /api/v2/ontologies/{ontologyRid}/fullMetadata`는 `preview` 파라미터를 사용하지 않음"
     assert forbidden not in migration_text
 
 
@@ -949,13 +949,13 @@ def test_removed_v1_paths_absent_from_generated_api_docs() -> None:
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}",
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions",
         "/api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}",
-        "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo",
-        "/api/v2/ontologies/{ontology}/actions/logs",
-        "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}",
-        "/api/v2/ontologies/{ontology}/actions/simulations",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions",
-        "/api/v2/ontologies/{ontology}/actions/simulations/{simulationId}/versions/{version}",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}/undo",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs",
+        "/api/v2/ontologies/{ontologyRid}/actions/logs/{actionLogId}",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions",
+        "/api/v2/ontologies/{ontologyRid}/actions/simulations/{simulationId}/versions/{version}",
         "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
         "/api/v1/databases/{db_name}/suggest-schema-from-data",
         "/api/v1/databases/{db_name}/suggest-mappings",

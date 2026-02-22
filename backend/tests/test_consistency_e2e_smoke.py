@@ -40,6 +40,7 @@ _settings = get_settings()
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or _settings.services.bff_base_url).rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or _settings.services.oms_base_url).rstrip("/")
 AGENT_URL = (os.getenv("AGENT_BASE_URL") or os.getenv("AGENT_URL") or _settings.services.agent_base_url).rstrip("/")
+SKIP_AGENT_E2E = (os.getenv("SKIP_AGENT_E2E") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 INGEST_RECONCILER_PORT = (
     os.getenv("INGEST_RECONCILER_PORT_HOST")
     or os.getenv("INGEST_RECONCILER_PORT")
@@ -548,6 +549,7 @@ class TestMSAServiceHealth:
 
     @pytest.mark.asyncio
     @pytest.mark.requires_infra
+    @pytest.mark.skipif(SKIP_AGENT_E2E, reason="Agent E2E explicitly skipped via SKIP_AGENT_E2E")
     async def test_agent_health_endpoint(self) -> None:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{AGENT_URL}/health") as resp:

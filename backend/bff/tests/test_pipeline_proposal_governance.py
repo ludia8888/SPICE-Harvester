@@ -263,7 +263,7 @@ async def test_pipeline_proposal_requires_approve_role() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
-    assert exc_info.value.detail == "Permission denied"
+    assert exc_info.value.detail["message"] == "Permission denied"
 
 
 @pytest.mark.asyncio
@@ -299,4 +299,4 @@ async def test_pipeline_proposal_requires_pending_status() -> None:
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
-    assert exc_info.value.detail == "No pending proposal to approve"
+    assert exc_info.value.detail["message"] == "No pending proposal to approve"

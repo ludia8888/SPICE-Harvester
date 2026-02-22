@@ -11,6 +11,7 @@ PYTHON_BIN="${PYTHON_BIN_ENV:-python3}"
 MODE="full"
 WAIT_FOR_SERVICES="true"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-90}"
+SKIP_AGENT_E2E="${SKIP_AGENT_E2E:-false}"
 RUN_OMS_SMOKE="true"
 RUN_CORE="true"
 RUN_CHAOS_LITE="false"
@@ -119,6 +120,7 @@ Options:
   --no-oms-smoke     Skip OMS live smoke test (creates/deletes real DBs)
   --no-clean-search  Skip Elasticsearch test index cleanup (keeps e2e_/test_/smoke_ indices)
   --skip-core        Skip full-stack core flow tests
+  --skip-agent       Skip agent service health + agent endpoints in E2E smoke
   -h, --help         Show help
 
 Notes:
@@ -182,6 +184,10 @@ while [[ $# -gt 0 ]]; do
       RUN_CORE="false"
       shift
       ;;
+    --skip-agent|--no-agent)
+      SKIP_AGENT_E2E="true"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -193,6 +199,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+export SKIP_AGENT_E2E
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "❌ Python not found: PYTHON_BIN=$PYTHON_BIN" >&2
@@ -547,7 +555,11 @@ if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   wait_for_elasticsearch_ready "${ELASTICSEARCH_URL}" "$TIMEOUT_SECONDS"
   wait_for_url "OMS" "${OMS_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "BFF" "${BFF_URL}/api/v1/health" "$TIMEOUT_SECONDS"
-  wait_for_url "Agent" "${AGENT_URL}/health" "$TIMEOUT_SECONDS"
+  if truthy "$SKIP_AGENT_E2E"; then
+    echo "ℹ️  Skipping Agent health check (SKIP_AGENT_E2E=${SKIP_AGENT_E2E})"
+  else
+    wait_for_url "Agent" "${AGENT_URL}/health" "$TIMEOUT_SECONDS"
+  fi
   wait_for_url "Ingest Reconciler" "${INGEST_RECONCILER_URL}/health" "$TIMEOUT_SECONDS"
 
   kafka_bootstrap="${KAFKA_BOOTSTRAP_SERVERS%%,*}"
@@ -574,6 +586,8 @@ if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   # by ensuring sufficient Kafka partitioning for key-based ordering topics.
   ensure_kafka_topic_partitions "${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}" 12
 fi
+
+CONSISTENCY_FROM_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 echo "🧪 Running tests (mode=$MODE)..."
 echo "ℹ️  ONTOLOGY_RESOURCE_STORAGE_BACKEND=${RESOURCE_STORAGE_BACKEND}"
@@ -605,7 +619,7 @@ if [[ "$MODE" == "full" ]]; then
   "$PYTHON_BIN" -m pytest tests/test_event_store_tls_guard.py -q
   "$PYTHON_BIN" -m pytest tests/test_critical_fixes_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_consistency_e2e_smoke.py -q
-  "$PYTHON_BIN" scripts/verify_projection_consistency.py --from-minutes-ago 240 --max-events 10000
+  "$PYTHON_BIN" scripts/verify_projection_consistency.py --from-ts "${CONSISTENCY_FROM_TS}" --max-events 10000
   RUN_PIPELINE_OBJECTIFY_E2E=true "$PYTHON_BIN" -m pytest tests/test_pipeline_objectify_es_e2e.py -q
   RUN_PIPELINE_TRANSFORM_E2E=true "$PYTHON_BIN" -m pytest tests/test_pipeline_transform_cleansing_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_financial_investigation_workflow_e2e.py -q

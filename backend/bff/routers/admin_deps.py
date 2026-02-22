@@ -51,3 +51,42 @@ async def require_admin(request: Request) -> None:
 
     actor = (request.headers.get("X-Admin-Actor") or "admin").strip() or "admin"
     request.state.admin_actor = actor
+
+
+async def require_admin_strict(request: Request) -> None:
+    """
+    Strict admin guard for sensitive endpoints.
+
+    Differences from `require_admin`:
+    - Missing credentials -> 401 (not 403)
+    - No dev-master bypass (must present credentials)
+    """
+    settings = get_settings()
+    auth = settings.auth
+
+    expected_tokens = auth.bff_expected_tokens
+    if not expected_tokens:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Admin auth required but no token configured",
+            code=ErrorCode.AUTH_REQUIRED,
+        )
+
+    presented = extract_presented_token(request.headers)
+    if not presented:
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Authentication required",
+            code=ErrorCode.AUTH_REQUIRED,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not any(hmac.compare_digest(presented, expected) for expected in expected_tokens):
+        raise classified_http_exception(
+            status.HTTP_403_FORBIDDEN,
+            "Invalid authentication credentials",
+            code=ErrorCode.AUTH_INVALID,
+        )
+
+    actor = (request.headers.get("X-Admin-Actor") or "admin").strip() or "admin"
+    request.state.admin_actor = actor

@@ -16,6 +16,9 @@ from bff.routers.pipeline_deps import (
 from bff.services import pipeline_execution_service
 from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import AuditLogStoreDep
+from shared.foundry.auth import require_scopes
+from shared.foundry.errors import foundry_error
+from shared.foundry.rids import build_rid, parse_rid
 from shared.observability.tracing import trace_endpoint
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -26,16 +29,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/orchestration", tags=["Foundry Orchestration v2"])
 
-_PIPELINE_RID_PREFIXES = (
-    "ri.spice.main.pipeline.",
-    "ri.foundry.main.pipeline.",
-    "ri.pipeline.",
-)
-_BUILD_RID_PREFIXES = (
-    "ri.spice.main.build.",
-    "ri.foundry.main.build.",
-)
-
 
 def _foundry_error(
     status_code: int,
@@ -44,14 +37,11 @@ def _foundry_error(
     error_name: str,
     parameters: Dict[str, Any] | None = None,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "errorCode": error_code,
-            "errorName": error_name,
-            "errorInstanceId": str(uuid4()),
-            "parameters": parameters or {},
-        },
+    return foundry_error(
+        int(status_code),
+        error_code=str(error_code),
+        error_name=str(error_name),
+        parameters=dict(parameters or {}),
     )
 
 
@@ -59,22 +49,26 @@ def _pipeline_id_from_target_rid(target_rid: str) -> str | None:
     text = str(target_rid or "").strip()
     if not text:
         return None
-    for prefix in _PIPELINE_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
     try:
-        UUID(text)
-        return text
+        kind, rid_id = parse_rid(text)
     except ValueError:
         return None
+    if kind != "pipeline":
+        return None
+    return rid_id
 
 
 def _job_id_from_build_rid(build_rid: str) -> str | None:
     text = str(build_rid or "").strip()
-    for prefix in _BUILD_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    return None
+    if not text:
+        return None
+    try:
+        kind, rid_id = parse_rid(text)
+    except ValueError:
+        return None
+    if kind != "build":
+        return None
+    return rid_id
 
 
 def _pipeline_id_from_build_job_id(job_id: str) -> str | None:
@@ -91,11 +85,11 @@ def _pipeline_id_from_build_job_id(job_id: str) -> str | None:
 
 
 def _build_rid(job_id: str) -> str:
-    return f"ri.spice.main.build.{job_id}"
+    return build_rid("build", job_id)
 
 
 def _job_rid(job_id: str) -> str:
-    return f"ri.spice.main.job.{job_id}"
+    return build_rid("job", job_id)
 
 
 def _to_int(value: Any, *, field_name: str, minimum: int | None = None) -> int:
@@ -170,7 +164,7 @@ def _extract_build_branch(
         text = str(pipeline_branch).strip()
         if text:
             return text
-    return "main"
+    return "master"
 
 
 def _extract_job_outputs(run: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -189,15 +183,27 @@ def _extract_job_outputs(run: dict[str, Any] | None) -> list[dict[str, Any]]:
         if not dataset_rid:
             dataset_id = str(item.get("dataset_id") or "").strip()
             if dataset_id:
-                dataset_rid = f"ri.spice.main.dataset.{dataset_id}"
+                dataset_rid = build_rid("dataset", dataset_id)
         if not dataset_rid:
             continue
+        try:
+            kind, rid_id = parse_rid(dataset_rid)
+            if kind == "dataset":
+                dataset_rid = build_rid("dataset", rid_id)
+        except ValueError:
+            pass
         row: dict[str, Any] = {
             "type": "datasetJobOutput",
             "datasetRid": dataset_rid,
         }
         transaction_rid = str(item.get("outputTransactionRid") or item.get("output_transaction_rid") or "").strip()
         if transaction_rid:
+            try:
+                kind, rid_id = parse_rid(transaction_rid)
+                if kind == "transaction":
+                    transaction_rid = build_rid("transaction", rid_id)
+            except ValueError:
+                pass
             row["outputTransactionRid"] = transaction_rid
         materialized.append(row)
     return materialized
@@ -240,7 +246,7 @@ def _resolve_create_build_input(payload: dict[str, Any], *, request: Request) ->
         or payload.get("branch")
         or target.get("branchName")
         or ""
-    ).strip() or "main"
+    ).strip() or "master"
     build_payload["branch"] = branch_name
 
     parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
@@ -319,7 +325,7 @@ def _build_response(
         if cron or interval:
             pid = getattr(pipeline, "pipeline_id", None) or (pipeline.get("pipeline_id") if isinstance(pipeline, dict) else None)
             if pid:
-                schedule_rid_value = f"ri.spice.main.schedule.{pid}"
+                schedule_rid_value = build_rid("schedule", str(pid))
 
     return {
         "rid": _build_rid(job_id),
@@ -363,6 +369,7 @@ async def create_build_v2(
     pipeline_job_queue: PipelineJobQueue = Depends(get_pipeline_job_queue),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     oms_client: OMSClient = Depends(get_oms_client),
+    _: None = require_scopes(["api:orchestration-write"]),
 ):
     try:
         resolved = _resolve_create_build_input(payload, request=request)
@@ -444,6 +451,7 @@ async def create_build_v2(
 async def get_build_v2(
     buildRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-read"]),
 ):
     try:
         pipeline_id, job_id, run = await _load_build_run(
@@ -490,6 +498,7 @@ async def get_build_v2(
 async def get_builds_batch_v2(
     payload: list[dict[str, Any]],
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-read"]),
 ):
     if not isinstance(payload, list) or not payload:
         return _foundry_error(
@@ -542,6 +551,7 @@ async def list_build_jobs_v2(
     pageSize: int | None = Query(default=None),
     pageToken: str | None = Query(default=None),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-read"]),
 ):
     try:
         _pipeline_id, job_id, run = await _load_build_run(
@@ -593,6 +603,7 @@ async def list_build_jobs_v2(
 async def cancel_build_v2(
     buildRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-write"]),
 ):
     try:
         pipeline_id, job_id, run = await _load_build_run(
@@ -645,28 +656,22 @@ async def cancel_build_v2(
 # Schedules — Foundry Orchestration Schedules API v2
 # ---------------------------------------------------------------------------
 
-_SCHEDULE_RID_PREFIXES = (
-    "ri.spice.main.schedule.",
-    "ri.foundry.main.schedule.",
-)
-
 
 def _schedule_rid(pipeline_id: str) -> str:
-    return f"ri.spice.main.schedule.{pipeline_id}"
+    return build_rid("schedule", pipeline_id)
 
 
 def _pipeline_id_from_schedule_rid(schedule_rid: str) -> str | None:
     text = str(schedule_rid or "").strip()
     if not text:
         return None
-    for prefix in _SCHEDULE_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix):].strip() or None
     try:
-        UUID(text)
-        return text
+        kind, rid_id = parse_rid(text)
     except ValueError:
         return None
+    if kind != "schedule":
+        return None
+    return rid_id
 
 
 def _schedule_response(pipeline: Any) -> dict[str, Any]:
@@ -688,11 +693,11 @@ def _schedule_response(pipeline: Any) -> dict[str, Any]:
 
     return {
         "rid": _schedule_rid(pipeline_id),
-        "targetRid": f"ri.spice.main.pipeline.{pipeline_id}",
+        "targetRid": build_rid("pipeline", str(pipeline_id)),
         "trigger": trigger,
         "action": {
             "type": "build",
-            "branchName": str(branch or "main"),
+            "branchName": str(branch or "master"),
         },
         "status": schedule_status,
         "createdTime": _iso_timestamp(getattr(pipeline, "created_at", None) or (pipeline.get("created_at") if isinstance(pipeline, dict) else None)),
@@ -712,6 +717,7 @@ async def create_schedule_v2(
     payload: Dict[str, Any],
     request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-write"]),
 ) -> JSONResponse:
     """POST /v2/orchestration/schedules — Create a schedule."""
     target_rid = str(payload.get("targetRid") or "").strip()
@@ -754,6 +760,7 @@ async def create_schedule_v2(
 async def get_schedule_v2(
     scheduleRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-read"]),
 ) -> JSONResponse:
     """GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule."""
     pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
@@ -775,6 +782,7 @@ async def get_schedule_v2(
 async def delete_schedule_v2(
     scheduleRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-write"]),
 ) -> Response:
     """DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule."""
     pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
@@ -803,6 +811,7 @@ async def delete_schedule_v2(
 async def pause_schedule_v2(
     scheduleRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-write"]),
 ) -> Response:
     """POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule."""
     pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
@@ -827,6 +836,7 @@ async def pause_schedule_v2(
 async def unpause_schedule_v2(
     scheduleRid: str,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-write"]),
 ) -> Response:
     """POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule."""
     pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)
@@ -853,6 +863,7 @@ async def list_schedule_runs_v2(
     pageSize: int = Query(default=25, ge=1, le=100),
     pageToken: str = Query(default=""),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:orchestration-read"]),
 ) -> JSONResponse:
     """GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs."""
     pipeline_id = _pipeline_id_from_schedule_rid(scheduleRid)

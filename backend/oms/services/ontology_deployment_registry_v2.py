@@ -200,7 +200,7 @@ class OntologyDeploymentRegistryV2(BaseOntologyDeploymentRegistry):
         self,
         *,
         db_name: str,
-        target_branch: str = "main",
+        target_branch: str = "master",
     ) -> Optional[Dict[str, Any]]:
         """
         Return the latest succeeded deployment record for a db/branch.

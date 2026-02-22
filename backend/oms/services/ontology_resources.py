@@ -281,7 +281,7 @@ class OntologyResourceService:
     @staticmethod
     def _normalize_branch_for_write(branch: str) -> str:
         normalized = _strip_branch_ref(branch)
-        return normalized or "main"
+        return normalized or "master"
 
     async def _resolve_deployed_target_branch(
         self,
@@ -316,7 +316,7 @@ class OntologyResourceService:
         return resolved or None
 
     async def _resolve_read_branches(self, *, db_name: str, branch: str) -> List[str]:
-        raw_branch = str(branch or "").strip() or "main"
+        raw_branch = str(branch or "").strip() or "master"
         candidates: List[str] = []
 
         def _add(value: Optional[str]) -> None:
@@ -896,6 +896,9 @@ class OntologyResourceService:
         existing_metadata = (existing or {}).get("metadata")
         if not isinstance(existing_metadata, dict):
             existing_metadata = {}
+        existing_spec = (existing or {}).get("spec")
+        if not isinstance(existing_spec, dict):
+            existing_spec = {}
         existing_version = 0
         try:
             existing_version = int((existing or {}).get("version") or 0)
@@ -908,6 +911,9 @@ class OntologyResourceService:
         else:
             version = max(1, existing_version + 1)
             merged_metadata = {**existing_metadata, **(metadata_payload or {})}
+            # Preserve unspecified spec keys on updates (enterprise object-type contracts should
+            # not overwrite ontology class schema properties/relationships).
+            spec_payload = {**existing_spec, **spec_payload}
 
         # Mirror the canonical version into metadata for RID/version consumers.
         merged_metadata["rev"] = version

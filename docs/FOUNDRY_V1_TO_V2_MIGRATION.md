@@ -31,7 +31,7 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
   - `https://www.palantir.com/docs/foundry/administration/data-connection/source-types/custom-jdbc/`
 - `Dataset Schema` canonical references:
   - `https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/get-dataset-schema`
-  - `https://www.palantir.com/docs/foundry/api/datasets-v2-resources/datasets/put-dataset-schema`
+  - `https://www.palantir.com/docs/foundry/api/v2/datasets-v2-resources/datasets/put-dataset-schema`
 - `Action Types` canonical references:
   - `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/action-types/list-action-types`
   - `https://www.palantir.com/docs/foundry/api/ontologies-v2-resources/action-types/get-action-type`
@@ -86,7 +86,7 @@ It also documents the strict-compat baseline used to harden v2 wire/behavior par
 - Connector secret safety hardening (P1): connector secret encryption is mandatory in non-test runtime (`DATA_ENCRYPTION_KEYS` required) unless explicitly overridden via `ALLOW_PLAINTEXT_CONNECTOR_SECRETS=true` for local debugging.
 - Connectivity delete hardening (P1): `DELETE /api/v2/connectivity/connections/{connectionRid}` and import delete endpoints now perform strict source hard-delete (FK cascade) with no runtime soft-disable fallback.
 - Dataset transaction hardening (P1): `POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit` no longer returns synthetic fallback commit IDs when lakeFS commit fails; failure surfaces explicit Foundry error and transaction remains `OPEN`.
-- Dataset read hardening (P1): `POST /api/v2/datasets/{datasetRid}/readTable` now returns Foundry error envelope for lakeFS availability failures when no cached sample exists (silent empty fallback is retained only for not-found source objects).
+- Dataset read hardening (P1): `GET /api/v2/datasets/{datasetRid}/readTable` now returns Foundry error envelope for lakeFS availability failures when no cached sample exists (silent empty fallback is retained only for not-found source objects).
 - Dataset files hardening (P1): `GET /api/v2/datasets/{datasetRid}/files` now returns Foundry error envelope on lakeFS availability failures instead of silent empty-list fallback.
 - Scheduler pause hardening (P1): paused pipelines are excluded from scheduler execution ticks (`status=paused` is respected by runtime scheduler loop).
 

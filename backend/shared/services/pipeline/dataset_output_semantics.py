@@ -242,7 +242,7 @@ def normalize_dataset_output_metadata(
     normalized_write_mode = _normalize_write_mode(write_mode_raw)
     if write_mode_key and write_mode_key not in {"write_mode", "writeMode"}:
         warnings.append(
-            f"compatibility write-mode key '{write_mode_key}' normalized to 'write_mode={normalized_write_mode}'"
+            f"legacy write-mode key '{write_mode_key}' normalized to 'write_mode={normalized_write_mode}'"
         )
 
     primary_key_raw = _first_raw(

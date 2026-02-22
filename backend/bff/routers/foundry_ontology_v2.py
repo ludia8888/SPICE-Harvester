@@ -31,6 +31,9 @@ from bff.routers.object_types import (
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.oms_client import OMSClient
 from bff.services import object_type_contract_service
+from shared.foundry.auth import require_scopes
+from shared.foundry.errors import foundry_error
+from shared.foundry.rids import build_rid
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
@@ -79,6 +82,9 @@ _ACTION_TYPE_SPEC_HINT_FIELDS = {
     "validation_rules",
     "target_object_type",
 }
+
+_ONTOLOGY_READ = require_scopes(["api:ontologies-read"])
+_ONTOLOGY_WRITE = require_scopes(["api:ontologies-write"])
 
 
 class OntologyNotFoundError(Exception):
@@ -237,7 +243,7 @@ def _service_http_error_response(
 
 
 def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "main"
+    normalized = str(branch or "").strip() or "master"
     if normalized.lower().startswith("branch:"):
         return normalized
     return f"branch:{normalized}"
@@ -250,14 +256,11 @@ def _foundry_error(
     error_name: str,
     parameters: Dict[str, Any] | None = None,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "errorCode": error_code,
-            "errorName": error_name,
-            "errorInstanceId": str(uuid4()),
-            "parameters": parameters or {},
-        },
+    return foundry_error(
+        int(status_code),
+        error_code=error_code,
+        error_name=error_name,
+        parameters=parameters or {},
     )
 
 
@@ -1279,21 +1282,22 @@ def _rid_component(value: Any, *, fallback: str) -> str:
 
 
 def _default_object_type_rid(*, db_name: str, object_type: str) -> str:
-    return f"ri.spice.main.object-type.{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}"
+    object_type_id = f"{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}"
+    return build_rid("object-type", object_type_id)
 
 
 def _default_property_rid(*, db_name: str, object_type: str, property_name: str) -> str:
-    return (
-        f"ri.spice.main.property."
+    prop_id = (
         f"{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}.{_rid_component(property_name, fallback='property')}"
     )
+    return build_rid("property", prop_id)
 
 
 def _default_link_type_rid(*, db_name: str, source_object_type: str, link_type: str) -> str:
-    return (
-        f"ri.spice.main.link-type."
+    link_id = (
         f"{_rid_component(db_name, fallback='db')}.{_rid_component(source_object_type, fallback='objectType')}.{_rid_component(link_type, fallback='linkType')}"
     )
+    return build_rid("link-type", link_id)
 
 
 def _default_property_contract(*, db_name: str, object_type: str, property_name: str) -> Dict[str, Any]:
@@ -2944,7 +2948,7 @@ def _to_foundry_ontology(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-@router.get("")
+@router.get("", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_ontologies")
 async def list_ontologies_v2(
     request: Request,
@@ -2978,13 +2982,14 @@ async def list_ontologies_v2(
         )
 
 
-@router.get("/{ontology}")
+@router.get("/{ontologyRid}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_ontology")
 async def get_ontology_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
@@ -3022,16 +3027,17 @@ async def get_ontology_v2(
         )
 
 
-@router.get("/{ontology}/fullMetadata")
+@router.get("/{ontologyRid}/fullMetadata", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_full_metadata")
 async def get_full_metadata_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     preview: bool = Query(False, description="Must be true for preview endpoints"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3039,7 +3045,7 @@ async def get_full_metadata_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="GET /api/v2/ontologies/{ontology}/fullMetadata",
+            endpoint="GET /api/v2/ontologies/{ontologyRid}/fullMetadata",
         )
         await _require_domain_role(request, db_name=db_name)
     except Exception as exc:
@@ -3204,16 +3210,17 @@ async def get_full_metadata_v2(
         )
 
 
-@router.get("/{ontology}/actionTypes")
+@router.get("/{ontologyRid}/actionTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_action_types")
 async def list_action_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3269,15 +3276,17 @@ async def list_action_types_v2(
         )
 
 
-@router.get("/{ontology}/actionTypes/{actionType}")
+@router.get("/{ontologyRid}/actionTypes/{actionTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_action_type")
 async def get_action_type_v2(
-    ontology: str,
-    actionType: str,
+    ontologyRid: str,
+    actionTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    actionType = actionTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3354,15 +3363,16 @@ async def get_action_type_v2(
         )
 
 
-@router.get("/{ontology}/actionTypes/byRid/{actionTypeRid}")
+@router.get("/{ontologyRid}/actionTypes/byRid/{actionTypeRid}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_action_type_by_rid")
 async def get_action_type_by_rid_v2(
-    ontology: str,
+    ontologyRid: str,
     actionTypeRid: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3556,19 +3566,21 @@ def _normalize_apply_action_response_payload(
     return normalized
 
 
-@router.post("/{ontology}/actions/{action}/apply")
+@router.post("/{ontologyRid}/actions/{actionApiName}/apply", dependencies=[_ONTOLOGY_WRITE])
 @trace_endpoint("bff.foundry_v2_ontology.apply_action")
 async def apply_action_v2(
-    ontology: str,
-    action: str,
+    ontologyRid: str,
+    actionApiName: str,
     body: ApplyActionRequestV2,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    action = actionApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3638,18 +3650,20 @@ async def apply_action_v2(
         )
 
 
-@router.post("/{ontology}/actions/{action}/applyBatch")
+@router.post("/{ontologyRid}/actions/{actionApiName}/applyBatch", dependencies=[_ONTOLOGY_WRITE])
 @trace_endpoint("bff.foundry_v2_ontology.apply_action_batch")
 async def apply_action_batch_v2(
-    ontology: str,
-    action: str,
+    ontologyRid: str,
+    actionApiName: str,
     body: BatchApplyActionRequestV2,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    action = actionApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3717,15 +3731,16 @@ async def apply_action_batch_v2(
         )
 
 
-@router.get("/{ontology}/queryTypes")
+@router.get("/{ontologyRid}/queryTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_query_types")
 async def list_query_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     page_size: int = Query(100, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
@@ -3738,7 +3753,7 @@ async def list_query_types_v2(
         payload = await oms_client.list_ontology_resources(
             db_name,
             resource_type="function",
-            branch="main",
+            branch="master",
             limit=page_size,
             offset=offset,
         )
@@ -3766,10 +3781,10 @@ async def list_query_types_v2(
         )
 
 
-@router.get("/{ontology}/queryTypes/{queryApiName}")
+@router.get("/{ontologyRid}/queryTypes/{queryApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_query_type")
 async def get_query_type_v2(
-    ontology: str,
+    ontologyRid: str,
     queryApiName: str,
     request: Request,
     version: str | None = Query(default=None),
@@ -3777,6 +3792,7 @@ async def get_query_type_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version, version
@@ -3796,7 +3812,7 @@ async def get_query_type_v2(
             db_name,
             resource_type="function",
             resource_id=query_api_name,
-            branch="main",
+            branch="master",
         )
         resource = _extract_ontology_resource(payload)
         if not resource:
@@ -3847,10 +3863,10 @@ async def get_query_type_v2(
         )
 
 
-@router.post("/{ontology}/queries/{queryApiName}/execute")
+@router.post("/{ontologyRid}/queries/{queryApiName}/execute", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.execute_query")
 async def execute_query_v2(
-    ontology: str,
+    ontologyRid: str,
     queryApiName: str,
     body: ExecuteQueryRequestV2,
     request: Request,
@@ -3860,6 +3876,7 @@ async def execute_query_v2(
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version, transaction_id
@@ -3879,7 +3896,7 @@ async def execute_query_v2(
             db_name,
             resource_type="function",
             resource_id=query_api_name,
-            branch="main",
+            branch="master",
         )
         resource = _extract_ontology_resource(payload)
         if not resource:
@@ -3934,7 +3951,7 @@ async def execute_query_v2(
 
         result = await oms_client.post(
             f"/api/v2/ontologies/{db_name}/objects/{normalized_object_type}/search",
-            params={"branch": "main"},
+            params={"branch": "master"},
             json=resolved_payload,
         )
         if not isinstance(result, dict):
@@ -3973,18 +3990,19 @@ async def execute_query_v2(
         )
 
 
-@router.get("/{ontology}/interfaceTypes")
+@router.get("/{ontologyRid}/interfaceTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_interface_types")
 async def list_interface_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     preview: bool = Query(False),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -3992,7 +4010,7 @@ async def list_interface_types_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/interfaceTypes",
+            endpoint="ontologies/{ontologyRid}/interfaceTypes",
         )
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
@@ -4036,19 +4054,21 @@ async def list_interface_types_v2(
         )
 
 
-@router.get("/{ontology}/interfaceTypes/{interfaceType}")
+@router.get("/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_interface_type")
 async def get_interface_type_v2(
-    ontology: str,
-    interfaceType: str,
+    ontologyRid: str,
+    interfaceTypeApiName: str,
     request: Request,
     preview: bool = Query(False),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    interfaceType = interfaceTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4056,7 +4076,7 @@ async def get_interface_type_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/interfaceTypes/{interfaceType}",
+            endpoint="ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}",
         )
         _ = sdk_package_rid, sdk_version
         interface_type = str(interfaceType or "").strip()
@@ -4117,18 +4137,19 @@ async def get_interface_type_v2(
         )
 
 
-@router.get("/{ontology}/sharedPropertyTypes")
+@router.get("/{ontologyRid}/sharedPropertyTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_shared_property_types")
 async def list_shared_property_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     preview: bool = Query(False),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4136,7 +4157,7 @@ async def list_shared_property_types_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/sharedPropertyTypes",
+            endpoint="ontologies/{ontologyRid}/sharedPropertyTypes",
         )
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
@@ -4180,17 +4201,19 @@ async def list_shared_property_types_v2(
         )
 
 
-@router.get("/{ontology}/sharedPropertyTypes/{sharedPropertyType}")
+@router.get("/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_shared_property_type")
 async def get_shared_property_type_v2(
-    ontology: str,
-    sharedPropertyType: str,
+    ontologyRid: str,
+    sharedPropertyTypeApiName: str,
     request: Request,
     preview: bool = Query(False),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    sharedPropertyType = sharedPropertyTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4198,7 +4221,7 @@ async def get_shared_property_type_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}",
+            endpoint="ontologies/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}",
         )
         shared_property_type = str(sharedPropertyType or "").strip()
         if not shared_property_type:
@@ -4258,22 +4281,23 @@ async def get_shared_property_type_v2(
         )
 
 
-@router.get("/{ontology}/valueTypes")
+@router.get("/{ontologyRid}/valueTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_value_types")
 async def list_value_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/valueTypes",
+            endpoint="ontologies/{ontologyRid}/valueTypes",
         )
         await _require_domain_role(request, db_name=db_name)
     except Exception as exc:
@@ -4286,7 +4310,7 @@ async def list_value_types_v2(
     try:
         resources = await _list_all_resources_for_type(
             db_name=db_name,
-            branch="main",
+            branch="master",
             resource_type="value_type",
             oms_client=oms_client,
         )
@@ -4312,23 +4336,25 @@ async def list_value_types_v2(
         )
 
 
-@router.get("/{ontology}/valueTypes/{valueType}")
+@router.get("/{ontologyRid}/valueTypes/{valueTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_value_type")
 async def get_value_type_v2(
-    ontology: str,
-    valueType: str,
+    ontologyRid: str,
+    valueTypeApiName: str,
     request: Request,
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    valueType = valueTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/valueTypes/{valueType}",
+            endpoint="ontologies/{ontologyRid}/valueTypes/{valueTypeApiName}",
         )
         value_type = str(valueType or "").strip()
         if not value_type:
@@ -4346,7 +4372,7 @@ async def get_value_type_v2(
             db_name,
             resource_type="value_type",
             resource_id=value_type,
-            branch="main",
+            branch="master",
         )
         resource = _extract_ontology_resource(payload)
         if not resource:
@@ -4388,17 +4414,18 @@ async def get_value_type_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes")
+@router.get("/{ontologyRid}/objectTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_object_types")
 async def list_object_types_v2(
-    ontology: str,
+    ontologyRid: str,
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4474,18 +4501,19 @@ async def list_object_types_v2(
         )
 
 
-@router.post("/{ontology}/objectTypes")
+@router.post("/{ontologyRid}/objectTypes", dependencies=[_ONTOLOGY_WRITE])
 @trace_endpoint("bff.foundry_v2_ontology.create_object_type")
 async def create_object_type_v2(
-    ontology: str,
+    ontologyRid: str,
     body: ObjectTypeContractCreateRequestV2,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4563,19 +4591,21 @@ async def create_object_type_v2(
         )
 
 
-@router.patch("/{ontology}/objectTypes/{objectType}")
+@router.patch("/{ontologyRid}/objectTypes/{objectTypeApiName}", dependencies=[_ONTOLOGY_WRITE])
 @trace_endpoint("bff.foundry_v2_ontology.update_object_type")
 async def update_object_type_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     body: ObjectTypeContractUpdateRequestV2,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4672,16 +4702,18 @@ async def update_object_type_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes/{objectType}")
+@router.get("/{ontologyRid}/objectTypes/{objectTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_object_type")
 async def get_object_type_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4744,19 +4776,21 @@ async def get_object_type_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes/{objectType}/fullMetadata")
+@router.get("/{ontologyRid}/objectTypes/{objectTypeApiName}/fullMetadata", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_object_type_full_metadata")
 async def get_object_type_full_metadata_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4764,7 +4798,7 @@ async def get_object_type_full_metadata_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="ontologies/{ontology}/objectTypes/{objectType}/fullMetadata",
+            endpoint="ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/fullMetadata",
         )
         _ = sdk_package_rid, sdk_version
         object_type = str(objectType or "").strip()
@@ -4860,18 +4894,20 @@ async def get_object_type_full_metadata_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes/{objectType}/outgoingLinkTypes")
+@router.get("/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_outgoing_link_types")
 async def list_outgoing_link_types_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -4972,17 +5008,23 @@ async def list_outgoing_link_types_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}")
+@router.get(
+    "/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes/{linkTypeApiName}",
+    dependencies=[_ONTOLOGY_READ],
+)
 @trace_endpoint("bff.foundry_v2_ontology.get_outgoing_link_type")
 async def get_outgoing_link_type_v2(
-    ontology: str,
-    objectType: str,
-    linkType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
+    linkTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
+    linkType = linkTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5075,18 +5117,20 @@ async def get_outgoing_link_type_v2(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{ontology}/objectTypes/{objectType}/incomingLinkTypes")
+@router.get("/{ontologyRid}/objectTypes/{objectTypeApiName}/incomingLinkTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_incoming_link_types")
 async def list_incoming_link_types_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5187,17 +5231,23 @@ async def list_incoming_link_types_v2(
         )
 
 
-@router.get("/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}")
+@router.get(
+    "/{ontologyRid}/objectTypes/{objectTypeApiName}/incomingLinkTypes/{linkTypeApiName}",
+    dependencies=[_ONTOLOGY_READ],
+)
 @trace_endpoint("bff.foundry_v2_ontology.get_incoming_link_type")
 async def get_incoming_link_type_v2(
-    ontology: str,
-    objectType: str,
-    linkType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
+    linkTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
+    ontology = ontologyRid
+    objectType = objectTypeApiName
+    linkType = linkTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5285,18 +5335,20 @@ async def get_incoming_link_type_v2(
         )
 
 
-@router.post("/{ontology}/objects/{objectType}/search")
+@router.post("/{ontologyRid}/objects/{objectTypeApiName}/search", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.search_objects")
 async def search_objects_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5349,17 +5401,19 @@ async def search_objects_v2(
         )
 
 
-@router.post("/{ontology}/objects/{objectType}/count")
+@router.post("/{ontologyRid}/objects/{objectTypeApiName}/count", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.count_objects")
 async def count_objects_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5410,20 +5464,22 @@ async def count_objects_v2(
         )
 
 
-@router.post("/{ontology}/objects/{objectType}/aggregate")
+@router.post("/{ontologyRid}/objects/{objectTypeApiName}/aggregate", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.aggregate_objects")
 async def aggregate_objects_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     """Delegate aggregation to OMS ES-native aggregate engine."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5472,13 +5528,13 @@ async def aggregate_objects_v2(
         )
 
 
-@router.post("/{ontology}/objectSets/loadObjects")
+@router.post("/{ontologyRid}/objectSets/loadObjects", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.load_objects")
 async def load_object_set_objects_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -5487,6 +5543,7 @@ async def load_object_set_objects_v2(
     search_around = False
     object_type: str | None = None
     search_payload: dict[str, Any] = {}
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5570,18 +5627,19 @@ async def load_object_set_objects_v2(
         )
 
 
-@router.post("/{ontology}/objectSets/loadLinks")
+@router.post("/{ontologyRid}/objectSets/loadLinks", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.load_links")
 async def load_object_set_links_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5590,7 +5648,7 @@ async def load_object_set_links_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontology}/objectSets/loadLinks",
+            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
         )
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
         requested_links = _normalize_link_type_values(payload)
@@ -5771,13 +5829,13 @@ async def load_object_set_links_v2(
     return response
 
 
-@router.post("/{ontology}/objectSets/loadObjectsMultipleObjectTypes")
+@router.post("/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.load_objects_multiple_object_types")
 async def load_object_set_multiple_object_types_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
@@ -5789,6 +5847,7 @@ async def load_object_set_multiple_object_types_v2(
     search_payload: dict[str, Any] = {}
     request_page_token: str | None = None
     pagination_scope: str | None = None
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5797,7 +5856,7 @@ async def load_object_set_multiple_object_types_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes",
+            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
         )
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
         search_around = _is_search_around_object_set(object_set)
@@ -5902,13 +5961,13 @@ async def load_object_set_multiple_object_types_v2(
         )
 
 
-@router.post("/{ontology}/objectSets/loadObjectsOrInterfaces")
+@router.post("/{ontologyRid}/objectSets/loadObjectsOrInterfaces", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.load_objects_or_interfaces")
 async def load_object_set_objects_or_interfaces_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -5919,6 +5978,7 @@ async def load_object_set_objects_or_interfaces_v2(
     search_payload: dict[str, Any] = {}
     request_page_token: str | None = None
     pagination_scope: str | None = None
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -5927,7 +5987,7 @@ async def load_object_set_objects_or_interfaces_v2(
         _require_preview_true_for_strict_compat(
             preview=preview,
             strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces",
+            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
         )
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
         search_around = _is_search_around_object_set(object_set)
@@ -6026,19 +6086,20 @@ async def load_object_set_objects_or_interfaces_v2(
         )
 
 
-@router.post("/{ontology}/objectSets/aggregate")
+@router.post("/{ontologyRid}/objectSets/aggregate", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.aggregate")
 async def aggregate_object_set_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
     """Delegate objectSet aggregate to OMS ES-native aggregate engine."""
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -6107,16 +6168,17 @@ async def aggregate_object_set_v2(
         )
 
 
-@router.post("/{ontology}/objectSets/createTemporary")
+@router.post("/{ontologyRid}/objectSets/createTemporary", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.create_temporary")
 async def create_temporary_object_set_v2(
-    ontology: str,
+    ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version
@@ -6132,14 +6194,15 @@ async def create_temporary_object_set_v2(
         )
 
 
-@router.get("/{ontology}/objectSets/{objectSetRid}")
+@router.get("/{ontologyRid}/objectSets/{objectSetRid}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.object_sets.get")
 async def get_object_set_v2(
-    ontology: str,
+    ontologyRid: str,
     objectSetRid: str,
     request: Request,
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
@@ -6152,11 +6215,11 @@ async def get_object_set_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}")
+@router.get("/{ontologyRid}/objects/{objectTypeApiName}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_objects")
 async def list_objects_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     request: Request,
     page_size: int = Query(1000, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
@@ -6164,11 +6227,13 @@ async def list_objects_v2(
     order_by: str | None = Query(default=None, alias="orderBy"),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -6234,20 +6299,22 @@ async def list_objects_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}")
+@router.get("/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.get_object")
 async def get_object_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     request: Request,
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -6370,13 +6437,16 @@ async def get_object_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}",
+    dependencies=[_ONTOLOGY_READ],
+)
 @trace_endpoint("bff.foundry_v2_ontology.list_linked_objects")
 async def list_linked_objects_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
-    linkType: str,
+    linkTypeApiName: str,
     request: Request,
     page_size: int = Query(1000, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
@@ -6384,11 +6454,14 @@ async def list_linked_objects_v2(
     order_by: str | None = Query(default=None, alias="orderBy"),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
+    linkType = linkTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -6630,22 +6703,28 @@ async def list_linked_objects_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}/{linkedObjectPrimaryKey}",
+    dependencies=[_ONTOLOGY_READ],
+)
 @trace_endpoint("bff.foundry_v2_ontology.get_linked_object")
 async def get_linked_object_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
-    linkType: str,
+    linkTypeApiName: str,
     linkedObjectPrimaryKey: str,
     request: Request,
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
-    branch: str = Query("main", description="Ontology branch name or branch RID"),
+    branch: str = Query("master", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
+    ontology = ontologyRid
+    objectType = objectTypeApiName
+    linkType = linkTypeApiName
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
@@ -6924,19 +7003,24 @@ async def get_linked_object_v2(
 # =====================================================================
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/firstPoint",
+    dependencies=[_ONTOLOGY_READ],
+)
 async def get_timeseries_first_point_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the first (earliest) point of a time series property."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -6958,6 +7042,12 @@ async def get_timeseries_first_point_v2(
             headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -6971,19 +7061,24 @@ async def get_timeseries_first_point_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/lastPoint",
+    dependencies=[_ONTOLOGY_READ],
+)
 async def get_timeseries_last_point_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the last (most recent) point of a time series property."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7005,6 +7100,12 @@ async def get_timeseries_last_point_v2(
             headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -7018,19 +7119,25 @@ async def get_timeseries_last_point_v2(
         )
 
 
-@router.post("/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints", response_model=None)
+@router.post(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/streamPoints",
+    response_model=None,
+    dependencies=[_ONTOLOGY_READ],
+)
 async def stream_timeseries_points_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> StreamingResponse | JSONResponse:
     """Stream all points of a time series property with optional range filter."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7057,6 +7164,12 @@ async def stream_timeseries_points_v2(
             content=iter([response.content]),
             media_type=response.headers.get("content-type", "application/x-ndjson"),
         )
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -7075,7 +7188,7 @@ async def stream_timeseries_points_v2(
 # =====================================================================
 
 
-@router.post("/attachments/upload")
+@router.post("/attachments/upload", dependencies=[_ONTOLOGY_WRITE])
 async def upload_attachment_v2(
     request: Request,
     filename: str = Query(..., description="The name of the file being uploaded"),
@@ -7108,19 +7221,24 @@ async def upload_attachment_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}",
+    dependencies=[_ONTOLOGY_READ],
+)
 async def list_attachment_property_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """List attachment metadata for a property (single or multiple)."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7142,6 +7260,12 @@ async def list_attachment_property_v2(
             headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -7155,20 +7279,25 @@ async def list_attachment_property_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}")
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/{attachmentRid}",
+    dependencies=[_ONTOLOGY_READ],
+)
 async def get_attachment_by_rid_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get metadata for a specific attachment by its RID."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7192,6 +7321,12 @@ async def get_attachment_by_rid_v2(
             headers=forward_headers if forward_headers else None,
         )
         return JSONResponse(content=result)
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -7205,19 +7340,25 @@ async def get_attachment_by_rid_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content", response_model=None)
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/content",
+    response_model=None,
+    dependencies=[_ONTOLOGY_READ],
+)
 async def get_attachment_content_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of a single-valued attachment property."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7242,6 +7383,12 @@ async def get_attachment_content_v2(
             content=response.content,
             media_type=response.headers.get("content-type", "application/octet-stream"),
         )
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
+        )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(
             exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
@@ -7255,20 +7402,26 @@ async def get_attachment_content_v2(
         )
 
 
-@router.get("/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content", response_model=None)
+@router.get(
+    "/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/{attachmentRid}/content",
+    response_model=None,
+    dependencies=[_ONTOLOGY_READ],
+)
 async def get_attachment_content_by_rid_v2(
-    ontology: str,
-    objectType: str,
+    ontologyRid: str,
+    objectTypeApiName: str,
     primaryKey: str,
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("main"),
+    branch: str = Query("master"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of an attachment by its RID."""
+    ontology = ontologyRid
+    objectType = objectTypeApiName
     error_parameters: Dict[str, Any] = {
         "ontology": ontology,
         "objectType": objectType,
@@ -7294,6 +7447,12 @@ async def get_attachment_content_by_rid_v2(
         return Response(
             content=response.content,
             media_type=response.headers.get("content-type", "application/octet-stream"),
+        )
+    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
+        return _preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters=error_parameters,
         )
     except httpx.HTTPStatusError as exc:
         return _upstream_status_error_response(

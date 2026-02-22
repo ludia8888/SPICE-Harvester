@@ -521,7 +521,7 @@ class TestPipelineAPIIdempotencyKeys:
             _require_pipeline_idempotency_key(mock_request, operation="deploy")
 
         assert exc_info.value.status_code == 400
-        assert "deploy" in exc_info.value.detail
+        assert "deploy" in exc_info.value.detail["message"]
 
     def test_require_pipeline_idempotency_key_includes_operation_in_error(self) -> None:
         """Error message should include the operation name"""
@@ -534,7 +534,7 @@ class TestPipelineAPIIdempotencyKeys:
         with pytest.raises(HTTPException) as exc_info:
             _require_pipeline_idempotency_key(mock_request, operation="custom-operation")
 
-        assert "custom-operation" in exc_info.value.detail
+        assert "custom-operation" in exc_info.value.detail["message"]
 
 
 # =============================================================================

@@ -27,7 +27,7 @@ def test_raise_oms_boundary_exception_with_custom_http_status_detail() -> None:
         )
 
     assert raised.value.status_code == 404
-    assert raised.value.detail == "데이터베이스를 찾을 수 없습니다"
+    assert raised.value.detail["message"] == "데이터베이스를 찾을 수 없습니다"
 
 
 def test_raise_oms_boundary_exception_maps_value_error_to_400() -> None:
@@ -36,9 +36,9 @@ def test_raise_oms_boundary_exception_maps_value_error_to_400() -> None:
             exc=ValueError("invalid payload"),
             action="온톨로지 생성",
             logger=logging.getLogger(__name__),
-        )
+    )
     assert raised.value.status_code == 400
-    assert raised.value.detail == "invalid payload"
+    assert raised.value.detail["message"] == "invalid payload"
 
 
 def test_raise_oms_boundary_exception_maps_generic_to_500() -> None:
@@ -49,4 +49,4 @@ def test_raise_oms_boundary_exception_maps_generic_to_500() -> None:
             logger=logging.getLogger(__name__),
         )
     assert raised.value.status_code == 500
-    assert "온톨로지 생성 실패" in raised.value.detail
+    assert "온톨로지 생성 실패" in raised.value.detail["message"]

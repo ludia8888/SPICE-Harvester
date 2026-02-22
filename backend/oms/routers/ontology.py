@@ -532,7 +532,7 @@ async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
     request: Request,
     db_name: str = Path(..., description="Database name"),  # URL path parameter
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
 ) -> ApiResponse:
@@ -815,7 +815,7 @@ async def validate_ontology_create(
     ontology_request: OntologyCreateRequest,
     request: Request,
     db_name: str = Path(..., description="Database name"),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
 ) -> Dict[str, Any]:
     """온톨로지 생성 검증 (no write)."""
     try:
@@ -912,7 +912,7 @@ async def validate_ontology_create(
 @trace_endpoint("oms.ontology.list")
 async def list_ontologies(
     db_name: str = Depends(ensure_database_exists),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     class_type: str = "sys:Class",
     limit: Optional[int] = 100,
     offset: int = 0,
@@ -997,7 +997,7 @@ async def get_ontology(
     request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     label_mapper=LabelMapperDep,
 ):
     """내부 ID 기반 온톨로지 조회"""
@@ -1086,7 +1086,7 @@ async def update_ontology(
     request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
@@ -1420,7 +1420,7 @@ async def update_ontology(
         raise
     except ValueError as e:
         raise classified_http_exception(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_400_BAD_REQUEST,
             str(e),
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
@@ -1435,7 +1435,7 @@ async def delete_ontology(
     request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
@@ -1462,10 +1462,10 @@ async def delete_ontology(
                 )
 
         # Best-effort command-side validation:
-        # - Safe on main branch.
-        # - For non-main branches, the authoritative existence check is in the worker (branch-aware),
+        # - Safe on master branch.
+        # - For non-master branches, the authoritative existence check is in the worker (branch-aware),
         #   so we avoid false negatives due to stale caches or missing branch support.
-        if branch == "main":
+        if branch == "master":
             existing = await _load_existing_ontology_for_write(
                 db_name=db_name,
                 class_id=class_id,

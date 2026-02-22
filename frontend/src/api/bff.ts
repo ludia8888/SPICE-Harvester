@@ -639,6 +639,66 @@ const bff2ParseJson = async (response: Response) => {
   }
 }
 
+const parseCsvText = (text: string): string[][] => {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+
+  const pushField = () => {
+    row.push(field)
+    field = ''
+  }
+
+  const pushRow = () => {
+    rows.push(row)
+    row = []
+  }
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i] ?? ''
+    if (inQuotes) {
+      if (char === '"') {
+        const next = text[i + 1]
+        if (next === '"') {
+          field += '"'
+          i += 1
+          continue
+        }
+        inQuotes = false
+        continue
+      }
+      field += char
+      continue
+    }
+
+    if (char === '"') {
+      inQuotes = true
+      continue
+    }
+    if (char === ',') {
+      pushField()
+      continue
+    }
+    if (char === '\n') {
+      pushField()
+      pushRow()
+      continue
+    }
+    if (char === '\r') {
+      continue
+    }
+    field += char
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    pushField()
+    pushRow()
+  }
+
+  return rows
+}
+
 const bff2ParseRetryAfterSeconds = (value: string | null) => {
   if (!value) {
     return null
@@ -946,17 +1006,12 @@ export const createDatasetV2 = async (
   input: {
     dbName: string
     name: string
-    description?: string
-    branchName?: string
   },
 ): Promise<FoundryDatasetRecordV2> => {
   const dbName = String(input.dbName).trim()
-  const branchName = String(input.branchName ?? 'main').trim() || 'main'
   const body = {
     name: input.name,
-    description: input.description,
-    branchName,
-    parentFolderRid: `ri.spice.main.folder.${dbName}`,
+    parentFolderRid: `ri.foundry.main.folder.${dbName}`,
   }
   const { payload } = await bff2RequestJson<FoundryDatasetRecordV2>(
     '/api/v2/datasets',
@@ -965,7 +1020,7 @@ export const createDatasetV2 = async (
     undefined,
     bff2DbContextHeaders(dbName),
   )
-  return payload ?? { rid: '', name: input.name, branchName }
+  return payload ?? { rid: '', name: input.name, parentFolderRid: body.parentFolderRid }
 }
 
 export const createDatasetTransactionV2 = async (
@@ -998,18 +1053,22 @@ export const uploadDatasetFileV2 = async (
     filePath: string
     content: BodyInit
     branchName?: string
+    transactionRid?: string
+    byteOffset?: number
     contentType?: string
     dbName?: string
   },
 ) => {
-  const branchName = String(params.branchName ?? 'main').trim() || 'main'
+  const branchName = String(params.branchName ?? 'master').trim() || 'master'
+  const filePath = String(params.filePath).trim().replace(/^\/+/, '')
+  const encodedFilePath = encodeURIComponent(filePath).replace(/%2F/g, '/')
   const extraHeaders = new Headers(bff2DbContextHeaders(params.dbName))
   extraHeaders.set('Content-Type', params.contentType ?? 'application/octet-stream')
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
-    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files:upload`,
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files/${encodedFilePath}/upload`,
     { method: 'POST', body: params.content },
     context,
-    { filePath: params.filePath, branchName },
+    { branchName, transactionRid: params.transactionRid, byteOffset: params.byteOffset },
     extraHeaders,
   )
   return payload ?? {}
@@ -1056,14 +1115,27 @@ export const readDatasetTableV2 = async (
   },
   params?: { dbName?: string },
 ): Promise<FoundryReadTableResponseV2> => {
-  const { payload } = await bff2RequestJson<FoundryReadTableResponseV2>(
+  const rowLimit = Number(input?.rowLimit ?? 100)
+
+  const response = await bff2RequestRaw(
     `/api/v2/datasets/${encodeURIComponent(datasetRid)}/readTable`,
-    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    { method: 'GET' },
     context,
-    undefined,
+    { rowLimit: Number.isFinite(rowLimit) ? Math.max(1, rowLimit) : 100, branchName: 'master', format: 'CSV' },
     bff2DbContextHeaders(params?.dbName),
   )
-  return payload ?? { columns: [], rows: [], totalRowCount: 0 }
+  const text = await response.text()
+  const parsed = parseCsvText(text)
+  if (parsed.length < 2) {
+    return { columns: [], rows: [], totalRowCount: 0 }
+  }
+  const header = parsed[0] ?? []
+  const rows = parsed.slice(1)
+  return {
+    columns: header.map((name) => ({ name })),
+    rows,
+    totalRowCount: rows.length,
+  }
 }
 
 const withConnectivityPreview = (searchParams?: Bff2SearchParams): Bff2SearchParams => ({

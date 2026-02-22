@@ -3,7 +3,7 @@
     {
       "name": "DatabaseSettings",
       "docstring": "Database configuration settings",
-      "field_count": 19,
+      "field_count": 20,
       "fields": [
         {
           "name": "query_max_scan_docs",
@@ -165,6 +165,17 @@
           "description": "Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS)",
           "env_vars": [
             "ELASTICSEARCH_DEFAULT_REPLICAS"
+          ],
+          "required": true
+        },
+        {
+          "name": "elasticsearch_compat_version",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Override elasticsearch-py compatibility header (ELASTICSEARCH_COMPAT_VERSION / ES_COMPAT_VERSION)",
+          "env_vars": [
+            "ELASTICSEARCH_COMPAT_VERSION",
+            "ES_COMPAT_VERSION"
           ],
           "required": true
         },
@@ -713,7 +724,7 @@
         {
           "name": "lineage_fail_closed",
           "type": "bool",
-          "default": "True",
+          "default": "False",
           "description": "Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED)",
           "env_vars": [
             "LINEAGE_FAIL_CLOSED"
@@ -1054,7 +1065,7 @@
         {
           "name": "protected_branches",
           "type": "str",
-          "default": "main",
+          "default": "master",
           "description": "Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
           "env_vars": [
             "PROTECTED_BRANCHES"
@@ -1064,7 +1075,7 @@
         {
           "name": "fallback_branches",
           "type": "str",
-          "default": "main",
+          "default": "master",
           "description": "Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
           "env_vars": [
             "FALLBACK_BRANCHES"
@@ -3499,7 +3510,7 @@
         {
           "name": "base_branch",
           "type": "str",
-          "default": "main",
+          "default": "master",
           "description": "Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
           "env_vars": [
             "BASE_BRANCH"
@@ -4630,7 +4641,7 @@
         {
           "name": "base_branch",
           "type": "str",
-          "default": "main",
+          "default": "master",
           "description": "Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
           "env_vars": [
             "BASE_BRANCH"
@@ -5618,5 +5629,5 @@
       ]
     }
   ],
-  "total_fields": 523
+  "total_fields": 524
 }

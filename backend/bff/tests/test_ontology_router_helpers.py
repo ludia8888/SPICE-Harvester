@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from bff.routers import ontology as ontology_router
+from bff.routers import ontology_ops as ontology_router
+from bff.schemas.ontology_requests import ImportTargetField
 
 
 def test_localized_to_string() -> None:
@@ -49,6 +50,6 @@ def test_normalize_mapping_type_and_import_target() -> None:
     assert ontology_router._normalize_mapping_type("money") == "xsd:decimal"
     assert ontology_router._normalize_mapping_type("xsd:integer") == "xsd:integer"
 
-    fields = [ontology_router.ImportTargetField(name="count", type="INTEGER")]
+    fields = [ImportTargetField(name="count", type="INTEGER")]
     types = ontology_router._extract_target_field_types_from_import_schema(fields)
     assert types["count"] == "xsd:integer"

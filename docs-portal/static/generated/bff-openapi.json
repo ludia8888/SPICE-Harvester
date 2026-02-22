@@ -5210,7 +5210,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -5621,7 +5621,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Branch",
               "title": "Branch",
               "type": "string"
@@ -8763,13 +8763,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -8876,13 +8876,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -8998,13 +8998,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -9134,13 +9134,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -9574,13 +9574,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -9771,7 +9771,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -9878,7 +9878,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -9983,7 +9983,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -10104,7 +10104,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -10213,7 +10213,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -10304,7 +10304,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Target branch",
               "title": "Branch",
               "type": "string"
@@ -10761,13 +10761,13 @@
             }
           },
           {
-            "description": "Base branch (default: main)",
+            "description": "Base branch (default: master)",
             "in": "query",
             "name": "base_branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Base branch (default: main)",
+              "default": "master",
+              "description": "Base branch (default: master)",
               "title": "Base Branch",
               "type": "string"
             }
@@ -10866,13 +10866,13 @@
             }
           },
           {
-            "description": "Base branch (default: main)",
+            "description": "Base branch (default: master)",
             "in": "query",
             "name": "base_branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Base branch (default: main)",
+              "default": "master",
+              "description": "Base branch (default: master)",
               "title": "Base Branch",
               "type": "string"
             }
@@ -11003,13 +11003,13 @@
             }
           },
           {
-            "description": "Target branch (default: main)",
+            "description": "Target branch (default: master)",
             "in": "query",
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Target branch (default: main)",
+              "default": "master",
+              "description": "Target branch (default: master)",
               "title": "Branch",
               "type": "string"
             }
@@ -11078,13 +11078,13 @@
             }
           },
           {
-            "description": "Base branch (default: main)",
+            "description": "Base branch (default: master)",
             "in": "query",
             "name": "base_branch",
             "required": false,
             "schema": {
-              "default": "main",
-              "description": "Base branch (default: main)",
+              "default": "master",
+              "description": "Base branch (default: master)",
               "title": "Base Branch",
               "type": "string"
             }
@@ -13861,7 +13861,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -14261,7 +14261,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -14353,7 +14353,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -18138,29 +18138,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -18199,29 +18176,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18275,29 +18229,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18364,29 +18295,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -18434,29 +18342,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18536,29 +18421,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -18606,29 +18468,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18700,29 +18539,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18806,29 +18622,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -18876,29 +18669,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -18971,29 +18741,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19051,29 +18798,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19130,29 +18854,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -19225,29 +18926,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19297,29 +18975,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -19403,29 +19058,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19473,29 +19105,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -19568,29 +19177,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19648,29 +19234,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19727,29 +19290,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -19822,29 +19362,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19895,29 +19412,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -19967,29 +19461,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -20052,29 +19523,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -20146,29 +19594,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -20264,29 +19689,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -20334,29 +19736,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -20429,29 +19808,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -20509,29 +19865,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -20588,29 +19921,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -20683,29 +19993,6 @@
               "title": "Preview",
               "type": "boolean"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -20735,73 +20022,37 @@
       }
     },
     "/api/v2/datasets": {
-      "get": {
-        "description": "GET /v2/datasets — List datasets.",
-        "operationId": "list_datasets_v2_api_v2_datasets_get",
+      "post": {
+        "description": "POST /v2/datasets — Create a new dataset.",
+        "operationId": "create_dataset_v2_api_v2_datasets_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Dataset V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      }
+    },
+    "/api/v2/datasets/getSchemaBatch": {
+      "post": {
+        "description": "POST /v2/datasets/getSchemaBatch — Get dataset schemas batch (preview).",
+        "operationId": "get_schema_batch_v2_api_v2_datasets_getSchemaBatch_post",
         "parameters": [
           {
             "in": "query",
-            "name": "parentFolderRid",
-            "required": false,
+            "name": "preview",
+            "required": true,
             "schema": {
-              "default": "",
-              "title": "Parentfolderrid",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dbName",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Dbname",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageSize",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Pagesize",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pageToken",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Pagetoken",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
+              "title": "Preview",
+              "type": "boolean"
             }
           }
         ],
@@ -20825,50 +20076,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Datasets V2",
-        "tags": [
-          "Foundry Datasets v2"
-        ]
-      },
-      "post": {
-        "description": "POST /v2/datasets — Create a new dataset.",
-        "operationId": "create_dataset_v2_api_v2_datasets_post",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Create Dataset V2",
+        "summary": "Get Schema Batch V2",
         "tags": [
           "Foundry Datasets v2"
         ]
@@ -20885,29 +20093,6 @@
             "required": true,
             "schema": {
               "title": "Datasetrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -20953,25 +20138,24 @@
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "pageSize",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Pagesize",
+              "type": "integer"
             }
           },
           {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
+            "in": "query",
+            "name": "pageToken",
             "required": false,
             "schema": {
+              "default": "",
+              "title": "Pagetoken",
               "type": "string"
             }
           }
@@ -21011,29 +20195,6 @@
             "required": true,
             "schema": {
               "title": "Datasetrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -21086,29 +20247,6 @@
               "title": "Branchname",
               "type": "string"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -21150,29 +20288,6 @@
             "required": true,
             "schema": {
               "title": "Branchname",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -21222,8 +20337,38 @@
             "name": "branchName",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branchname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Starttransactionrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Endtransactionrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "prefix",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Prefix",
               "type": "string"
             }
           },
@@ -21240,25 +20385,12 @@
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "pageToken",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
+              "default": "",
+              "title": "Pagetoken",
               "type": "string"
             }
           }
@@ -21284,6 +20416,86 @@
           }
         },
         "summary": "List Files V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/files/{filePath}": {
+      "get": {
+        "description": "GET /v2/datasets/{datasetRid}/files/{filePath} — Get file metadata.",
+        "operationId": "get_file_v2_api_v2_datasets__datasetRid__files__filePath__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "datasetRid",
+            "required": true,
+            "schema": {
+              "title": "Datasetrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filePath",
+            "required": true,
+            "schema": {
+              "title": "Filepath",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branchName",
+            "required": false,
+            "schema": {
+              "default": "master",
+              "title": "Branchname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Starttransactionrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Endtransactionrid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get File V2",
         "tags": [
           "Foundry Datasets v2"
         ]
@@ -21317,31 +20529,28 @@
             "name": "branchName",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branchname",
               "type": "string"
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "startTransactionRid",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
+              "default": "",
+              "title": "Starttransactionrid",
               "type": "string"
             }
           },
           {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
+            "in": "query",
+            "name": "endTransactionRid",
             "required": false,
             "schema": {
+              "default": "",
+              "title": "Endtransactionrid",
               "type": "string"
             }
           }
@@ -21372,10 +20581,10 @@
         ]
       }
     },
-    "/api/v2/datasets/{datasetRid}/files:upload": {
+    "/api/v2/datasets/{datasetRid}/files/{filePath}/upload": {
       "post": {
-        "description": "POST /v2/datasets/{datasetRid}/files:upload — Upload file.",
-        "operationId": "upload_file_v2_api_v2_datasets__datasetRid__files_upload_post",
+        "description": "POST /v2/datasets/{datasetRid}/files/{filePath}/upload — Upload file.",
+        "operationId": "upload_file_v2_api_v2_datasets__datasetRid__files__filePath__upload_post",
         "parameters": [
           {
             "in": "path",
@@ -21387,7 +20596,7 @@
             }
           },
           {
-            "in": "query",
+            "in": "path",
             "name": "filePath",
             "required": true,
             "schema": {
@@ -21400,32 +20609,35 @@
             "name": "branchName",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branchname",
               "type": "string"
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "transactionRid",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
+              "default": "",
+              "title": "Transactionrid",
               "type": "string"
             }
           },
           {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
+            "in": "query",
+            "name": "byteOffset",
             "required": false,
             "schema": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Byteoffset"
             }
           }
         ],
@@ -21455,10 +20667,10 @@
         ]
       }
     },
-    "/api/v2/datasets/{datasetRid}/readTable": {
-      "post": {
-        "description": "POST /v2/datasets/{datasetRid}/readTable — Read table rows.",
-        "operationId": "read_table_v2_api_v2_datasets__datasetRid__readTable_post",
+    "/api/v2/datasets/{datasetRid}/getSchema": {
+      "get": {
+        "description": "GET /v2/datasets/{datasetRid}/getSchema — Get dataset schema (preview).",
+        "operationId": "get_dataset_schema_v2_api_v2_datasets__datasetRid__getSchema_get",
         "parameters": [
           {
             "in": "path",
@@ -21470,26 +20682,206 @@
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "preview",
+            "required": true,
+            "schema": {
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branchName",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
+              "default": "master",
+              "title": "Branchname",
               "type": "string"
             }
           },
           {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
+            "in": "query",
+            "name": "endTransactionRid",
             "required": false,
             "schema": {
+              "default": "",
+              "title": "Endtransactionrid",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "versionId",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Versionid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Schema V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/putSchema": {
+      "put": {
+        "description": "PUT /v2/datasets/{datasetRid}/putSchema — Put dataset schema (preview).",
+        "operationId": "put_dataset_schema_v2_api_v2_datasets__datasetRid__putSchema_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "datasetRid",
+            "required": true,
+            "schema": {
+              "title": "Datasetrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "preview",
+            "required": true,
+            "schema": {
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branchName",
+            "required": false,
+            "schema": {
+              "default": "master",
+              "title": "Branchname",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Dataset Schema V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/readTable": {
+      "get": {
+        "description": "GET /v2/datasets/{datasetRid}/readTable — Read table rows.",
+        "operationId": "read_table_v2_api_v2_datasets__datasetRid__readTable_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "datasetRid",
+            "required": true,
+            "schema": {
+              "title": "Datasetrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branchName",
+            "required": false,
+            "schema": {
+              "default": "master",
+              "title": "Branchname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "startTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Starttransactionrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endTransactionRid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Endtransactionrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": true,
+            "schema": {
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "columns",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Columns"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rowLimit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Rowlimit",
+              "type": "integer"
             }
           }
         ],
@@ -21519,10 +20911,90 @@
         ]
       }
     },
-    "/api/v2/datasets/{datasetRid}/schema": {
+    "/api/v2/datasets/{datasetRid}/transactions": {
       "get": {
-        "description": "GET /v2/datasets/{datasetRid}/schema — Get dataset schema.",
-        "operationId": "get_schema_v2_api_v2_datasets__datasetRid__schema_get",
+        "description": "GET /v2/datasets/{datasetRid}/transactions — List transactions.",
+        "operationId": "list_transactions_v2_api_v2_datasets__datasetRid__transactions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "datasetRid",
+            "required": true,
+            "schema": {
+              "title": "Datasetrid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "preview",
+            "required": true,
+            "schema": {
+              "title": "Preview",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "branchName",
+            "required": false,
+            "schema": {
+              "default": "master",
+              "title": "Branchname",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Pagesize",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageToken",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Pagetoken",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Transactions V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      },
+      "post": {
+        "description": "POST /v2/datasets/{datasetRid}/transactions — Create a transaction.",
+        "operationId": "create_transaction_v2_api_v2_datasets__datasetRid__transactions_post",
         "parameters": [
           {
             "in": "path",
@@ -21538,157 +21010,8 @@
             "name": "branchName",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branchname",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Schema V2",
-        "tags": [
-          "Foundry Datasets v2"
-        ]
-      },
-      "put": {
-        "description": "PUT /v2/datasets/{datasetRid}/schema — Update dataset schema.",
-        "operationId": "update_schema_v2_api_v2_datasets__datasetRid__schema_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "datasetRid",
-            "required": true,
-            "schema": {
-              "title": "Datasetrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Schema V2",
-        "tags": [
-          "Foundry Datasets v2"
-        ]
-      }
-    },
-    "/api/v2/datasets/{datasetRid}/transactions": {
-      "post": {
-        "description": "POST /v2/datasets/{datasetRid}/transactions — Create a transaction.",
-        "operationId": "create_transaction_v2_api_v2_datasets__datasetRid__transactions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "datasetRid",
-            "required": true,
-            "schema": {
-              "title": "Datasetrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -21719,10 +21042,10 @@
         ]
       }
     },
-    "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort": {
-      "post": {
-        "description": "POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.",
-        "operationId": "abort_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__abort_post",
+    "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}": {
+      "get": {
+        "description": "GET /v2/datasets/{datasetRid}/transactions/{transactionRid} — Get transaction.",
+        "operationId": "get_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__get",
         "parameters": [
           {
             "in": "path",
@@ -21743,25 +21066,62 @@
             }
           },
           {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
-            "name": "lang",
+            "name": "branchName",
             "required": false,
             "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
+              "default": "master",
+              "title": "Branchname",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Transaction V2",
+        "tags": [
+          "Foundry Datasets v2"
+        ]
+      }
+    },
+    "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort": {
+      "post": {
+        "description": "POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort.",
+        "operationId": "abort_transaction_v2_api_v2_datasets__datasetRid__transactions__transactionRid__abort_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "datasetRid",
+            "required": true,
+            "schema": {
+              "title": "Datasetrid",
               "type": "string"
             }
           },
           {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
+            "in": "path",
+            "name": "transactionRid",
+            "required": true,
             "schema": {
+              "title": "Transactionrid",
               "type": "string"
             }
           }
@@ -21814,29 +21174,6 @@
               "title": "Transactionrid",
               "type": "string"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -21868,31 +21205,6 @@
     "/api/v2/ontologies": {
       "get": {
         "operationId": "list_ontologies_v2_api_v2_ontologies_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -21956,29 +21268,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -22007,39 +21296,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}": {
+    "/api/v2/ontologies/{ontologyRid}": {
       "get": {
-        "operationId": "get_ontology_v2_api_v2_ontologies__ontology__get",
+        "operationId": "get_ontology_v2_api_v2_ontologies__ontologyRid__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
+              "title": "Ontologyrid",
               "type": "string"
             }
           }
@@ -22070,16 +21336,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/actionTypes": {
+    "/api/v2/ontologies/{ontologyRid}/actionTypes": {
       "get": {
-        "operationId": "list_action_types_v2_api_v2_ontologies__ontology__actionTypes_get",
+        "operationId": "list_action_types_v2_api_v2_ontologies__ontologyRid__actionTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -22117,32 +21383,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -22173,16 +21416,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/actionTypes/byRid/{actionTypeRid}": {
+    "/api/v2/ontologies/{ontologyRid}/actionTypes/byRid/{actionTypeRid}": {
       "get": {
-        "operationId": "get_action_type_by_rid_v2_api_v2_ontologies__ontology__actionTypes_byRid__actionTypeRid__get",
+        "operationId": "get_action_type_by_rid_v2_api_v2_ontologies__ontologyRid__actionTypes_byRid__actionTypeRid__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -22201,32 +21444,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -22257,25 +21477,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/actionTypes/{actionType}": {
+    "/api/v2/ontologies/{ontologyRid}/actionTypes/{actionTypeApiName}": {
       "get": {
-        "operationId": "get_action_type_v2_api_v2_ontologies__ontology__actionTypes__actionType__get",
+        "operationId": "get_action_type_v2_api_v2_ontologies__ontologyRid__actionTypes__actionTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "actionType",
+            "name": "actionTypeApiName",
             "required": true,
             "schema": {
-              "title": "Actiontype",
+              "title": "Actiontypeapiname",
               "type": "string"
             }
           },
@@ -22285,32 +21505,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -22341,25 +21538,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/actions/{action}/apply": {
+    "/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/apply": {
       "post": {
-        "operationId": "apply_action_v2_api_v2_ontologies__ontology__actions__action__apply_post",
+        "operationId": "apply_action_v2_api_v2_ontologies__ontologyRid__actions__actionApiName__apply_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "action",
+            "name": "actionApiName",
             "required": true,
             "schema": {
-              "title": "Action",
+              "title": "Actionapiname",
               "type": "string"
             }
           },
@@ -22369,7 +21566,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -22421,29 +21618,6 @@
                 }
               ],
               "title": "Transactionid"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -22483,25 +21657,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch": {
+    "/api/v2/ontologies/{ontologyRid}/actions/{actionApiName}/applyBatch": {
       "post": {
-        "operationId": "apply_action_batch_v2_api_v2_ontologies__ontology__actions__action__applyBatch_post",
+        "operationId": "apply_action_batch_v2_api_v2_ontologies__ontologyRid__actions__actionApiName__applyBatch_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "action",
+            "name": "actionApiName",
             "required": true,
             "schema": {
-              "title": "Action",
+              "title": "Actionapiname",
               "type": "string"
             }
           },
@@ -22511,7 +21685,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -22547,29 +21721,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -22609,16 +21760,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/fullMetadata": {
+    "/api/v2/ontologies/{ontologyRid}/fullMetadata": {
       "get": {
-        "operationId": "get_full_metadata_v2_api_v2_ontologies__ontology__fullMetadata_get",
+        "operationId": "get_full_metadata_v2_api_v2_ontologies__ontologyRid__fullMetadata_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -22640,32 +21791,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -22696,16 +21824,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/interfaceTypes": {
+    "/api/v2/ontologies/{ontologyRid}/interfaceTypes": {
       "get": {
-        "operationId": "list_interface_types_v2_api_v2_ontologies__ontology__interfaceTypes_get",
+        "operationId": "list_interface_types_v2_api_v2_ontologies__ontologyRid__interfaceTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -22753,32 +21881,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -22809,25 +21914,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/interfaceTypes/{interfaceType}": {
+    "/api/v2/ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}": {
       "get": {
-        "operationId": "get_interface_type_v2_api_v2_ontologies__ontology__interfaceTypes__interfaceType__get",
+        "operationId": "get_interface_type_v2_api_v2_ontologies__ontologyRid__interfaceTypes__interfaceTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "interfaceType",
+            "name": "interfaceTypeApiName",
             "required": true,
             "schema": {
-              "title": "Interfacetype",
+              "title": "Interfacetypeapiname",
               "type": "string"
             }
           },
@@ -22847,7 +21952,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -22884,29 +21989,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -22935,17 +22017,17 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/aggregate": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/aggregate": {
       "post": {
         "description": "Delegate objectSet aggregate to OMS ES-native aggregate engine.",
-        "operationId": "aggregate_object_set_v2_api_v2_ontologies__ontology__objectSets_aggregate_post",
+        "operationId": "aggregate_object_set_v2_api_v2_ontologies__ontologyRid__objectSets_aggregate_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -22955,7 +22037,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23007,29 +22089,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23071,16 +22130,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/createTemporary": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/createTemporary": {
       "post": {
-        "operationId": "create_temporary_object_set_v2_api_v2_ontologies__ontology__objectSets_createTemporary_post",
+        "operationId": "create_temporary_object_set_v2_api_v2_ontologies__ontologyRid__objectSets_createTemporary_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23114,29 +22173,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23178,16 +22214,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/loadLinks": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/loadLinks": {
       "post": {
-        "operationId": "load_object_set_links_v2_api_v2_ontologies__ontology__objectSets_loadLinks_post",
+        "operationId": "load_object_set_links_v2_api_v2_ontologies__ontologyRid__objectSets_loadLinks_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23197,7 +22233,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23243,29 +22279,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23307,16 +22320,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/loadObjects": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjects": {
       "post": {
-        "operationId": "load_object_set_objects_v2_api_v2_ontologies__ontology__objectSets_loadObjects_post",
+        "operationId": "load_object_set_objects_v2_api_v2_ontologies__ontologyRid__objectSets_loadObjects_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23326,7 +22339,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23378,29 +22391,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23442,16 +22432,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes": {
       "post": {
-        "operationId": "load_object_set_multiple_object_types_v2_api_v2_ontologies__ontology__objectSets_loadObjectsMultipleObjectTypes_post",
+        "operationId": "load_object_set_multiple_object_types_v2_api_v2_ontologies__ontologyRid__objectSets_loadObjectsMultipleObjectTypes_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23461,7 +22451,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23523,29 +22513,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23587,16 +22554,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces": {
       "post": {
-        "operationId": "load_object_set_objects_or_interfaces_v2_api_v2_ontologies__ontology__objectSets_loadObjectsOrInterfaces_post",
+        "operationId": "load_object_set_objects_or_interfaces_v2_api_v2_ontologies__ontologyRid__objectSets_loadObjectsOrInterfaces_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23606,7 +22573,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23652,29 +22619,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23716,16 +22660,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectSets/{objectSetRid}": {
+    "/api/v2/ontologies/{ontologyRid}/objectSets/{objectSetRid}": {
       "get": {
-        "operationId": "get_object_set_v2_api_v2_ontologies__ontology__objectSets__objectSetRid__get",
+        "operationId": "get_object_set_v2_api_v2_ontologies__ontologyRid__objectSets__objectSetRid__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23735,29 +22679,6 @@
             "required": true,
             "schema": {
               "title": "Objectsetrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -23788,16 +22709,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes": {
       "get": {
-        "operationId": "list_object_types_v2_api_v2_ontologies__ontology__objectTypes_get",
+        "operationId": "list_object_types_v2_api_v2_ontologies__ontologyRid__objectTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23835,32 +22756,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -23891,14 +22789,14 @@
         ]
       },
       "post": {
-        "operationId": "create_object_type_v2_api_v2_ontologies__ontology__objectTypes_post",
+        "operationId": "create_object_type_v2_api_v2_ontologies__ontologyRid__objectTypes_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -23908,7 +22806,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -23928,29 +22826,6 @@
                 }
               ],
               "title": "Expectedheadcommit"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -23990,25 +22865,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}": {
       "get": {
-        "operationId": "get_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__get",
+        "operationId": "get_object_type_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24018,32 +22893,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -24074,23 +22926,23 @@
         ]
       },
       "patch": {
-        "operationId": "update_object_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__patch",
+        "operationId": "update_object_type_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24100,7 +22952,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -24120,29 +22972,6 @@
                 }
               ],
               "title": "Expectedheadcommit"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -24182,25 +23011,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/fullMetadata": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/fullMetadata": {
       "get": {
-        "operationId": "get_object_type_full_metadata_v2_api_v2_ontologies__ontology__objectTypes__objectType__fullMetadata_get",
+        "operationId": "get_object_type_full_metadata_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__fullMetadata_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24210,7 +23039,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -24257,29 +23086,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -24308,25 +23114,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/incomingLinkTypes": {
       "get": {
-        "operationId": "list_incoming_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes_get",
+        "operationId": "list_incoming_link_types_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__incomingLinkTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24364,32 +23170,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -24420,34 +23203,34 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/incomingLinkTypes/{linkType}": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/incomingLinkTypes/{linkTypeApiName}": {
       "get": {
-        "operationId": "get_incoming_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__incomingLinkTypes__linkType__get",
+        "operationId": "get_incoming_link_type_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__incomingLinkTypes__linkTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "linkType",
+            "name": "linkTypeApiName",
             "required": true,
             "schema": {
-              "title": "Linktype",
+              "title": "Linktypeapiname",
               "type": "string"
             }
           },
@@ -24457,32 +23240,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -24513,25 +23273,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes": {
       "get": {
-        "operationId": "list_outgoing_link_types_v2_api_v2_ontologies__ontology__objectTypes__objectType__outgoingLinkTypes_get",
+        "operationId": "list_outgoing_link_types_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__outgoingLinkTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24569,32 +23329,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -24625,34 +23362,34 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}": {
+    "/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes/{linkTypeApiName}": {
       "get": {
-        "operationId": "get_outgoing_link_type_v2_api_v2_ontologies__ontology__objectTypes__objectType__outgoingLinkTypes__linkType__get",
+        "operationId": "get_outgoing_link_type_v2_api_v2_ontologies__ontologyRid__objectTypes__objectTypeApiName__outgoingLinkTypes__linkTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "linkType",
+            "name": "linkTypeApiName",
             "required": true,
             "schema": {
-              "title": "Linktype",
+              "title": "Linktypeapiname",
               "type": "string"
             }
           },
@@ -24662,32 +23399,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -24718,25 +23432,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}": {
       "get": {
-        "operationId": "list_objects_v2_api_v2_ontologies__ontology__objects__objectType__get",
+        "operationId": "list_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24841,7 +23555,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -24878,29 +23592,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -24929,26 +23620,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/aggregate": {
       "post": {
         "description": "Delegate aggregation to OMS ES-native aggregate engine.",
-        "operationId": "aggregate_objects_v2_api_v2_ontologies__ontology__objects__objectType__aggregate_post",
+        "operationId": "aggregate_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName__aggregate_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -24958,7 +23649,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -25011,29 +23702,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -25074,25 +23742,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/count": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/count": {
       "post": {
-        "operationId": "count_objects_v2_api_v2_ontologies__ontology__objects__objectType__count_post",
+        "operationId": "count_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName__count_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25102,7 +23770,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -25138,29 +23806,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -25190,25 +23835,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/search": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/search": {
       "post": {
-        "operationId": "search_objects_v2_api_v2_ontologies__ontology__objects__objectType__search_post",
+        "operationId": "search_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName__search_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25218,7 +23863,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -25254,29 +23899,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -25318,25 +23940,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}": {
       "get": {
-        "operationId": "get_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__get",
+        "operationId": "get_object_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25390,7 +24012,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -25427,29 +24049,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -25478,26 +24077,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}": {
       "get": {
         "description": "List attachment metadata for a property (single or multiple).",
-        "operationId": "list_attachment_property_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__get",
+        "operationId": "list_attachment_property_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__attachments__property__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25524,7 +24123,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -25559,29 +24158,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -25611,26 +24187,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/content": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/content": {
       "get": {
         "description": "Get the content of a single-valued attachment property.",
-        "operationId": "get_attachment_content_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property__content_get",
+        "operationId": "get_attachment_content_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__attachments__property__content_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25657,7 +24233,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -25692,29 +24268,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -25744,26 +24297,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/{attachmentRid}": {
       "get": {
         "description": "Get metadata for a specific attachment by its RID.",
-        "operationId": "get_attachment_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__get",
+        "operationId": "get_attachment_by_rid_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__attachments__property___attachmentRid__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25799,7 +24352,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -25834,29 +24387,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -25886,26 +24416,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}/{attachmentRid}/content": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}/{attachmentRid}/content": {
       "get": {
         "description": "Get the content of an attachment by its RID.",
-        "operationId": "get_attachment_content_by_rid_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__attachments__property___attachmentRid__content_get",
+        "operationId": "get_attachment_content_by_rid_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__attachments__property___attachmentRid__content_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -25941,7 +24471,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -25977,29 +24507,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -26028,25 +24535,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}": {
       "get": {
-        "operationId": "list_linked_objects_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType__get",
+        "operationId": "list_linked_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__links__linkTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -26061,10 +24568,10 @@
           },
           {
             "in": "path",
-            "name": "linkType",
+            "name": "linkTypeApiName",
             "required": true,
             "schema": {
-              "title": "Linktype",
+              "title": "Linktypeapiname",
               "type": "string"
             }
           },
@@ -26169,7 +24676,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -26206,29 +24713,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -26257,25 +24741,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}/{linkedObjectPrimaryKey}": {
       "get": {
-        "operationId": "get_linked_object_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__links__linkType___linkedObjectPrimaryKey__get",
+        "operationId": "get_linked_object_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__links__linkTypeApiName___linkedObjectPrimaryKey__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -26290,10 +24774,10 @@
           },
           {
             "in": "path",
-            "name": "linkType",
+            "name": "linkTypeApiName",
             "required": true,
             "schema": {
-              "title": "Linktype",
+              "title": "Linktypeapiname",
               "type": "string"
             }
           },
@@ -26347,7 +24831,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
               "type": "string"
@@ -26384,29 +24868,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -26435,26 +24896,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/firstPoint": {
       "get": {
         "description": "Get the first (earliest) point of a time series property.",
-        "operationId": "get_timeseries_first_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__firstPoint_get",
+        "operationId": "get_timeseries_first_point_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__timeseries__property__firstPoint_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -26481,7 +24942,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -26516,29 +24977,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -26568,26 +25006,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/lastPoint": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/lastPoint": {
       "get": {
         "description": "Get the last (most recent) point of a time series property.",
-        "operationId": "get_timeseries_last_point_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__lastPoint_get",
+        "operationId": "get_timeseries_last_point_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__timeseries__property__lastPoint_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -26614,7 +25052,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -26649,29 +25087,6 @@
                 }
               ],
               "title": "Sdkversion"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -26701,26 +25116,26 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/streamPoints": {
+    "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/streamPoints": {
       "post": {
         "description": "Stream all points of a time series property with optional range filter.",
-        "operationId": "stream_timeseries_points_v2_api_v2_ontologies__ontology__objects__objectType___primaryKey__timeseries__property__streamPoints_post",
+        "operationId": "stream_timeseries_points_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName___primaryKey__timeseries__property__streamPoints_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "objectType",
+            "name": "objectTypeApiName",
             "required": true,
             "schema": {
-              "title": "Objecttype",
+              "title": "Objecttypeapiname",
               "type": "string"
             }
           },
@@ -26747,7 +25162,7 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "title": "Branch",
               "type": "string"
             }
@@ -26783,29 +25198,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -26834,16 +25226,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute": {
+    "/api/v2/ontologies/{ontologyRid}/queries/{queryApiName}/execute": {
       "post": {
-        "operationId": "execute_query_v2_api_v2_ontologies__ontology__queries__queryApiName__execute_post",
+        "operationId": "execute_query_v2_api_v2_ontologies__ontologyRid__queries__queryApiName__execute_post",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -26919,29 +25311,6 @@
               ],
               "title": "Transactionid"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -26980,16 +25349,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/queryTypes": {
+    "/api/v2/ontologies/{ontologyRid}/queryTypes": {
       "get": {
-        "operationId": "list_query_types_v2_api_v2_ontologies__ontology__queryTypes_get",
+        "operationId": "list_query_types_v2_api_v2_ontologies__ontologyRid__queryTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -27020,29 +25389,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -27071,16 +25417,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/queryTypes/{queryApiName}": {
+    "/api/v2/ontologies/{ontologyRid}/queryTypes/{queryApiName}": {
       "get": {
-        "operationId": "get_query_type_v2_api_v2_ontologies__ontology__queryTypes__queryApiName__get",
+        "operationId": "get_query_type_v2_api_v2_ontologies__ontologyRid__queryTypes__queryApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -27140,29 +25486,6 @@
               ],
               "title": "Sdkversion"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -27191,16 +25514,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/sharedPropertyTypes": {
+    "/api/v2/ontologies/{ontologyRid}/sharedPropertyTypes": {
       "get": {
-        "operationId": "list_shared_property_types_v2_api_v2_ontologies__ontology__sharedPropertyTypes_get",
+        "operationId": "list_shared_property_types_v2_api_v2_ontologies__ontologyRid__sharedPropertyTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -27248,32 +25571,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -27304,25 +25604,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/sharedPropertyTypes/{sharedPropertyType}": {
+    "/api/v2/ontologies/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}": {
       "get": {
-        "operationId": "get_shared_property_type_v2_api_v2_ontologies__ontology__sharedPropertyTypes__sharedPropertyType__get",
+        "operationId": "get_shared_property_type_v2_api_v2_ontologies__ontologyRid__sharedPropertyTypes__sharedPropertyTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "sharedPropertyType",
+            "name": "sharedPropertyTypeApiName",
             "required": true,
             "schema": {
-              "title": "Sharedpropertytype",
+              "title": "Sharedpropertytypeapiname",
               "type": "string"
             }
           },
@@ -27342,32 +25642,9 @@
             "name": "branch",
             "required": false,
             "schema": {
-              "default": "main",
+              "default": "master",
               "description": "Ontology branch name or branch RID",
               "title": "Branch",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -27398,16 +25675,16 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/valueTypes": {
+    "/api/v2/ontologies/{ontologyRid}/valueTypes": {
       "get": {
-        "operationId": "list_value_types_v2_api_v2_ontologies__ontology__valueTypes_get",
+        "operationId": "list_value_types_v2_api_v2_ontologies__ontologyRid__valueTypes_get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
@@ -27419,29 +25696,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -27471,25 +25725,25 @@
         ]
       }
     },
-    "/api/v2/ontologies/{ontology}/valueTypes/{valueType}": {
+    "/api/v2/ontologies/{ontologyRid}/valueTypes/{valueTypeApiName}": {
       "get": {
-        "operationId": "get_value_type_v2_api_v2_ontologies__ontology__valueTypes__valueType__get",
+        "operationId": "get_value_type_v2_api_v2_ontologies__ontologyRid__valueTypes__valueTypeApiName__get",
         "parameters": [
           {
             "in": "path",
-            "name": "ontology",
+            "name": "ontologyRid",
             "required": true,
             "schema": {
-              "title": "Ontology",
+              "title": "Ontologyrid",
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "valueType",
+            "name": "valueTypeApiName",
             "required": true,
             "schema": {
-              "title": "Valuetype",
+              "title": "Valuetypeapiname",
               "type": "string"
             }
           },
@@ -27501,29 +25755,6 @@
               "default": false,
               "title": "Preview",
               "type": "boolean"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -27556,31 +25787,6 @@
     "/api/v2/orchestration/builds/create": {
       "post": {
         "operationId": "create_build_v2_api_v2_orchestration_builds_create_post",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27622,31 +25828,6 @@
     "/api/v2/orchestration/builds/getBatch": {
       "post": {
         "operationId": "get_builds_batch_v2_api_v2_orchestration_builds_getBatch_post",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27700,29 +25881,6 @@
               "title": "Buildrid",
               "type": "string"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -27761,29 +25919,6 @@
             "required": true,
             "schema": {
               "title": "Buildrid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -27858,29 +25993,6 @@
               ],
               "title": "Pagetoken"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -27913,31 +26025,6 @@
       "post": {
         "description": "POST /v2/orchestration/schedules — Create a schedule.",
         "operationId": "create_schedule_v2_api_v2_orchestration_schedules_post",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -27989,29 +26076,6 @@
               "title": "Schedulerid",
               "type": "string"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -28044,29 +26108,6 @@
             "required": true,
             "schema": {
               "title": "Schedulerid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -28108,29 +26149,6 @@
             "required": true,
             "schema": {
               "title": "Schedulerid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }
@@ -28191,29 +26209,6 @@
               "title": "Pagetoken",
               "type": "string"
             }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -28253,29 +26248,6 @@
             "required": true,
             "schema": {
               "title": "Schedulerid",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
               "type": "string"
             }
           }

@@ -11,7 +11,7 @@ export const FOUNDRY_QA_API_CONTRACT: FoundryQaApiContractRow[] = [
     phase: 'Ingest (Foundry v2 datasets)',
     bffMethod: 'createDatasetV2 / createTransactionV2 / uploadFileV2 / commitTransactionV2 / readTableV2',
     endpoint:
-      'POST /api/v2/datasets, POST /api/v2/datasets/{datasetRid}/transactions, POST /api/v2/datasets/{datasetRid}/files:upload, POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit, POST /api/v2/datasets/{datasetRid}/readTable',
+      'POST /api/v2/datasets, POST /api/v2/datasets/{datasetRid}/transactions, POST /api/v2/datasets/{datasetRid}/files/{filePath}/upload, POST /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit, GET /api/v2/datasets/{datasetRid}/readTable',
     backendSurface: 'foundry_v2',
   },
   {

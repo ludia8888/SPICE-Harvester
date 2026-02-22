@@ -282,7 +282,7 @@ services:
           ns="$2"
           code="$$(curl -sS -o /dev/null -w '%{http_code}' -u "$$auth_user:$$auth_pass" -X POST http://lakefs:8000/api/v1/repositories \
             -H 'Content-Type: application/json' \
-            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"main\"}")"
+            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"master\"}")"
           if [ "$$code" != "201" ] && [ "$$code" != "409" ]; then
             echo "Failed to create repo $$name (http=$$code)"
             exit 1
@@ -690,9 +690,9 @@ services:
       - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
       - OBJECTIFY_JOBS_GROUP=${OBJECTIFY_JOBS_GROUP:-objectify-worker-group}
       - OBJECTIFY_JOBS_DLQ_TOPIC=${OBJECTIFY_JOBS_DLQ_TOPIC:-objectify-jobs-dlq}
-      - OBJECTIFY_MAX_RETRIES=${OBJECTIFY_MAX_RETRIES:-5}
+      - OBJECTIFY_MAX_RETRIES=${OBJECTIFY_MAX_RETRIES:-12}
       - OBJECTIFY_BACKOFF_BASE_SECONDS=${OBJECTIFY_BACKOFF_BASE_SECONDS:-2}
-      - OBJECTIFY_BACKOFF_MAX_SECONDS=${OBJECTIFY_BACKOFF_MAX_SECONDS:-60}
+      - OBJECTIFY_BACKOFF_MAX_SECONDS=${OBJECTIFY_BACKOFF_MAX_SECONDS:-20}
       - OBJECTIFY_ROW_BATCH_SIZE=${OBJECTIFY_ROW_BATCH_SIZE:-1000}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true

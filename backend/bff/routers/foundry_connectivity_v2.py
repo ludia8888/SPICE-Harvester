@@ -36,6 +36,10 @@ from data_connector.adapters.import_config_validators import (
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.settings import get_settings
 from shared.dependencies.providers import AuditLogStoreDep, BackgroundTaskManagerDep, LineageStoreDep
+from shared.foundry.auth import require_scopes
+from shared.foundry.errors import foundry_error
+from shared.foundry.rids import build_rid, parse_rid
+from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.models.background_task import TaskStatus
 from shared.observability.tracing import trace_endpoint
 from shared.services.core.audit_log_store import AuditLogStore
@@ -49,31 +53,6 @@ from shared.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/connectivity", tags=["Foundry Connectivity v2"])
-
-_CONNECTION_RID_PREFIXES = (
-    "ri.spice.main.connection.",
-    "ri.foundry.main.connection.",
-)
-_TABLE_IMPORT_RID_PREFIXES = (
-    "ri.spice.main.table-import.",
-    "ri.foundry.main.table-import.",
-)
-_FILE_IMPORT_RID_PREFIXES = (
-    "ri.spice.main.file-import.",
-    "ri.foundry.main.file-import.",
-)
-_VIRTUAL_TABLE_RID_PREFIXES = (
-    "ri.spice.main.virtual-table.",
-    "ri.foundry.main.virtual-table.",
-)
-_DATASET_RID_PREFIXES = (
-    "ri.spice.main.dataset.",
-    "ri.foundry.main.dataset.",
-)
-_EXPORT_RUN_RID_PREFIXES = (
-    "ri.spice.main.export-run.",
-    "ri.foundry.main.export-run.",
-)
 
 _TABLE_IMPORT_CONFIG_TYPES = {
     "jdbcImportConfig",
@@ -151,14 +130,11 @@ def _foundry_error(
     error_name: str,
     parameters: Dict[str, Any] | None = None,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "errorCode": error_code,
-            "errorName": error_name,
-            "errorInstanceId": str(uuid4()),
-            "parameters": parameters or {},
-        },
+    return foundry_error(
+        status_code,
+        error_code=error_code,
+        error_name=error_name,
+        parameters=parameters or {},
     )
 
 
@@ -166,96 +142,111 @@ def _connection_id_from_rid(connection_rid: str) -> str | None:
     text = str(connection_rid or "").strip()
     if not text:
         return None
-    for prefix in _CONNECTION_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "connection":
+        return None
+    return parsed
 
 
 def _connection_rid(connection_id: str) -> str:
-    return f"ri.spice.main.connection.{connection_id}"
+    return build_rid("connection", connection_id)
 
 
 def _table_import_id_from_rid(table_import_rid: str) -> str | None:
     text = str(table_import_rid or "").strip()
     if not text:
         return None
-    for prefix in _TABLE_IMPORT_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "table-import":
+        return None
+    return parsed
 
 
 def _table_import_rid(table_import_id: str) -> str:
-    return f"ri.spice.main.table-import.{table_import_id}"
+    return build_rid("table-import", table_import_id)
 
 
 def _file_import_id_from_rid(file_import_rid: str) -> str | None:
     text = str(file_import_rid or "").strip()
     if not text:
         return None
-    for prefix in _FILE_IMPORT_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "file-import":
+        return None
+    return parsed
 
 
 def _file_import_rid(file_import_id: str) -> str:
-    return f"ri.spice.main.file-import.{file_import_id}"
+    return build_rid("file-import", file_import_id)
 
 
 def _virtual_table_id_from_rid(virtual_table_rid: str) -> str | None:
     text = str(virtual_table_rid or "").strip()
     if not text:
         return None
-    for prefix in _VIRTUAL_TABLE_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "virtual-table":
+        return None
+    return parsed
 
 
 def _virtual_table_rid(virtual_table_id: str) -> str:
-    return f"ri.spice.main.virtual-table.{virtual_table_id}"
+    return build_rid("virtual-table", virtual_table_id)
 
 
 def _dataset_id_from_rid(dataset_rid: str) -> str | None:
     text = str(dataset_rid or "").strip()
     if not text:
         return None
-    for prefix in _DATASET_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
+    if kind != "dataset":
+        return None
+    return parsed
+
+
+def _dataset_id_from_any(raw: Any) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("ri."):
+        return _dataset_id_from_rid(text)
     return text
 
 
 def _dataset_rid(dataset_id: str) -> str:
-    return f"ri.spice.main.dataset.{dataset_id}"
+    return build_rid("dataset", dataset_id)
 
 
 def _export_run_rid(run_id: str) -> str:
-    return f"ri.spice.main.export-run.{run_id}"
+    return build_rid("export-run", run_id)
 
 
 def _export_run_id_from_rid(export_run_rid: str) -> str | None:
     text = str(export_run_rid or "").strip()
     if not text:
         return None
-    for prefix in _EXPORT_RUN_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix) :].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "export-run":
+        return None
+    return parsed
 
 
 def _coerce_bool(raw: Any, *, default: bool) -> bool:
@@ -815,8 +806,8 @@ def _extract_destination(payload: Dict[str, Any]) -> tuple[str | None, str | Non
         payload.get("branchName")
         or destination.get("branchName")
         or destination.get("branch")
-        or "main"
-    ).strip() or "main"
+        or "master"
+    ).strip() or "master"
     object_type = str(
         payload.get("objectType")
         or payload.get("classLabel")
@@ -888,7 +879,7 @@ async def _resolve_dataset_context(
         raise LookupError("datasetRid not found")
 
     resolved_dataset_rid = _dataset_rid(dataset.dataset_id)
-    dataset_branch = str(dataset.branch or "").strip() or "main"
+    dataset_branch = str(dataset.branch or "").strip() or "master"
     dataset_db_name = str(dataset.db_name or "").strip() or None
     return resolved_dataset_rid, dataset_db_name, dataset_branch
 
@@ -993,11 +984,11 @@ async def _resolve_output_dataset_rid(
     dataset_registry: DatasetRegistry,
 ) -> str:
     cfg = source.config_json or {}
-    configured_rid = str(cfg.get("dataset_rid") or "").strip()
-    if configured_rid:
-        return configured_rid
+    configured_id = _dataset_id_from_any(cfg.get("dataset_rid"))
+    if configured_id:
+        return _dataset_rid(configured_id)
 
-    dataset_id = _dataset_id_from_rid(str(cfg.get("dataset_id") or "").strip())
+    dataset_id = _dataset_id_from_any(cfg.get("dataset_id"))
     if dataset_id:
         return _dataset_rid(dataset_id)
 
@@ -1008,7 +999,7 @@ async def _resolve_output_dataset_rid(
             db_name=target_db,
             source_type="connector",
             source_ref=f"{source.source_type}:{source.source_id}",
-            branch=target_branch or "main",
+            branch=target_branch or "master",
         )
         if dataset is not None:
             return _dataset_rid(dataset.dataset_id)
@@ -1039,7 +1030,11 @@ async def _build_table_import_response(
         or str(cfg.get("sheet_title") or "").strip()
         or f"{connector_kind} import {source.source_id}"
     )
-    parent_rid = str(cfg.get("parent_rid") or "").strip() or _connection_rid(connection_id)
+    parent_rid = (
+        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
+        if str(cfg.get("parent_rid") or "").strip()
+        else _connection_rid(connection_id)
+    )
 
     return {
         "rid": _table_import_rid(source.source_id),
@@ -1079,7 +1074,11 @@ async def _build_file_import_response(
         or str(cfg.get("file_pattern") or "").strip()
         or f"{connector_kind} file import {source.source_id}"
     )
-    parent_rid = str(cfg.get("parent_rid") or "").strip() or _connection_rid(connection_id)
+    parent_rid = (
+        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
+        if str(cfg.get("parent_rid") or "").strip()
+        else _connection_rid(connection_id)
+    )
 
     return {
         "rid": _file_import_rid(source.source_id),
@@ -1116,7 +1115,11 @@ async def _build_virtual_table_response(
         or str(cfg.get("display_name") or "").strip()
         or f"{connector_kind} virtual table {source.source_id}"
     )
-    parent_rid = str(cfg.get("parent_rid") or "").strip() or _connection_rid(connection_id)
+    parent_rid = (
+        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
+        if str(cfg.get("parent_rid") or "").strip()
+        else _connection_rid(connection_id)
+    )
     markings = cfg.get("markings") if isinstance(cfg.get("markings"), list) else []
     return {
         "rid": _virtual_table_rid(source.source_id),
@@ -1348,7 +1351,7 @@ async def _ensure_table_import_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "main"
+    branch = str(mapping.target_branch or "").strip() or "master"
     pipeline_name = f"table_import_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1380,7 +1383,7 @@ async def _ensure_file_import_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "main"
+    branch = str(mapping.target_branch or "").strip() or "master"
     pipeline_name = f"file_import_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1412,7 +1415,7 @@ async def _ensure_virtual_table_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "main"
+    branch = str(mapping.target_branch or "").strip() or "master"
     pipeline_name = f"virtual_table_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1437,6 +1440,7 @@ async def create_table_import_v2(
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
     *,
     lineage_store: LineageStoreDep,
 ):
@@ -1473,7 +1477,7 @@ async def create_table_import_v2(
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or dataset_db_name
-    resolved_branch = destination_branch or dataset_branch or "main"
+    resolved_branch = destination_branch or dataset_branch or "master"
 
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
@@ -1667,6 +1671,7 @@ async def get_table_import_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -1719,6 +1724,7 @@ async def list_table_imports_v2(
     pageToken: str | None = Query(default=None),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -1819,6 +1825,7 @@ async def replace_table_import_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -1964,6 +1971,7 @@ async def delete_table_import_v2(
     tableImportRid: str,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2027,6 +2035,7 @@ async def execute_table_import_v2(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2100,7 +2109,7 @@ async def execute_table_import_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "main"
+    branch_name = str(mapping.target_branch or "").strip() or "master"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     table_import_rid = _table_import_rid(source.source_id)
@@ -2198,7 +2207,7 @@ async def execute_table_import_v2(
             parameters={"message": "Failed to execute table import"},
         )
 
-    return f"ri.spice.main.build.{job_id}"
+    return build_rid("build", job_id)
 
 
 @router.post("/connections/{connectionRid}/fileImports")
@@ -2209,6 +2218,7 @@ async def create_file_import_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2229,7 +2239,7 @@ async def create_file_import_v2(
     connector_kind = _connection_kind_from_source(connection)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db
-    resolved_branch = destination_branch or "main"
+    resolved_branch = destination_branch or "master"
 
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
@@ -2280,7 +2290,7 @@ async def create_file_import_v2(
         )
     if not resolved_db:
         resolved_db = dataset_db_name
-    if dataset_branch and destination_branch == "main":
+    if dataset_branch and destination_branch == "master":
         resolved_branch = dataset_branch
 
     await connector_registry.upsert_source(
@@ -2341,6 +2351,7 @@ async def get_file_import_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2394,6 +2405,7 @@ async def list_file_imports_v2(
     pageToken: str | None = Query(default=None),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2481,6 +2493,7 @@ async def replace_file_import_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2616,6 +2629,7 @@ async def delete_file_import_v2(
     fileImportRid: str,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2675,6 +2689,7 @@ async def execute_file_import_v2(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2748,7 +2763,7 @@ async def execute_file_import_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "main"
+    branch_name = str(mapping.target_branch or "").strip() or "master"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     file_import_rid = _file_import_rid(source.source_id)
@@ -2848,7 +2863,7 @@ async def execute_file_import_v2(
             parameters={"message": "Failed to execute file import"},
         )
 
-    return f"ri.spice.main.build.{job_id}"
+    return build_rid("build", job_id)
 
 
 @router.post("/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute")
@@ -2865,6 +2880,7 @@ async def execute_virtual_table_v2(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -2931,7 +2947,7 @@ async def execute_virtual_table_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "main"
+    branch_name = str(mapping.target_branch or "").strip() or "master"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     virtual_table_rid = _virtual_table_rid(source.source_id)
@@ -3031,7 +3047,7 @@ async def execute_virtual_table_v2(
             parameters={"message": "Failed to execute virtual table"},
         )
 
-    return f"ri.spice.main.build.{job_id}"
+    return build_rid("build", job_id)
 
 
 @router.post("/connections/{connectionRid}/virtualTables")
@@ -3042,6 +3058,7 @@ async def create_virtual_table_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3062,7 +3079,7 @@ async def create_virtual_table_v2(
     connector_kind = _connection_kind_from_source(connection)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db
-    resolved_branch = destination_branch or "main"
+    resolved_branch = destination_branch or "master"
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -3104,7 +3121,7 @@ async def create_virtual_table_v2(
         )
     if not resolved_db:
         resolved_db = dataset_db_name
-    if dataset_branch and destination_branch == "main":
+    if dataset_branch and destination_branch == "master":
         resolved_branch = dataset_branch
 
     await connector_registry.upsert_source(
@@ -3163,6 +3180,7 @@ async def get_virtual_table_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3215,6 +3233,7 @@ async def list_virtual_tables_v2(
     pageToken: str | None = Query(default=None),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3302,6 +3321,7 @@ async def replace_virtual_table_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3424,6 +3444,7 @@ async def delete_virtual_table_v2(
     virtualTableRid: str,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3477,6 +3498,7 @@ async def create_connection_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-write"]),
 ) -> JSONResponse:
     _ = request
     preview_error = _require_preview_or_400(preview)
@@ -3572,6 +3594,7 @@ async def get_connection_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3588,13 +3611,16 @@ async def get_connection_v2(
 
 
 @router.get("/connections")
+@rate_limit(**RateLimitPresets.RELAXED)
 @trace_endpoint("bff.foundry_v2_connectivity.list_connections")
 async def list_connections_v2(
+    request: Request,
     preview: bool = Query(default=False),
     pageSize: int = Query(default=100, ge=1, le=500),
     pageToken: str | None = Query(default=None),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3639,6 +3665,7 @@ async def delete_connection_v2(
     connectionRid: str,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3675,6 +3702,7 @@ async def test_connection_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3734,6 +3762,7 @@ async def get_connection_configuration_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3766,6 +3795,7 @@ async def get_connection_configuration_batch_v2(
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
+    _: None = require_scopes(["api:connectivity-read"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3816,6 +3846,7 @@ async def update_connection_secrets_v2(
     payload: Dict[str, Any],
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3861,6 +3892,7 @@ async def update_connection_export_settings_v2(
     payload: Dict[str, Any],
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -3901,6 +3933,7 @@ async def create_connection_export_run_v2(
     audit_store: AuditLogStoreDep,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ) -> JSONResponse:
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -4015,6 +4048,7 @@ async def get_connection_export_run_v2(
     task_manager: BackgroundTaskManagerDep,
     preview: bool = Query(default=False),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ) -> JSONResponse:
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -4067,6 +4101,7 @@ async def list_connection_export_runs_v2(
     pageSize: int = Query(default=100, ge=1, le=500),
     pageToken: str | None = Query(default=None),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    _: None = require_scopes(["api:connectivity-read"]),
 ) -> JSONResponse:
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
@@ -4128,6 +4163,7 @@ async def upload_custom_jdbc_drivers_v2(
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     connector_adapter_factory: ConnectorAdapterFactory = Depends(get_connector_adapter_factory),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(["api:connectivity-write"]),
 ):
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:

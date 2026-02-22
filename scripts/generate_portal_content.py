@@ -124,10 +124,7 @@ def _post_process_myst(path: Path) -> None:
     # Use backtick-wrapped code spans for these values
     content = re.sub(r"\$\{([^}]+)\}", r"`${\1}`", content)
     # Escape bare { and } that aren't inside code fences (MDX treats them as JSX)
-    # We wrap the file in .md extension which is safer, but still escape inline braces
-    # Replace <= outside code fences: MDX interprets < as JSX tag opener
-    # Use the Unicode ≤ character which renders identically
-    content = re.sub(r"(?<!`)<=(?!`)", "≤", content)
+    # We wrap the file in .md extension which is safer, but still escape inline braces.
     path.write_text(content, encoding="utf-8")
 
 

@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **523 settings** total.
+SPICE Harvester uses **45 configuration classes** with **524 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -66,7 +66,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Database configuration settings
 
-**19 settings**
+**20 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -86,6 +86,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `elasticsearch_password` | `Optional[str]` | **required** | `ELASTICSEARCH_PASSWORD` | Elasticsearch password |
 | `elasticsearch_default_shards` | `int` | `1` | `ELASTICSEARCH_DEFAULT_SHARDS` | Default number of shards for new indices (ELASTICSEARCH_DEFAULT_SHARDS) |
 | `elasticsearch_default_replicas` | `Optional[int]` | **required** | `ELASTICSEARCH_DEFAULT_REPLICAS` | Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS) |
+| `elasticsearch_compat_version` | `Optional[str]` | **required** | `ELASTICSEARCH_COMPAT_VERSION`, `ES_COMPAT_VERSION` | Override elasticsearch-py compatibility header (ELASTICSEARCH_COMPAT_VERSION / ES_COMPAT_VERSION) |
 | `kafka_host` | `str` | `<env-dependent>` | `KAFKA_HOST` | Kafka host |
 | `kafka_port` | `int` | `<env-dependent>` | `KAFKA_PORT`, `KAFKA_PORT_HOST` | Kafka port |
 | `kafka_bootstrap_servers` | `Optional[str]` | **required** | `KAFKA_BOOTSTRAP_SERVERS` | Kafka bootstrap servers (overrides host:port) |
@@ -165,7 +166,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `service_name` | `Optional[str]` | **required** | `SERVICE_NAME` | Service name override (SERVICE_NAME) |
 | `hostname` | `Optional[str]` | **required** | `HOSTNAME` | Hostname override (HOSTNAME) |
 | `enable_lineage` | `bool` | `True` | `ENABLE_LINEAGE` | Enable lineage store integration (ENABLE_LINEAGE) |
-| `lineage_fail_closed` | `bool` | `True` | `LINEAGE_FAIL_CLOSED` | Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED) |
+| `lineage_fail_closed` | `bool` | `False` | `LINEAGE_FAIL_CLOSED` | Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED) |
 | `lineage_fail_open_override` | `bool` | `False` | `LINEAGE_FAIL_OPEN_OVERRIDE` | Emergency override to disable lineage fail-closed behavior (LINEAGE_FAIL_OPEN_OVERRIDE) |
 | `enable_audit_logs` | `bool` | `True` | `ENABLE_AUDIT_LOGS` | Enable audit log store integration (ENABLE_AUDIT_LOGS) |
 | `run_id` | `Optional[str]` | **required** | `RUN_ID` | Execution/run id (RUN_ID; fallback PIPELINE_RUN_ID/EXECUTION_ID) |
@@ -224,8 +225,8 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
 | `require_proposals` | `bool` | `False` | `REQUIRE_PROPOSALS` | Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS) |
-| `protected_branches` | `str` | `main` | `PROTECTED_BRANCHES` | Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES) |
-| `fallback_branches` | `str` | `main` | `FALLBACK_BRANCHES` | Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES) |
+| `protected_branches` | `str` | `master` | `PROTECTED_BRANCHES` | Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES) |
+| `fallback_branches` | `str` | `master` | `FALLBACK_BRANCHES` | Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES) |
 | `locks_enabled` | `bool` | `True` | `LOCKS_ENABLED` | Enable pipeline locks (PIPELINE_LOCKS_ENABLED) |
 | `locks_required` | `bool` | `True` | `LOCKS_REQUIRED` | Require lock acquisition (PIPELINE_LOCKS_REQUIRED) |
 | `lock_ttl_seconds` | `int` | `3600` | `LOCK_TTL_SECONDS` | Lock TTL seconds (PIPELINE_LOCK_TTL_SECONDS) |
@@ -592,7 +593,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH) |
+| `base_branch` | `str` | `master` | `BASE_BRANCH` | Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH) |
 
 ## InstanceWorkerSettings
 
@@ -816,7 +817,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH) |
+| `base_branch` | `str` | `master` | `BASE_BRANCH` | Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH) |
 | `interval_seconds` | `float` | **required** | `INTERVAL_SECONDS` | Run interval seconds (WRITEBACK_MATERIALIZER_INTERVAL_SECONDS) |
 | `run_once` | `bool` | `False` | `RUN_ONCE` | Run once and exit (WRITEBACK_MATERIALIZER_RUN_ONCE) |
 | `db_names` | `Optional[str]` | **required** | `DB_NAMES` | Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES) |

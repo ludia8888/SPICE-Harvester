@@ -44,7 +44,7 @@ async def test_resolve_ontology_version_without_source_returns_ref_only() -> Non
         branch="main",
     )
 
-    assert result == {"ref": "branch:main"}
+    assert result == {"ref": "branch:main", "commit": "branch:main"}
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_resolve_ontology_version_ignores_legacy_like_source() -> None:
         branch="main",
     )
 
-    assert result == {"ref": "branch:main"}
+    assert result == {"ref": "branch:main", "commit": "branch:main"}
 
 
 @pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def test_resolve_ontology_version_ignores_branch_list_source() -> None:
         branch="feature-a",
     )
 
-    assert result == {"ref": "branch:feature-a"}
+    assert result == {"ref": "branch:feature-a", "commit": "branch:feature-a"}
 
 
 @pytest.mark.asyncio
@@ -77,7 +77,7 @@ async def test_resolve_ontology_version_ignores_branch_info_source() -> None:
         branch="main",
     )
 
-    assert result == {"ref": "branch:main"}
+    assert result == {"ref": "branch:main", "commit": "branch:main"}
 
 
 @pytest.mark.asyncio
@@ -88,4 +88,4 @@ async def test_resolve_ontology_version_falls_back_to_ref_on_source_failures() -
         branch="main",
     )
 
-    assert result == {"ref": "branch:main"}
+    assert result == {"ref": "branch:main", "commit": "branch:main"}

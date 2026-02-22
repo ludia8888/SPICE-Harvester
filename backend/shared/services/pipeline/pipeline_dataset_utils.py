@@ -33,8 +33,8 @@ def resolve_fallback_branches(fallback_raw: Optional[str] = None) -> List[str]:
     if not isinstance(raw, str):
         raw = str(raw)
     branches = [item.strip() for item in raw.split(",") if item.strip()]
-    if "main" not in branches:
-        branches.append("main")
+    if "master" not in branches:
+        branches.append("master")
     return branches
 
 
@@ -62,12 +62,12 @@ def normalize_dataset_selection(
     dataset_id = metadata.get("datasetId") or metadata.get("dataset_id")
     dataset_name = metadata.get("datasetName") or metadata.get("dataset_name")
     requested_branch = (
-        metadata.get("datasetBranch") or metadata.get("dataset_branch") or default_branch or "main"
+        metadata.get("datasetBranch") or metadata.get("dataset_branch") or default_branch or "master"
     )
 
     dataset_id = str(dataset_id).strip() if dataset_id else None
     dataset_name = str(dataset_name).strip() if dataset_name else None
-    requested_branch = str(requested_branch).strip() or "main"
+    requested_branch = str(requested_branch).strip() or "master"
 
     candidates = build_branch_candidates(requested_branch, fallback_raw=fallback_raw)
     return DatasetSelection(

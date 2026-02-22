@@ -24,6 +24,7 @@ REFERENCE_DOCS = [
     "reference/_generated/PIPELINE_MCP_TOOLS",
     "reference/_generated/PIPELINE_AGENT_ALLOWED_TOOLS",
     "reference/_generated/ONTOLOGY_AGENT_ALLOWED_TOOLS",
+    "reference/_generated/API_VERSION_OVERLAP",
     "reference/_generated/REPO_FILE_INVENTORY",
 ]
 

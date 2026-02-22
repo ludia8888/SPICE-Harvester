@@ -32,7 +32,7 @@ router = APIRouter(tags=["Ontology Management"])
 async def create_ontology(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
-    branch: str = Query("main", description="Target branch (default: main)"),
+    branch: str = Query("master", description="Target branch (default: master)"),
     mapper: LabelMapper = LabelMapperDep,
     oms_client: OMSClient = OMSClientDep,
 ):
@@ -43,4 +43,3 @@ async def create_ontology(
         mapper=mapper,
         oms_client=oms_client,
     )
-

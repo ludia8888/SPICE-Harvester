@@ -63,7 +63,7 @@ services:
       - cluster.name=spice-harvester-cluster
       - node.name=spice-harvester-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms384m -Xmx384m"
       # Dev/test only: avoid RED cluster when the Docker VM disk is tight (shards become unassigned).
       - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false
@@ -248,7 +248,7 @@ services:
           ns="$2"
           code="$$(curl -sS -o /dev/null -w '%{http_code}' -u "$$auth_user:$$auth_pass" -X POST http://lakefs:8000/api/v1/repositories \
             -H 'Content-Type: application/json' \
-            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"main\"}")"
+            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"master\"}")"
           if [ "$$code" != "201" ] && [ "$$code" != "409" ]; then
             echo "Failed to create repo $$name (http=$$code)"
             exit 1

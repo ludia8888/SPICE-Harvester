@@ -7,6 +7,8 @@ reads against the ``bff.routers.foundry_datasets_v2`` router.
 Test pattern follows ``test_foundry_platform_v2_contract.py``.
 """
 
+import csv
+import io
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +19,8 @@ from httpx import ASGITransport, AsyncClient
 
 from bff.routers import foundry_datasets_v2
 from bff.routers.data_connector_deps import get_dataset_registry, get_pipeline_registry
+from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
+from shared.security.user_context import UserPrincipal
 from shared.services.storage.lakefs_client import LakeFSError
 from shared.utils.time_utils import utcnow
 
@@ -27,6 +31,21 @@ from shared.utils.time_utils import utcnow
 
 def _build_test_app() -> FastAPI:
     app = FastAPI()
+    app.add_exception_handler(FoundryAPIError, foundry_exception_handler)
+
+    @app.middleware("http")
+    async def _attach_scoped_principal(request, call_next):  # noqa: ANN001
+        request.state.user = UserPrincipal(
+            id="test-user",
+            type="user",
+            roles=(),
+            tenant_id="default",
+            org_id="default",
+            verified=True,
+            claims={"scope": "api:datasets-read api:datasets-write"},
+        )
+        return await call_next(request)
+
     app.include_router(foundry_datasets_v2.router, prefix="/api")
     return app
 
@@ -54,7 +73,7 @@ class _DatasetRegistry:
             source_type=kwargs.get("source_type", "foundry_api"),
             source_ref=kwargs.get("source_ref"),
             schema_json=kwargs.get("schema_json") or {},
-            branch=kwargs.get("branch", "main"),
+            branch=kwargs.get("branch", "master"),
             created_at=utcnow(),
             updated_at=utcnow(),
         )
@@ -82,6 +101,36 @@ class _DatasetRegistry:
                 "updated_at": d.updated_at,
             }
             for d in items
+        ]
+
+    async def list_all_datasets(
+        self,
+        *,
+        branch: str | None,
+        limit: int,
+        offset: int,
+        order_by: str | None = None,
+    ) -> list[dict[str, Any]]:
+        items = list(self.datasets.values())
+        if branch:
+            items = [d for d in items if str(getattr(d, "branch", "") or "") == str(branch)]
+        if order_by and str(order_by).strip().lower() == "name":
+            items.sort(key=lambda d: str(getattr(d, "name", "")))
+        sliced = items[int(offset) : int(offset) + int(limit)]
+        return [
+            {
+                "dataset_id": d.dataset_id,
+                "db_name": d.db_name,
+                "name": d.name,
+                "description": d.description,
+                "source_type": d.source_type,
+                "source_ref": d.source_ref,
+                "branch": d.branch,
+                "schema_json": d.schema_json,
+                "created_at": d.created_at,
+                "updated_at": d.updated_at,
+            }
+            for d in sliced
         ]
 
     async def update_schema(self, *, dataset_id: str, schema_json: dict) -> None:  # noqa: ANN001
@@ -129,6 +178,21 @@ class _DatasetRegistry:
 
     async def get_ingest_request(self, *, ingest_request_id: str) -> SimpleNamespace | None:  # noqa: ANN001
         return self.ingest_requests_by_id.get(ingest_request_id)
+
+    async def mark_ingest_committed(
+        self,
+        *,
+        ingest_request_id: str,
+        lakefs_commit_id: str,
+        artifact_key: str | None,
+    ) -> SimpleNamespace | None:
+        req = await self.get_ingest_request(ingest_request_id=ingest_request_id)
+        if req:
+            req.status = "RAW_COMMITTED"
+            req.lakefs_commit_id = lakefs_commit_id
+            req.artifact_key = artifact_key
+            req.updated_at = utcnow()
+        return req
 
     async def create_ingest_transaction(
         self,
@@ -247,11 +311,11 @@ class _DatasetRegistry:
 class _MockLakeFSClient:
     async def list_branches(self, repository: str, **kwargs: Any) -> list[dict[str, Any]]:  # noqa: ANN401
         return [
-            {"name": "main", "commit_id": "abc123"},
+            {"name": "master", "commit_id": "abc123"},
             {"name": "dev", "commit_id": "def456"},
         ]
 
-    async def create_branch(self, repository: str, name: str, source: str = "main") -> dict[str, str]:
+    async def create_branch(self, repository: str, name: str, source: str = "master") -> dict[str, str]:
         return {"id": name}
 
     async def get_branch_head_commit_id(self, repository: str, branch: str) -> str:
@@ -290,6 +354,16 @@ class _MockLakeFSStorage:
 
     async def save_bytes(self, repo: str, path: str, data: bytes, content_type: str | None = None) -> None:
         self.objects[path] = data
+
+    async def get_object_metadata(self, repo: str, path: str) -> dict[str, Any]:
+        if path not in self.objects:
+            raise FileNotFoundError(path)
+        return {
+            "size": len(self.objects[path]),
+            "last_modified": utcnow(),
+            "etag": "mock-etag",
+            "metadata": {},
+        }
 
 
 class _PipelineRegistry:
@@ -336,18 +410,23 @@ def test_foundry_datasets_v2_paths_exist_in_openapi():
         # Dataset CRUD
         "/api/v2/datasets",
         "/api/v2/datasets/{datasetRid}",
-        "/api/v2/datasets/{datasetRid}/schema",
+        # Schema (preview)
+        "/api/v2/datasets/{datasetRid}/getSchema",
+        "/api/v2/datasets/getSchemaBatch",
+        "/api/v2/datasets/{datasetRid}/putSchema",
         # Branches
         "/api/v2/datasets/{datasetRid}/branches",
         "/api/v2/datasets/{datasetRid}/branches/{branchName}",
         # Transactions
         "/api/v2/datasets/{datasetRid}/transactions",
+        "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}",
         "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit",
         "/api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort",
         # Files
         "/api/v2/datasets/{datasetRid}/files",
+        "/api/v2/datasets/{datasetRid}/files/{filePath}",
         "/api/v2/datasets/{datasetRid}/files/{filePath}/content",
-        "/api/v2/datasets/{datasetRid}/files:upload",
+        "/api/v2/datasets/{datasetRid}/files/{filePath}/upload",
         # Read table
         "/api/v2/datasets/{datasetRid}/readTable",
     }
@@ -356,15 +435,9 @@ def test_foundry_datasets_v2_paths_exist_in_openapi():
     missing = expected_paths - actual_paths
     assert not missing, f"Missing OpenAPI paths: {missing}"
 
-    # Verify dataset list has expected query params
-    list_params = schema["paths"]["/api/v2/datasets"]["get"].get("parameters", [])
-    param_names = [p["name"] for p in list_params]
-    assert "pageSize" in param_names
-    assert "pageToken" in param_names
-
     # Verify we have at least 12 distinct paths (some share the same path for
     # different methods, e.g. GET/POST on /v2/datasets and GET/PUT on schema)
-    assert len(actual_paths) >= 12
+    assert len(actual_paths) >= 16
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +465,6 @@ async def test_foundry_datasets_create_and_get(
             json={
                 "name": "orders",
                 "parentFolderRid": "ri.spice.main.folder.commerce_db",
-                "branchName": "main",
                 "description": "Order data",
             },
         )
@@ -400,14 +472,12 @@ async def test_foundry_datasets_create_and_get(
     assert create_resp.status_code == 200
     body = create_resp.json()
     assert body["name"] == "orders"
-    assert body["parentFolderRid"] == "ri.spice.main.folder.commerce_db"
-    assert body["branchName"] == "main"
-    assert body["createdTime"] is not None
-    assert body["rid"].startswith("ri.spice.main.dataset.")
+    assert body["parentFolderRid"] == "ri.foundry.main.folder.commerce_db"
+    assert body["rid"].startswith("ri.foundry.main.dataset.")
 
     # Extract dataset_id to do a GET
     dataset_rid = body["rid"]
-    dataset_id = dataset_rid.replace("ri.spice.main.dataset.", "")
+    dataset_id = dataset_rid.replace("ri.foundry.main.dataset.", "")
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         get_resp = await client.get(f"/api/v2/datasets/{dataset_rid}")
@@ -416,74 +486,11 @@ async def test_foundry_datasets_create_and_get(
     get_body = get_resp.json()
     assert get_body["rid"] == dataset_rid
     assert get_body["name"] == "orders"
-    assert get_body["parentFolderRid"] == "ri.spice.main.folder.commerce_db"
-    assert get_body["createdTime"] is not None
+    assert get_body["parentFolderRid"] == "ri.foundry.main.folder.commerce_db"
 
 
 # ---------------------------------------------------------------------------
-# 3. Dataset list with pagination
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_foundry_datasets_list_with_pagination(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(
-        foundry_datasets_v2,
-        "_resolve_lakefs_raw_repository",
-        lambda: "raw-datasets",
-    )
-
-    app = _build_test_app()
-    dr, _ = _override_deps(app)
-
-    # Seed three datasets in the same db
-    for i in range(3):
-        await dr.create_dataset(
-            db_name="commerce_db",
-            name=f"dataset_{i}",
-            description=f"Dataset {i}",
-            source_type="foundry_api",
-            branch="main",
-        )
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # First page: pageSize=2
-        page1 = await client.get(
-            "/api/v2/datasets",
-            params={"parentFolderRid": "ri.spice.main.folder.commerce_db", "pageSize": 2},
-        )
-
-    assert page1.status_code == 200
-    p1 = page1.json()
-    assert len(p1["data"]) == 2
-    assert p1["nextPageToken"] is not None
-
-    # Second page using the token
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        page2 = await client.get(
-            "/api/v2/datasets",
-            params={
-                "parentFolderRid": "ri.spice.main.folder.commerce_db",
-                "pageSize": 2,
-                "pageToken": p1["nextPageToken"],
-            },
-        )
-
-    assert page2.status_code == 200
-    p2 = page2.json()
-    assert len(p2["data"]) == 1
-    assert p2["nextPageToken"] is None
-
-    # Verify all RIDs are distinct
-    all_rids = [d["rid"] for d in p1["data"] + p2["data"]]
-    assert len(set(all_rids)) == 3
-
-
-# ---------------------------------------------------------------------------
-# 4. Schema get and update
+# 3. Schema get and update
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
@@ -506,15 +513,18 @@ async def test_foundry_datasets_schema_get_and_update(
         name="orders",
         schema_json={"columns": [{"name": "id", "type": "string"}, {"name": "amount", "type": "double"}]},
     )
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # GET schema
-        get_resp = await client.get(f"/api/v2/datasets/{dataset_rid}/schema")
+        get_resp = await client.get(
+            f"/api/v2/datasets/{dataset_rid}/getSchema",
+            params={"preview": True, "branchName": "master"},
+        )
 
     assert get_resp.status_code == 200
-    schema_body = get_resp.json()
+    schema_body = get_resp.json()["schema"]
     assert "fieldSchemaList" in schema_body
     assert len(schema_body["fieldSchemaList"]) == 2
     assert schema_body["fieldSchemaList"][0]["fieldPath"] == "id"
@@ -531,14 +541,12 @@ async def test_foundry_datasets_schema_get_and_update(
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         put_resp = await client.put(
-            f"/api/v2/datasets/{dataset_rid}/schema",
+            f"/api/v2/datasets/{dataset_rid}/putSchema",
+            params={"preview": True, "branchName": "master"},
             json={"fieldSchemaList": new_field_list},
         )
 
-    assert put_resp.status_code == 200
-    updated = put_resp.json()
-    assert len(updated["fieldSchemaList"]) == 3
-    assert updated["fieldSchemaList"][2]["fieldPath"] == "status"
+    assert put_resp.status_code == 204
 
     # Verify the registry was updated
     refreshed = await dr.get_dataset(dataset_id=ds.dataset_id)
@@ -566,7 +574,7 @@ async def test_foundry_datasets_branch_operations(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -579,14 +587,14 @@ async def test_foundry_datasets_branch_operations(
         branches = list_resp.json()["data"]
         assert len(branches) == 2
         branch_names = {b["branchName"] for b in branches}
-        assert "main" in branch_names
+        assert "master" in branch_names
         assert "dev" in branch_names
         assert all(b["datasetRid"] == dataset_rid for b in branches)
 
         # Create branch
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/branches",
-            json={"branchName": "feature-x", "sourceBranchName": "main"},
+            json={"name": "feature-x", "sourceBranchName": "master"},
             headers={"X-User-ID": "user-1"},
         )
         assert create_resp.status_code == 200
@@ -596,12 +604,12 @@ async def test_foundry_datasets_branch_operations(
 
         # Get branch
         get_resp = await client.get(
-            f"/api/v2/datasets/{dataset_rid}/branches/main",
+            f"/api/v2/datasets/{dataset_rid}/branches/master",
             headers={"X-User-ID": "user-1"},
         )
         assert get_resp.status_code == 200
         get_body = get_resp.json()
-        assert get_body["branchName"] == "main"
+        assert get_body["branchName"] == "master"
         assert get_body["latestCommitId"] == "abc123"
 
         # Delete branch
@@ -611,13 +619,13 @@ async def test_foundry_datasets_branch_operations(
         )
         assert del_resp.status_code == 204
 
-        # Cannot delete main branch
+        # Cannot delete master branch
         del_main_resp = await client.delete(
-            f"/api/v2/datasets/{dataset_rid}/branches/main",
+            f"/api/v2/datasets/{dataset_rid}/branches/master",
             headers={"X-User-ID": "user-1"},
         )
         assert del_main_resp.status_code == 400
-        assert del_main_resp.json()["errorName"] == "CannotDeleteMainBranch"
+        assert del_main_resp.json()["errorName"] == "CannotDeleteMasterBranch"
 
 
 # ---------------------------------------------------------------------------
@@ -641,20 +649,21 @@ async def test_foundry_datasets_transaction_lifecycle(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Create a transaction
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
+            params={"branchName": "master"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
         assert create_resp.status_code == 200
         txn_body = create_resp.json()
-        assert txn_body["rid"].startswith("ri.spice.main.transaction.")
-        assert txn_body["datasetRid"] == dataset_rid
+        assert txn_body["rid"].startswith("ri.foundry.main.transaction.")
+        assert txn_body["transactionType"] == "APPEND"
         assert txn_body["status"] == "OPEN"
         txn_rid = txn_body["rid"]
 
@@ -666,7 +675,7 @@ async def test_foundry_datasets_transaction_lifecycle(
         assert commit_resp.status_code == 200
         commit_body = commit_resp.json()
         assert commit_body["status"] == "COMMITTED"
-        assert commit_body["datasetRid"] == dataset_rid
+        assert commit_body["rid"] == txn_rid
 
     latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
     assert latest_version is not None
@@ -676,7 +685,8 @@ async def test_foundry_datasets_transaction_lifecycle(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp2 = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            json={},
+            params={"branchName": "master"},
+            json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
         assert create_resp2.status_code == 200
@@ -691,7 +701,7 @@ async def test_foundry_datasets_transaction_lifecycle(
         assert abort_resp.status_code == 200
         abort_body = abort_resp.json()
         assert abort_body["status"] == "ABORTED"
-        assert abort_body["datasetRid"] == dataset_rid
+        assert abort_body["rid"] == txn2_rid
 
 
 @pytest.mark.unit
@@ -712,12 +722,13 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
+            params={"branchName": "master"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -726,8 +737,8 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
 
         csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
         upload_resp = await client.post(
-            f"/api/v2/datasets/{dataset_rid}/files:upload",
-            params={"filePath": "source.csv", "branchName": "main"},
+            f"/api/v2/datasets/{dataset_rid}/files/source.csv/upload",
+            params={"transactionRid": txn_rid, "branchName": "master"},
             content=csv_payload,
             headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
         )
@@ -740,23 +751,21 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
         assert commit_resp.status_code == 200
         assert commit_resp.json()["status"] == "COMMITTED"
 
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={"rowLimit": 10},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
         assert read_resp.status_code == 200
-        table = read_resp.json()
-        assert [col["name"] for col in table["columns"]] == ["id", "amount", "status"]
-        assert table["rows"] == [
+        parsed = list(csv.reader(io.StringIO(read_resp.text)))
+        assert parsed[0] == ["id", "amount", "status"]
+        assert parsed[1:] == [
             ["order-1", "10.5", "OPEN"],
             ["order-2", "20.0", "HOLD"],
         ]
-        assert table["totalRowCount"] == 2
 
     latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
     assert latest_version is not None
-    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.artifact_key == f"s3://raw-datasets/master/commerce_db/{ds.dataset_id}/orders/source.csv"
     assert latest_version.row_count == 2
     assert latest_version.sample_json["rows"] == [
         ["order-1", "10.5", "OPEN"],
@@ -785,12 +794,13 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
+            params={"branchName": "master"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -799,13 +809,13 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
 
         csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
         upload_resp = await client.post(
-            f"/api/v2/datasets/{dataset_rid}/files:upload",
-            params={"filePath": "orders_snapshot.csv", "branchName": "main"},
+            f"/api/v2/datasets/{dataset_rid}/files/orders_snapshot.csv/upload",
+            params={"transactionRid": txn_rid, "branchName": "master"},
             content=csv_payload,
             headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
         )
         assert upload_resp.status_code == 200
-        assert storage.objects.get(f"main/commerce_db/{ds.dataset_id}/orders/source.csv") == csv_payload
+        assert storage.objects.get(f"master/commerce_db/{ds.dataset_id}/orders/source.csv") == csv_payload
 
         commit_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
@@ -814,23 +824,21 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
         assert commit_resp.status_code == 200
         assert commit_resp.json()["status"] == "COMMITTED"
 
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={"rowLimit": 10},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
         assert read_resp.status_code == 200
-        table = read_resp.json()
-        assert [col["name"] for col in table["columns"]] == ["id", "amount", "status"]
-        assert table["rows"] == [
+        parsed = list(csv.reader(io.StringIO(read_resp.text)))
+        assert parsed[0] == ["id", "amount", "status"]
+        assert parsed[1:] == [
             ["order-1", "10.5", "OPEN"],
             ["order-2", "20.0", "HOLD"],
         ]
-        assert table["totalRowCount"] == 2
 
     latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
     assert latest_version is not None
-    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.artifact_key == f"s3://raw-datasets/master/commerce_db/{ds.dataset_id}/orders/source.csv"
     assert latest_version.row_count == 2
 
 
@@ -851,12 +859,13 @@ async def test_foundry_datasets_transaction_commit_lakefs_failure_keeps_open(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
+            params={"branchName": "master"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -867,9 +876,9 @@ async def test_foundry_datasets_transaction_commit_lakefs_failure_keeps_open(
             f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
             headers={"X-User-ID": "user-1"},
         )
-        assert commit_resp.status_code == 503
+        assert commit_resp.status_code == 500
         body = commit_resp.json()
-        assert body["errorName"] == "TransactionCommitUnavailable"
+        assert body["errorName"] == "CommitTransactionError"
 
     txn_id = txn_rid.rsplit(".", 1)[-1]
     txn = await dr.get_ingest_transaction_by_id(transaction_id=txn_id)
@@ -899,7 +908,7 @@ async def test_foundry_datasets_file_operations(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -914,13 +923,13 @@ async def test_foundry_datasets_file_operations(
         assert "data" in files_body
         assert isinstance(files_body["data"], list)
         assert len(files_body["data"]) >= 1
-        assert files_body["data"][0]["path"] == "source.csv"
+        assert files_body["data"][0]["filePath"] == "source.csv"
 
         # Upload a file
         upload_data = b"id,name\n1,Alice\n2,Bob\n"
         upload_resp = await client.post(
-            f"/api/v2/datasets/{dataset_rid}/files:upload",
-            params={"filePath": "data/upload.csv", "branchName": "main"},
+            f"/api/v2/datasets/{dataset_rid}/files/data/upload.csv/upload",
+            params={"branchName": "master"},
             content=upload_data,
             headers={
                 "X-User-ID": "user-1",
@@ -929,20 +938,20 @@ async def test_foundry_datasets_file_operations(
         )
         assert upload_resp.status_code == 200
         upload_body = upload_resp.json()
-        assert upload_body["path"] == "data/upload.csv"
-        assert upload_body["sizeBytes"] == len(upload_data)
+        assert upload_body["rid"].startswith("ri.foundry.main.file.")
+        assert upload_body["transactionRid"].startswith("ri.foundry.main.transaction.")
 
         # Verify the data was written to storage
-        expected_key = f"main/commerce_db/{ds.dataset_id}/orders/data/upload.csv"
+        expected_key = f"master/commerce_db/{ds.dataset_id}/orders/data/upload.csv"
         assert storage.objects.get(expected_key) == upload_data
 
         # Get file content (pre-populate storage for this path)
-        content_key = f"main/commerce_db/{ds.dataset_id}/orders/readme.txt"
+        content_key = f"master/commerce_db/{ds.dataset_id}/orders/readme.txt"
         storage.objects[content_key] = b"Hello, World!"
 
         content_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/files/readme.txt/content",
-            params={"branchName": "main"},
+            params={"branchName": "master"},
             headers={"X-User-ID": "user-1"},
         )
         assert content_resp.status_code == 200
@@ -966,20 +975,20 @@ async def test_foundry_datasets_list_files_returns_503_when_lakefs_unavailable(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         list_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/files",
-            params={"branchName": "main"},
+            params={"branchName": "master"},
             headers={"X-User-ID": "user-1"},
         )
 
-    assert list_resp.status_code == 503
+    assert list_resp.status_code == 500
     body = list_resp.json()
-    assert body["errorCode"] == "SERVICE_UNAVAILABLE"
-    assert body["errorName"] == "DatasetFilesUnavailable"
+    assert body["errorCode"] == "INTERNAL"
+    assert body["errorName"] == "ListFilesError"
 
 
 # ---------------------------------------------------------------------------
@@ -1004,7 +1013,7 @@ async def test_foundry_datasets_read_table(
     _override_deps(app, dataset_registry=dr, pipeline_registry=pr)
 
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
-    dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
+    dataset_rid = f"ri.foundry.main.dataset.{ds.dataset_id}"
 
     # Seed a version with sample_json
     dr.versions[ds.dataset_id] = SimpleNamespace(
@@ -1026,20 +1035,19 @@ async def test_foundry_datasets_read_table(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={"rowLimit": 100},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 100, "branchName": "master", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
-    table = read_resp.json()
-    assert len(table["columns"]) == 2
-    assert table["columns"][0]["name"] == "id"
-    assert table["columns"][1]["name"] == "amount"
-    assert len(table["rows"]) == 3
-    assert table["rows"][0] == ["order-1", 10.0]
-    assert table["totalRowCount"] == 3
+    parsed = list(csv.reader(io.StringIO(read_resp.text)))
+    assert parsed[0] == ["id", "amount"]
+    assert parsed[1:] == [
+        ["order-1", "10.0"],
+        ["order-2", "20.0"],
+        ["order-3", "30.0"],
+    ]
 
 
 @pytest.mark.unit
@@ -1082,19 +1090,15 @@ async def test_foundry_datasets_read_table_with_column_selection(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={"columns": ["id", "status"], "rowLimit": 10},
-            headers={"X-User-ID": "user-1"},
+            params={"columns": ["id", "status"], "rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
-    table = read_resp.json()
-    assert len(table["columns"]) == 2
-    col_names = [c["name"] for c in table["columns"]]
-    assert col_names == ["id", "status"]
-    assert table["rows"][0] == ["order-1", "ACTIVE"]
-    assert table["rows"][1] == ["order-2", "CLOSED"]
+    parsed = list(csv.reader(io.StringIO(read_resp.text)))
+    assert parsed[0] == ["id", "status"]
+    assert parsed[1:] == [["order-1", "ACTIVE"], ["order-2", "CLOSED"]]
 
 
 @pytest.mark.unit
@@ -1117,7 +1121,7 @@ async def test_foundry_datasets_read_table_uses_version_artifact_key_fallback(
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
     dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
     custom_artifact_key = f"commerce_db/{ds.dataset_id}/orders/custom/path/orders_snapshot.csv"
-    storage.objects[f"main/{custom_artifact_key}"] = b"id,status\norder-1,OPEN\norder-2,HOLD\n"
+    storage.objects[f"master/{custom_artifact_key}"] = b"id,status\norder-1,OPEN\norder-2,HOLD\n"
 
     dr.versions[ds.dataset_id] = SimpleNamespace(
         version_id=str(uuid.uuid4()),
@@ -1129,17 +1133,15 @@ async def test_foundry_datasets_read_table_uses_version_artifact_key_fallback(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={"rowLimit": 10},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
-    table = read_resp.json()
-    assert [col["name"] for col in table["columns"]] == ["id", "status"]
-    assert table["rows"] == [["order-1", "OPEN"], ["order-2", "HOLD"]]
-    assert table["totalRowCount"] == 2
+    parsed = list(csv.reader(io.StringIO(read_resp.text)))
+    assert parsed[0] == ["id", "status"]
+    assert parsed[1:] == [["order-1", "OPEN"], ["order-2", "HOLD"]]
 
 
 @pytest.mark.unit
@@ -1169,17 +1171,13 @@ async def test_foundry_datasets_read_table_no_version_returns_empty(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
-    table = read_resp.json()
-    assert table["columns"] == []
-    assert table["rows"] == []
-    assert table["totalRowCount"] == 0
+    assert read_resp.text == ""
 
 
 @pytest.mark.unit
@@ -1215,12 +1213,11 @@ async def test_foundry_datasets_read_table_lakefs_error_returns_unavailable(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        read_resp = await client.post(
+        read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            json={},
-            headers={"X-User-ID": "user-1"},
+            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
         )
 
-    assert read_resp.status_code == 503
+    assert read_resp.status_code == 500
     body = read_resp.json()
-    assert body["errorName"] == "DatasetReadUnavailable"
+    assert body["errorName"] == "ReadTableError"

@@ -1,0 +1,527 @@
+version: 1
+
+# Minimal Foundry contract manifest used by unit tests to enforce:
+# - endpoint path + method existence
+# - parameter names + required flags (path + query)
+# - required OAuth scopes (enforced via shared.foundry.auth.require_scopes metadata)
+#
+# Add additional endpoints here as parity work progresses.
+
+endpoints:
+  # -------------------------------------------------------------------------
+  # Datasets API v2
+  # -------------------------------------------------------------------------
+  - id: datasets_v2.create_dataset
+    path: /api/v2/datasets
+    method: post
+    path_params: []
+    query_params: []
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.get_dataset
+    path: /api/v2/datasets/{datasetRid}
+    method: get
+    path_params: [datasetRid]
+    query_params: []
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.get_schema
+    path: /api/v2/datasets/{datasetRid}/getSchema
+    method: get
+    path_params: [datasetRid]
+    query_params:
+      - {name: preview, required: true}
+      - {name: branchName, required: false}
+      - {name: endTransactionRid, required: false}
+      - {name: versionId, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.put_schema
+    path: /api/v2/datasets/{datasetRid}/putSchema
+    method: put
+    path_params: [datasetRid]
+    query_params:
+      - {name: preview, required: true}
+      - {name: branchName, required: false}
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.get_schema_batch
+    path: /api/v2/datasets/getSchemaBatch
+    method: post
+    path_params: []
+    query_params:
+      - {name: preview, required: true}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.list_branches
+    path: /api/v2/datasets/{datasetRid}/branches
+    method: get
+    path_params: [datasetRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.create_branch
+    path: /api/v2/datasets/{datasetRid}/branches
+    method: post
+    path_params: [datasetRid]
+    query_params: []
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.get_branch
+    path: /api/v2/datasets/{datasetRid}/branches/{branchName}
+    method: get
+    path_params: [datasetRid, branchName]
+    query_params: []
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.delete_branch
+    path: /api/v2/datasets/{datasetRid}/branches/{branchName}
+    method: delete
+    path_params: [datasetRid, branchName]
+    query_params: []
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.create_transaction
+    path: /api/v2/datasets/{datasetRid}/transactions
+    method: post
+    path_params: [datasetRid]
+    query_params:
+      - {name: branchName, required: false}
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.list_transactions
+    path: /api/v2/datasets/{datasetRid}/transactions
+    method: get
+    path_params: [datasetRid]
+    query_params:
+      - {name: preview, required: true}
+      - {name: branchName, required: false}
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.get_transaction
+    path: /api/v2/datasets/{datasetRid}/transactions/{transactionRid}
+    method: get
+    path_params: [datasetRid, transactionRid]
+    query_params:
+      - {name: branchName, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.commit_transaction
+    path: /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/commit
+    method: post
+    path_params: [datasetRid, transactionRid]
+    query_params: []
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.abort_transaction
+    path: /api/v2/datasets/{datasetRid}/transactions/{transactionRid}/abort
+    method: post
+    path_params: [datasetRid, transactionRid]
+    query_params: []
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.list_files
+    path: /api/v2/datasets/{datasetRid}/files
+    method: get
+    path_params: [datasetRid]
+    query_params:
+      - {name: branchName, required: false}
+      - {name: startTransactionRid, required: false}
+      - {name: endTransactionRid, required: false}
+      - {name: prefix, required: false}
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.get_file
+    path: /api/v2/datasets/{datasetRid}/files/{filePath}
+    method: get
+    path_params: [datasetRid, filePath]
+    query_params:
+      - {name: branchName, required: false}
+      - {name: startTransactionRid, required: false}
+      - {name: endTransactionRid, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.get_file_content
+    path: /api/v2/datasets/{datasetRid}/files/{filePath}/content
+    method: get
+    path_params: [datasetRid, filePath]
+    query_params:
+      - {name: branchName, required: false}
+      - {name: startTransactionRid, required: false}
+      - {name: endTransactionRid, required: false}
+    required_scopes: [api:datasets-read]
+
+  - id: datasets_v2.upload_file
+    path: /api/v2/datasets/{datasetRid}/files/{filePath}/upload
+    method: post
+    path_params: [datasetRid, filePath]
+    query_params:
+      - {name: branchName, required: false}
+      - {name: transactionRid, required: false}
+      - {name: byteOffset, required: false}
+    required_scopes: [api:datasets-write]
+
+  - id: datasets_v2.read_table
+    path: /api/v2/datasets/{datasetRid}/readTable
+    method: get
+    path_params: [datasetRid]
+    query_params:
+      - {name: branchName, required: false}
+      - {name: startTransactionRid, required: false}
+      - {name: endTransactionRid, required: false}
+      - {name: format, required: true}
+      - {name: columns, required: false}
+      - {name: rowLimit, required: false}
+    required_scopes: [api:datasets-read]
+
+  # -------------------------------------------------------------------------
+  # Orchestration API v2
+  # -------------------------------------------------------------------------
+  - id: orchestration_v2.create_build
+    path: /api/v2/orchestration/builds/create
+    method: post
+    path_params: []
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.get_build
+    path: /api/v2/orchestration/builds/{buildRid}
+    method: get
+    path_params: [buildRid]
+    query_params: []
+    required_scopes: [api:orchestration-read]
+
+  - id: orchestration_v2.get_build_batch
+    path: /api/v2/orchestration/builds/getBatch
+    method: post
+    path_params: []
+    query_params: []
+    required_scopes: [api:orchestration-read]
+
+  - id: orchestration_v2.list_build_jobs
+    path: /api/v2/orchestration/builds/{buildRid}/jobs
+    method: get
+    path_params: [buildRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+    required_scopes: [api:orchestration-read]
+
+  - id: orchestration_v2.cancel_build
+    path: /api/v2/orchestration/builds/{buildRid}/cancel
+    method: post
+    path_params: [buildRid]
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.create_schedule
+    path: /api/v2/orchestration/schedules
+    method: post
+    path_params: []
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.get_schedule
+    path: /api/v2/orchestration/schedules/{scheduleRid}
+    method: get
+    path_params: [scheduleRid]
+    query_params: []
+    required_scopes: [api:orchestration-read]
+
+  - id: orchestration_v2.delete_schedule
+    path: /api/v2/orchestration/schedules/{scheduleRid}
+    method: delete
+    path_params: [scheduleRid]
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.pause_schedule
+    path: /api/v2/orchestration/schedules/{scheduleRid}/pause
+    method: post
+    path_params: [scheduleRid]
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.unpause_schedule
+    path: /api/v2/orchestration/schedules/{scheduleRid}/unpause
+    method: post
+    path_params: [scheduleRid]
+    query_params: []
+    required_scopes: [api:orchestration-write]
+
+  - id: orchestration_v2.list_schedule_runs
+    path: /api/v2/orchestration/schedules/{scheduleRid}/runs
+    method: get
+    path_params: [scheduleRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+    required_scopes: [api:orchestration-read]
+
+  # -------------------------------------------------------------------------
+  # Connectivity API v2
+  # -------------------------------------------------------------------------
+  - id: connectivity_v2.list_connections
+    path: /api/v2/connectivity/connections
+    method: get
+    path_params: []
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.create_connection
+    path: /api/v2/connectivity/connections
+    method: post
+    path_params: []
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_configuration_batch
+    path: /api/v2/connectivity/connections/getConfigurationBatch
+    method: post
+    path_params: []
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.get_connection
+    path: /api/v2/connectivity/connections/{connectionRid}
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.delete_connection
+    path: /api/v2/connectivity/connections/{connectionRid}
+    method: delete
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.test_connection
+    path: /api/v2/connectivity/connections/{connectionRid}/test
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_connection_configuration
+    path: /api/v2/connectivity/connections/{connectionRid}/getConfiguration
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.update_secrets
+    path: /api/v2/connectivity/connections/{connectionRid}/updateSecrets
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.update_export_settings
+    path: /api/v2/connectivity/connections/{connectionRid}/updateExportSettings
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.upload_custom_jdbc_drivers
+    path: /api/v2/connectivity/connections/{connectionRid}/uploadCustomJdbcDrivers
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: fileName, required: true}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.create_export_run
+    path: /api/v2/connectivity/connections/{connectionRid}/exportRuns
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_export_run
+    path: /api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}
+    method: get
+    path_params: [connectionRid, exportRunRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.list_export_runs
+    path: /api/v2/connectivity/connections/{connectionRid}/exportRuns
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.create_table_import
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_table_import
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}
+    method: get
+    path_params: [connectionRid, tableImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.list_table_imports
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.replace_table_import
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}
+    method: put
+    path_params: [connectionRid, tableImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.delete_table_import
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}
+    method: delete
+    path_params: [connectionRid, tableImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.execute_table_import
+    path: /api/v2/connectivity/connections/{connectionRid}/tableImports/{tableImportRid}/execute
+    method: post
+    path_params: [connectionRid, tableImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.create_file_import
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_file_import
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}
+    method: get
+    path_params: [connectionRid, fileImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.list_file_imports
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.replace_file_import
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}
+    method: put
+    path_params: [connectionRid, fileImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.delete_file_import
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}
+    method: delete
+    path_params: [connectionRid, fileImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.execute_file_import
+    path: /api/v2/connectivity/connections/{connectionRid}/fileImports/{fileImportRid}/execute
+    method: post
+    path_params: [connectionRid, fileImportRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.create_virtual_table
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables
+    method: post
+    path_params: [connectionRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.get_virtual_table
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}
+    method: get
+    path_params: [connectionRid, virtualTableRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.list_virtual_tables
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables
+    method: get
+    path_params: [connectionRid]
+    query_params:
+      - {name: pageSize, required: false}
+      - {name: pageToken, required: false}
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-read]
+
+  - id: connectivity_v2.replace_virtual_table
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}
+    method: put
+    path_params: [connectionRid, virtualTableRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.delete_virtual_table
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}
+    method: delete
+    path_params: [connectionRid, virtualTableRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]
+
+  - id: connectivity_v2.execute_virtual_table
+    path: /api/v2/connectivity/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute
+    method: post
+    path_params: [connectionRid, virtualTableRid]
+    query_params:
+      - {name: preview, required: false}
+    required_scopes: [api:connectivity-write]

@@ -25,7 +25,7 @@ def test_apply_message_error_policies_raises_policy_http_exception() -> None:
             default_detail="default",
         )
     assert raised.value.status_code == 404
-    assert raised.value.detail == "db missing"
+    assert raised.value.detail["message"] == "db missing"
 
 
 def test_apply_message_error_policies_returns_fallback_when_configured() -> None:

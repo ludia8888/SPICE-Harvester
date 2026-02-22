@@ -53,7 +53,7 @@ async def create_dataset(
         description = str(sanitized.get("description") or "").strip() or None
         source_type = str(sanitized.get("source_type") or "manual").strip() or "manual"
         source_ref = str(sanitized.get("source_ref") or "").strip() or None
-        branch = str(sanitized.get("branch") or "main").strip() or "main"
+        branch = str(sanitized.get("branch") or "master").strip() or "master"
         schema_json = sanitized.get("schema_json") if isinstance(sanitized.get("schema_json"), dict) else {}
 
         dataset = await dataset_registry.create_dataset(

@@ -68,7 +68,7 @@ def _strip_text_if_not_none(raw: Any) -> Optional[str]:
 
 
 def _normalize_base_branch(raw: Any) -> str:
-    return str(raw or "").strip() or "main"
+    return str(raw or "").strip() or "master"
 
 
 def _clamp_flush_timeout_seconds(raw: Any, *, default: float = 10.0) -> float:
@@ -194,6 +194,11 @@ class DatabaseSettings(BaseSettings):
     elasticsearch_default_replicas: Optional[int] = Field(
         default=None,
         description="Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS)",
+    )
+    elasticsearch_compat_version: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("ELASTICSEARCH_COMPAT_VERSION", "ES_COMPAT_VERSION"),
+        description="Override elasticsearch-py compatibility header (ELASTICSEARCH_COMPAT_VERSION / ES_COMPAT_VERSION)",
     )
     
     # Kafka Configuration
@@ -667,7 +672,7 @@ class ObservabilitySettings(BaseSettings):
         description="Enable lineage store integration (ENABLE_LINEAGE)",
     )
     lineage_fail_closed: bool = Field(
-        default=True,
+        default=False,
         description="Fail closed when lineage is unavailable/recording fails (LINEAGE_FAIL_CLOSED)",
     )
     lineage_fail_open_override: bool = Field(
@@ -963,11 +968,11 @@ class PipelineSettings(BaseSettings):
         description="Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS)",
     )
     protected_branches: str = Field(
-        default="main",
+        default="master",
         description="Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
     )
     fallback_branches: str = Field(
-        default="main",
+        default="master",
         description="Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
     )
 
@@ -1230,17 +1235,17 @@ class PipelineSettings(BaseSettings):
 
     @property
     def protected_branches_set(self) -> set[str]:
-        raw = str(self.protected_branches or "").strip() or "main"
+        raw = str(self.protected_branches or "").strip() or "master"
         branches = {branch.strip() for branch in raw.split(",") if branch.strip()}
-        branches.add("main")
+        branches.add("master")
         return branches
 
     @property
     def fallback_branches_list(self) -> List[str]:
-        raw = str(self.fallback_branches or "").strip() or "main"
+        raw = str(self.fallback_branches or "").strip() or "master"
         branches = [branch.strip() for branch in raw.split(",") if branch.strip()]
-        if "main" not in branches:
-            branches.append("main")
+        if "master" not in branches:
+            branches.append("master")
         return branches
 
 
@@ -2629,7 +2634,7 @@ class BranchVirtualizationSettings(BaseSettings):
     )
 
     base_branch: str = Field(
-        default="main",
+        default="master",
         description="Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
     )
     _normalize_base_branch = field_validator("base_branch", mode="before")(_normalize_base_branch)
@@ -3669,7 +3674,7 @@ class WritebackMaterializerSettings(BaseSettings):
     )
 
     base_branch: str = Field(
-        default="main",
+        default="master",
         description="Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
     )
     interval_seconds: float = Field(

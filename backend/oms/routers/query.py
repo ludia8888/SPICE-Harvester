@@ -1754,7 +1754,7 @@ async def search_objects_v2_foundry(
     ontology: str,
     payload: Dict[str, Any] = Body(...),
     objectType: str = ...,
-    branch: str = Query(default="main"),
+    branch: str = Query(default="master"),
     es: ElasticsearchServiceDep = ...,
 ) -> SearchObjectsResponseV2 | JSONResponse:
     db_name = validate_db_name(ontology)
@@ -1775,7 +1775,7 @@ async def search_objects_v2_foundry(
 async def count_objects_v2_oms(
     ontology: str,
     objectType: str = ...,
-    branch: str = Query(default="main"),
+    branch: str = Query(default="master"),
     sdk_package_rid: Optional[str] = Query(default=None, alias="sdkPackageRid"),
     sdk_version: Optional[str] = Query(default=None, alias="sdkVersion"),
     es: ElasticsearchServiceDep = ...,
@@ -1831,7 +1831,7 @@ async def aggregate_objects_v2_oms(
     ontology: str,
     payload: Dict[str, Any] = Body(...),
     objectType: str = ...,
-    branch: str = Query(default="main"),
+    branch: str = Query(default="master"),
     es: ElasticsearchServiceDep = ...,
 ) -> Dict[str, Any] | JSONResponse:
     """

@@ -8,8 +8,8 @@ error handling, and common operations for search and indexing.
 import asyncio
 import importlib
 import logging
-import os
 from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple, Union
+from urllib.parse import urlparse
 from elasticsearch import AsyncElasticsearch, __versionstr__ as _ELASTIC_CLIENT_VERSION
 # elasticsearch>=8.11.0 is now required in shared/pyproject.toml
 from elasticsearch.exceptions import (
@@ -20,6 +20,7 @@ from elasticsearch.exceptions import (
 )
 from elasticsearch.helpers import async_bulk
 
+from shared.config.settings import get_settings
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.connectivity import AsyncClientPingMixin
 
@@ -30,11 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_compat_version() -> Optional[str]:
-    explicit = str(
-        os.getenv("ELASTICSEARCH_COMPAT_VERSION")
-        or os.getenv("ES_COMPAT_VERSION")
-        or ""
-    ).strip()
+    explicit = str(get_settings().database.elasticsearch_compat_version or "").strip()
     if explicit:
         return explicit
     try:
@@ -715,11 +712,19 @@ def create_elasticsearch_service(settings: 'ApplicationSettings') -> Elasticsear
         이 함수는 더 이상 내부에서 환경변수를 로드하지 않습니다.
         모든 설정은 ApplicationSettings를 통해 중앙화되어 관리됩니다.
     """
+    parsed = urlparse(settings.database.elasticsearch_url)
+    host = parsed.hostname or settings.database.elasticsearch_host
+    port = parsed.port or settings.database.elasticsearch_port
+    username = parsed.username or settings.database.elasticsearch_username
+    password = parsed.password or settings.database.elasticsearch_password
+    use_ssl = (parsed.scheme or "").lower() == "https"
+
     return ElasticsearchService(
-        host=settings.database.elasticsearch_host,
-        port=settings.database.elasticsearch_port,
-        username=settings.database.elasticsearch_username,
-        password=settings.database.elasticsearch_password,
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        use_ssl=use_ssl,
         request_timeout=settings.database.elasticsearch_request_timeout,
     )
 

@@ -54,15 +54,15 @@ async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> 
                 detail = resp.text
             raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
         raise classified_http_exception(
-            status.HTTP_502_BAD_GATEWAY,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
             "OMS command status 조회 실패",
-            code=ErrorCode.UPSTREAM_ERROR,
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         ) from e
     except httpx.HTTPError as e:
         raise classified_http_exception(
-            status.HTTP_502_BAD_GATEWAY,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
             "OMS command status 조회 실패",
-            code=ErrorCode.UPSTREAM_ERROR,
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
         ) from e
     except Exception as e:
         logger.error(f"Error proxying command status ({command_id}): {e}")

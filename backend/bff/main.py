@@ -24,7 +24,7 @@ from typing import Optional
 
 # Third party imports
 import httpx
-from fastapi import FastAPI, status
+from fastapi import Depends, FastAPI, status
 
 # Centralized configuration and dependency injection
 from shared.config.settings import get_settings, ApplicationSettings
@@ -60,6 +60,8 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 
 # Shared models and utilities
 from shared.utils.label_mapper import LabelMapper
+# Foundry parity helpers (used by Foundry v2 routers/dependencies)
+from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
 # NOTE: configure_type_inference_service removed (legacy type inference engine deleted)
 from shared.services.storage.redis_service import create_redis_service
 from shared.services.core.websocket_service import get_notification_service
@@ -68,6 +70,7 @@ from shared.services.core.schema_drift_detector import SchemaDriftDetector
 
 # Auth middleware
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
+from bff.routers.admin_deps import require_admin_strict
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient
@@ -850,6 +853,7 @@ app = create_fastapi_service(
     include_logging_middleware=True
 )
 install_bff_auth_middleware(app)
+app.add_exception_handler(FoundryAPIError, foundry_exception_handler)
 
 
 # Modern dependency injection functions
@@ -1018,7 +1022,7 @@ app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring")
-app.include_router(config_monitoring.router, prefix="/api/v1/config")
+app.include_router(config_monitoring.router, prefix="/api/v1/config", dependencies=[Depends(require_admin_strict)])
 
 
 if __name__ == "__main__":

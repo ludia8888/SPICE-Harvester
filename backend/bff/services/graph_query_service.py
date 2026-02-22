@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from elasticsearch import NotFoundError
 from fastapi import HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -655,6 +656,15 @@ async def execute_graph_query(
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid query: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        # Elasticsearch index missing typically means the DB/branch has not been materialized yet.
+        # Treat this as a user-visible 404 instead of a 500.
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            "Graph index not found",
+            code=ErrorCode.ES_INDEX_NOT_FOUND,
+            extra={"db_name": db_name},
+        ) from exc
     except Exception as exc:
         logger.error("Graph query failed: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Graph query failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc
@@ -772,6 +782,13 @@ async def execute_simple_graph_query(
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"Invalid query: {str(exc)}", code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            "Graph index not found",
+            code=ErrorCode.ES_INDEX_NOT_FOUND,
+            extra={"db_name": db_name},
+        ) from exc
     except Exception as exc:
         logger.error("Simple graph query failed: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Query failed: {str(exc)}", code=ErrorCode.INTERNAL_ERROR) from exc

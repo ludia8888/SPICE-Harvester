@@ -42,11 +42,17 @@ def normalize_ontology_version(value: Any) -> Optional[Dict[str, str]]:
 
 
 def build_ontology_version(*, branch: str, commit: Optional[str]) -> Dict[str, str]:
+    """
+    Build a minimal ontology stamp for audit + replay.
+
+    Enterprise contract:
+    - `ref` is always `branch:<name>`
+    - `commit` must be present as well; when an immutable commit id isn't available,
+      we fall back to the same branch ref (floating head semantics).
+    """
     ref = f"branch:{branch}"
-    out: Dict[str, str] = {"ref": ref}
-    if commit:
-        out["commit"] = str(commit).strip()
-    return out
+    commit_norm = str(commit).strip() if commit is not None else ""
+    return {"ref": ref, "commit": commit_norm or ref}
 
 
 def extract_ontology_version(*, envelope_metadata: Any = None, envelope_data: Any = None) -> Optional[Dict[str, str]]:
@@ -86,7 +92,8 @@ async def resolve_ontology_version(
     Resolve ontology semantic contract stamp in Foundry-style branch-ref form.
 
     Deprecated branch/version lookups are intentionally removed. The canonical
-    contract is `ref=branch:<name>`, with commit omitted when unavailable.
+    contract is `ref=branch:<name>`, with commit falling back to the same ref
+    when an immutable commit id is unavailable.
     """
     _ = (source, db_name, logger)
     return build_ontology_version(branch=branch, commit=None)

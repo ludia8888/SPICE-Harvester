@@ -40,4 +40,6 @@ async def test_create_instance_async_allows_missing_terminus_in_postgres_profile
     command = captured["command"]
     ontology_stamp = command.metadata.get("ontology")
     assert ontology_stamp.get("ref") == "branch:main"
-    assert "commit" not in ontology_stamp
+    # Postgres profiles may not have an immutable commit id; parity requires a non-empty
+    # commit field anyway (floating-head semantics).
+    assert ontology_stamp.get("commit") == ontology_stamp.get("ref")

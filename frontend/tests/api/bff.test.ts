@@ -95,9 +95,7 @@ describe('bff api helpers', () => {
     expect(headers.get('Content-Type')).toBe('application/json')
     expect(JSON.parse(String(init.body))).toEqual({
       name: 'orders',
-      description: undefined,
-      branchName: 'main',
-      parentFolderRid: 'ri.spice.main.folder.core',
+      parentFolderRid: 'ri.foundry.main.folder.core',
     })
   })
 

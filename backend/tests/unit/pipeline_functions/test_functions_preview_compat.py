@@ -50,14 +50,14 @@ class _DatasetRegistry:
 async def _build_executor() -> tuple[PipelineExecutor, str, str]:
     db_name = "demo"
     dataset_name = "ds_functions_preview"
-    dataset_id = "ds-func-preview-main"
+    dataset_id = "ds-func-preview-master"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="main",
+        branch="master",
         schema_json={
             "columns": [
                 {"name": "group", "type": "xsd:string"},

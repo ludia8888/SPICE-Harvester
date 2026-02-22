@@ -8,10 +8,10 @@ Endpoints
 ---------
 Dataset CRUD:
   POST   /v2/datasets                                      Create dataset
-  GET    /v2/datasets                                      List datasets
   GET    /v2/datasets/{datasetRid}                         Get dataset
-  GET    /v2/datasets/{datasetRid}/schema                  Get schema
-  PUT    /v2/datasets/{datasetRid}/schema                  Update schema
+  GET    /v2/datasets/{datasetRid}/getSchema               Get dataset schema (preview)
+  POST   /v2/datasets/getSchemaBatch                       Get dataset schemas batch (preview)
+  PUT    /v2/datasets/{datasetRid}/putSchema               Put dataset schema (preview)
 
 Branch management:
   GET    /v2/datasets/{datasetRid}/branches                List branches
@@ -21,14 +21,17 @@ Branch management:
 
 Transactions:
   POST   /v2/datasets/{datasetRid}/transactions                          Create transaction
-  POST   /v2/datasets/{datasetRid}/transactions/{txnRid}/commit          Commit
-  POST   /v2/datasets/{datasetRid}/transactions/{txnRid}/abort           Abort
+  GET    /v2/datasets/{datasetRid}/transactions                          List transactions
+  GET    /v2/datasets/{datasetRid}/transactions/{transactionRid}         Get transaction
+  POST   /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit  Commit transaction
+  POST   /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort   Abort transaction
 
 Files & table read:
-  GET    /v2/datasets/{datasetRid}/files                   List files
-  GET    /v2/datasets/{datasetRid}/files/{filePath:path}/content  Get file content
-  POST   /v2/datasets/{datasetRid}/files:upload            Upload file
-  POST   /v2/datasets/{datasetRid}/readTable               Read table rows
+  GET    /v2/datasets/{datasetRid}/files                                   List files
+  GET    /v2/datasets/{datasetRid}/files/{filePath:path}                    Get file metadata
+  GET    /v2/datasets/{datasetRid}/files/{filePath:path}/content            Get file content
+  POST   /v2/datasets/{datasetRid}/files/{filePath:path}/upload             Upload file
+  GET    /v2/datasets/{datasetRid}/readTable                                Read table rows
 """
 
 import csv
@@ -36,14 +39,19 @@ import io
 import logging
 import mimetypes
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
+
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from bff.routers.data_connector_deps import get_dataset_registry, get_pipeline_registry
 from bff.routers.pipeline_datasets_ops_lakefs import _resolve_lakefs_raw_repository
+from shared.foundry.auth import require_scopes
+from shared.foundry.errors import foundry_error
+from shared.foundry.rids import build_rid, parse_rid
 from shared.observability.tracing import trace_endpoint
+from shared.security.input_sanitizer import SecurityViolationError, validate_branch_name, validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import (
@@ -54,6 +62,7 @@ from shared.services.storage.lakefs_client import (
 )
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.time_utils import utcnow
+from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 
 logger = logging.getLogger(__name__)
 
@@ -82,70 +91,57 @@ def _dataset_id_from_rid(dataset_rid: str) -> str | None:
     text = str(dataset_rid or "").strip()
     if not text:
         return None
-    for prefix in _DATASET_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix):].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "dataset":
+        return None
+    return parsed
 
 
 def _dataset_rid(dataset_id: str) -> str:
-    return f"ri.spice.main.dataset.{dataset_id}"
+    return build_rid("dataset", dataset_id)
 
 
 def _folder_rid(db_name: str) -> str:
-    return f"ri.spice.main.folder.{db_name}"
+    return build_rid("folder", db_name)
 
 
 def _db_name_from_folder_rid(folder_rid: str) -> str | None:
     text = str(folder_rid or "").strip()
     if not text:
         return None
-    for prefix in _FOLDER_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix):].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "folder":
+        return None
+    return parsed
 
 
 def _transaction_rid(transaction_id: str) -> str:
-    return f"ri.spice.main.transaction.{transaction_id}"
+    return build_rid("transaction", transaction_id)
 
 
 def _transaction_id_from_rid(txn_rid: str) -> str | None:
     text = str(txn_rid or "").strip()
     if not text:
         return None
-    for prefix in _TRANSACTION_RID_PREFIXES:
-        if text.startswith(prefix):
-            return text[len(prefix):].strip() or None
-    if text.startswith("ri."):
+    try:
+        kind, parsed = parse_rid(text)
+    except ValueError:
         return None
-    return text
+    if kind != "transaction":
+        return None
+    return parsed
 
 
-# ---------------------------------------------------------------------------
-# Error helper (matches foundry_connectivity_v2 pattern)
-# ---------------------------------------------------------------------------
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "errorCode": error_code,
-            "errorName": error_name,
-            "errorInstanceId": str(uuid4()),
-            "parameters": parameters or {},
-        },
-    )
+def _file_rid(*, dataset_id: str, file_path: str) -> str:
+    normalized_path = str(file_path or "").strip().lstrip("/")
+    token = str(uuid5(NAMESPACE_URL, f"foundry:file:{dataset_id}:{normalized_path}"))
+    return build_rid("file", token)
 
 
 # ---------------------------------------------------------------------------
@@ -153,16 +149,10 @@ def _foundry_error(
 # ---------------------------------------------------------------------------
 
 def _dataset_response(dataset: Any) -> Dict[str, Any]:
-    created_at = dataset.created_at
     return {
         "rid": _dataset_rid(dataset.dataset_id),
         "name": dataset.name,
-        "description": dataset.description,
         "parentFolderRid": _folder_rid(dataset.db_name),
-        "branchName": dataset.branch,
-        "sourceType": dataset.source_type,
-        "createdTime": created_at.isoformat() if created_at else None,
-        "createdBy": "system",
     }
 
 
@@ -226,7 +216,7 @@ def _normalize_dataset_object_key(dataset: Any, object_key: str) -> str:
     if parsed:
         _, parsed_key = parsed
         key = parsed_key.lstrip("/")
-        branch_prefix = f"{(dataset.branch or 'main').strip('/')}/"
+        branch_prefix = f"{(dataset.branch or 'master').strip('/')}/"
         if key.startswith(branch_prefix):
             key = key[len(branch_prefix):]
     else:
@@ -246,7 +236,7 @@ def _artifact_s3_uri(*, repository: str, branch: str, object_key: str | None) ->
     normalized_key = str(object_key or "").strip().lstrip("/")
     if not normalized_key:
         return None
-    normalized_branch = str(branch or "main").strip().strip("/") or "main"
+    normalized_branch = str(branch or "master").strip().strip("/") or "master"
     return f"s3://{repository}/{normalized_branch}/{normalized_key}"
 
 
@@ -359,25 +349,52 @@ async def _extract_commit_preview(
 async def create_dataset_v2(
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
     """POST /v2/datasets — Create a new dataset."""
     try:
         body = await request.json()
     except Exception:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidRequestBody", parameters={"message": "Invalid JSON body"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Invalid JSON body"},
+        )
 
     name = str(body.get("name") or "").strip()
     if not name:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "name is required"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "name is required"},
+        )
 
     parent_folder_rid = str(body.get("parentFolderRid") or "").strip()
     db_name = _db_name_from_folder_rid(parent_folder_rid) if parent_folder_rid else None
     if not db_name:
-        db_name = str(body.get("dbName") or body.get("db_name") or "").strip()
-    if not db_name:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "parentFolderRid (or dbName) is required"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidFolderRid",
+            parameters={"parentFolderRid": parent_folder_rid},
+        )
 
-    branch = str(body.get("branchName") or "main").strip() or "main"
+    try:
+        db_name = validate_db_name(db_name)
+    except SecurityViolationError as exc:
+        logger.info("Invalid folder RID/db name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidFolderRid",
+            parameters={"parentFolderRid": parent_folder_rid},
+        )
+
+    branch = "master"
     description = body.get("description")
 
     try:
@@ -390,54 +407,14 @@ async def create_dataset_v2(
         )
     except Exception as exc:
         logger.error("Failed to create dataset: %s", exc)
-        return _foundry_error(500, error_code="INTERNAL", error_name="DatasetCreationFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="DatasetCreationFailed",
+            parameters={"message": str(exc)},
+        )
 
     return JSONResponse(content=_dataset_response(dataset))
-
-
-@router.get(
-    "",
-    status_code=status.HTTP_200_OK,
-)
-@trace_endpoint("foundry_datasets_v2.list_datasets")
-async def list_datasets_v2(
-    parentFolderRid: str = Query(default="", alias="parentFolderRid"),
-    dbName: str = Query(default="", alias="dbName"),
-    pageSize: int = Query(default=100, ge=1, le=1000, alias="pageSize"),
-    pageToken: str = Query(default="", alias="pageToken"),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> JSONResponse:
-    """GET /v2/datasets — List datasets."""
-    db_name = _db_name_from_folder_rid(parentFolderRid) if parentFolderRid else None
-    if not db_name:
-        db_name = dbName.strip() if dbName else None
-    if not db_name:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "parentFolderRid or dbName query param required"})
-
-    try:
-        all_datasets = await dataset_registry.list_datasets(db_name=db_name)
-    except Exception as exc:
-        logger.error("Failed to list datasets: %s", exc)
-        return _foundry_error(500, error_code="INTERNAL", error_name="ListDatasetsFailed", parameters={"message": str(exc)})
-
-    offset = int(pageToken) if pageToken.strip().isdigit() else 0
-    page = all_datasets[offset: offset + pageSize]
-    next_token = str(offset + pageSize) if offset + pageSize < len(all_datasets) else None
-
-    data = []
-    for ds in page:
-        data.append({
-            "rid": _dataset_rid(ds["dataset_id"]),
-            "name": ds["name"],
-            "description": ds.get("description"),
-            "parentFolderRid": _folder_rid(ds["db_name"]),
-            "branchName": ds.get("branch", "main"),
-            "sourceType": ds.get("source_type"),
-            "createdTime": ds["created_at"].isoformat() if ds.get("created_at") else None,
-            "createdBy": "system",
-        })
-
-    return JSONResponse(content={"data": data, "nextPageToken": next_token})
 
 
 @router.get(
@@ -448,72 +425,187 @@ async def list_datasets_v2(
 async def get_dataset_v2(
     datasetRid: str,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> JSONResponse:
     """GET /v2/datasets/{datasetRid} — Get a dataset."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     return JSONResponse(content=_dataset_response(dataset))
 
 
 # ---------------------------------------------------------------------------
-# Schema
+# Schema (preview)
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/{datasetRid}/schema",
+    "/{datasetRid}/getSchema",
     status_code=status.HTTP_200_OK,
 )
-@trace_endpoint("foundry_datasets_v2.get_schema")
-async def get_schema_v2(
+@trace_endpoint("foundry_datasets_v2.get_dataset_schema")
+async def get_dataset_schema_v2(
     datasetRid: str,
-    branchName: str = Query(default="main", alias="branchName"),
+    preview: bool = Query(..., alias="preview"),
+    branchName: str = Query(default="master", alias="branchName"),
+    endTransactionRid: str = Query(default="", alias="endTransactionRid"),
+    versionId: str = Query(default="", alias="versionId"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> JSONResponse:
-    """GET /v2/datasets/{datasetRid}/schema — Get dataset schema."""
+    """GET /v2/datasets/{datasetRid}/getSchema — Get dataset schema (preview)."""
+    if preview is not True:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="ApiFeaturePreviewUsageOnly",
+            parameters={},
+        )
+
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
-    return JSONResponse(content=_schema_response(dataset.schema_json))
+    normalized_branch = str(branchName or "").strip() or "master"
+    try:
+        validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    # Best-effort validation for transaction/version selectors. Current implementation always
+    # returns the latest stored schema, independent of transaction or version selectors.
+    if endTransactionRid:
+        if not _transaction_id_from_rid(endTransactionRid):
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidTransactionRid",
+                parameters={"endTransactionRid": endTransactionRid},
+            )
+    _ = versionId  # Placeholder: reserved for future version-specific schema materialization.
+
+    schema_json = dataset.schema_json if isinstance(dataset.schema_json, dict) else {}
+    if not schema_json or not schema_json.get("columns"):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="SchemaNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    return JSONResponse(content={"schema": _schema_response(schema_json)})
 
 
 @router.put(
-    "/{datasetRid}/schema",
-    status_code=status.HTTP_200_OK,
+    "/{datasetRid}/putSchema",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
-@trace_endpoint("foundry_datasets_v2.update_schema")
-async def update_schema_v2(
+@trace_endpoint("foundry_datasets_v2.put_dataset_schema")
+async def put_dataset_schema_v2(
     datasetRid: str,
     request: Request,
+    preview: bool = Query(..., alias="preview"),
+    branchName: str = Query(default="master", alias="branchName"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> JSONResponse:
-    """PUT /v2/datasets/{datasetRid}/schema — Update dataset schema."""
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
+) -> Response:
+    """PUT /v2/datasets/{datasetRid}/putSchema — Put dataset schema (preview)."""
+    if preview is not True:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="ApiFeaturePreviewUsageOnly",
+            parameters={},
+        )
+
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     try:
         body = await request.json()
     except Exception:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidRequestBody", parameters={"message": "Invalid JSON body"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Invalid JSON body"},
+        )
 
-    field_list = body.get("fieldSchemaList")
+    normalized_branch = str(branchName or "master").strip() or "master"
+    try:
+        validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    field_list = body.get("fieldSchemaList") if isinstance(body, dict) else None
     if not isinstance(field_list, list):
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidSchema", parameters={"message": "fieldSchemaList is required"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "fieldSchemaList is required"},
+        )
 
     columns = []
     for field in field_list:
@@ -531,9 +623,87 @@ async def update_schema_v2(
         await dataset_registry.update_schema(dataset_id=dataset_id, schema_json=new_schema)
     except Exception as exc:
         logger.error("Failed to update schema: %s", exc)
-        return _foundry_error(500, error_code="INTERNAL", error_name="SchemaUpdateFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="PutSchemaFailed",
+            parameters={"message": str(exc)},
+        )
 
-    return JSONResponse(content=_schema_response(new_schema))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/getSchemaBatch",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("foundry_datasets_v2.get_schema_batch")
+async def get_schema_batch_v2(
+    request: Request,
+    preview: bool = Query(..., alias="preview"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
+) -> JSONResponse:
+    """POST /v2/datasets/getSchemaBatch — Get dataset schemas batch (preview)."""
+    if preview is not True:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="ApiFeaturePreviewUsageOnly",
+            parameters={},
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Invalid JSON body"},
+        )
+
+    dataset_rids = body.get("datasetRids")
+    if not isinstance(dataset_rids, list) or not dataset_rids:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "datasetRids is required"},
+        )
+
+    output: list[dict[str, Any]] = []
+    for raw in dataset_rids:
+        rid = str(raw or "").strip()
+        dataset_id = _dataset_id_from_rid(rid)
+        if not dataset_id:
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidDatasetRid",
+                parameters={"datasetRid": rid},
+            )
+        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        if not dataset:
+            return foundry_error(
+                404,
+                error_code="NOT_FOUND",
+                error_name="DatasetNotFound",
+                parameters={"datasetRid": rid},
+            )
+        schema_json = dataset.schema_json if isinstance(dataset.schema_json, dict) else {}
+        if not schema_json or not schema_json.get("columns"):
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="SchemaNotFound",
+                parameters={"datasetRid": rid},
+            )
+        output.append({"datasetRid": _dataset_rid(dataset_id), "schema": _schema_response(schema_json)})
+
+    return JSONResponse(content=output)
 
 
 # ---------------------------------------------------------------------------
@@ -558,37 +728,75 @@ async def _get_lakefs_storage(pipeline_registry: PipelineRegistry, request: Requ
 async def list_branches_v2(
     datasetRid: str,
     request: Request,
+    pageSize: int = Query(default=100, ge=1, le=1000, alias="pageSize"),
+    pageToken: str = Query(default="", alias="pageToken"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> JSONResponse:
     """GET /v2/datasets/{datasetRid}/branches — List branches."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     repo = _resolve_lakefs_raw_repository()
     rid = _dataset_rid(dataset_id)
+    scope_key = f"datasets:branches:{dataset_id}"
+    try:
+        offset = decode_offset_page_token(
+            pageToken,
+            ttl_seconds=60 * 60 * 24,
+            expected_scope=scope_key,
+        )
+    except ValueError as exc:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
 
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
         branches = await lakefs_client.list_branches(repository=repo)
     except LakeFSError as exc:
         logger.warning("Failed to list lakeFS branches: %s", exc)
-        branches = [{"name": dataset.branch or "main"}]
+        branches = [{"name": dataset.branch or "master"}]
     except Exception:
-        branches = [{"name": dataset.branch or "main"}]
+        branches = [{"name": dataset.branch or "master"}]
 
-    data = []
-    for br in branches:
+    sliced = branches[int(offset) : int(offset) + int(pageSize) + 1]
+    has_next = len(sliced) > int(pageSize)
+    if has_next:
+        sliced = sliced[: int(pageSize)]
+
+    data: list[dict[str, Any]] = []
+    for br in sliced:
         br_name = br.get("name") if isinstance(br, dict) else str(br)
         commit_id = br.get("commit_id") if isinstance(br, dict) else None
         data.append(_branch_response(branch_name=br_name, dataset_rid=rid, commit_id=commit_id))
 
-    return JSONResponse(content={"data": data})
+    next_token = None
+    if has_next:
+        next_token = encode_offset_page_token(int(offset) + int(pageSize), scope=scope_key)
+
+    return JSONResponse(content={"data": data, "nextPageToken": next_token})
 
 
 @router.post(
@@ -601,37 +809,96 @@ async def create_branch_v2(
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
     """POST /v2/datasets/{datasetRid}/branches — Create branch."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     try:
         body = await request.json()
     except Exception:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidRequestBody", parameters={"message": "Invalid JSON body"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Invalid JSON body"},
+        )
 
-    branch_name = str(body.get("branchName") or body.get("name") or "").strip()
+    branch_name = str(body.get("name") or "").strip()
     if not branch_name:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "branchName is required"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "name is required"},
+        )
 
-    source_branch = str(body.get("sourceBranchName") or body.get("source") or "main").strip() or "main"
+    try:
+        branch_name = validate_branch_name(branch_name)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": branch_name},
+        )
+
+    source_branch = str(body.get("sourceBranchName") or "master").strip() or "master"
+    try:
+        source_branch = validate_branch_name(source_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid source branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": source_branch},
+        )
     repo = _resolve_lakefs_raw_repository()
 
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
         await lakefs_client.create_branch(repository=repo, name=branch_name, source=source_branch)
     except LakeFSConflictError:
-        return _foundry_error(409, error_code="CONFLICT", error_name="BranchAlreadyExists", parameters={"branchName": branch_name})
+        return foundry_error(
+            409,
+            error_code="CONFLICT",
+            error_name="BranchAlreadyExists",
+            parameters={"branchName": branch_name},
+        )
     except LakeFSNotFoundError:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="SourceBranchNotFound", parameters={"sourceBranchName": source_branch})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="SourceBranchNotFound",
+            parameters={"sourceBranchName": source_branch},
+        )
     except LakeFSError as exc:
-        return _foundry_error(500, error_code="INTERNAL", error_name="BranchCreationFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="BranchCreationFailed",
+            parameters={"message": str(exc)},
+        )
 
     rid = _dataset_rid(dataset_id)
     return JSONResponse(content=_branch_response(branch_name=branch_name, dataset_rid=rid))
@@ -648,28 +915,58 @@ async def get_branch_v2(
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> JSONResponse:
     """GET /v2/datasets/{datasetRid}/branches/{branchName} — Get branch."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    normalized_branch = str(branchName or "").strip()
+    try:
+        normalized_branch = validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
 
     repo = _resolve_lakefs_raw_repository()
     commit_id: str | None = None
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
-        commit_id = await lakefs_client.get_branch_head_commit_id(repository=repo, branch=branchName)
+        commit_id = await lakefs_client.get_branch_head_commit_id(repository=repo, branch=normalized_branch)
     except LakeFSNotFoundError:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="BranchNotFound", parameters={"branchName": branchName, "datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": normalized_branch, "datasetRid": datasetRid},
+        )
     except LakeFSError as exc:
         logger.warning("Failed to get branch head: %s", exc)
 
     rid = _dataset_rid(dataset_id)
-    return JSONResponse(content=_branch_response(branch_name=branchName, dataset_rid=rid, commit_id=commit_id))
+    return JSONResponse(content=_branch_response(branch_name=normalized_branch, dataset_rid=rid, commit_id=commit_id))
 
 
 @router.delete(
@@ -683,27 +980,67 @@ async def delete_branch_v2(
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> Response:
     """DELETE /v2/datasets/{datasetRid}/branches/{branchName} — Delete branch."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
-    if branchName == "main":
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="CannotDeleteMainBranch", parameters={"branchName": "main"})
+    normalized_branch = str(branchName or "").strip()
+    try:
+        normalized_branch = validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    if normalized_branch == "master":
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="CannotDeleteMasterBranch",
+            parameters={"branchName": "master"},
+        )
 
     repo = _resolve_lakefs_raw_repository()
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
-        await lakefs_client.delete_branch(repository=repo, name=branchName)
+        await lakefs_client.delete_branch(repository=repo, name=normalized_branch)
     except LakeFSNotFoundError:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="BranchNotFound", parameters={"branchName": branchName})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": normalized_branch},
+        )
     except LakeFSError as exc:
-        return _foundry_error(500, error_code="INTERNAL", error_name="BranchDeletionFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="BranchDeletionFailed",
+            parameters={"message": str(exc)},
+        )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -720,31 +1057,72 @@ async def delete_branch_v2(
 async def create_transaction_v2(
     datasetRid: str,
     request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
     """POST /v2/datasets/{datasetRid}/transactions — Create a transaction."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     try:
         body = await request.json()
     except Exception:
-        body = {}
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "Invalid JSON body"},
+        )
 
-    idempotency_key = str(body.get("idempotencyKey") or uuid4())
+    transaction_type = str(body.get("transactionType") or "").strip().upper()
+    if transaction_type not in {"APPEND", "UPDATE"}:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "transactionType must be APPEND or UPDATE"},
+        )
+
+    branch_name = str(branchName or "master").strip() or "master"
+    try:
+        branch_name = validate_branch_name(branch_name)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": branch_name},
+        )
+
+    idempotency_key = str(uuid4())
 
     try:
         ingest_request, _ = await dataset_registry.create_ingest_request(
             dataset_id=dataset_id,
             db_name=dataset.db_name,
-            branch=dataset.branch,
+            branch=branch_name,
             idempotency_key=idempotency_key,
             request_fingerprint=None,
+            source_metadata={"transactionType": transaction_type},
         )
         txn = await dataset_registry.create_ingest_transaction(
             ingest_request_id=ingest_request.ingest_request_id,
@@ -752,11 +1130,241 @@ async def create_transaction_v2(
         )
     except Exception as exc:
         logger.error("Failed to create transaction: %s", exc)
-        return _foundry_error(500, error_code="INTERNAL", error_name="TransactionCreationFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="CreateTransactionError",
+            parameters={"message": str(exc)},
+        )
 
-    resp = _transaction_response(txn)
-    resp["datasetRid"] = _dataset_rid(dataset_id)
-    return JSONResponse(content=resp)
+    created_time = txn.created_at.isoformat() if getattr(txn, "created_at", None) else None
+    return JSONResponse(
+        content={
+            "rid": _transaction_rid(txn.transaction_id),
+            "transactionType": transaction_type,
+            "status": _map_txn_status(txn.status),
+            **({"createdTime": created_time} if created_time else {}),
+        }
+    )
+
+
+@router.get(
+    "/{datasetRid}/transactions",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("foundry_datasets_v2.list_transactions")
+async def list_transactions_v2(
+    datasetRid: str,
+    preview: bool = Query(..., alias="preview"),
+    branchName: str = Query(default="master", alias="branchName"),
+    pageSize: int = Query(default=100, ge=1, le=1000, alias="pageSize"),
+    pageToken: str = Query(default="", alias="pageToken"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
+) -> JSONResponse:
+    """GET /v2/datasets/{datasetRid}/transactions — List transactions."""
+    if preview is not True:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="ApiFeaturePreviewUsageOnly",
+            parameters={},
+        )
+
+    dataset_id = _dataset_id_from_rid(datasetRid)
+    if not dataset_id:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+    if not dataset:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    normalized_branch = str(branchName or "").strip() or "master"
+    try:
+        normalized_branch = validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    scope_key = f"datasets:transactions:{dataset_id}:{normalized_branch}"
+    try:
+        offset = decode_offset_page_token(
+            pageToken,
+            ttl_seconds=60 * 60 * 24,
+            expected_scope=scope_key,
+        )
+    except ValueError as exc:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
+
+    try:
+        records = await dataset_registry.list_ingest_transactions_for_dataset(
+            dataset_id=dataset_id,
+            branch=normalized_branch,
+            limit=int(pageSize) + 1,
+            offset=int(offset),
+        )
+    except Exception as exc:
+        logger.error("Failed to list transactions: %s", exc)
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="ListTransactionsError",
+            parameters={"message": str(exc)},
+        )
+
+    has_next = len(records) > int(pageSize)
+    page = records[: int(pageSize)]
+    next_token = None
+    if has_next:
+        next_token = encode_offset_page_token(int(offset) + int(pageSize), scope=scope_key)
+
+    data: list[dict[str, Any]] = []
+    for row in page:
+        transaction_type: str = "APPEND"
+        try:
+            ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=row.ingest_request_id)
+            source_metadata = getattr(ingest_request, "source_metadata", None) if ingest_request else None
+            if isinstance(source_metadata, dict) and source_metadata.get("transactionType"):
+                transaction_type = str(source_metadata.get("transactionType")).strip().upper() or transaction_type
+        except Exception:
+            transaction_type = "APPEND"
+
+        created_time = row.created_at.isoformat() if getattr(row, "created_at", None) else None
+        closed = getattr(row, "committed_at", None) or getattr(row, "aborted_at", None)
+        closed_time = closed.isoformat() if hasattr(closed, "isoformat") else None
+        data.append(
+            {
+                "rid": _transaction_rid(row.transaction_id),
+                "transactionType": transaction_type,
+                "status": _map_txn_status(row.status),
+                "createdTime": created_time,
+                "closedTime": closed_time,
+            }
+        )
+
+    return JSONResponse(content={"data": data, "nextPageToken": next_token})
+
+
+@router.get(
+    "/{datasetRid}/transactions/{transactionRid}",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("foundry_datasets_v2.get_transaction")
+async def get_transaction_v2(
+    datasetRid: str,
+    transactionRid: str,
+    branchName: str = Query(default="master", alias="branchName"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
+) -> JSONResponse:
+    """GET /v2/datasets/{datasetRid}/transactions/{transactionRid} — Get transaction."""
+    dataset_id = _dataset_id_from_rid(datasetRid)
+    if not dataset_id:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    transaction_id = _transaction_id_from_rid(transactionRid)
+    if not transaction_id:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidTransactionRid",
+            parameters={"transactionRid": transactionRid},
+        )
+
+    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+    if not dataset:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
+    if not txn:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="TransactionNotFound",
+            parameters={"transactionRid": transactionRid},
+        )
+
+    # Ensure the transaction belongs to this dataset.
+    ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=txn.ingest_request_id)
+    if not ingest_request or str(getattr(ingest_request, "dataset_id", "")) != str(dataset_id):
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="TransactionNotFound",
+            parameters={"transactionRid": transactionRid},
+        )
+
+    normalized_branch = str(branchName or "master").strip() or "master"
+    try:
+        normalized_branch = validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    if str(getattr(ingest_request, "branch", "") or "") != str(normalized_branch):
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="TransactionNotFound",
+            parameters={"transactionRid": transactionRid},
+        )
+
+    transaction_type = "APPEND"
+    source_metadata = getattr(ingest_request, "source_metadata", None)
+    if isinstance(source_metadata, dict) and source_metadata.get("transactionType"):
+        transaction_type = str(source_metadata.get("transactionType")).strip().upper() or transaction_type
+
+    created_time = txn.created_at.isoformat() if getattr(txn, "created_at", None) else None
+    closed = getattr(txn, "committed_at", None) or getattr(txn, "aborted_at", None)
+    closed_time = closed.isoformat() if hasattr(closed, "isoformat") else None
+    return JSONResponse(
+        content={
+            "rid": _transaction_rid(txn.transaction_id),
+            "transactionType": transaction_type,
+            "status": _map_txn_status(txn.status),
+            "createdTime": created_time,
+            "closedTime": closed_time,
+        }
+    )
 
 
 @router.post(
@@ -770,31 +1378,68 @@ async def commit_transaction_v2(
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
     """POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/commit."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     transaction_id = _transaction_id_from_rid(transactionRid)
     if not transaction_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidTransactionRid", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidTransactionRid",
+            parameters={"transactionRid": transactionRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     # Transaction RID resolves to transaction_id, not ingest_request_id.
     txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not txn:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="TransactionNotFound", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="TransactionNotFound",
+            parameters={"transactionRid": transactionRid},
+        )
 
     if txn.status != "OPEN":
-        return _foundry_error(409, error_code="CONFLICT", error_name="TransactionAlreadyClosed", parameters={"transactionRid": transactionRid, "status": txn.status})
+        return foundry_error(
+            409,
+            error_code="CONFLICT",
+            error_name="TransactionNotOpen",
+            parameters={"transactionRid": transactionRid, "status": txn.status},
+        )
 
+    ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=txn.ingest_request_id)
+    if not ingest_request:
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="CommitTransactionError",
+            parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": "Ingest request not found"},
+        )
+
+    branch = str(getattr(ingest_request, "branch", "") or "").strip() or "master"
     # Commit to lakeFS
     repo = _resolve_lakefs_raw_repository()
-    branch = dataset.branch or "main"
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
         commit_id = await lakefs_client.commit(
@@ -805,10 +1450,10 @@ async def commit_transaction_v2(
         )
     except LakeFSError as exc:
         logger.error("lakeFS commit failed during transaction commit: %s", exc)
-        return _foundry_error(
-            503,
-            error_code="SERVICE_UNAVAILABLE",
-            error_name="TransactionCommitUnavailable",
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="CommitTransactionError",
             parameters={
                 "transactionRid": transactionRid,
                 "datasetRid": datasetRid,
@@ -817,24 +1462,11 @@ async def commit_transaction_v2(
         )
     except Exception as exc:
         logger.error("Unexpected transaction commit failure: %s", exc)
-        return _foundry_error(
+        return foundry_error(
             500,
             error_code="INTERNAL",
-            error_name="TransactionCommitFailed",
+            error_name="CommitTransactionError",
             parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
-        )
-
-    ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=txn.ingest_request_id)
-    if not ingest_request:
-        return _foundry_error(
-            500,
-            error_code="INTERNAL",
-            error_name="TransactionCommitFailed",
-            parameters={
-                "transactionRid": transactionRid,
-                "datasetRid": datasetRid,
-                "message": "Ingest request not found",
-            },
         )
 
     lakefs_storage_service = await _get_lakefs_storage(pipeline_registry, request)
@@ -883,7 +1515,7 @@ async def commit_transaction_v2(
             apply_schema=apply_schema,
         )
     except ValueError as exc:
-        return _foundry_error(
+        return foundry_error(
             400,
             error_code="INVALID_ARGUMENT",
             error_name="TransactionCommitFailed",
@@ -900,7 +1532,7 @@ async def commit_transaction_v2(
             recovered = await dataset_registry.get_latest_version(dataset_id=dataset_id)
             recovered_commit_id = str(getattr(recovered, "lakefs_commit_id", "") or "").strip()
             if recovered is None or recovered_commit_id != str(commit_id):
-                return _foundry_error(
+                return foundry_error(
                     500,
                     error_code="INTERNAL",
                     error_name="TransactionCommitFailed",
@@ -913,7 +1545,7 @@ async def commit_transaction_v2(
                 commit_id,
             )
         except Exception as reconcile_exc:
-            return _foundry_error(
+            return foundry_error(
                 500,
                 error_code="INTERNAL",
                 error_name="TransactionCommitFailed",
@@ -926,11 +1558,19 @@ async def commit_transaction_v2(
 
     committed_txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not committed_txn:
-        return _foundry_error(500, error_code="INTERNAL", error_name="TransactionCommitFailed", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="TransactionCommitFailed",
+            parameters={"transactionRid": transactionRid},
+        )
 
-    resp = _transaction_response(committed_txn)
-    resp["datasetRid"] = _dataset_rid(dataset_id)
-    return JSONResponse(content=resp)
+    return JSONResponse(
+        content={
+            "rid": _transaction_rid(transaction_id),
+            "status": _map_txn_status(committed_txn.status),
+        }
+    )
 
 
 @router.post(
@@ -942,37 +1582,73 @@ async def abort_transaction_v2(
     datasetRid: str,
     transactionRid: str,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
     """POST /v2/datasets/{datasetRid}/transactions/{transactionRid}/abort."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     transaction_id = _transaction_id_from_rid(transactionRid)
     if not transaction_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidTransactionRid", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidTransactionRid",
+            parameters={"transactionRid": transactionRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     txn = await dataset_registry.get_ingest_transaction_by_id(transaction_id=transaction_id)
     if not txn:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="TransactionNotFound", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="TransactionNotFound",
+            parameters={"transactionRid": transactionRid},
+        )
 
     if txn.status != "OPEN":
-        return _foundry_error(409, error_code="CONFLICT", error_name="TransactionAlreadyClosed", parameters={"transactionRid": transactionRid, "status": txn.status})
+        return foundry_error(
+            409,
+            error_code="CONFLICT",
+            error_name="TransactionNotOpen",
+            parameters={"transactionRid": transactionRid, "status": txn.status},
+        )
 
     aborted_txn = await dataset_registry.mark_ingest_transaction_aborted(
         ingest_request_id=txn.ingest_request_id,
         error="Transaction aborted by user",
     )
     if not aborted_txn:
-        return _foundry_error(500, error_code="INTERNAL", error_name="TransactionAbortFailed", parameters={"transactionRid": transactionRid})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="TransactionAbortFailed",
+            parameters={"transactionRid": transactionRid},
+        )
 
-    resp = _transaction_response(aborted_txn)
-    resp["datasetRid"] = _dataset_rid(dataset_id)
-    return JSONResponse(content=resp)
+    return JSONResponse(
+        content={
+            "rid": _transaction_rid(transaction_id),
+            "status": _map_txn_status(aborted_txn.status),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -986,59 +1662,136 @@ async def abort_transaction_v2(
 @trace_endpoint("foundry_datasets_v2.list_files")
 async def list_files_v2(
     datasetRid: str,
-    branchName: str = Query(default="main", alias="branchName"),
+    request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
+    startTransactionRid: str = Query(default="", alias="startTransactionRid"),
+    endTransactionRid: str = Query(default="", alias="endTransactionRid"),
+    prefix: str = Query(default="", alias="prefix"),
     pageSize: int = Query(default=100, ge=1, le=1000, alias="pageSize"),
-    request: Request = None,  # type: ignore[assignment]
+    pageToken: str = Query(default="", alias="pageToken"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> JSONResponse:
     """GET /v2/datasets/{datasetRid}/files — List files in dataset."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     repo = _resolve_lakefs_raw_repository()
-    ref = branchName or dataset.branch or "main"
+    ref = str(branchName or "").strip() or "master"
+    try:
+        ref = validate_branch_name(ref)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": ref},
+        )
+
+    if startTransactionRid and not _transaction_id_from_rid(startTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "startTransactionRid is invalid"},
+        )
+    if endTransactionRid and not _transaction_id_from_rid(endTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "endTransactionRid is invalid"},
+        )
 
     # Build prefix from dataset naming convention
-    prefix = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/"
+    dataset_prefix = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/"
+    file_prefix = str(prefix or "").lstrip("/")
+    object_prefix = f"{dataset_prefix}{file_prefix}" if file_prefix else dataset_prefix
+
+    scope_key = f"datasets:files:{dataset_id}:{ref}:{file_prefix}"
+    try:
+        offset = decode_offset_page_token(
+            pageToken,
+            ttl_seconds=60 * 60 * 24,
+            expected_scope=scope_key,
+        )
+    except ValueError as exc:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": str(exc)},
+        )
 
     files: List[Dict[str, Any]] = []
     try:
         lakefs_client = await _get_lakefs_client(pipeline_registry, request)
-        objects = await lakefs_client.list_objects(repository=repo, ref=ref, prefix=prefix, amount=pageSize)
-        for obj in objects:
+        objects = await lakefs_client.list_objects(repository=repo, ref=ref, prefix=object_prefix, amount=1000)
+        sliced = objects[int(offset) : int(offset) + int(pageSize) + 1]
+        has_next = len(sliced) > int(pageSize)
+        if has_next:
+            sliced = sliced[: int(pageSize)]
+
+        for obj in sliced:
             path = obj.get("path", "")
             # Strip the dataset prefix for display
-            relative_path = path[len(prefix):] if path.startswith(prefix) else path
-            files.append({
-                "path": relative_path,
-                "sizeBytes": obj.get("size_bytes") or obj.get("sizeBytes") or 0,
-                "transactionRid": None,
-                "updatedTime": obj.get("mtime") or None,
-            })
+            relative_path = path[len(dataset_prefix) :] if path.startswith(dataset_prefix) else path
+            relative_path = relative_path.lstrip("/")
+            files.append(
+                {
+                    "rid": _file_rid(dataset_id=dataset_id, file_path=relative_path),
+                    "filePath": relative_path,
+                    "sizeBytes": obj.get("size_bytes") or obj.get("sizeBytes") or 0,
+                    "updatedTime": obj.get("mtime") or None,
+                }
+            )
+        next_token = None
+        if has_next:
+            next_token = encode_offset_page_token(int(offset) + int(pageSize), scope=scope_key)
     except LakeFSError as exc:
         logger.error("lakeFS list_files failed: %s", exc)
-        return _foundry_error(
-            503,
-            error_code="SERVICE_UNAVAILABLE",
-            error_name="DatasetFilesUnavailable",
-            parameters={"datasetRid": datasetRid, "message": "lakeFS list failed"},
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="ListFilesError",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
+    except LakeFSNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": ref, "datasetRid": datasetRid},
         )
     except Exception as exc:
         logger.error("Unexpected list_files failure: %s", exc)
-        return _foundry_error(
+        return foundry_error(
             500,
             error_code="INTERNAL",
-            error_name="DatasetFilesListFailed",
+            error_name="ListFilesError",
             parameters={"datasetRid": datasetRid, "message": str(exc)},
         )
 
-    return JSONResponse(content={"data": files, "nextPageToken": None})
+    return JSONResponse(content={"data": files, "nextPageToken": next_token})
 
 
 @router.get(
@@ -1050,94 +1803,429 @@ async def list_files_v2(
 async def get_file_content_v2(
     datasetRid: str,
     filePath: str,
-    branchName: str = Query(default="main", alias="branchName"),
-    request: Request = None,  # type: ignore[assignment]
+    request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
+    startTransactionRid: str = Query(default="", alias="startTransactionRid"),
+    endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
 ) -> Response:
     """GET /v2/datasets/{datasetRid}/files/{filePath}/content — Download file."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
     repo = _resolve_lakefs_raw_repository()
-    branch = branchName or dataset.branch or "main"
-    object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/{filePath}"
+    branch = str(branchName or "").strip() or (dataset.branch or "master")
+    if startTransactionRid and not _transaction_id_from_rid(startTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "startTransactionRid is invalid"},
+        )
+    if endTransactionRid and not _transaction_id_from_rid(endTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "endTransactionRid is invalid"},
+        )
 
     try:
-        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
-        storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+        branch = validate_branch_name(branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": branch},
+        )
+
+    normalized_path = str(filePath or "").strip().lstrip("/")
+    object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/{normalized_path}"
+
+    try:
+        storage_service = await _get_lakefs_storage(pipeline_registry, request)
         content = await storage_service.load_bytes(repo, f"{branch}/{object_key}")
+    except FileNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="FileNotFoundOnBranch",
+            parameters={"branchName": branch, "filePath": normalized_path, "datasetRid": datasetRid},
+        )
+    except LakeFSNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": branch, "datasetRid": datasetRid},
+        )
+    except LakeFSError as exc:
+        logger.error("lakeFS get_file_content failed: %s", exc)
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="GetFileContentError",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
     except Exception as exc:
         logger.warning("Failed to load file content: %s", exc)
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="FileNotFound", parameters={"filePath": filePath})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="GetFileContentError",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
 
     media_type = mimetypes.guess_type(filePath)[0] or "application/octet-stream"
     return Response(content=content, media_type=media_type)
 
 
 @router.post(
-    "/{datasetRid}/files:upload",
+    "/{datasetRid}/files/{filePath:path}/upload",
     status_code=status.HTTP_200_OK,
 )
 @trace_endpoint("foundry_datasets_v2.upload_file")
 async def upload_file_v2(
     datasetRid: str,
-    filePath: str = Query(..., alias="filePath"),
-    branchName: str = Query(default="main", alias="branchName"),
-    request: Request = None,  # type: ignore[assignment]
+    filePath: str,
+    request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
+    transactionRid: str = Query(default="", alias="transactionRid"),
+    byteOffset: int | None = Query(default=None, alias="byteOffset"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-write"],
+    ),
 ) -> JSONResponse:
-    """POST /v2/datasets/{datasetRid}/files:upload — Upload file."""
+    """POST /v2/datasets/{datasetRid}/files/{filePath}/upload — Upload file."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
 
-    file_path = str(filePath).strip()
+    file_path = str(filePath or "").strip().lstrip("/")
     if not file_path:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidArgument", parameters={"message": "filePath is required"})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "filePath is required"},
+        )
 
     repo = _resolve_lakefs_raw_repository()
-    branch = branchName or dataset.branch or "main"
+    txn_id: str | None = None
+    transaction_record: Any | None = None
+    ingest_request: Any | None = None
+
+    if transactionRid:
+        txn_id = _transaction_id_from_rid(transactionRid)
+        if not txn_id:
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidTransactionRid",
+                parameters={"transactionRid": transactionRid},
+            )
+        transaction_record = await dataset_registry.get_ingest_transaction_by_id(transaction_id=txn_id)
+        if not transaction_record:
+            return foundry_error(
+                404,
+                error_code="NOT_FOUND",
+                error_name="TransactionNotFound",
+                parameters={"transactionRid": transactionRid},
+            )
+        if transaction_record.status != "OPEN":
+            return foundry_error(
+                409,
+                error_code="CONFLICT",
+                error_name="TransactionNotOpen",
+                parameters={"transactionRid": transactionRid, "status": transaction_record.status},
+            )
+        ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=transaction_record.ingest_request_id)
+        if not ingest_request or str(getattr(ingest_request, "dataset_id", "")) != str(dataset_id):
+            return foundry_error(
+                404,
+                error_code="NOT_FOUND",
+                error_name="TransactionNotFound",
+                parameters={"transactionRid": transactionRid},
+            )
+        branch = str(getattr(ingest_request, "branch", "") or "").strip() or "master"
+    else:
+        branch = str(branchName or "").strip() or "master"
+        try:
+            branch = validate_branch_name(branch)
+        except SecurityViolationError as exc:
+            logger.info("Invalid branch name rejected: %s", exc)
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidBranchName",
+                parameters={"branchName": branch},
+            )
+        try:
+            ingest_request, _ = await dataset_registry.create_ingest_request(
+                dataset_id=dataset_id,
+                db_name=dataset.db_name,
+                branch=branch,
+                idempotency_key=str(uuid4()),
+                request_fingerprint=None,
+            )
+            transaction_record = await dataset_registry.create_ingest_transaction(
+                ingest_request_id=ingest_request.ingest_request_id,
+                status="OPEN",
+            )
+            txn_id = transaction_record.transaction_id
+        except Exception as exc:
+            logger.error("Failed to create upload transaction: %s", exc)
+            return foundry_error(
+                500,
+                error_code="INTERNAL",
+                error_name="UploadFileError",
+                parameters={"message": str(exc)},
+            )
     object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/{file_path}"
 
     try:
         body_bytes = await request.body()
         content_type = request.headers.get("Content-Type") or "application/octet-stream"
-        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
-        storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
-        await storage_service.save_bytes(repo, f"{branch}/{object_key}", body_bytes, content_type=content_type)
+        storage_service = await _get_lakefs_storage(pipeline_registry, request)
+        resolved_offset = int(byteOffset) if byteOffset is not None else 0
+        if resolved_offset < 0:
+            return foundry_error(
+                400,
+                error_code="INVALID_ARGUMENT",
+                error_name="InvalidArgument",
+                parameters={"message": "byteOffset must be >= 0"},
+            )
+
+        payload_bytes = body_bytes
+        if resolved_offset:
+            try:
+                existing = await storage_service.load_bytes(repo, f"{branch}/{object_key}")
+            except (FileNotFoundError, LakeFSNotFoundError):
+                return foundry_error(
+                    400,
+                    error_code="INVALID_ARGUMENT",
+                    error_name="WriteOffsetOutOfBounds",
+                    parameters={
+                        "datasetRid": datasetRid,
+                        "filePath": file_path,
+                        "branchName": branch,
+                        "byteOffset": resolved_offset,
+                    },
+                )
+            if len(existing) != resolved_offset:
+                return foundry_error(
+                    400,
+                    error_code="INVALID_ARGUMENT",
+                    error_name="WriteOffsetOutOfBounds",
+                    parameters={
+                        "datasetRid": datasetRid,
+                        "filePath": file_path,
+                        "branchName": branch,
+                        "byteOffset": resolved_offset,
+                        "currentSizeBytes": len(existing),
+                    },
+                )
+            payload_bytes = existing + body_bytes
+
+        await storage_service.save_bytes(repo, f"{branch}/{object_key}", payload_bytes, content_type=content_type)
         # Keep a canonical CSV object so commit/readTable can materialize even when
         # callers upload arbitrary CSV file paths instead of source.csv.
         if file_path.lower().endswith(".csv") and file_path.lower() != "source.csv":
             canonical_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/source.csv"
-            await storage_service.save_bytes(repo, f"{branch}/{canonical_key}", body_bytes, content_type=content_type)
+            await storage_service.save_bytes(repo, f"{branch}/{canonical_key}", payload_bytes, content_type=content_type)
+    except LakeFSNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": branch, "datasetRid": datasetRid},
+        )
     except Exception as exc:
         logger.error("Failed to upload file: %s", exc)
-        return _foundry_error(500, error_code="INTERNAL", error_name="FileUploadFailed", parameters={"message": str(exc)})
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="UploadFileError",
+            parameters={"message": str(exc)},
+        )
 
-    return JSONResponse(content={
-        "path": file_path,
-        "sizeBytes": len(body_bytes),
-        "transactionRid": None,
-        "updatedTime": utcnow().isoformat(),
-    })
+    return JSONResponse(
+        content={
+            "rid": _file_rid(dataset_id=dataset_id, file_path=file_path),
+            "transactionRid": _transaction_rid(str(txn_id or "")),
+        }
+    )
+
+
+@router.get(
+    "/{datasetRid}/files/{filePath:path}",
+    status_code=status.HTTP_200_OK,
+)
+@trace_endpoint("foundry_datasets_v2.get_file")
+async def get_file_v2(
+    datasetRid: str,
+    filePath: str,
+    request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
+    startTransactionRid: str = Query(default="", alias="startTransactionRid"),
+    endTransactionRid: str = Query(default="", alias="endTransactionRid"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
+) -> JSONResponse:
+    """GET /v2/datasets/{datasetRid}/files/{filePath} — Get file metadata."""
+    dataset_id = _dataset_id_from_rid(datasetRid)
+    if not dataset_id:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+    if not dataset:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    normalized_path = str(filePath or "").strip().lstrip("/")
+    if not normalized_path:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "filePath is required"},
+        )
+
+    branch = str(branchName or "").strip() or (dataset.branch or "master")
+    try:
+        branch = validate_branch_name(branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": branch},
+        )
+
+    if startTransactionRid and not _transaction_id_from_rid(startTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "startTransactionRid is invalid"},
+        )
+    if endTransactionRid and not _transaction_id_from_rid(endTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "endTransactionRid is invalid"},
+        )
+
+    repo = _resolve_lakefs_raw_repository()
+    object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/{normalized_path}"
+    try:
+        storage_service = await _get_lakefs_storage(pipeline_registry, request)
+        meta = await storage_service.get_object_metadata(repo, f"{branch}/{object_key}")
+    except FileNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="FileNotFoundOnBranch",
+            parameters={"branchName": branch, "filePath": normalized_path, "datasetRid": datasetRid},
+        )
+    except LakeFSNotFoundError:
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="BranchNotFound",
+            parameters={"branchName": branch, "datasetRid": datasetRid},
+        )
+    except LakeFSError as exc:
+        logger.error("lakeFS get_file failed: %s", exc)
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="GetFileError",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
+    except Exception as exc:
+        logger.warning("Failed to load file metadata: %s", exc)
+        return foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="GetFileError",
+            parameters={"datasetRid": datasetRid, "message": str(exc)},
+        )
+
+    updated = meta.get("last_modified")
+    updated_time = updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None)
+    size = meta.get("size")
+    try:
+        size_bytes = int(size) if size is not None else 0
+    except Exception:
+        size_bytes = 0
+
+    return JSONResponse(
+        content={
+            "rid": _file_rid(dataset_id=dataset_id, file_path=normalized_path),
+            "filePath": normalized_path,
+            "sizeBytes": size_bytes,
+            "updatedTime": updated_time,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Read table
 # ---------------------------------------------------------------------------
 
-@router.post(
+@router.get(
     "/{datasetRid}/readTable",
     status_code=status.HTTP_200_OK,
 )
@@ -1145,28 +2233,115 @@ async def upload_file_v2(
 async def read_table_v2(
     datasetRid: str,
     request: Request,
+    branchName: str = Query(default="master", alias="branchName"),
+    startTransactionRid: str = Query(default="", alias="startTransactionRid"),
+    endTransactionRid: str = Query(default="", alias="endTransactionRid"),
+    format: str = Query(..., alias="format"),
+    columns: list[str] | None = Query(default=None, alias="columns"),
+    rowLimit: int = Query(default=100, alias="rowLimit"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
-) -> JSONResponse:
-    """POST /v2/datasets/{datasetRid}/readTable — Read table rows."""
+    _: None = require_scopes(
+        ["api:datasets-read"],
+    ),
+) -> Response:
+    """GET /v2/datasets/{datasetRid}/readTable — Read table rows."""
     dataset_id = _dataset_id_from_rid(datasetRid)
     if not dataset_id:
-        return _foundry_error(400, error_code="INVALID_ARGUMENT", error_name="InvalidDatasetRid", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidDatasetRid",
+            parameters={"datasetRid": datasetRid},
+        )
 
     dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
     if not dataset:
-        return _foundry_error(404, error_code="NOT_FOUND", error_name="DatasetNotFound", parameters={"datasetRid": datasetRid})
+        return foundry_error(
+            404,
+            error_code="NOT_FOUND",
+            error_name="DatasetNotFound",
+            parameters={"datasetRid": datasetRid},
+        )
+
+    normalized_branch = str(branchName or "").strip() or "master"
+    try:
+        normalized_branch = validate_branch_name(normalized_branch)
+    except SecurityViolationError as exc:
+        logger.info("Invalid branch name rejected: %s", exc)
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBranchName",
+            parameters={"branchName": normalized_branch},
+        )
+
+    if startTransactionRid and not _transaction_id_from_rid(startTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "startTransactionRid is invalid"},
+        )
+    if endTransactionRid and not _transaction_id_from_rid(endTransactionRid):
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "endTransactionRid is invalid"},
+        )
 
     try:
-        body = await request.json()
+        requested_limit = int(rowLimit)
     except Exception:
-        body = {}
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "rowLimit must be an integer"},
+        )
+    if requested_limit < 1:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "rowLimit must be >= 1"},
+        )
+    if requested_limit > 10000:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="ReadTableRowLimitExceeded",
+            parameters={"rowLimit": requested_limit, "maxRowLimit": 10000},
+        )
 
-    requested_columns: list[str] | None = body.get("columns")
-    row_limit: int = int(body.get("rowLimit") or 100)
-    row_limit = max(1, min(row_limit, 10000))
+    fmt = str(format or "").strip().upper()
+    if fmt not in {"CSV", "ARROW"}:
+        return foundry_error(
+            400,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidArgument",
+            parameters={"message": "format must be ARROW or CSV"},
+        )
 
-    # Load latest version
+    if fmt == "ARROW":
+        try:
+            import pyarrow as pa  # type: ignore
+            import pyarrow.ipc as pa_ipc  # type: ignore
+        except ModuleNotFoundError:
+            return foundry_error(
+                500,
+                error_code="INTERNAL",
+                error_name="ReadTableError",
+                parameters={"datasetRid": datasetRid, "message": "pyarrow is not available"},
+            )
+
+    requested_columns = [str(col).strip() for col in (columns or []) if str(col).strip()]
+
+    headers: list[str] = []
+    rows: list[list[Any]] = []
+    total_count: int = 0
+
     version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
     if not version:
         try:
@@ -1178,104 +2353,77 @@ async def read_table_v2(
             version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
         except Exception as reconcile_exc:
             logger.warning("Dataset ingest reconcile before readTable failed: %s", reconcile_exc)
-    if not version:
-        return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
 
-    # Try loading sample from cached sample_json first
-    sample = version.sample_json or {}
-    cached_columns = sample.get("columns") or []
-    cached_rows = sample.get("rows") or []
+    if version and getattr(version, "sample_json", None):
+        sample = version.sample_json or {}
+        cached_columns = sample.get("columns") or []
+        cached_rows = sample.get("rows") or []
+        if isinstance(cached_rows, list) and cached_rows:
+            headers = [
+                str(col.get("name") or "").strip() if isinstance(col, dict) else str(col).strip()
+                for col in cached_columns
+            ]
+            headers = [h for h in headers if h]
+            total_count = int(getattr(version, "row_count", None) or len(cached_rows))
+            for raw in cached_rows[:requested_limit]:
+                if isinstance(raw, list):
+                    rows.append(raw)
 
-    if cached_rows:
-        # Use cached sample data
-        columns_out = cached_columns
-        if requested_columns and isinstance(requested_columns, list):
-            col_indices = []
-            col_names = []
-            for rc in requested_columns:
-                for i, cc in enumerate(cached_columns):
-                    name = cc.get("name") if isinstance(cc, dict) else str(cc)
-                    if name == rc:
-                        col_indices.append(i)
-                        col_names.append(cc)
-                        break
-            columns_out = col_names
-            rows_out = []
-            for row in cached_rows[:row_limit]:
-                if isinstance(row, list):
-                    rows_out.append([row[i] if i < len(row) else None for i in col_indices])
-                else:
-                    rows_out.append(row)
-        else:
-            rows_out = cached_rows[:row_limit]
-            columns_out = cached_columns
-
-        return JSONResponse(content={
-            "columns": columns_out,
-            "rows": rows_out,
-            "totalRowCount": version.row_count or len(cached_rows),
-        })
-
-    # Fallback: try loading from lakeFS
-    try:
+    if not rows:
         repo = _resolve_lakefs_raw_repository()
-        branch = dataset.branch or "main"
-        storage_service = await _get_lakefs_storage(pipeline_registry, request)
-        fallback_keys = []
-        artifact_key = getattr(version, "artifact_key", None)
-        if isinstance(artifact_key, str) and artifact_key.strip():
-            fallback_keys.append(_normalize_dataset_object_key(dataset, artifact_key))
-        fallback_keys.append(_normalize_dataset_object_key(dataset, "source.csv"))
+        try:
+            storage_service = await _get_lakefs_storage(pipeline_registry, request)
+            fallback_keys: list[str] = []
+            artifact_key = getattr(version, "artifact_key", None) if version else None
+            if isinstance(artifact_key, str) and artifact_key.strip():
+                fallback_keys.append(_normalize_dataset_object_key(dataset, artifact_key))
+            fallback_keys.append(_normalize_dataset_object_key(dataset, "source.csv"))
 
-        for object_key in dict.fromkeys(fallback_keys):
-            try:
-                csv_bytes = await storage_service.load_bytes(repo, f"{branch}/{object_key}")
-            except (FileNotFoundError, LakeFSNotFoundError):
-                continue
+            for object_key in dict.fromkeys(fallback_keys):
+                try:
+                    csv_bytes = await storage_service.load_bytes(repo, f"{normalized_branch}/{object_key}")
+                except (FileNotFoundError, LakeFSNotFoundError):
+                    continue
 
-            reader = csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig", errors="replace")))
-            all_rows = list(reader)
-            if not all_rows:
-                continue
-            header = _normalized_csv_headers([str(cell) for cell in all_rows[0]])
-            data_rows = all_rows[1: 1 + row_limit]
-            columns_out = [{"name": h, "type": "string"} for h in header]
-            if requested_columns and isinstance(requested_columns, list):
-                col_indices: list[int] = []
-                columns_out = []
-                for requested_name in [str(col) for col in requested_columns]:
-                    for idx, name in enumerate(header):
-                        if name == requested_name:
-                            col_indices.append(idx)
-                            columns_out.append({"name": header[idx], "type": "string"})
-                            break
-                projected_rows: list[list[Any]] = []
-                for row in data_rows:
-                    projected_rows.append([row[idx] if idx < len(row) else None for idx in col_indices])
-                data_rows = projected_rows
+                reader = csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig", errors="replace")))
+                all_rows = list(reader)
+                if not all_rows:
+                    continue
+                headers = _normalized_csv_headers([str(cell) for cell in all_rows[0]])
+                raw_data_rows = all_rows[1:]
+                total_count = len(raw_data_rows)
+                rows = raw_data_rows[:requested_limit]
+                break
+        except LakeFSError as exc:
+            logger.error("lakeFS readTable load failed: %s", exc)
+            return foundry_error(
+                500,
+                error_code="INTERNAL",
+                error_name="ReadTableError",
+                parameters={"datasetRid": datasetRid, "message": "lakeFS read failed"},
+            )
 
-            return JSONResponse(content={
-                "columns": columns_out,
-                "rows": data_rows,
-                "totalRowCount": len(all_rows) - 1,
-            })
-        return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
-    except (FileNotFoundError, LakeFSNotFoundError):
-        # Dataset can legitimately exist before any source object is materialized.
-        return JSONResponse(content={"columns": [], "rows": [], "totalRowCount": 0})
-    except LakeFSError as exc:
-        logger.error("lakeFS readTable load failed: %s", exc)
-        return _foundry_error(
-            503,
-            error_code="SERVICE_UNAVAILABLE",
-            error_name="DatasetReadUnavailable",
-            parameters={"datasetRid": datasetRid, "message": "lakeFS read failed"},
-        )
-    except Exception as exc:
-        logger.error("Unexpected readTable load failure: %s", exc)
-        return _foundry_error(
-            500,
-            error_code="INTERNAL",
-            error_name="DatasetReadFailed",
-            parameters={"datasetRid": datasetRid, "message": str(exc)},
-        )
+    if requested_columns and headers:
+        index_by_name = {name: idx for idx, name in enumerate(headers)}
+        selected_indices = [index_by_name[name] for name in requested_columns if name in index_by_name]
+        headers = [headers[idx] for idx in selected_indices]
+        rows = [[row[idx] if idx < len(row) else None for idx in selected_indices] for row in rows]
+
+    if fmt == "CSV":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        if headers:
+            writer.writerow(headers)
+        for row in rows:
+            writer.writerow([value if value is not None else "" for value in row])
+        return Response(content=buffer.getvalue(), media_type="text/csv")
+
+    # ARROW
+    columns_data: dict[str, list[Any]] = {}
+    for col_idx, name in enumerate(headers):
+        columns_data[name] = [row[col_idx] if col_idx < len(row) else None for row in rows]
+    table = pa.table({name: pa.array(values, type=pa.string()) for name, values in columns_data.items()})
+    sink = io.BytesIO()
+    with pa_ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    return Response(content=sink.getvalue(), media_type="application/vnd.apache.arrow.file")

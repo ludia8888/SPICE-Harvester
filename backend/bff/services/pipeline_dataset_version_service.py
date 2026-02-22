@@ -198,6 +198,12 @@ async def create_dataset_version(
             )
             staging_prefix = ops._ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/data.json"
+            await pipeline_registry.ensure_lakefs_branch(
+                repository=repo,
+                branch=dataset_branch,
+                source="main",
+                user_id=actor_user_id,
+            )
             checksum = await lakefs_storage_service.save_json(
                 repo,
                 f"{dataset_branch}/{object_key}",

@@ -52,18 +52,18 @@ async def test_join_evaluator_reports_coverage_and_explosion() -> None:
     right_id = "ds-right"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="main",
+        branch="master",
         schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(

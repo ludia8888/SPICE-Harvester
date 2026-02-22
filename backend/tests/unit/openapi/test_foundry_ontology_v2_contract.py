@@ -1,10 +1,12 @@
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock
 
 from bff.dependencies import BFFDependencyProvider
 from bff.routers import foundry_ontology_v2
+from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
+from shared.security.user_context import UserPrincipal
 
 
 def _param_names(schema: dict, *, path: str, method: str) -> list[str]:
@@ -14,6 +16,16 @@ def _param_names(schema: dict, *, path: str, method: str) -> list[str]:
 
 def _build_router_test_app(*, oms_client: object) -> FastAPI:
     app = FastAPI()
+    app.add_exception_handler(FoundryAPIError, foundry_exception_handler)
+
+    @app.middleware("http")
+    async def _inject_test_principal(request: Request, call_next):  # noqa: ANN001
+        request.state.user = UserPrincipal(
+            id="test-user",
+            claims={"scope": "api:ontologies-read api:ontologies-write"},
+        )
+        return await call_next(request)
+
     app.include_router(foundry_ontology_v2.router, prefix="/api")
 
     async def _fake_oms_client():
@@ -41,7 +53,7 @@ def test_foundry_v2_object_type_list_keeps_pagination_and_branch_params():
     app.include_router(foundry_ontology_v2.router, prefix="/api")
 
     schema = app.openapi()
-    params = _param_names(schema, path="/api/v2/ontologies/{ontology}/objectTypes", method="get")
+    params = _param_names(schema, path="/api/v2/ontologies/{ontologyRid}/objectTypes", method="get")
 
     assert "pageSize" in params
     assert "pageToken" in params
@@ -56,42 +68,42 @@ def test_foundry_v2_ontology_read_paths_include_branch_when_supported():
 
     object_type_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectTypes/{objectType}",
+        path="/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}",
         method="get",
     )
     outgoing_list_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes",
+        path="/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes",
         method="get",
     )
     outgoing_get_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectTypes/{objectType}/outgoingLinkTypes/{linkType}",
+        path="/api/v2/ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/outgoingLinkTypes/{linkTypeApiName}",
         method="get",
     )
     search_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/search",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/search",
         method="post",
     )
     list_objects_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}",
         method="get",
     )
     get_object_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}",
         method="get",
     )
     list_linked_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}",
         method="get",
     )
     get_linked_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}/{linkedObjectPrimaryKey}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}/{linkedObjectPrimaryKey}",
         method="get",
     )
 
@@ -129,7 +141,7 @@ def test_foundry_v2_load_object_set_objects_keeps_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjects",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjects",
         method="post",
     )
 
@@ -151,17 +163,17 @@ def test_foundry_v2_object_set_preview_endpoints_keep_preview_query_param():
 
     load_links_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadLinks",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
         method="post",
     )
     load_multiple_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjectsMultipleObjectTypes",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
         method="post",
     )
     load_or_interfaces_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/loadObjectsOrInterfaces",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
         method="post",
     )
 
@@ -180,12 +192,12 @@ def test_foundry_v2_object_set_aggregate_and_temporary_query_params():
 
     aggregate_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/aggregate",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/aggregate",
         method="post",
     )
     create_temporary_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objectSets/createTemporary",
+        path="/api/v2/ontologies/{ontologyRid}/objectSets/createTemporary",
         method="post",
     )
 
@@ -201,7 +213,7 @@ def test_foundry_v2_execute_query_keeps_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/queries/{queryApiName}/execute",
+        path="/api/v2/ontologies/{ontologyRid}/queries/{queryApiName}/execute",
         method="post",
     )
 
@@ -218,7 +230,7 @@ def test_foundry_v2_list_objects_includes_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}",
         method="get",
     )
 
@@ -240,7 +252,7 @@ def test_foundry_v2_count_objects_includes_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/count",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/count",
         method="post",
     )
 
@@ -260,7 +272,7 @@ def test_foundry_v2_list_linked_objects_includes_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/links/{linkType}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/links/{linkTypeApiName}",
         method="get",
     )
 
@@ -282,7 +294,7 @@ def test_foundry_v2_aggregate_objects_keeps_foundry_query_params():
 
     params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/aggregate",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/aggregate",
         method="post",
     )
 
@@ -297,12 +309,12 @@ def test_foundry_v2_timeseries_and_attachment_query_params():
 
     timeseries_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/timeseries/{property}/firstPoint",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/timeseries/{property}/firstPoint",
         method="get",
     )
     attachment_params = _param_names(
         schema,
-        path="/api/v2/ontologies/{ontology}/objects/{objectType}/{primaryKey}/attachments/{property}",
+        path="/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/{primaryKey}/attachments/{property}",
         method="get",
     )
 
@@ -335,7 +347,7 @@ def test_foundry_v2_strict_compat_env_gate(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.unit
 def test_foundry_v2_full_metadata_branch_contract():
-    assert foundry_ontology_v2._full_metadata_branch_contract(branch="main") == {"rid": "main"}
+    assert foundry_ontology_v2._full_metadata_branch_contract(branch="master") == {"rid": "master"}
 
 
 @pytest.mark.unit
@@ -352,7 +364,7 @@ def test_foundry_v2_strict_object_type_normalization_adds_required_fields():
     assert normalized["displayName"] == "Order"
     assert normalized["pluralDisplayName"] == "Order"
     assert normalized["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert normalized["rid"] == "ri.spice.main.object-type.commerce.Order"
+    assert normalized["rid"] == "ri.foundry.main.object-type.commerce.Order"
     assert normalized["primaryKey"] in normalized["properties"]
     assert normalized["titleProperty"] in normalized["properties"]
     for prop in normalized["properties"].values():
@@ -373,7 +385,7 @@ def test_foundry_v2_strict_link_type_normalization_and_resolution():
     assert is_resolved is False
     assert unresolved["displayName"] == "orderedBy"
     assert unresolved["cardinality"] == "MANY"
-    assert unresolved["linkTypeRid"] == "ri.spice.main.link-type.commerce.Order.orderedBy"
+    assert unresolved["linkTypeRid"] == "ri.foundry.main.link-type.commerce.Order.orderedBy"
 
     resolved_payload = {"apiName": "orderedBy", "objectTypeApiName": "User"}
     resolved, _, is_resolved = foundry_ontology_v2._strictify_outgoing_link_type(
@@ -447,21 +459,21 @@ async def test_foundry_v2_route_full_metadata_applies_required_fields(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main&preview=true")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master&preview=true")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["branch"] == {"rid": "main"}
+    assert body["branch"] == {"rid": "master"}
     object_contract = body["objectTypes"]["Order"]["objectType"]
     assert object_contract["apiName"] == "Order"
     assert object_contract["displayName"] == "Order"
     assert object_contract["pluralDisplayName"] == "Order"
     assert object_contract["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert object_contract["rid"] == "ri.spice.main.object-type.sales_db.Order"
+    assert object_contract["rid"] == "ri.foundry.main.object-type.sales_db.Order"
     assert object_contract["primaryKey"] == "id"
     assert object_contract["titleProperty"] == "id"
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
-    assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
+    assert object_contract["properties"]["id"]["rid"] == "ri.foundry.main.property.sales_db.Order.id"
     assert body["objectTypes"]["Order"]["linkTypes"] == []
 
 
@@ -488,7 +500,7 @@ async def test_foundry_v2_load_object_set_objects_routes_to_object_search(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=main&transactionId=txn_1",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=master&transactionId=txn_1",
             json={
                 "objectSet": {"objectType": "Order"},
                 "select": ["id", "status"],
@@ -504,7 +516,7 @@ async def test_foundry_v2_load_object_set_objects_routes_to_object_search(
     called_params = oms_client.post.await_args.kwargs["params"]
     called_payload = oms_client.post.await_args.kwargs["json"]
     assert called_path == "/api/v2/ontologies/sales_db/objects/Order/search"
-    assert called_params == {"branch": "main"}
+    assert called_params == {"branch": "master"}
     assert called_payload["pageSize"] == 25
     assert called_payload["select"] == ["id", "status"]
 
@@ -531,7 +543,7 @@ async def test_foundry_v2_load_object_set_objects_requires_object_set(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=main",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=master",
             json={},
         )
 
@@ -564,7 +576,7 @@ async def test_foundry_v2_count_objects_routes_to_oms_count(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objects/Order/count?branch=main&sdkPackageRid=ri.pkg.1&sdkVersion=2.0.0",
+            "/api/v2/ontologies/sales_db/objects/Order/count?branch=master&sdkPackageRid=ri.pkg.1&sdkVersion=2.0.0",
         )
 
     assert response.status_code == 200
@@ -573,7 +585,7 @@ async def test_foundry_v2_count_objects_routes_to_oms_count(
     called_path = oms_client.post.await_args.args[0]
     called_params = oms_client.post.await_args.kwargs["params"]
     assert called_path == "/api/v2/ontologies/sales_db/objects/Order/count"
-    assert called_params == {"branch": "main", "sdkPackageRid": "ri.pkg.1", "sdkVersion": "2.0.0"}
+    assert called_params == {"branch": "master", "sdkPackageRid": "ri.pkg.1", "sdkVersion": "2.0.0"}
 
 
 @pytest.mark.unit
@@ -598,7 +610,7 @@ async def test_foundry_v2_load_object_set_multiple_object_types_requires_preview
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjectsMultipleObjectTypes?branch=main",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjectsMultipleObjectTypes?branch=master",
             json={
                 "objectSet": {"objectType": "Order"},
                 "select": ["id"],
@@ -633,7 +645,7 @@ async def test_foundry_v2_load_object_set_links_requires_preview(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=main",
+            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=master",
             json={
                 "objectSet": {"objectType": "Order"},
                 "links": ["owned_by"],
@@ -696,7 +708,7 @@ async def test_foundry_v2_load_object_set_links_returns_locator_payload(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=main&preview=true",
+            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=master&preview=true",
             json={
                 "objectSet": {"objectType": "Order"},
                 "links": ["owned_by"],
@@ -766,7 +778,7 @@ async def test_foundry_v2_aggregate_object_set_returns_metrics(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=main",
+            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=master",
             json={
                 "objectSet": {"objectType": "Order"},
                 "aggregation": [
@@ -830,7 +842,7 @@ async def test_foundry_v2_aggregate_object_set_delegates_to_oms(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=main",
+            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=master",
             json={
                 "objectSet": {"objectType": "Order"},
                 "aggregation": [
@@ -886,7 +898,7 @@ async def test_foundry_v2_aggregate_objects_route_returns_metrics(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objects/Order/aggregate?branch=main",
+            "/api/v2/ontologies/sales_db/objects/Order/aggregate?branch=master",
             json={
                 "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
                 "aggregation": [{"type": "sum", "field": "amount", "name": "amountSum"}],
@@ -983,21 +995,21 @@ async def test_foundry_v2_route_full_metadata_keeps_branch_rid_contract(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main&preview=true")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master&preview=true")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["branch"] == {"rid": "main"}
+    assert body["branch"] == {"rid": "master"}
     object_contract = body["objectTypes"]["Order"]["objectType"]
     assert object_contract["apiName"] == "Order"
     assert object_contract["displayName"] == "Order"
     assert object_contract["pluralDisplayName"] == "Order"
     assert object_contract["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert object_contract["rid"] == "ri.spice.main.object-type.sales_db.Order"
+    assert object_contract["rid"] == "ri.foundry.main.object-type.sales_db.Order"
     assert object_contract["primaryKey"] == "id"
     assert object_contract["titleProperty"] == "id"
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
-    assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
+    assert object_contract["properties"]["id"]["rid"] == "ri.foundry.main.property.sales_db.Order.id"
     assert body["objectTypes"]["Order"]["linkTypes"] == []
 
 
@@ -1028,7 +1040,7 @@ async def test_foundry_v2_route_full_metadata_requires_preview_flag(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master")
 
     assert response.status_code == 400
     body = response.json()
@@ -1041,13 +1053,13 @@ async def test_foundry_v2_route_full_metadata_requires_preview_flag(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/v2/ontologies/sales_db/interfaceTypes?branch=main",
-        "/api/v2/ontologies/sales_db/interfaceTypes/BaseInterface?branch=main",
-        "/api/v2/ontologies/sales_db/sharedPropertyTypes?branch=main",
-        "/api/v2/ontologies/sales_db/sharedPropertyTypes/sharedName?branch=main",
+        "/api/v2/ontologies/sales_db/interfaceTypes?branch=master",
+        "/api/v2/ontologies/sales_db/interfaceTypes/BaseInterface?branch=master",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes?branch=master",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes/sharedName?branch=master",
         "/api/v2/ontologies/sales_db/valueTypes",
         "/api/v2/ontologies/sales_db/valueTypes/string",
-        "/api/v2/ontologies/sales_db/objectTypes/Order/fullMetadata?branch=main",
+        "/api/v2/ontologies/sales_db/objectTypes/Order/fullMetadata?branch=master",
     ],
 )
 async def test_foundry_v2_preview_routes_require_preview_flag(
@@ -1106,7 +1118,7 @@ async def test_foundry_v2_route_list_object_types_strict_on_applies_required_fie
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes?branch=main&pageSize=100")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes?branch=master&pageSize=100")
 
     assert response.status_code == 200
     body = response.json()
@@ -1117,11 +1129,11 @@ async def test_foundry_v2_route_list_object_types_strict_on_applies_required_fie
     assert object_contract["displayName"] == "Order"
     assert object_contract["pluralDisplayName"] == "Order"
     assert object_contract["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert object_contract["rid"] == "ri.spice.main.object-type.sales_db.Order"
+    assert object_contract["rid"] == "ri.foundry.main.object-type.sales_db.Order"
     assert object_contract["primaryKey"] == "id"
     assert object_contract["titleProperty"] == "id"
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
-    assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
+    assert object_contract["properties"]["id"]["rid"] == "ri.foundry.main.property.sales_db.Order.id"
 
 
 @pytest.mark.unit
@@ -1152,7 +1164,7 @@ async def test_foundry_v2_route_get_object_type_applies_required_fields(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=main")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=master")
 
     assert response.status_code == 200
     object_contract = response.json()
@@ -1160,11 +1172,11 @@ async def test_foundry_v2_route_get_object_type_applies_required_fields(
     assert object_contract["displayName"] == "Order"
     assert object_contract["pluralDisplayName"] == "Order"
     assert object_contract["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert object_contract["rid"] == "ri.spice.main.object-type.sales_db.Order"
+    assert object_contract["rid"] == "ri.foundry.main.object-type.sales_db.Order"
     assert object_contract["primaryKey"] == "id"
     assert object_contract["titleProperty"] == "id"
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
-    assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
+    assert object_contract["properties"]["id"]["rid"] == "ri.foundry.main.property.sales_db.Order.id"
 
 
 @pytest.mark.unit
@@ -1195,7 +1207,7 @@ async def test_foundry_v2_route_get_object_type_strict_on_applies_required_field
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=main")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=master")
 
     assert response.status_code == 200
     object_contract = response.json()
@@ -1203,11 +1215,11 @@ async def test_foundry_v2_route_get_object_type_strict_on_applies_required_field
     assert object_contract["displayName"] == "Order"
     assert object_contract["pluralDisplayName"] == "Order"
     assert object_contract["icon"] == {"type": "blueprint", "name": "table", "color": "#4C6A9A"}
-    assert object_contract["rid"] == "ri.spice.main.object-type.sales_db.Order"
+    assert object_contract["rid"] == "ri.foundry.main.object-type.sales_db.Order"
     assert object_contract["primaryKey"] == "id"
     assert object_contract["titleProperty"] == "id"
     assert object_contract["properties"]["id"]["dataType"] == {"type": "string"}
-    assert object_contract["properties"]["id"]["rid"] == "ri.spice.main.property.sales_db.Order.id"
+    assert object_contract["properties"]["id"]["rid"] == "ri.foundry.main.property.sales_db.Order.id"
 
 
 @pytest.mark.unit
@@ -1238,7 +1250,7 @@ async def test_foundry_v2_route_get_outgoing_link_type_strict_on_unresolved_retu
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=main"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=master"
         )
 
     assert response.status_code == 404
@@ -1275,7 +1287,7 @@ async def test_foundry_v2_route_get_outgoing_link_type_unresolved_returns_not_fo
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=main"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=master"
         )
 
     assert response.status_code == 404
@@ -1320,7 +1332,7 @@ async def test_foundry_v2_route_list_outgoing_link_types_strict_on_drops_unresol
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes?branch=main&pageSize=100"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes?branch=master&pageSize=100"
         )
 
     assert response.status_code == 200
@@ -1332,6 +1344,6 @@ async def test_foundry_v2_route_list_outgoing_link_types_strict_on_drops_unresol
             "displayName": "contains",
             "status": "ACTIVE",
             "cardinality": "MANY",
-            "linkTypeRid": "ri.spice.main.link-type.sales_db.Order.contains",
+            "linkTypeRid": "ri.foundry.main.link-type.sales_db.Order.contains",
         }
     ]

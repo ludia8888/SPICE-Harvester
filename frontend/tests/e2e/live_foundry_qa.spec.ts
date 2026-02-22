@@ -142,6 +142,63 @@ const csvFromRows = (header: string[], rows: Array<Array<string | number | null 
   return [header.map(escape).join(','), ...rows.map((row) => row.map(escape).join(','))].join('\n')
 }
 
+const parseCsv = (text: string) => {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  const pushField = () => {
+    row.push(field)
+    field = ''
+  }
+  const pushRow = () => {
+    rows.push(row)
+    row = []
+  }
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i] ?? ''
+    if (inQuotes) {
+      if (char === '"') {
+        const next = text[i + 1]
+        if (next === '"') {
+          field += '"'
+          i += 1
+          continue
+        }
+        inQuotes = false
+        continue
+      }
+      field += char
+      continue
+    }
+    if (char === '"') {
+      inQuotes = true
+      continue
+    }
+    if (char === ',') {
+      pushField()
+      continue
+    }
+    if (char === '\n') {
+      pushField()
+      pushRow()
+      continue
+    }
+    if (char === '\r') {
+      continue
+    }
+    field += char
+  }
+  if (inQuotes) {
+    field = `${field}`
+  }
+  if (field.length > 0 || row.length > 0) {
+    pushField()
+    pushRow()
+  }
+  return rows
+}
+
 const sha256Hex = (buffer: Buffer) => createHash('sha256').update(buffer).digest('hex')
 
 const decodeDatasetRawContent = (file: Record<string, unknown> | null): Buffer | null => {
@@ -294,9 +351,7 @@ const uploadCsvDataset = async (params: {
     headers: jsonHeaders,
     json: {
       name: params.datasetName,
-      description: `Foundry QA ingest: ${params.datasetName}`,
-      parentFolderRid: `ri.spice.main.folder.${params.dbName}`,
-      branchName: 'main',
+      parentFolderRid: `ri.foundry.main.folder.${params.dbName}`,
     },
   })
   if (!createResponse.ok) {
@@ -371,7 +426,7 @@ const uploadCsvDataset = async (params: {
 
   const uploadResponse = await apiCall(
     params.request,
-    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files:upload`,
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files/${encodeURIComponent(params.fileName).replace(/%2F/g, '/')}/upload`,
     {
       method: 'POST',
       headers: {
@@ -379,8 +434,8 @@ const uploadCsvDataset = async (params: {
         'Content-Type': 'text/csv',
       },
       query: {
-        filePath: params.fileName,
-        branchName: 'main',
+        transactionRid,
+        branchName: 'master',
       },
       body: params.fileBuffer,
     },
@@ -392,7 +447,7 @@ const uploadCsvDataset = async (params: {
       repro_steps: [`Upload file for dataset (${params.datasetName})`],
       expected: 'Dataset file upload succeeds',
       actual: `status=${uploadResponse.status}; body=${uploadResponse.text.slice(0, 400)}`,
-      endpoint: 'POST /api/v2/datasets/{datasetRid}/files:upload',
+      endpoint: 'POST /api/v2/datasets/{datasetRid}/files/{filePath}/upload',
       ui_path: `/db/${encodeURIComponent(params.dbName)}/overview`,
       evidence: {
         dataset_rid: datasetRid,
@@ -789,9 +844,7 @@ test.describe.serial('Live Foundry QA', () => {
         headers: baseHeaders,
         json: {
           name: datasetName,
-          parentFolderRid: `ri.spice.main.folder.${dbName}`,
-          branchName: 'main',
-          description: 'Foundry v2 lifecycle QA dataset',
+          parentFolderRid: `ri.foundry.main.folder.${dbName}`,
         },
       })
       if (!createDatasetV2.ok) {
@@ -848,7 +901,7 @@ test.describe.serial('Live Foundry QA', () => {
           } else {
             const uploadV2 = await apiCall(
               request,
-              `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files:upload`,
+              `/api/v2/datasets/${encodeURIComponent(datasetRid)}/files/source.csv/upload`,
               {
                 method: 'POST',
                 headers: {
@@ -856,8 +909,8 @@ test.describe.serial('Live Foundry QA', () => {
                   'Content-Type': 'text/csv',
                 },
                 query: {
-                  filePath: 'source.csv',
-                  branchName: 'main',
+                  transactionRid,
+                  branchName: 'master',
                 },
                 body: csvBuffer,
               },
@@ -869,7 +922,7 @@ test.describe.serial('Live Foundry QA', () => {
                 repro_steps: ['Upload source.csv through Foundry v2 dataset file upload'],
                 expected: 'CSV upload succeeds for transaction commit preparation',
                 actual: `status=${uploadV2.status}; body=${uploadV2.text.slice(0, 400)}`,
-                endpoint: 'POST /api/v2/datasets/{datasetRid}/files:upload',
+                endpoint: 'POST /api/v2/datasets/{datasetRid}/files/{filePath}/upload',
                 ui_path: `/db/${encodeURIComponent(dbName)}/overview`,
                 evidence: { dataset_rid: datasetRid, response: uploadV2.body },
                 hypothesis: 'Foundry v2 file upload path is not writable.',
@@ -904,19 +957,21 @@ test.describe.serial('Live Foundry QA', () => {
                   request,
                   `/api/v2/datasets/${encodeURIComponent(datasetRid)}/readTable`,
                   {
-                    method: 'POST',
-                    headers: baseHeaders,
-                    json: {
+                    method: 'GET',
+                    headers: buildAuthHeaders(dbName),
+                    query: {
                       rowLimit: 10,
+                      branchName: 'master',
+                      format: 'CSV',
                     },
                   },
                 )
-                const tablePayload = extractApiData<Record<string, unknown>>(readTableV2.body) ?? {}
-                const tableColumns = Array.isArray(tablePayload.columns) ? tablePayload.columns as Array<Record<string, unknown>> : []
-                const tableRows = Array.isArray(tablePayload.rows) ? tablePayload.rows : []
-                const totalRowCount = Number(tablePayload.totalRowCount ?? tableRows.length ?? 0)
-                const columnNames = tableColumns
-                  .map((col) => String(col.name ?? '').trim())
+                const csvRows = parseCsv(readTableV2.text ?? '')
+                const headerRow = csvRows[0] ?? []
+                const tableRows = csvRows.slice(1)
+                const totalRowCount = tableRows.length
+                const columnNames = headerRow
+                  .map((col) => String(col ?? '').trim())
                   .filter((name) => Boolean(name))
                 const hasExpectedColumns = ['order_id', 'order_status', 'customer_id'].every((name) => columnNames.includes(name))
                 if (!readTableV2.ok || tableRows.length < 2 || !hasExpectedColumns || totalRowCount !== 2) {
@@ -926,12 +981,12 @@ test.describe.serial('Live Foundry QA', () => {
                     repro_steps: ['Commit Foundry v2 transaction', 'Read table via Foundry v2 readTable'],
                     expected: 'readTable returns uploaded rows with expected schema columns',
                     actual: `status=${readTableV2.status}; columns=${columnNames.join(',')}; rows=${tableRows.length}; total=${totalRowCount}`,
-                    endpoint: 'POST /api/v2/datasets/{datasetRid}/readTable',
+                    endpoint: 'GET /api/v2/datasets/{datasetRid}/readTable',
                     ui_path: `/db/${encodeURIComponent(dbName)}/overview`,
                     evidence: {
                       dataset_rid: datasetRid,
                       totalRowCount,
-                      response: readTableV2.body,
+                      response: readTableV2.text.slice(0, 400),
                     },
                     hypothesis: 'Dataset version was committed but preview/sample projection is missing.',
                   })

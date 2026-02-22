@@ -2396,6 +2396,11 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                     triggered_by_action_log_id=parent_action_log_id,
                 )
             except Exception as exc:
+                logger.exception(
+                    "Failed to dispatch deferred action command (child=%s triggered_by=%s)",
+                    child_id,
+                    parent_action_log_id,
+                )
                 await self.action_logs.mark_failed(
                     action_log_id=child_id,
                     result=self._audit_result(
