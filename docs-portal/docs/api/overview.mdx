@@ -173,15 +173,15 @@ Collection:
 }
 ```
 
-### Error Responses
+### Error Responses (FoundryAPIError)
 
-All errors follow a structured format:
+All `/api/v2/` endpoints return errors using the **FoundryAPIError** envelope. This Foundry-compatible format is handled by a global `foundry_exception_handler` registered on the BFF service. Request validation errors and JSON decode errors on v2 paths are also automatically wrapped in this format.
 
 ```json
 {
   "errorCode": "NOT_FOUND",
   "errorName": "ObjectNotFound",
-  "errorInstanceId": "err-2024-01-15-a1b2c3",
+  "errorInstanceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "parameters": {
     "objectType": "Employee",
     "primaryKey": "EMP-999"
@@ -191,9 +191,9 @@ All errors follow a structured format:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `errorCode` | string | Machine-readable error code (e.g., `NOT_FOUND`, `INVALID_ARGUMENT`) |
-| `errorName` | string | Human-readable error name |
-| `errorInstanceId` | string | Unique identifier for this specific error occurrence |
+| `errorCode` | string | Machine-readable error code (e.g., `NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`) |
+| `errorName` | string | Human-readable error name (e.g., `ObjectNotFound`, `ApiUsageDenied`) |
+| `errorInstanceId` | string | UUID generated per error occurrence for tracing |
 | `parameters` | object | Context-specific parameters for debugging |
 
 ### HTTP Status Codes
@@ -233,6 +233,10 @@ X-RateLimit-Reset: 1705312200
 ```
 
 ## Endpoint Summary
+
+**Total endpoints: 264** (109 v2 + 155 v1)
+
+The v2 surface is organized into 9 categories: Ontologies (12), Object Types (18), Actions (5), Links & Link Types (5), Query Types (2), Interface Types (2), Shared Property Types (2), Value Types (2), and Other v2 Endpoints (61 covering datasets, connectivity, and orchestration).
 
 For live endpoint counts and latest route inventory, see:
 

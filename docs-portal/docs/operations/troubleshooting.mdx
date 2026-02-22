@@ -95,6 +95,53 @@ curl -X POST http://localhost:8002/api/v2/auth/token \
   -d '{"username": "admin", "password": "admin"}'
 ```
 
+### API Returns 403 with ApiUsageDenied
+
+**Symptom**: v2 API requests return `403 Forbidden` with error name `ApiUsageDenied`.
+
+**Diagnosis**:
+This means the authenticated principal lacks a required **OAuth scope**. The error response includes the missing scope:
+
+```json
+{
+  "errorCode": "PERMISSION_DENIED",
+  "errorName": "ApiUsageDenied",
+  "parameters": { "missingScope": "api:datasets-write" }
+}
+```
+
+**Resolution**:
+1. Decode the JWT (at jwt.io) and check the `scope` or `scp` claim.
+2. Ensure the JWT includes the required platform API scope (e.g., `api:datasets-write`).
+3. If using an IdP (Okta, Auth0, Azure AD), add the scope to the application's allowed scopes.
+4. For development, the admin token (`X-Admin-Token`) and dev master auth automatically include all scopes.
+
+### FoundryAPIError Debugging
+
+**Symptom**: v2 endpoints return structured error responses you need to understand.
+
+**Diagnosis**:
+All `/api/v2/` error responses use the `FoundryAPIError` envelope:
+
+```json
+{
+  "errorCode": "...",
+  "errorName": "...",
+  "errorInstanceId": "uuid-...",
+  "parameters": { ... }
+}
+```
+
+**Key fields**:
+- `errorInstanceId` -- Use this UUID to search BFF logs for the exact error context
+- `errorCode` -- Machine-readable code (e.g., `NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`)
+- `parameters` -- Contains the specific resource that caused the error
+
+```bash
+# Search BFF logs for a specific error instance
+docker compose logs bff | grep "uuid-from-errorInstanceId"
+```
+
 ### Search Returns Stale Results
 
 **Symptom**: Recently created or updated objects do not appear in search results.

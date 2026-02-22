@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 
@@ -237,7 +239,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             )
         try:
             raw_text = payload.decode("utf-8")
-        except Exception as exc:
+        except UnicodeDecodeError as exc:
             raise _ActionCommandParseError(
                 stage="decode",
                 payload_text=None,
@@ -249,7 +251,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         raw_message: Any
         try:
             raw_message = json.loads(raw_text)
-        except Exception as exc:
+        except json.JSONDecodeError as exc:
             raise _ActionCommandParseError(
                 stage="parse_json",
                 payload_text=raw_text,
@@ -263,7 +265,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
         try:
             envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
-        except Exception as exc:
+        except ValidationError as exc:
             payload_obj = raw_message if isinstance(raw_message, dict) else None
             raise _ActionCommandParseError(
                 stage="parse_envelope",
@@ -917,7 +919,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                         status_code=400,
                         external_code=None,
                     ).to_dict()
-                except Exception as exc:
+                except ValueError as exc:
                     logger.warning("Failed to resolve enterprise error for key=%s: %s", error_key, exc, exc_info=True)
             if enterprise is not None:
                 enriched["enterprise"] = enterprise
@@ -2461,7 +2463,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         )
         try:
             await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
-        except Exception as exc:
+        except LakeFSError as exc:
             logger.warning(
                 "Failed to cleanup writeback patchset staging branch %s: %s",
                 staging_branch,
@@ -2537,7 +2539,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if not entries:
             try:
                 await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
-            except Exception as exc:
+            except LakeFSError as exc:
                 logger.warning(
                     "Failed to cleanup empty writeback queue staging branch %s: %s",
                     staging_branch,
@@ -2576,7 +2578,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         )
         try:
             await self.lakefs_client.delete_branch(repository=repository, name=staging_branch)
-        except Exception as exc:
+        except LakeFSError as exc:
             logger.warning(
                 "Failed to cleanup writeback queue staging branch %s: %s",
                 staging_branch,

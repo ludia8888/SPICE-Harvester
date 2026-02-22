@@ -94,7 +94,7 @@ The service layer contains the core business logic:
 - **Ontology Management Service (OMS)** -- the primary service for ontology CRUD, object management, search, actions, and lineage. Runs on port 8000.
 - **Funnel Runtime (internal)** -- BFF-embedded tabular type inference and sheet structure analysis component (not exposed as a public service).
 - **Agent Service** -- tool-runner runtime for orchestrated workflow steps. Runs on port 8004.
-- **Workers** -- 13 background services that process events, build projections, run pipelines, and maintain consistency.
+- **Workers** -- 12 background services that process events, build projections, run pipelines, and maintain consistency.
 
 ### Data Layer
 
@@ -147,14 +147,16 @@ Each ontology provides logical isolation of data and schema. This enables:
 
 ## Service Inventory
 
-The platform consists of 33+ Docker services organized into four categories:
+The platform consists of **32 Docker services** organized into six categories:
 
 | Category | Count | Examples |
 |----------|-------|---------|
 | API Servers | 3 | OMS, BFF, Agent |
-| Workers | 13 | Event Processor, Projection Builder, Pipeline Runner, Lineage Worker, Schema Validator, Action Executor, Notification Worker, Retry Handler, Dead Letter Processor, Metric Aggregator, Cache Warmer, Index Syncer, Snapshot Worker |
-| Data Stores | 8 | PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, Schema Registry, Kafka Connect |
-| Observability | 6 | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki |
+| Workers | 12 | Action Worker, Action Outbox Worker, Connector Sync Worker, Connector Trigger Service, Ingest Reconciler, Instance Worker, Objectify Worker, Ontology Worker, Pipeline Scheduler, Pipeline Worker, Projection Worker, Writeback Materializer |
+| Data Platform | 7 | PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, LakeFS |
+| Observability | 6 | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Kafka UI |
+| Bootstrap | 3 | DB Migrations, LakeFS Init, MinIO Init |
+| Other | 1 | Message Relay |
 
 For detailed service topology and port mappings, see [Service Topology](./service-topology).
 

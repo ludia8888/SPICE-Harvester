@@ -56,10 +56,17 @@ During Phases 1-2, both v1 and v2 endpoints are available simultaneously.
 
 ### Dataset Endpoints
 
+The v2 Datasets API has been significantly expanded to 19 endpoints covering the full Foundry Datasets lifecycle (CRUD, branching, transactions, files, schemas):
+
 | v1 Path | v2 Path |
 |---------|---------|
-| `GET /api/databases/{db}/datasets` | `GET /api/v2/datasets` |
+| `GET /api/databases/{db}/datasets` | `GET /api/v2/datasets/{datasetRid}` |
 | `GET /api/databases/{db}/datasets/{id}` | `GET /api/v2/datasets/{datasetRid}` |
+| *(no v1 equivalent)* | `POST /api/v2/datasets` (create dataset) |
+| *(no v1 equivalent)* | `GET/POST /api/v2/datasets/{rid}/branches` (list/create branches) |
+| *(no v1 equivalent)* | `GET/POST /api/v2/datasets/{rid}/files/{path}/upload` (file management) |
+| *(no v1 equivalent)* | `GET/PUT /api/v2/datasets/{rid}/getSchema` / `putSchema` |
+| *(no v1 equivalent)* | `POST /api/v2/datasets/{rid}/transactions` (create/commit/abort) |
 
 ### Connectivity Endpoints
 
@@ -141,6 +148,27 @@ The BFF layer handles this mapping internally. You only need to update your clie
 - `type` → `__apiName`
 - `data` → `properties`
 - Added `__primaryKey` field
+
+### Error Response Format
+
+v2 endpoints use the **FoundryAPIError** envelope for all error responses. If your v1 client parses error responses, update it to expect the new format:
+
+**v1 error:**
+```json
+{"error": "Object not found", "status": 404}
+```
+
+**v2 error (FoundryAPIError):**
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "a1b2c3d4-...",
+  "parameters": {"objectType": "Employee", "primaryKey": "EMP-999"}
+}
+```
+
+Request validation errors and JSON decode errors on v2 paths are also automatically wrapped in this format.
 
 ## Pagination Migration
 

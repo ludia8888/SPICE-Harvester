@@ -751,3 +751,83 @@ async def test_executor_stream_join_left_lookup_picks_latest_right_row_per_key_w
     row = (preview.get("rows") or [])[0]
     assert row.get("id") == 10
     assert row.get("value_right") == "right-latest"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_preview_uses_foundry_default_limit_and_skips_contract_checks() -> None:
+    db_name = "demo"
+    dataset_name = "preview_input"
+    dataset_id = "ds-demo-preview-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
+        dataset_id=dataset_id,
+        db_name=db_name,
+        name=dataset_name,
+        branch="master",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+    )
+    registry.versions_by_dataset_id[dataset_id] = _Version(
+        dataset_id=dataset_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": idx} for idx in range(600)]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+    definition = {
+        "__preview_meta__": {"branch": "master"},
+        "schemaContract": [{"column": "missing_col", "required": True}],
+        "nodes": [
+            {"id": "in1", "type": "input", "metadata": {"datasetName": dataset_name}},
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [{"from": "in1", "to": "out1"}],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="out1")
+    assert preview["row_count"] == 500
+    assert len(preview.get("rows") or []) == 500
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_preview_applies_per_input_sampling_strategy() -> None:
+    db_name = "demo"
+    dataset_name = "sampled_input"
+    dataset_id = "ds-demo-sampled-main"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
+        dataset_id=dataset_id,
+        db_name=db_name,
+        name=dataset_name,
+        branch="master",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+    )
+    registry.versions_by_dataset_id[dataset_id] = _Version(
+        dataset_id=dataset_id,
+        artifact_key=None,
+        sample_json={"rows": [{"id": idx} for idx in range(1, 21)]},
+    )
+
+    executor = PipelineExecutor(dataset_registry=registry)
+    definition = {
+        "__preview_meta__": {"branch": "master", "sample_limit": 500},
+        "nodes": [
+            {
+                "id": "in1",
+                "type": "input",
+                "metadata": {
+                    "datasetName": dataset_name,
+                    "samplingStrategy": {"type": "limit", "limit": 3},
+                },
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [{"from": "in1", "to": "out1"}],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="out1", limit=100)
+    assert preview["row_count"] == 3
+    assert [row["id"] for row in (preview.get("rows") or [])] == [1, 2, 3]

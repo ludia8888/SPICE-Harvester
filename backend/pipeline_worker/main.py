@@ -118,6 +118,13 @@ from shared.services.pipeline.pipeline_transform_spec import (
     SUPPORTED_TRANSFORMS,
     normalize_operation,
 )
+from pipeline_worker.preview_sampling import (
+    apply_sampling_strategy as apply_preview_sampling_strategy,
+    attach_sampling_snapshot as attach_preview_sampling_snapshot,
+    resolve_preview_flag as resolve_preview_meta_flag,
+    resolve_preview_limit as resolve_preview_meta_limit,
+    resolve_sampling_strategy as resolve_preview_sampling_strategy,
+)
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.backing_source_adapter import MappingSpecResolver, is_oms_mapping_spec
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
@@ -1212,6 +1219,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         *,
         job: PipelineJob,
         definition: Dict[str, Any],
+        preview_meta: Dict[str, Any],
         nodes: Dict[str, Dict[str, Any]],
         target_node_ids: List[str],
         tables: Dict[str, DataFrame],
@@ -1231,16 +1239,31 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         record_run: Callable[..., Any],
         record_artifact: Callable[..., Any],
     ) -> None:
+        skip_production_checks = self._resolve_preview_flag(
+            preview_meta,
+            snake_case_key="skip_production_checks",
+            camel_case_key="skipProductionChecks",
+            default=True,
+        )
+        skip_output_recording = self._resolve_preview_flag(
+            preview_meta,
+            snake_case_key="skip_output_recording",
+            camel_case_key="skipOutputRecording",
+            default=True,
+        )
         primary_id = target_node_ids[0] if target_node_ids else None
         output_df = tables.get(primary_id) if primary_id else self._empty_dataframe()
         schema_columns = _schema_from_dataframe(output_df)
         row_count = int(await self._run_spark(lambda: output_df.count(), label=f"count:preview:{primary_id}"))
-        schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
         output_ops = self._build_table_ops(output_df)
-        contract_errors = await self._run_spark(
-            lambda: validate_schema_contract(output_ops, schema_contract),
-            label=f"schema_contract:preview:{primary_id}",
-        )
+        if skip_production_checks:
+            contract_errors: List[str] = []
+        else:
+            schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
+            contract_errors = await self._run_spark(
+                lambda: validate_schema_contract(output_ops, schema_contract),
+                label=f"schema_contract:preview:{primary_id}",
+            )
         if contract_errors:
             contract_payload = self._build_error_payload(
                 message="Pipeline schema contract failed",
@@ -1271,11 +1294,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 input_lakefs_commits=input_commit_payload,
                 finished_at=utcnow(),
             )
-            await record_artifact(
-                status="FAILED",
-                errors=contract_errors,
-                inputs=inputs_payload,
-            )
+            if not skip_output_recording:
+                await record_artifact(
+                    status="FAILED",
+                    errors=contract_errors,
+                    inputs=inputs_payload,
+                )
             logger.error("Pipeline schema contract failed: %s", contract_errors)
             return
 
@@ -1297,52 +1321,54 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             output_metadata=output_metadata,
             node_id=str(primary_id or "preview_output"),
         )
-        pk_semantics = resolve_pk_semantics(
-            execution_semantics=execution_semantics,
-            definition=definition,
-            output_metadata=output_metadata,
-        )
-        delete_column = resolve_delete_column(
-            definition=definition,
-            output_metadata=output_metadata,
-        )
-        pk_columns = resolve_pk_columns(
-            definition=definition,
-            output_metadata=output_metadata,
-            output_name=output_name,
-            output_node_id=primary_id,
-            declared_outputs=declared_outputs,
-        )
-        available_columns = output_ops.columns
-        pk_semantic_errors = validate_pk_semantics(
-            available_columns=available_columns,
-            pk_semantics=pk_semantics,
-            pk_columns=pk_columns,
-            delete_column=delete_column,
-        )
-        expectations = build_expectations_with_pk(
-            definition=definition,
-            output_metadata=output_metadata,
-            output_name=output_name,
-            output_node_id=primary_id,
-            declared_outputs=declared_outputs,
-            pk_semantics=pk_semantics,
-            delete_column=delete_column,
-            pk_columns=pk_columns,
-            available_columns=available_columns,
-        )
-        expectation_errors = pk_semantic_errors + await self._run_spark(
-            lambda: validate_expectations(output_ops, expectations),
-            label=f"expectations:preview:{primary_id}",
-        )
-        fk_errors = await self._evaluate_fk_expectations(
-            expectations=expectations,
-            output_df=output_df,
-            db_name=job.db_name,
-            branch=job.branch or "main",
-            temp_dirs=temp_dirs,
-        )
-        expectation_errors = expectation_errors + fk_errors
+        expectation_errors: List[str] = []
+        if not skip_production_checks:
+            pk_semantics = resolve_pk_semantics(
+                execution_semantics=execution_semantics,
+                definition=definition,
+                output_metadata=output_metadata,
+            )
+            delete_column = resolve_delete_column(
+                definition=definition,
+                output_metadata=output_metadata,
+            )
+            pk_columns = resolve_pk_columns(
+                definition=definition,
+                output_metadata=output_metadata,
+                output_name=output_name,
+                output_node_id=primary_id,
+                declared_outputs=declared_outputs,
+            )
+            available_columns = output_ops.columns
+            pk_semantic_errors = validate_pk_semantics(
+                available_columns=available_columns,
+                pk_semantics=pk_semantics,
+                pk_columns=pk_columns,
+                delete_column=delete_column,
+            )
+            expectations = build_expectations_with_pk(
+                definition=definition,
+                output_metadata=output_metadata,
+                output_name=output_name,
+                output_node_id=primary_id,
+                declared_outputs=declared_outputs,
+                pk_semantics=pk_semantics,
+                delete_column=delete_column,
+                pk_columns=pk_columns,
+                available_columns=available_columns,
+            )
+            expectation_errors = pk_semantic_errors + await self._run_spark(
+                lambda: validate_expectations(output_ops, expectations),
+                label=f"expectations:preview:{primary_id}",
+            )
+            fk_errors = await self._evaluate_fk_expectations(
+                expectations=expectations,
+                output_df=output_df,
+                db_name=job.db_name,
+                branch=job.branch or "main",
+                temp_dirs=temp_dirs,
+            )
+            expectation_errors = expectation_errors + fk_errors
         sample_rows = await self._run_spark(
             lambda: output_df.limit(preview_limit).collect(),
             label=f"collect:preview:{primary_id}",
@@ -1368,6 +1394,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             "pipeline_spec_commit_id": pipeline_spec_commit_id,
             "code_version": code_version,
             "spark_conf": spark_conf,
+            "production_checks_skipped": skip_production_checks,
+            "output_recording_skipped": skip_output_recording,
         }
         if primary_id:
             sample_payload["node_id"] = primary_id
@@ -1389,18 +1417,19 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             }
         ]
         artifact_status = "FAILED" if expectation_errors else "SUCCESS"
-        artifact_id = await record_artifact(
-            status=artifact_status,
-            outputs=preview_outputs,
-            inputs=inputs_payload,
-            sampling_strategy={
-                "output": {"type": "limit", "limit": preview_limit},
-                **({"input": input_sampling} if input_sampling else {}),
-            },
-            errors=expectation_errors if expectation_errors else None,
-        )
-        if artifact_id:
-            sample_payload["artifact_id"] = artifact_id
+        if not skip_output_recording:
+            artifact_id = await record_artifact(
+                status=artifact_status,
+                outputs=preview_outputs,
+                inputs=inputs_payload,
+                sampling_strategy={
+                    "output": {"type": "limit", "limit": preview_limit},
+                    **({"input": input_sampling} if input_sampling else {}),
+                },
+                errors=expectation_errors if expectation_errors else None,
+            )
+            if artifact_id:
+                sample_payload["artifact_id"] = artifact_id
 
         await record_preview(
             status="FAILED" if expectation_errors else "SUCCESS",
@@ -2950,6 +2979,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         previous_watermark: Optional[Any],
         previous_watermark_keys: List[str],
         is_preview: bool,
+        preview_input_sample_limit: int,
     ) -> DataFrame:
         metadata = node.get("metadata") or {}
         node_type = str(node.get("type") or "transform")
@@ -2970,7 +3000,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 watermark_keys=previous_watermark_keys if execution_semantics in {"incremental", "streaming"} else None,
             )
             if is_preview:
-                sampling_strategy = self._resolve_sampling_strategy(metadata, preview_meta)
+                sampling_strategy = self._resolve_sampling_strategy(
+                    metadata,
+                    preview_meta,
+                    preview_limit=preview_input_sample_limit,
+                )
                 if sampling_strategy:
                     df = self._apply_sampling_strategy(
                         df,
@@ -3144,7 +3178,10 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             )
             if has_diff_signal:
                 incremental_inputs_have_additive_updates = not diff_empty_inputs
-        resolved_preview_limit = int(preview_limit or 200)
+        try:
+            resolved_preview_limit = int(preview_limit or 500)
+        except (TypeError, ValueError):
+            resolved_preview_limit = 500
         resolved_preview_limit = max(1, min(500, resolved_preview_limit))
         return (
             input_commit_payload,
@@ -3540,6 +3577,17 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         record_run: Callable[..., Any], record_artifact: Callable[..., Any],
         emit_job_event: Callable[..., Any],
     ) -> bool:
+        preview_input_sample_limit = self._resolve_preview_limit(
+            preview_limit=job.preview_limit,
+            preview_meta=preview_meta,
+            default=500,
+        )
+        skip_production_checks = is_preview and self._resolve_preview_flag(
+            preview_meta,
+            snake_case_key="skip_production_checks",
+            camel_case_key="skipProductionChecks",
+            default=True,
+        )
         for node_id in order_run:
             node = nodes[node_id]
             metadata = node.get("metadata") or {}
@@ -3562,33 +3610,35 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 previous_watermark=previous_watermark,
                 previous_watermark_keys=previous_watermark_keys,
                 is_preview=is_preview,
+                preview_input_sample_limit=preview_input_sample_limit,
             )
-            table_ops = self._build_table_ops(df)
-            schema_errors = await self._run_spark(
-                lambda: validate_schema_checks(
-                    table_ops,
-                    metadata.get("schemaChecks") or [],
-                    error_prefix=f"schema check failed ({node_id}): ",
-                ),
-                label=f"schema_checks:{node_id}",
-            )
-            if schema_errors:
-                await self._record_schema_check_failure(
-                    job=job,
-                    node_id=node_id,
-                    schema_errors=schema_errors,
-                    execution_semantics=execution_semantics,
-                    is_preview=is_preview,
-                    is_build=is_build,
-                    run_mode=run_mode,
-                    input_commit_payload=input_commit_payload,
-                    record_preview=record_preview,
-                    record_build=record_build,
-                    record_run=record_run,
-                    record_artifact=record_artifact,
-                    emit_job_event=emit_job_event,
+            if not skip_production_checks:
+                table_ops = self._build_table_ops(df)
+                schema_errors = await self._run_spark(
+                    lambda: validate_schema_checks(
+                        table_ops,
+                        metadata.get("schemaChecks") or [],
+                        error_prefix=f"schema check failed ({node_id}): ",
+                    ),
+                    label=f"schema_checks:{node_id}",
                 )
-                return False
+                if schema_errors:
+                    await self._record_schema_check_failure(
+                        job=job,
+                        node_id=node_id,
+                        schema_errors=schema_errors,
+                        execution_semantics=execution_semantics,
+                        is_preview=is_preview,
+                        is_build=is_build,
+                        run_mode=run_mode,
+                        input_commit_payload=input_commit_payload,
+                        record_preview=record_preview,
+                        record_build=record_build,
+                        record_run=record_run,
+                        record_artifact=record_artifact,
+                        emit_job_event=emit_job_event,
+                    )
+                    return False
 
             tables[node_id] = df
         return True
@@ -3865,6 +3915,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 await self._run_preview_mode(
                     job=job,
                     definition=definition,
+                    preview_meta=preview_meta,
                     nodes=nodes,
                     target_node_ids=target_node_ids,
                     tables=tables,
@@ -5327,21 +5378,46 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         seed_raw = abs(hash(str(job_id)))
         return seed_raw % 2_147_483_647
 
+    def _resolve_preview_flag(
+        self,
+        preview_meta: Dict[str, Any],
+        *,
+        snake_case_key: str,
+        camel_case_key: str,
+        default: bool,
+    ) -> bool:
+        return resolve_preview_meta_flag(
+            preview_meta,
+            snake_case_key=snake_case_key,
+            camel_case_key=camel_case_key,
+            default=default,
+        )
+
+    def _resolve_preview_limit(
+        self,
+        *,
+        preview_limit: Optional[Any],
+        preview_meta: Optional[Dict[str, Any]] = None,
+        default: int = 500,
+    ) -> int:
+        return resolve_preview_meta_limit(
+            preview_limit=preview_limit,
+            preview_meta=preview_meta,
+            default=default,
+        )
+
     def _resolve_sampling_strategy(
         self,
         metadata: Dict[str, Any],
         preview_meta: Dict[str, Any],
+        *,
+        preview_limit: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        raw = metadata.get("samplingStrategy") or metadata.get("sampling_strategy")
-        if raw is None:
-            raw = preview_meta.get("samplingStrategy") or preview_meta.get("sampling_strategy")
-        if raw is None:
-            return None
-        if isinstance(raw, str):
-            return {"type": raw}
-        if isinstance(raw, dict):
-            return raw
-        raise ValueError("sampling_strategy must be an object")
+        return resolve_preview_sampling_strategy(
+            metadata,
+            preview_meta,
+            preview_limit=preview_limit,
+        )
 
     def _attach_sampling_snapshot(
         self,
@@ -5350,19 +5426,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         node_id: str,
         sampling_strategy: Dict[str, Any],
     ) -> None:
-        for snapshot in reversed(input_snapshots):
-            if snapshot.get("node_id") == node_id:
-                snapshot["sampling_strategy"] = sampling_strategy
-                break
-
-    def _normalize_sampling_fraction(self, value: Any, *, field: str) -> float:
-        try:
-            fraction = float(value)
-        except (TypeError, ValueError):
-            raise ValueError(f"sampling_strategy.{field} must be a number")
-        if fraction <= 0 or fraction > 1:
-            raise ValueError(f"sampling_strategy.{field} must be within (0, 1]")
-        return fraction
+        attach_preview_sampling_snapshot(
+            input_snapshots,
+            node_id=node_id,
+            sampling_strategy=sampling_strategy,
+        )
 
     def _apply_sampling_strategy(
         self,
@@ -5372,42 +5440,12 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         node_id: str,
         seed: Optional[int],
     ) -> DataFrame:
-        strategy = sampling_strategy or {}
-        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
-        if not strategy_type:
-            raise ValueError(f"sampling_strategy.type is required for input node {node_id}")
-        if strategy_type in {"random", "sample", "bernoulli", "tablesample"}:
-            fraction = strategy.get("fraction")
-            if fraction is None:
-                percent = strategy.get("percent")
-                if percent is not None:
-                    fraction = float(percent) / 100.0
-            if fraction is None:
-                raise ValueError(f"sampling_strategy.fraction is required for input node {node_id}")
-            resolved_fraction = self._normalize_sampling_fraction(fraction, field="fraction")
-            with_replacement = bool(strategy.get("with_replacement") or strategy.get("withReplacement") or False)
-            return df.sample(withReplacement=with_replacement, fraction=resolved_fraction, seed=seed)
-        if strategy_type in {"stratified", "sampleby"}:
-            column = str(strategy.get("column") or "").strip()
-            fractions_raw = strategy.get("fractions")
-            if not column:
-                raise ValueError(f"sampling_strategy.column is required for input node {node_id}")
-            if not isinstance(fractions_raw, dict) or not fractions_raw:
-                raise ValueError(f"sampling_strategy.fractions is required for input node {node_id}")
-            fractions: Dict[Any, float] = {}
-            for key, value in fractions_raw.items():
-                fractions[key] = self._normalize_sampling_fraction(value, field="fractions")
-            return df.sampleBy(column, fractions, seed=seed)
-        if strategy_type in {"limit", "head"}:
-            limit = strategy.get("limit") or strategy.get("rows")
-            try:
-                limit_value = int(limit)
-            except (TypeError, ValueError):
-                raise ValueError(f"sampling_strategy.limit must be an integer for input node {node_id}")
-            if limit_value <= 0:
-                raise ValueError(f"sampling_strategy.limit must be positive for input node {node_id}")
-            return df.limit(limit_value)
-        raise ValueError(f"Unsupported sampling_strategy.type '{strategy_type}' for input node {node_id}")
+        return apply_preview_sampling_strategy(
+            df,
+            sampling_strategy,
+            node_id=node_id,
+            seed=seed,
+        )
 
     def _strip_commit_prefix(self, key: str, commit_id: str) -> str:
         normalized = (key or "").lstrip("/")

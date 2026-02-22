@@ -37,7 +37,7 @@ This guide covers a complete SPICE Harvester installation, including system requ
 
 ### Full Stack
 
-The default Docker Compose configuration starts all 33+ services:
+The default Docker Compose configuration starts all 32 services:
 
 ```bash
 docker compose up -d
@@ -63,7 +63,7 @@ Available profiles:
 | Profile | Services | Ports |
 |---------|----------|-------|
 | `core` | OMS, BFF, Agent, PostgreSQL, Elasticsearch, Redis, Kafka, MinIO | 8000, 8002, 8004, 5432, 9200, 6379, 9092, 9000 |
-| `workers` | Event Processor, Projection Builder, Pipeline Runner, Lineage Worker, and 9 more | Internal only |
+| `workers` | Action Worker, Projection Worker, Pipeline Worker, Ontology Worker, and 8 more | Internal only |
 | `observability` | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki | 13000, 19090, 16686 |
 
 ## Environment Variables

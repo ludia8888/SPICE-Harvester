@@ -38,6 +38,7 @@ See the [Auth Flow Guide](../integration-developer/auth-flow) for detailed authe
 | Role | Read | Write | Delete | Admin | Use Case |
 |------|:----:|:-----:|:------:|:-----:|----------|
 | **Admin** | ✅ | ✅ | ✅ | ✅ | Platform administrators |
+| **Platform Admin** | ✅ | ✅ | ✅ | ✅ | Superuser with all platform API scopes |
 | **Editor** | ✅ | ✅ | ✅ | — | Data engineers, analysts |
 | **Viewer** | ✅ | — | — | — | Read-only dashboard users |
 
@@ -48,6 +49,13 @@ Full access to all platform capabilities:
 - Manage connections, pipelines, and schedules
 - Access admin endpoints (user management, configuration)
 - View audit logs and lineage data
+
+### Platform Admin Role
+
+Superset of the Admin role with all **platform API scopes** granted. The `platform_admin` role is automatically assigned to:
+- Admin token principals (via `X-Admin-Token` header)
+- Pytest-scoped principals (in test environments)
+- Dev master auth principals (in development)
 
 ### Editor Role
 
@@ -110,6 +118,31 @@ Restrict allowed operations:
 }
 ```
 
+## Platform API Scopes
+
+SPICE Harvester enforces **OAuth-style scopes** on v2 API endpoints. Scopes are extracted from the JWT `scope` or `scp` claim and checked at the endpoint level using the `require_scopes` dependency.
+
+| Scope | Grants Access To |
+|-------|-----------------|
+| `api:datasets-read` | List/get datasets, branches, transactions, files, schemas |
+| `api:datasets-write` | Create datasets, branches, transactions; upload files; commit |
+| `api:ontologies-read` | List/get ontologies, object types, objects, links, search |
+| `api:ontologies-write` | Create object types, execute actions, apply batch actions |
+| `api:orchestration-read` | List/get builds, schedules, runs, jobs |
+| `api:orchestration-write` | Create builds, create/pause/unpause schedules |
+| `api:connectivity-read` | List/get connections, table/file imports, virtual tables |
+| `api:connectivity-write` | Create/modify/delete connections and imports; test connections |
+
+When a principal lacks a required scope, the API returns:
+
+```json
+{
+  "errorCode": "PERMISSION_DENIED",
+  "errorName": "ApiUsageDenied",
+  "parameters": { "missingScope": "api:datasets-write" }
+}
+```
+
 ## Agent Tool Policies
 
 For AI agent integrations, SPICE Harvester provides granular **tool policies** that restrict what each agent tool can access:
@@ -123,7 +156,7 @@ For AI agent integrations, SPICE Harvester provides granular **tool policies** t
   "allowed_pipeline_ids": [],
   "allowed_ontology_ids": ["acme-corp"],
   "allowed_db_names": ["acme"],
-  "allowed_branches": ["main"]
+  "allowed_branches": ["master"]
 }
 ```
 

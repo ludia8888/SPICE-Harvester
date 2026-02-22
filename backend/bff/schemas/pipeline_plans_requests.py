@@ -17,7 +17,7 @@ class PipelinePlanCompileRequest(BaseModel):
 
 class PipelinePlanPreviewRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
-    limit: int = Field(default=200, ge=1, le=200)
+    limit: int = Field(default=500, ge=1, le=500)
     include_run_tables: bool = Field(default=False)
     run_table_limit: int = Field(default=200, ge=1, le=1000)
 
@@ -25,11 +25,10 @@ class PipelinePlanPreviewRequest(BaseModel):
 class PipelinePlanInspectPreviewRequest(BaseModel):
     preview: Dict[str, Any] | None = Field(default=None)
     node_id: str | None = Field(default=None, max_length=200)
-    limit: int = Field(default=200, ge=1, le=200)
+    limit: int = Field(default=500, ge=1, le=500)
 
 
 class PipelinePlanEvaluateJoinsRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
     run_tables: Dict[str, Dict[str, Any]] | None = Field(default=None)
     definition_digest: str | None = Field(default=None, max_length=200)
-

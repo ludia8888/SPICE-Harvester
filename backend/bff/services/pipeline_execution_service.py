@@ -842,8 +842,9 @@ def _parse_pipeline_run_request_payload(
     *,
     sanitized: Dict[str, Any],
     allow_sampling_strategy: bool,
+    default_limit: int = 200,
 ) -> _PipelineRunRequestPayload:
-    limit = int(sanitized.get("limit") or 200)
+    limit = int(sanitized.get("limit") or default_limit)
     limit = max(1, min(limit, 500))
     definition_json = (
         sanitized.get("definition_json")
@@ -1047,11 +1048,17 @@ def _build_preview_definition(
     *,
     definition_json: Dict[str, Any],
     branch: Optional[str],
+    preview_limit: int,
     sampling_strategy: Optional[dict[str, Any]],
 ) -> Dict[str, Any]:
     preview_definition = dict(definition_json)
     preview_meta = dict(preview_definition.get("__preview_meta__") or {})
     preview_meta["branch"] = branch or "main"
+    preview_meta["sample_limit"] = preview_limit
+    preview_meta["max_output_rows"] = preview_limit
+    preview_meta["sample_based_execution"] = True
+    preview_meta["skip_production_checks"] = True
+    preview_meta["skip_output_recording"] = True
     if sampling_strategy:
         preview_meta["sampling_strategy"] = sampling_strategy
     preview_definition["__preview_meta__"] = preview_meta
@@ -1309,6 +1316,7 @@ async def _prepare_preview_execution(
     request_payload = _parse_pipeline_run_request_payload(
         sanitized=sanitized,
         allow_sampling_strategy=True,
+        default_limit=500,
     )
     run_context = await _resolve_pipeline_run_context(
         pipeline_registry=pipeline_registry,
@@ -1377,6 +1385,7 @@ async def _dispatch_preview_execution(
     preview_definition = _build_preview_definition(
         definition_json=prepared.run_context.definition_json,
         branch=prepared.request_payload.branch,
+        preview_limit=prepared.request_payload.limit,
         sampling_strategy=prepared.request_payload.sampling_strategy,
     )
     job = PipelineJob(

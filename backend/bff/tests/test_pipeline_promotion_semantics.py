@@ -429,6 +429,51 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
 
 
 @pytest.mark.asyncio
+async def test_preview_defaults_to_foundry_limit_and_preview_meta_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _EventStore:
+        async def connect(self) -> None:
+            return None
+
+        async def append_event(self, event: Any) -> None:
+            return None
+
+    import bff.routers.pipeline_execution as pipeline_router
+
+    monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
+
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
+    registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
+    queue = _PipelineJobQueue()
+
+    response = await preview_pipeline(
+        pipeline_id=PIPELINE_ID,
+        payload={
+            "db_name": "testdb",
+            "definition_json": {"nodes": [], "edges": []},
+            "node_id": "node-x",
+        },
+        request=_Request(headers={"Idempotency-Key": "idem-preview-default-limit"}),
+        pipeline_registry=registry,
+        pipeline_job_queue=queue,
+        dataset_registry=_DatasetRegistry(),
+        audit_store=_AuditStore(),
+    )
+
+    assert response["status"] == "success"
+    assert response["data"]["limit"] == 500
+
+    assert len(queue.published) == 1
+    job = queue.published[0]
+    assert job.preview_limit == 500
+    preview_meta = job.definition_json.get("__preview_meta__") or {}
+    assert preview_meta.get("sample_limit") == 500
+    assert preview_meta.get("max_output_rows") == 500
+    assert preview_meta.get("sample_based_execution") is True
+    assert preview_meta.get("skip_production_checks") is True
+    assert preview_meta.get("skip_output_recording") is True
+
+
+@pytest.mark.asyncio
 async def test_promote_build_merges_build_branch_to_main_and_registers_version(
     lakefs_merge_stub: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,

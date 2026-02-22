@@ -9,7 +9,7 @@ This guide walks integration developers through building applications that consu
 
 ## API Architecture
 
-SPICE Harvester exposes **234+ REST endpoints** through the BFF (Backend for Frontend) service, organized into several API families:
+SPICE Harvester exposes **264 REST endpoints** (109 v2 + 155 v1) through the BFF (Backend for Frontend) service, organized into several API families:
 
 | API Family | Prefix | Description |
 |-----------|--------|-------------|
@@ -47,7 +47,20 @@ SPICE Harvester supports multiple authentication strategies:
 | User JWT | `Authorization: Bearer <jwt>` | SSO/OIDC authenticated users |
 | Admin Token | `X-Admin-Token: <token>` | Administrative operations |
 
-See the [Auth Flow Guide](./auth-flow) for detailed authentication patterns.
+### OAuth Scope Enforcement
+
+Certain v2 endpoints enforce **OAuth scopes** on the authenticated principal. If the principal's JWT does not include the required scope, the API returns a Foundry-style error:
+
+```json
+{
+  "errorCode": "PERMISSION_DENIED",
+  "errorName": "ApiUsageDenied",
+  "errorInstanceId": "...",
+  "parameters": { "missingScope": "api:datasets-write" }
+}
+```
+
+See the [Auth Flow Guide](./auth-flow) for the full list of platform API scopes and authentication patterns.
 
 ## Object Operations
 
@@ -394,6 +407,10 @@ All errors follow a structured format:
   }
 }
 ```
+
+:::note
+All `/api/v2/` endpoints return errors using the Foundry-compatible `FoundryAPIError` envelope shown above. This is handled by a global exception handler registered on the BFF service. The `errorInstanceId` is a UUID generated per error occurrence for tracing.
+:::
 
 ### Common Error Codes
 

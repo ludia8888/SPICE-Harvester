@@ -39,6 +39,9 @@ A persistence pattern where state is derived from a sequence of immutable events
 **Event Store**
 The durable, append-only log of all events, stored in S3/MinIO. The event store is the canonical source of truth; all other data stores are projections of it.
 
+**FoundryAPIError**
+A structured exception class and error envelope format used by all `/api/v2/` endpoints. Returns a JSON body with `errorCode`, `errorName`, `errorInstanceId` (UUID), and `parameters`. Handled by a global `foundry_exception_handler` registered on the BFF service. See [API Overview](/docs/api/overview).
+
 **Funnel**
 The internal tabular type-inference and sheet-structure analysis runtime used by BFF data-connector flows. In Foundry-aligned topology it is not exposed as a standalone public service.
 
@@ -66,6 +69,9 @@ The primary backend service for ontology management, object CRUD, search, action
 **Ontology**
 The top-level container that defines the data model. An ontology contains object types, link types, and their relationships. Each ontology is identified by a unique API name.
 
+**OAuth Scope**
+An access control mechanism used by SPICE Harvester to restrict API operations. Scopes are extracted from the JWT `scope` or `scp` claim. SPICE defines 8 platform API scopes (e.g., `api:datasets-read`, `api:ontologies-write`). See [RBAC Guide](/docs/guides/platform-admin/rbac).
+
 **Outbox Pattern**
 A technique for reliably publishing events to Kafka. Events are written to an outbox table within the same database transaction as the mutation. A relay process reads committed events from the outbox and publishes them to Kafka.
 
@@ -74,6 +80,9 @@ An opaque, base64-encoded string used for cursor-based pagination in the v2 API.
 
 **Pipeline**
 A declarative data transformation workflow that reads from a source, applies a series of transforms, and writes results to the ontology. Pipelines support 22+ transform types and are executed by Pipeline Runner workers.
+
+**Platform API Scope**
+One of 8 predefined scopes that govern access to major API families: `api:datasets-read`, `api:datasets-write`, `api:ontologies-read`, `api:ontologies-write`, `api:orchestration-read`, `api:orchestration-write`, `api:connectivity-read`, `api:connectivity-write`. Enforced via the `require_scopes` dependency on protected endpoints.
 
 **Primary Key**
 The property that uniquely identifies instances within an object type. The primary key value is used in API URLs and is returned as `__primaryKey` in v2 responses.
@@ -98,6 +107,9 @@ A point-in-time capture of an aggregate's state at a specific sequence number. S
 
 **Transform**
 A single step in a pipeline that processes data. Each transform has a type (e.g., `map`, `filter`, `lookup`) and configuration parameters. Transforms are executed sequentially.
+
+**UserPrincipal**
+A frozen dataclass attached to `request.state.user` after successful authentication. Contains `id`, `type`, `email`, `roles`, `tenant_id`, `org_id`, `verified`, and `claims`. The `scopes()` method extracts OAuth scopes from the claims dict. See [Auth Flow Guide](/docs/guides/integration-developer/auth-flow).
 
 ---
 

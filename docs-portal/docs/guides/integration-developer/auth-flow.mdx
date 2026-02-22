@@ -111,7 +111,37 @@ Authorization: Bearer <jwt>
 | `tenant_id` | `tenant_id` | Multi-tenant isolation |
 | `org_id` | `org_id` | Organization identifier |
 
-### Strategy 4: Dev Master Auth
+### Strategy 4: Admin Token
+
+For administrative operations using a pre-shared admin token.
+
+**Required header:**
+```
+X-Admin-Token: <admin-token>
+```
+
+**Flow:**
+1. Extract token from `X-Admin-Token` header
+2. Validate against configured admin token
+3. Attach a system principal with `admin` and `platform_admin` roles
+4. All platform API scopes are granted automatically
+
+The admin token principal is created with `id: "system"` and full platform scopes. This keeps action validation and apply usable in unconfigured dev stacks (edit policy enforcement is skipped for `system`).
+
+### Strategy 5: Pytest-Scoped Principal
+
+**Testing only** -- automatically attaches a principal when running in the test harness.
+
+**Flow:**
+1. Check for `X-User-ID` or `X-Actor` headers (falls back to `pytest-user`)
+2. Create a principal with `admin` and `platform_admin` roles
+3. All platform API scopes are granted via the `scope` claim
+
+:::caution
+The pytest principal is only active when the application is running under a test runner. It should never be reachable in production.
+:::
+
+### Strategy 6: Dev Master Auth
 
 **Development only** -- bypasses all authentication when enabled.
 
@@ -128,13 +158,48 @@ Never enable Dev Master Auth in production. It bypasses all security controls.
 After successful authentication, a `UserPrincipal` is attached to the request:
 
 ```python
+@dataclass(frozen=True)
 class UserPrincipal:
-    user_id: str          # Unique user identifier
-    user_type: str        # "user", "service", "agent"
-    roles: List[str]      # Role assignments
-    tenant_id: str        # Tenant isolation key
-    org_id: Optional[str] # Organization identifier
+    id: str                        # Unique user identifier
+    type: str = "user"             # "user", "service", "agent"
+    email: Optional[str] = None    # Email address (from JWT)
+    roles: Tuple[str, ...] = ()    # Role assignments
+    tenant_id: Optional[str] = None  # Tenant isolation key
+    org_id: Optional[str] = None   # Organization identifier
+    verified: bool = True          # Whether the token was cryptographically verified
+    claims: Dict[str, Any] = {}    # Raw JWT claims (used for scope extraction)
+
+    def scopes(self) -> Tuple[str, ...]:
+        """Extract OAuth scopes from the claims dict."""
+        ...
 ```
+
+### OAuth Scopes
+
+The `UserPrincipal.scopes()` method parses OAuth scopes from OIDC claims. It supports multiple formats:
+
+| Format | Source | Example |
+|--------|--------|---------|
+| Space-delimited string | OAuth2 standard (`scope` claim) | `"api:datasets-read api:ontologies-write"` |
+| Comma-delimited string | Legacy systems | `"api:datasets-read,api:ontologies-write"` |
+| Array of strings | Azure AD (`scp` claim) | `["api:datasets-read", "api:ontologies-write"]` |
+
+### Platform API Scopes
+
+SPICE Harvester defines 8 platform API scopes for fine-grained access control:
+
+| Scope | Description |
+|-------|-------------|
+| `api:datasets-read` | Read datasets, branches, transactions, files |
+| `api:datasets-write` | Create/modify datasets, upload files, manage transactions |
+| `api:ontologies-read` | Read ontologies, object types, objects, links |
+| `api:ontologies-write` | Create/modify ontologies, execute actions |
+| `api:orchestration-read` | Read builds, schedules, runs |
+| `api:orchestration-write` | Create builds, manage schedules |
+| `api:connectivity-read` | Read connections, imports, virtual tables |
+| `api:connectivity-write` | Create/modify connections and imports |
+
+Scopes are enforced using the `require_scopes` dependency on protected endpoints. When a request lacks required scopes, the API returns a Foundry-style `403 PERMISSION_DENIED` error with `ApiUsageDenied` error name.
 
 The principal is propagated to downstream services via headers:
 
@@ -225,6 +290,7 @@ If the same idempotency key is sent twice, the second request returns the result
 | Invalid token | 401 | Token not in expected list | Check `BFF_EXPECTED_TOKENS` configuration |
 | JWT verification failed | 401 | Wrong secret/key or expired token | Check JWT configuration and token expiration |
 | Permission denied | 403 | Role lacks required permission | Add required role to user or adjust RBAC policy |
+| Missing scope (`ApiUsageDenied`) | 403 | OAuth scope not present on principal | Ensure the JWT includes required scopes in the `scope` or `scp` claim |
 | Agent tool not found | 403 | `X-Agent-Tool-ID` not registered | Register tool in agent tool registry |
 | Agent policy violation | 403 | Request violates tool policy | Check tool's allowed methods, paths, and resources |
 

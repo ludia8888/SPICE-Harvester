@@ -155,6 +155,86 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         return to_int_or_none(value)
 
     @staticmethod
+    def _projection_doc_sequence(document: Any) -> Optional[int]:
+        if not isinstance(document, dict):
+            return None
+        for field in ("event_sequence", "version", "eventSequence", "_version"):
+            sequence = to_int_or_none(document.get(field))
+            if sequence is not None:
+                return sequence
+        return None
+
+    async def _handle_es_version_conflict(
+        self,
+        *,
+        event_id: str,
+        event_data: Dict[str, Any],
+        db_name: str,
+        index_name: str,
+        doc_id: str,
+        operation: str,
+        incoming_seq: Optional[int],
+        skip_reason: str,
+        conflict_message: str,
+        record_lineage: bool = False,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.elasticsearch_service:
+            raise RuntimeError("Elasticsearch service unavailable while resolving version conflict")
+
+        existing_doc = await self.elasticsearch_service.get_document(index_name, doc_id)
+        existing_sequence = self._projection_doc_sequence(existing_doc)
+
+        if incoming_seq is None:
+            conflict_confirmed = bool(existing_doc)
+        else:
+            conflict_confirmed = existing_sequence is not None and existing_sequence >= int(incoming_seq)
+
+        metadata = dict(extra_metadata or {})
+        metadata.update(
+            {
+                "incoming_sequence": incoming_seq,
+                "existing_sequence": existing_sequence,
+                "conflict_confirmed": conflict_confirmed,
+            }
+        )
+
+        if not conflict_confirmed:
+            detail = (
+                f"Unverified ES version conflict for {index_name}/{doc_id} "
+                f"(incoming_seq={incoming_seq}, existing_seq={existing_sequence})"
+            )
+            logger.error(detail)
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(doc_id),
+                operation=operation,
+                status="failure",
+                record_lineage=False,
+                skip_reason="version_conflict_unverified",
+                error=detail,
+                extra_metadata=metadata,
+            )
+            raise RuntimeError(detail)
+
+        logger.warning(conflict_message)
+        await self._record_es_side_effect(
+            event_id=str(event_id),
+            event_data=event_data,
+            db_name=db_name,
+            index_name=index_name,
+            doc_id=str(doc_id),
+            operation=operation,
+            status="success",
+            record_lineage=record_lineage,
+            skip_reason=skip_reason,
+            extra_metadata=metadata,
+        )
+
+    @staticmethod
     def _normalize_localized_field(value: Any, *, default_lang: str) -> tuple[str, Dict[str, str]]:
         i18n_map = coerce_localized_text(value, default_lang=default_lang)
         text = select_localized_text(value, lang=default_lang)
@@ -989,12 +1069,20 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 )
             except Exception as e:
                 if self._is_es_version_conflict(e):
-                    logger.info(
-                        "Skipping stale ActionApplied overlay write via ES version conflict "
-                        "(seq=%s, instance_id=%s, lifecycle_id=%s)",
-                        incoming_seq,
-                        instance_id,
-                        lifecycle_id,
+                    await self._handle_es_version_conflict(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=overlay_index,
+                        doc_id=str(overlay_id),
+                        operation="index",
+                        incoming_seq=incoming_seq,
+                        skip_reason="stale_version_conflict",
+                        conflict_message=(
+                            "Skipping stale ActionApplied overlay write via ES version conflict "
+                            f"(seq={incoming_seq}, instance_id={instance_id}, lifecycle_id={lifecycle_id})"
+                        ),
+                        extra_metadata={"instance_id": instance_id, "lifecycle_id": lifecycle_id},
                     )
                     continue
                 raise
@@ -1115,37 +1203,35 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 )
             except Exception as e:
                 if incoming_seq is None and self._is_es_version_conflict(e):
-                    logger.info(
-                        f"Skipping ontology create due to ES create conflict "
-                        f"(class_id={class_id})"
-                    )
-                    await self._record_es_side_effect(
+                    await self._handle_es_version_conflict(
                         event_id=str(event_id),
                         event_data=event_data,
                         db_name=db_name,
                         index_name=index_name,
                         doc_id=str(class_id),
                         operation="index",
-                        status="success",
-                        record_lineage=False,
+                        incoming_seq=incoming_seq,
                         skip_reason="es_create_conflict",
+                        conflict_message=(
+                            "Skipping ontology create due to ES create conflict "
+                            f"(class_id={class_id})"
+                        ),
                     )
                     return
                 if incoming_seq is not None and self._is_es_version_conflict(e):
-                    logger.info(
-                        f"Skipping stale ontology create event via ES version conflict "
-                        f"(seq={incoming_seq}, class_id={class_id})"
-                    )
-                    await self._record_es_side_effect(
+                    await self._handle_es_version_conflict(
                         event_id=str(event_id),
                         event_data=event_data,
                         db_name=db_name,
                         index_name=index_name,
                         doc_id=str(class_id),
                         operation="index",
-                        status="success",
-                        record_lineage=False,
+                        incoming_seq=incoming_seq,
                         skip_reason="stale_version_conflict",
+                        conflict_message=(
+                            "Skipping stale ontology create event via ES version conflict "
+                            f"(seq={incoming_seq}, class_id={class_id})"
+                        ),
                     )
                     return
                 await self._record_es_side_effect(
@@ -1314,37 +1400,35 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                     )
             except Exception as e:
                 if incoming_seq is not None and self._is_es_version_conflict(e):
-                    logger.info(
-                        f"Skipping stale ontology update event via ES version conflict "
-                        f"(seq={incoming_seq}, class_id={class_id})"
-                    )
-                    await self._record_es_side_effect(
+                    await self._handle_es_version_conflict(
                         event_id=str(event_id),
                         event_data=event_data,
                         db_name=db_name,
                         index_name=index_name,
                         doc_id=str(class_id),
                         operation="index",
-                        status="success",
-                        record_lineage=False,
+                        incoming_seq=incoming_seq,
                         skip_reason="stale_version_conflict",
+                        conflict_message=(
+                            "Skipping stale ontology update event via ES version conflict "
+                            f"(seq={incoming_seq}, class_id={class_id})"
+                        ),
                     )
                     return
                 if incoming_seq is None and self._is_es_version_conflict(e):
-                    logger.info(
-                        f"Skipping ontology update create due to ES conflict "
-                        f"(class_id={class_id})"
-                    )
-                    await self._record_es_side_effect(
+                    await self._handle_es_version_conflict(
                         event_id=str(event_id),
                         event_data=event_data,
                         db_name=db_name,
                         index_name=index_name,
                         doc_id=str(class_id),
                         operation="index",
-                        status="success",
-                        record_lineage=False,
+                        incoming_seq=incoming_seq,
                         skip_reason="es_create_conflict",
+                        conflict_message=(
+                            "Skipping ontology update create due to ES conflict "
+                            f"(class_id={class_id})"
+                        ),
                     )
                     return
                 await self._record_es_side_effect(
@@ -1475,20 +1559,19 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                     )
                 except Exception as e:
                     if self._is_es_version_conflict(e):
-                        logger.info(
-                            f"Skipping stale ontology tombstone event via ES version conflict "
-                            f"(seq={incoming_seq}, class_id={class_id})"
-                        )
-                        await self._record_es_side_effect(
+                        await self._handle_es_version_conflict(
                             event_id=str(event_id),
                             event_data=event_data,
                             db_name=db_name,
                             index_name=index_name,
                             doc_id=str(class_id),
                             operation="index",
-                            status="success",
-                            record_lineage=False,
+                            incoming_seq=incoming_seq,
                             skip_reason="stale_version_conflict",
+                            conflict_message=(
+                                "Skipping stale ontology tombstone event via ES version conflict "
+                                f"(seq={incoming_seq}, class_id={class_id})"
+                            ),
                             extra_metadata={"tombstone": True},
                         )
                         return

@@ -111,7 +111,7 @@ async def preview_plan(
         return warning_resp
 
     node_id = str(body.node_id or "").strip() or None
-    limit = int(body.limit or 200)
+    limit = int(body.limit or 500)
     include_run_tables = bool(body.include_run_tables)
     run_table_limit = int(body.run_table_limit or limit)
 
@@ -236,7 +236,7 @@ async def inspect_plan_preview(
         preflight = validation.preflight
 
         node_id = str(body.node_id or "").strip() or None
-        limit = int(body.limit or 200)
+        limit = int(body.limit or 500)
         preview_definition = dict(validation.plan.definition_json)
         preview_meta = dict(preview_definition.get("__preview_meta__") or {})
         preview_meta.setdefault("branch", str(branch or "") or "master")

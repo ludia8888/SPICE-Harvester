@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -127,6 +128,140 @@ class PipelineExecutor:
         self._preview_mode: bool = False
         self._preview_max_output_rows: Optional[int] = None
 
+    @staticmethod
+    def _preview_flag(
+        preview_meta: Dict[str, Any],
+        *,
+        snake_case_key: str,
+        camel_case_key: str,
+        default: bool,
+    ) -> bool:
+        raw = preview_meta.get(snake_case_key)
+        if raw is None:
+            raw = preview_meta.get(camel_case_key)
+        if raw is None:
+            return default
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, (int, float)):
+            return bool(raw)
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+        return bool(raw)
+
+    @staticmethod
+    def _preview_limit(
+        preview_meta: Dict[str, Any],
+        *,
+        primary_key: str,
+        secondary_key: str,
+        default: Optional[int] = None,
+    ) -> Optional[int]:
+        raw = preview_meta.get(primary_key)
+        if raw is None:
+            raw = preview_meta.get(secondary_key)
+        if raw is None:
+            return default
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError):
+            return default
+        if limit <= 0:
+            return default
+        return max(1, min(500, limit))
+
+    def _resolve_preview_sampling_strategy(
+        self,
+        *,
+        metadata: Dict[str, Any],
+        preview_meta: Dict[str, Any],
+        fallback_limit: Optional[int],
+    ) -> Optional[Dict[str, Any]]:
+        raw = metadata.get("samplingStrategy") or metadata.get("sampling_strategy")
+        if raw is None:
+            raw = preview_meta.get("samplingStrategy") or preview_meta.get("sampling_strategy")
+        if raw is None:
+            if fallback_limit and fallback_limit > 0:
+                return {"type": "limit", "limit": fallback_limit}
+            return None
+        if isinstance(raw, str):
+            strategy: Dict[str, Any] = {"type": raw}
+        elif isinstance(raw, dict):
+            strategy = dict(raw)
+        else:
+            raise ValueError("sampling_strategy must be an object")
+        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
+        if strategy_type in {"limit", "head"} and "limit" not in strategy and "rows" not in strategy:
+            if fallback_limit and fallback_limit > 0:
+                strategy["limit"] = fallback_limit
+        return strategy
+
+    def _apply_preview_sampling(
+        self,
+        table: PipelineTable,
+        *,
+        sampling_strategy: Dict[str, Any],
+        node_id: str,
+    ) -> PipelineTable:
+        strategy = sampling_strategy or {}
+        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
+        if not strategy_type:
+            raise ValueError(f"sampling_strategy.type is required for input node {node_id}")
+        if strategy_type in {"limit", "head"}:
+            limit = strategy.get("limit") or strategy.get("rows")
+            try:
+                limit_value = int(limit)
+            except (TypeError, ValueError):
+                raise ValueError(f"sampling_strategy.limit must be an integer for input node {node_id}")
+            if limit_value <= 0:
+                raise ValueError(f"sampling_strategy.limit must be positive for input node {node_id}")
+            return PipelineTable(columns=table.columns, rows=table.rows[:limit_value])
+        if strategy_type in {"random", "sample", "bernoulli", "tablesample"}:
+            fraction = strategy.get("fraction")
+            if fraction is None:
+                percent = strategy.get("percent")
+                if percent is not None:
+                    fraction = float(percent) / 100.0
+            if fraction is None:
+                raise ValueError(f"sampling_strategy.fraction is required for input node {node_id}")
+            try:
+                resolved_fraction = float(fraction)
+            except (TypeError, ValueError):
+                raise ValueError(f"sampling_strategy.fraction must be a number for input node {node_id}")
+            if resolved_fraction <= 0 or resolved_fraction > 1:
+                raise ValueError(f"sampling_strategy.fraction must be within (0, 1] for input node {node_id}")
+            generator = random.Random(f"preview:{node_id}")
+            sampled_rows = [row for row in table.rows if generator.random() <= resolved_fraction]
+            return PipelineTable(columns=table.columns, rows=sampled_rows)
+        if strategy_type in {"stratified", "sampleby"}:
+            column = str(strategy.get("column") or "").strip()
+            fractions_raw = strategy.get("fractions")
+            if not column:
+                raise ValueError(f"sampling_strategy.column is required for input node {node_id}")
+            if not isinstance(fractions_raw, dict) or not fractions_raw:
+                raise ValueError(f"sampling_strategy.fractions is required for input node {node_id}")
+            fractions: Dict[Any, float] = {}
+            for key, value in fractions_raw.items():
+                try:
+                    fraction = float(value)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"sampling_strategy.fractions values must be numbers for input node {node_id}"
+                    )
+                if fraction <= 0 or fraction > 1:
+                    raise ValueError(
+                        f"sampling_strategy.fractions values must be within (0, 1] for input node {node_id}"
+                    )
+                fractions[key] = fraction
+            generator = random.Random(f"preview:stratified:{node_id}")
+            sampled_rows = [
+                row
+                for row in table.rows
+                if generator.random() <= fractions.get(row.get(column), 0.0)
+            ]
+            return PipelineTable(columns=table.columns, rows=sampled_rows)
+        raise ValueError(f"Unsupported sampling_strategy.type '{strategy_type}' for input node {node_id}")
+
     async def preview(
         self,
         *,
@@ -175,22 +310,32 @@ class PipelineExecutor:
         preview_meta = definition.get("__preview_meta__") or {}
         preview_branch = preview_meta.get("branch")
         self._preview_mode = bool(definition.get("__preview_meta__"))
-        self._preview_max_output_rows = None
-        if self._preview_mode and "max_output_rows" in preview_meta:
-            try:
-                max_rows = int(preview_meta.get("max_output_rows") or 0)
-            except (TypeError, ValueError):
-                max_rows = 0
-            if max_rows > 0:
-                self._preview_max_output_rows = max_rows
-        sample_limit = None
-        if "sample_limit" in preview_meta:
-            try:
-                sample_limit = int(preview_meta.get("sample_limit") or 0)
-            except (TypeError, ValueError):
-                sample_limit = None
-        if sample_limit is not None and sample_limit <= 0:
-            sample_limit = None
+        skip_production_checks = self._preview_mode and self._preview_flag(
+            preview_meta,
+            snake_case_key="skip_production_checks",
+            camel_case_key="skipProductionChecks",
+            default=True,
+        )
+        sample_limit = (
+            self._preview_limit(
+                preview_meta,
+                primary_key="sample_limit",
+                secondary_key="sampleLimit",
+                default=500 if self._preview_mode else None,
+            )
+            if self._preview_mode
+            else None
+        )
+        self._preview_max_output_rows = (
+            self._preview_limit(
+                preview_meta,
+                primary_key="max_output_rows",
+                secondary_key="maxOutputRows",
+                default=sample_limit if self._preview_mode else None,
+            )
+            if self._preview_mode
+            else None
+        )
 
         tables: Dict[str, PipelineTable] = {}
         incoming_map = build_incoming(edges)
@@ -212,15 +357,28 @@ class PipelineExecutor:
                         preview_branch,
                         sample_limit=sample_limit,
                     )
+                if self._preview_mode:
+                    sampling_strategy = self._resolve_preview_sampling_strategy(
+                        metadata=metadata,
+                        preview_meta=preview_meta,
+                        fallback_limit=sample_limit,
+                    )
+                    if sampling_strategy:
+                        table = self._apply_preview_sampling(
+                            table,
+                            sampling_strategy=sampling_strategy,
+                            node_id=node_id,
+                        )
             elif node_type == "output":
                 table = incoming_tables[0] if incoming_tables else PipelineTable([], [])
             else:
                 table = await self._apply_transform(metadata, incoming_tables, parameters)
 
-            table_ops = _build_table_ops(table)
-            check_errors = validate_schema_checks(table_ops, metadata.get("schemaChecks") or [])
-            if check_errors:
-                schema_errors[node_id] = check_errors
+            if not skip_production_checks:
+                table_ops = _build_table_ops(table)
+                check_errors = validate_schema_checks(table_ops, metadata.get("schemaChecks") or [])
+                if check_errors:
+                    schema_errors[node_id] = check_errors
 
             tables[node_id] = table
 
@@ -255,45 +413,44 @@ class PipelineExecutor:
         )
         output_ops = _build_table_ops(output_table)
         available_columns = output_ops.columns
-        preview_mode = bool(definition.get("__preview_meta__"))
+        if not skip_production_checks:
+            contract_errors = validate_schema_contract(
+                output_ops,
+                definition.get("schemaContract") or definition.get("schema_contract"),
+            )
+            if contract_errors:
+                raise PipelineExpectationError(f"Schema contract failed: {contract_errors}")
 
-        contract_errors = validate_schema_contract(
-            output_ops,
-            definition.get("schemaContract") or definition.get("schema_contract"),
-        )
-        if contract_errors:
-            raise PipelineExpectationError(f"Schema contract failed: {contract_errors}")
-
-        pk_semantic_errors = validate_pk_semantics(
-            available_columns=available_columns,
-            pk_semantics=pk_semantics,
-            pk_columns=pk_columns,
-            delete_column=delete_column,
-        )
-        if preview_mode:
-            pk_columns = [col for col in pk_columns if col in available_columns]
-            pk_semantic_errors = []
-        expectations = build_expectations_with_pk(
-            definition=definition,
-            output_metadata=output_metadata,
-            output_name=output_name,
-            output_node_id=output_node_id,
-            declared_outputs=declared_outputs,
-            pk_semantics=pk_semantics,
-            delete_column=delete_column,
-            pk_columns=pk_columns,
-            available_columns=available_columns,
-        )
-        expectation_errors = pk_semantic_errors + validate_expectations(output_ops, expectations)
-        fk_errors = await self._evaluate_fk_expectations(
-            expectations=expectations,
-            output_table=output_table,
-            db_name=db_name,
-            branch=preview_branch,
-        )
-        expectation_errors = expectation_errors + fk_errors
-        if expectation_errors:
-            raise PipelineExpectationError(f"Expectations failed: {expectation_errors}")
+            pk_semantic_errors = validate_pk_semantics(
+                available_columns=available_columns,
+                pk_semantics=pk_semantics,
+                pk_columns=pk_columns,
+                delete_column=delete_column,
+            )
+            if self._preview_mode:
+                pk_columns = [col for col in pk_columns if col in available_columns]
+                pk_semantic_errors = []
+            expectations = build_expectations_with_pk(
+                definition=definition,
+                output_metadata=output_metadata,
+                output_name=output_name,
+                output_node_id=output_node_id,
+                declared_outputs=declared_outputs,
+                pk_semantics=pk_semantics,
+                delete_column=delete_column,
+                pk_columns=pk_columns,
+                available_columns=available_columns,
+            )
+            expectation_errors = pk_semantic_errors + validate_expectations(output_ops, expectations)
+            fk_errors = await self._evaluate_fk_expectations(
+                expectations=expectations,
+                output_table=output_table,
+                db_name=db_name,
+                branch=preview_branch,
+            )
+            expectation_errors = expectation_errors + fk_errors
+            if expectation_errors:
+                raise PipelineExpectationError(f"Expectations failed: {expectation_errors}")
         return PipelineRunResult(tables=tables, output_nodes=output_nodes)
 
     async def _load_input(
@@ -739,7 +896,8 @@ class PipelineExecutor:
     def _table_to_sample(self, table: PipelineTable, *, limit: Optional[int]) -> Dict[str, Any]:
         inferred = _infer_column_types(table)
         columns = [{"name": name, "type": inferred.get(name, "xsd:string")} for name in table.columns]
-        rows = table.limited_rows(limit or 200)
+        default_limit = 500 if self._preview_mode else 200
+        rows = table.limited_rows(limit or default_limit)
         return {
             "row_count": len(table.rows),
             "columns": columns,

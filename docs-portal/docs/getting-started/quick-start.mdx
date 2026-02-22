@@ -57,7 +57,7 @@ MINIO_PORT=9000
 
 ## Step 3: Start the Platform
 
-Launch all 33+ services using Docker Compose:
+Launch all 32 services using Docker Compose:
 
 ```bash
 docker compose up -d
@@ -65,9 +65,9 @@ docker compose up -d
 
 This starts the full stack including:
 - **3 API servers** (OMS, BFF, Agent)
-- **13 workers** (event processors, projection builders, pipeline runners)
-- **8 data stores** (PostgreSQL, Elasticsearch, Redis, Kafka, MinIO, and more)
-- **6 observability services** (Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki)
+- **12 workers** (action workers, projection builders, pipeline runners, connector sync, and more)
+- **7 data platform services** (PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, LakeFS)
+- **6 observability services** (Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Kafka UI)
 
 :::tip
 For a lighter footprint during development, start only the core services:
@@ -203,5 +203,5 @@ curl -X POST http://localhost:8002/api/v2/ontologies/demo/objects/Employee/searc
 
 - **[Installation Guide](./installation)** -- Detailed setup with production configuration options
 - **[Core Concepts](./concepts)** -- Understand the ontology model and platform architecture
-- **[API Reference](/docs/api/overview)** -- Full API documentation with all 275 endpoints
+- **[API Reference](/docs/api/overview)** -- Full API documentation with all 264 endpoints
 - **[Architecture Overview](/docs/architecture/overview)** -- How the system is designed

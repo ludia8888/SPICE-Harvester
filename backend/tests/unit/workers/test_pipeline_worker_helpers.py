@@ -189,3 +189,42 @@ def test_resolve_kafka_avro_schema_rejects_latest_registry_version() -> None:
             node_id="in",
         )
     assert "schema registry version=latest is not allowed" in str(exc_info.value)
+
+
+def test_preview_helpers_use_foundry_defaults() -> None:
+    worker = PipelineWorker()
+
+    assert worker._resolve_preview_limit(preview_limit=None, preview_meta=None) == 500
+    assert worker._resolve_preview_limit(preview_limit=None, preview_meta={"sample_limit": "250"}) == 250
+    assert worker._resolve_preview_limit(preview_limit=None, preview_meta={"sampleLimit": 700}) == 500
+
+    assert worker._resolve_preview_flag(
+        {"skip_production_checks": "true"},
+        snake_case_key="skip_production_checks",
+        camel_case_key="skipProductionChecks",
+        default=False,
+    )
+    assert not worker._resolve_preview_flag(
+        {"skipOutputRecording": "false"},
+        snake_case_key="skip_output_recording",
+        camel_case_key="skipOutputRecording",
+        default=True,
+    )
+
+
+def test_sampling_strategy_defaults_to_limit_for_preview_inputs() -> None:
+    worker = PipelineWorker()
+
+    strategy = worker._resolve_sampling_strategy(
+        metadata={},
+        preview_meta={},
+        preview_limit=500,
+    )
+    assert strategy == {"type": "limit", "limit": 500}
+
+    explicit_limit = worker._resolve_sampling_strategy(
+        metadata={"samplingStrategy": {"type": "limit"}},
+        preview_meta={},
+        preview_limit=500,
+    )
+    assert explicit_limit == {"type": "limit", "limit": 500}
