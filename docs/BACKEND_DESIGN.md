@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-22T22:05:07+09:00
+> Generated: 2026-02-22T22:26:44+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **995**
-- Modules with module docstring: **538/995**
+- Modules scanned: **997**
+- Modules with module docstring: **538/997**
 - Modules with broad `except Exception`: **279**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **247373**
+- Total code lines (non-empty, non-comment): **247492**
 
 ## Package Scoreboard
 
@@ -39,10 +39,10 @@
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
 | `pipeline_worker` | 6 | 5/6 (83%) | 3 | 50 | 79 | 8 | 7716 |
-| `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1869 |
+| `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1868 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
 | `shared` | 302 | 202/302 (66%) | 106 | 391 | 863 | 1130 | 80068 |
-| `tests` | 300 | 53/300 (17%) | 22 | 113 | 1613 | 1476 | 51024 |
+| `tests` | 302 | 53/302 (17%) | 22 | 113 | 1618 | 1481 | 51144 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 293 |
 
 ## Engineering Hotspots
@@ -59,7 +59,7 @@
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2642 |
 | `backend/ontology_worker/main.py` | 142 | 28 | 0 | 0 | 30 | 28 | 1192 |
 | `backend/shared/observability/metrics.py` | 140 | 23 | 0 | 0 | 26 | 1 | 884 |
-| `backend/projection_worker/main.py` | 130 | 26 | 0 | 0 | 29 | 30 | 1869 |
+| `backend/projection_worker/main.py` | 130 | 26 | 0 | 0 | 29 | 30 | 1868 |
 | `backend/bff/services/oms_client.py` | 130 | 26 | 0 | 0 | 27 | 28 | 671 |
 | `backend/shared/services/kafka/processed_event_worker.py` | 123 | 22 | 0 | 0 | 29 | 16 | 1391 |
 | `backend/objectify_worker/main.py` | 120 | 24 | 0 | 0 | 32 | 36 | 3946 |
@@ -84,7 +84,7 @@
 | `backend/ontology_worker/main.py` | 15 | 28 | 30 | 28 | 1192 |
 | `backend/pipeline_scheduler/main.py` | 1 | 0 | 0 | 0 | 26 |
 | `backend/pipeline_worker/main.py` | 79 | 47 | 63 | 73 | 6389 |
-| `backend/projection_worker/main.py` | 27 | 26 | 29 | 30 | 1869 |
+| `backend/projection_worker/main.py` | 27 | 26 | 29 | 30 | 1868 |
 | `backend/writeback_materializer_worker/main.py` | 8 | 4 | 6 | 4 | 292 |
 
 ## New Developer Read Order (First 60-90 Minutes)
@@ -6089,7 +6089,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=2158 | code_lines=1869 | risk_score=130
+- Source footprint: total_lines=2157 | code_lines=1868 | risk_score=130
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=45
 - Runtime signals: async_functions=27 | try=29 | raise=30 | broad_except=26 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=21/45 (46%)
@@ -11991,6 +11991,22 @@
 - External imports (2): fastapi; pytest
 - Public API names: test_error_handler_records_error_taxonomy_metrics; test_service_factory_installs_error_handlers_by_default
 
+### `backend/tests/unit/errors/test_worker_complexity_budgets.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=48 | code_lines=40 | risk_score=0
+- API surface: public=2 | top-level functions=3 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (4): __future__; ast; pathlib; pytest
+- Public API names: test_action_worker_broad_exception_budget; test_pipeline_worker_file_size_budget
+
 ### `backend/tests/unit/idempotency/__init__.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -15990,6 +16006,22 @@
 - Internal imports (1): pipeline_worker.main
 - External imports (6): __future__; importlib; os; pyspark; pytest; sys
 - Public API names: spark; test_apply_transform_basic_ops; test_apply_transform_join_union_groupby_pivot_window; test_pipeline_worker_file_helpers; test_watermark_helpers; worker
+
+### `backend/tests/unit/workers/test_projection_worker_conflict_guard.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: asynchronous background processing
+- Source footprint: total_lines=102 | code_lines=80 | risk_score=0
+- API surface: public=3 | top-level functions=4 | classes=1 | methods=2
+- Runtime signals: async_functions=5 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/1 (0%) | methods=0/2 (0%)
+- Internal imports (1): projection_worker.main
+- External imports (3): __future__; pytest; typing
+- Public API names: test_handle_es_version_conflict_accepts_unsequenced_duplicate_only_when_document_exists; test_handle_es_version_conflict_confirms_stale_sequence; test_handle_es_version_conflict_requires_verifiable_ordering
 
 ### `backend/tests/unit/workers/test_spark_advanced_transforms.py`
 - Module summary: no docstring

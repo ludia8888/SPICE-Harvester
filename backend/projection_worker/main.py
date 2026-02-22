@@ -1670,20 +1670,19 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 )
             except Exception as e:
                 if self._is_es_version_conflict(e):
-                    logger.info(
-                        f"Skipping stale ontology delete event via ES version conflict "
-                        f"(seq={incoming_seq}, class_id={class_id})"
-                    )
-                    await self._record_es_side_effect(
+                    await self._handle_es_version_conflict(
                         event_id=str(event_id),
                         event_data=event_data,
                         db_name=db_name,
                         index_name=index_name,
                         doc_id=str(class_id),
                         operation="delete",
-                        status="success",
-                        record_lineage=False,
+                        incoming_seq=incoming_seq,
                         skip_reason="stale_version_conflict",
+                        conflict_message=(
+                            "Skipping stale ontology delete event via ES version conflict "
+                            f"(seq={incoming_seq}, class_id={class_id})"
+                        ),
                     )
                     return
                 await self._record_es_side_effect(

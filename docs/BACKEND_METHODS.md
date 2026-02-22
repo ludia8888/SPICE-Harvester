@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-22T22:05:07+09:00
+> Generated: 2026-02-22T22:26:44+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -4999,16 +4999,16 @@
     - `async _handle_ontology_class_created(self, ontology_data, event_id, event_data)` (line 1093): 온톨로지 클래스 생성 이벤트 처리
     - `async _handle_ontology_class_updated(self, ontology_data, event_id, event_data)` (line 1274): 온톨로지 클래스 업데이트 이벤트 처리
     - `async _handle_ontology_class_deleted(self, ontology_data, event_id, event_data)` (line 1471): 온톨로지 클래스 삭제 이벤트 처리
-    - `async _handle_database_created(self, db_data, event_id, event_data)` (line 1725): 데이터베이스 생성 이벤트 처리
-    - `async _handle_database_deleted(self, db_data, event_id, event_data)` (line 1781): 데이터베이스 삭제 이벤트 처리
-    - `async _get_class_label(self, class_id, db_name, branch)` (line 1861): Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
-    - `async _get_class_label_fallback(self, class_id, db_name, branch)` (line 1967): 락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
-    - `get_cache_efficiency_metrics(self)` (line 2003): 캐시 효율성 및 락 경합 메트릭 반환
-    - `log_cache_metrics(self)` (line 2056): 캐시 메트릭을 로그로 출력
-    - `async _cache_class_label(self, class_id, label, db_name, branch)` (line 2075): 클래스 라벨을 Redis에 캐싱
-    - `_normalize_properties(self, properties)` (line 2090): 속성을 검색 최적화된 형태로 정규화
-    - `_is_transient_infra_error(error)` (line 2102): Return True for errors that are expected to recover via retry (e.g. ES outage).
-    - `async _shutdown(self)` (line 2126): 워커 종료
+    - `async _handle_database_created(self, db_data, event_id, event_data)` (line 1724): 데이터베이스 생성 이벤트 처리
+    - `async _handle_database_deleted(self, db_data, event_id, event_data)` (line 1780): 데이터베이스 삭제 이벤트 처리
+    - `async _get_class_label(self, class_id, db_name, branch)` (line 1860): Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
+    - `async _get_class_label_fallback(self, class_id, db_name, branch)` (line 1966): 락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
+    - `get_cache_efficiency_metrics(self)` (line 2002): 캐시 효율성 및 락 경합 메트릭 반환
+    - `log_cache_metrics(self)` (line 2055): 캐시 메트릭을 로그로 출력
+    - `async _cache_class_label(self, class_id, label, db_name, branch)` (line 2074): 클래스 라벨을 Redis에 캐싱
+    - `_normalize_properties(self, properties)` (line 2089): 속성을 검색 최적화된 형태로 정규화
+    - `_is_transient_infra_error(error)` (line 2101): Return True for errors that are expected to recover via retry (e.g. ES outage).
+    - `async _shutdown(self)` (line 2125): 워커 종료
 
 ## scripts
 
@@ -10208,6 +10208,12 @@
   - `test_service_factory_installs_error_handlers_by_default()` (line 10): no docstring
   - `test_error_handler_records_error_taxonomy_metrics(monkeypatch)` (line 50): no docstring
 
+### `backend/tests/unit/errors/test_worker_complexity_budgets.py`
+- **Functions**
+  - `_count_broad_exception_handlers(path)` (line 9): no docstring
+  - `test_action_worker_broad_exception_budget()` (line 30): no docstring
+  - `test_pipeline_worker_file_size_budget()` (line 41): no docstring
+
 ### `backend/tests/unit/idempotency/__init__.py`
 
 ### `backend/tests/unit/idempotency/test_enterprise_idempotency.py`
@@ -13412,6 +13418,17 @@
   - `test_apply_transform_join_union_groupby_pivot_window(worker)` (line 150): no docstring
   - `test_watermark_helpers(worker)` (line 192): no docstring
   - `test_pipeline_worker_file_helpers(worker, tmp_path)` (line 205): no docstring
+
+### `backend/tests/unit/workers/test_projection_worker_conflict_guard.py`
+- **Functions**
+  - `_build_worker(document)` (line 20): no docstring
+  - `async test_handle_es_version_conflict_confirms_stale_sequence()` (line 34): no docstring
+  - `async test_handle_es_version_conflict_requires_verifiable_ordering()` (line 60): no docstring
+  - `async test_handle_es_version_conflict_accepts_unsequenced_duplicate_only_when_document_exists()` (line 85): no docstring
+- **Classes**
+  - `_FakeElasticSearch` (line 10): no docstring
+    - `__init__(self, document)` (line 11): no docstring
+    - `async get_document(self, index_name, doc_id)` (line 15): no docstring
 
 ### `backend/tests/unit/workers/test_spark_advanced_transforms.py`
 - **Functions**
