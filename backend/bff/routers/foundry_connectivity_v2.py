@@ -444,8 +444,14 @@ async def _run_connection_export(
                 occurred_at=utcnow(),
             )
             audit_log_id = str(audit_id)
-        except Exception:
-            pass
+        except Exception as audit_exc:
+            logger.warning(
+                "Failed to persist connectivity export audit failure log (connection_id=%s task_id=%s): %s",
+                connection_id,
+                task_id,
+                audit_exc,
+                exc_info=True,
+            )
 
         error_message = str(exc)
         if audit_log_id:
@@ -672,8 +678,13 @@ def _public_custom_jdbc_driver_metadata(config: Dict[str, Any]) -> list[Dict[str
         if item.get("sizeBytes") is not None:
             try:
                 payload["sizeBytes"] = int(item.get("sizeBytes"))
-            except (TypeError, ValueError):
-                pass
+            except (TypeError, ValueError) as exc:
+                logger.debug(
+                    "Dropping invalid custom JDBC driver size metadata (fileName=%s sizeBytes=%r): %s",
+                    file_name,
+                    item.get("sizeBytes"),
+                    exc,
+                )
         uploaded_time = item.get("uploadedTime")
         if uploaded_time not in (None, ""):
             payload["uploadedTime"] = str(uploaded_time)
@@ -3749,8 +3760,13 @@ async def test_connection_v2(
             enabled=source.enabled,
             config_json=merged_cfg,
         )
-    except Exception:
-        pass
+    except Exception as status_exc:
+        logger.warning(
+            "Failed to persist connection test status after test run (connection_id=%s): %s",
+            connection_id,
+            status_exc,
+            exc_info=True,
+        )
 
     return test_result
 

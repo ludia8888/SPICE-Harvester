@@ -70,15 +70,19 @@ async def test_agent_runtime_resolves_step_output_templates(monkeypatch: pytest.
 
         async def request(self, method, url, params=None, json=None, headers=None):  # noqa: ANN001
             captured.append((method, url))
-            if url.rstrip("/") == "http://bff/api/v1/pipelines":
+            if url.rstrip("/") == "http://bff/api/v2/datasets":
                 return FakeResponse(
                     {
-                        "status": "success",
-                        "data": {"pipeline": {"pipeline_id": "11111111-1111-1111-1111-111111111111"}},
+                        "rid": "ri.foundry.main.dataset.11111111-1111-1111-1111-111111111111",
                     }
                 )
-            if "11111111-1111-1111-1111-111111111111/preview" in url:
-                return FakeResponse({"status": "success", "data": {"job_id": "preview-1"}})
+            if "http://bff/api/v2/datasets/11111111-1111-1111-1111-111111111111" in url:
+                return FakeResponse(
+                    {
+                        "rid": "ri.foundry.main.dataset.11111111-1111-1111-1111-111111111111",
+                        "name": "orders",
+                    }
+                )
             return FakeResponse({"status": "error"}, status_code=404)
 
     monkeypatch.setattr(module.httpx, "AsyncClient", FakeClient)
@@ -86,12 +90,12 @@ async def test_agent_runtime_resolves_step_output_templates(monkeypatch: pytest.
     context: dict = {}
 
     create_call = AgentToolCall(
-        step_id="create_pipeline",
-        tool_id="pipelines.create",
+        step_id="create_dataset",
+        tool_id="datasets.create",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines",
-        body={"db_name": "demo", "name": "p1", "pipeline_type": "batch", "definition_json": {"nodes": [], "edges": []}},
+        path="/api/v2/datasets",
+        body={"name": "orders", "parentFolderRid": "ri.foundry.main.folder.demo"},
     )
 
     create_result = await runtime.execute_tool_call(
@@ -107,31 +111,29 @@ async def test_agent_runtime_resolves_step_output_templates(monkeypatch: pytest.
     )
 
     assert create_result["status"] == "success"
-    assert context["step_outputs"]["create_pipeline"]["pipeline_id"] == "11111111-1111-1111-1111-111111111111"
+    assert context["step_outputs"]["create_dataset"]["dataset_id"] == "11111111-1111-1111-1111-111111111111"
 
-    preview_call = AgentToolCall(
-        step_id="preview_pipeline",
-        tool_id="pipelines.preview",
+    get_call = AgentToolCall(
+        step_id="get_dataset",
+        tool_id="datasets.get",
         service="bff",
-        method="POST",
-        path="/api/v1/pipelines/${steps.create_pipeline.pipeline_id}/preview",
-        body={"limit": 10},
+        method="GET",
+        path="/api/v2/datasets/${steps.create_dataset.dataset_id}",
     )
 
-    preview_result = await runtime.execute_tool_call(
+    get_result = await runtime.execute_tool_call(
         run_id="run-1",
         actor="user-1",
         step_index=1,
         attempt=0,
-        tool_call=preview_call,
+        tool_call=get_call,
         context=context,
         dry_run=False,
         request_headers={},
         request_id="req-1",
     )
 
-    assert preview_result["status"] == "success"
+    assert get_result["status"] == "success"
     assert any(
-        url == "http://bff/api/v1/pipelines/11111111-1111-1111-1111-111111111111/preview" for _, url in captured
+        url == "http://bff/api/v2/datasets/11111111-1111-1111-1111-111111111111" for _, url in captured
     )
-

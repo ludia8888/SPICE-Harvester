@@ -36,7 +36,7 @@ def _resolve_compat_version() -> Optional[str]:
         return explicit
     try:
         major = int(str(_ELASTIC_CLIENT_VERSION).split(".", maxsplit=1)[0])
-    except Exception:
+    except (TypeError, ValueError):
         return None
     # elasticsearch-py 9 defaults to `compatible-with=9`; our runtime ES is 8.x.
     return "8" if major >= 9 else None
@@ -58,7 +58,7 @@ def _apply_compat_mimetype_patch(compat_version: Optional[str]) -> None:
     for module_name in ("elasticsearch._async.client._base", "elasticsearch._sync.client._base"):
         try:
             module = importlib.import_module(module_name)
-        except Exception:
+        except ImportError:
             continue
         try:
             setattr(module, "_COMPAT_MIMETYPE_TEMPLATE", template)
@@ -127,6 +127,24 @@ class ElasticsearchService(AsyncClientPingMixin):
             
         self._client: Optional[AsyncElasticsearch] = None
         self._connect_lock = asyncio.Lock()
+
+    async def _safe_close_client(
+        self,
+        client: Optional[AsyncElasticsearch],
+        *,
+        context: str,
+    ) -> None:
+        if client is None:
+            return
+        try:
+            await client.close()
+        except Exception as exc:
+            logger.warning(
+                "Failed to close Elasticsearch client (%s): %s",
+                context,
+                exc,
+                exc_info=True,
+            )
         
     @trace_storage_operation("es.connect", system="elasticsearch")
     async def connect(self) -> None:
@@ -137,28 +155,24 @@ class ElasticsearchService(AsyncClientPingMixin):
                 try:
                     await existing.ping()
                     return
-                except Exception:
-                    try:
-                        await existing.close()
-                    except Exception:
-                        pass
+                except Exception as exc:
+                    logger.warning(
+                        "Existing Elasticsearch client ping failed; recreating connection: %s",
+                        exc,
+                        exc_info=True,
+                    )
+                    await self._safe_close_client(existing, context="reconnect-after-ping-failure")
                     self._client = None
 
             client = AsyncElasticsearch(**self.config)
             try:
                 info = await client.info()
             except ESConnectionError as e:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
+                await self._safe_close_client(client, context="connect-connection-error")
                 logger.error(f"Failed to connect to Elasticsearch: {e}")
                 raise
             except Exception:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
+                await self._safe_close_client(client, context="connect-unexpected-error")
                 raise
 
             self._client = client

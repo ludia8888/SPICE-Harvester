@@ -1001,6 +1001,282 @@ const toLegacyInstanceShape = (value: unknown, classIdHint?: string): Record<str
   }
 }
 
+/* ── Pipeline CRUD (v1) ──────────────────────────────── */
+
+export const listPipelines = async (
+  context: RequestContext,
+  params: { db_name: string; branch?: string },
+): Promise<PipelineRecord[]> => {
+  const { payload } = await bff2RequestJson<PipelineListPayload | PipelineRecord[]>(
+    'pipelines',
+    { method: 'GET' },
+    context,
+    { db_name: params.db_name, branch: params.branch },
+  )
+  if (Array.isArray(payload)) return payload
+  return (payload as PipelineListPayload)?.pipelines ?? []
+}
+
+export const createPipeline = async (
+  context: RequestContext,
+  input: {
+    db_name: string
+    name: string
+    description?: string
+    pipeline_type?: string
+    branch?: string
+    definition_json?: PipelineDefinition
+  },
+): Promise<PipelineRecord> => {
+  const { payload } = await bff2RequestJson<PipelineCreatePayload | PipelineRecord>(
+    'pipelines',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  if (payload && 'pipeline_id' in payload) return payload as PipelineRecord
+  return (payload as PipelineCreatePayload)?.pipeline ?? { pipeline_id: '', db_name: input.db_name, name: input.name, pipeline_type: input.pipeline_type ?? 'transform' }
+}
+
+export const getPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+): Promise<PipelineDetailRecord> => {
+  const { payload } = await bff2RequestJson<PipelineGetPayload | PipelineDetailRecord>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'GET' },
+    context,
+  )
+  if (payload && 'pipeline_id' in payload) return payload as PipelineDetailRecord
+  return (payload as PipelineGetPayload)?.pipeline ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
+}
+
+export const updatePipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: {
+    name?: string
+    description?: string
+    definition_json?: PipelineDefinition
+    status?: string
+  },
+): Promise<PipelineRecord> => {
+  const { payload } = await bff2RequestJson<PipelineRecord>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
+}
+
+export const deletePipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+): Promise<void> => {
+  await bff2RequestJson<void>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'DELETE' },
+    context,
+  )
+}
+
+export const getPipelineReadiness = async (
+  context: RequestContext,
+  pipelineId: string,
+): Promise<PipelineReadiness> => {
+  const { payload } = await bff2RequestJson<PipelineReadinessPayload | PipelineReadiness>(
+    `pipelines/${encodeURIComponent(pipelineId)}/readiness`,
+    { method: 'GET' },
+    context,
+  )
+  return (payload ?? {}) as PipelineReadiness
+}
+
+export const previewPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input?: { limit?: number },
+): Promise<Record<string, unknown>> => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `pipelines/${encodeURIComponent(pipelineId)}/preview`,
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const buildPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input?: Record<string, unknown>,
+): Promise<{ task_id: string }> => {
+  const { payload } = await bff2RequestJson<{ task_id: string }>(
+    `pipelines/${encodeURIComponent(pipelineId)}/build`,
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    context,
+  )
+  return payload ?? { task_id: '' }
+}
+
+export const deployPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input?: Record<string, unknown>,
+): Promise<{ task_id: string }> => {
+  const { payload } = await bff2RequestJson<{ task_id: string }>(
+    `pipelines/${encodeURIComponent(pipelineId)}/deploy`,
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    context,
+  )
+  return payload ?? { task_id: '' }
+}
+
+export const listPipelineRuns = async (
+  context: RequestContext,
+  pipelineId: string,
+): Promise<PipelineArtifactRecord[]> => {
+  const { payload } = await bff2RequestJson<PipelineArtifactListPayload | PipelineArtifactRecord[]>(
+    `pipelines/${encodeURIComponent(pipelineId)}/runs`,
+    { method: 'GET' },
+    context,
+  )
+  if (Array.isArray(payload)) return payload
+  return (payload as PipelineArtifactListPayload)?.artifacts ?? []
+}
+
+export const listPipelineArtifacts = async (
+  context: RequestContext,
+  pipelineId: string,
+): Promise<PipelineArtifactRecord[]> => {
+  const { payload } = await bff2RequestJson<PipelineArtifactListPayload | PipelineArtifactRecord[]>(
+    `pipelines/${encodeURIComponent(pipelineId)}/artifacts`,
+    { method: 'GET' },
+    context,
+  )
+  if (Array.isArray(payload)) return payload
+  return (payload as PipelineArtifactListPayload)?.artifacts ?? []
+}
+
+export const getTaskStatus = async (
+  context: RequestContext,
+  taskId: string,
+): Promise<Record<string, unknown>> => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `tasks/${encodeURIComponent(taskId)}`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
+}
+
+/* ── Pipeline Datasets (v1, non-blocked endpoints + v2 wrappers) ──── */
+
+export const listPipelineDatasets = async (
+  context: RequestContext,
+  params: { db_name?: string; branch?: string },
+) => {
+  const { payload } = await bff2RequestJson<PipelineListPayload | DatasetRecord[]>(
+    'pipelines/datasets',
+    { method: 'GET' },
+    context,
+    { db_name: params.db_name, branch: params.branch },
+  )
+  return payload ?? []
+}
+
+export const createPipelineDataset = async (
+  context: RequestContext,
+  input: { db_name: string; name: string; branch?: string; source_type?: string },
+) => {
+  const { payload } = await bff2RequestJson<DatasetRecord>(
+    'pipelines/datasets',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const uploadCsvDataset = async (
+  context: RequestContext,
+  input: { db_name: string; name: string; branch?: string; file: File },
+): Promise<DatasetUploadResult> => {
+  const ds = await createDatasetV2(context, { dbName: input.db_name, name: input.name })
+  const txn = await createDatasetTransactionV2(context, ds.rid, {
+    dbName: input.db_name,
+    transactionType: 'APPEND',
+  })
+  await uploadDatasetFileV2(context, ds.rid, {
+    filePath: input.file.name,
+    content: input.file,
+    branchName: input.branch ?? 'master',
+    transactionRid: txn.rid,
+    contentType: 'text/csv',
+    dbName: input.db_name,
+  })
+  await commitDatasetTransactionV2(context, ds.rid, txn.rid, { dbName: input.db_name })
+  return { dataset: ds as unknown as DatasetRecord }
+}
+
+export const uploadExcelDataset = async (
+  context: RequestContext,
+  input: { db_name: string; name: string; branch?: string; file: File },
+): Promise<DatasetUploadResult> => {
+  const ds = await createDatasetV2(context, { dbName: input.db_name, name: input.name })
+  const txn = await createDatasetTransactionV2(context, ds.rid, {
+    dbName: input.db_name,
+    transactionType: 'APPEND',
+  })
+  await uploadDatasetFileV2(context, ds.rid, {
+    filePath: input.file.name,
+    content: input.file,
+    branchName: input.branch ?? 'master',
+    transactionRid: txn.rid,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    dbName: input.db_name,
+  })
+  await commitDatasetTransactionV2(context, ds.rid, txn.rid, { dbName: input.db_name })
+  return { dataset: ds as unknown as DatasetRecord }
+}
+
+export const getPipelineDatasetRawFile = async (
+  context: RequestContext,
+  datasetId: string,
+): Promise<DatasetRawFile> => {
+  const { payload } = await bff2RequestJson<DatasetRawFile>(
+    `pipelines/datasets/${encodeURIComponent(datasetId)}/raw-file`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? { dataset_id: datasetId, filename: '', content: '', content_type: '', encoding: 'utf-8' as const }
+}
+
+export const getPipelineDatasetIngestRequest = async (
+  context: RequestContext,
+  datasetId: string,
+): Promise<DatasetIngestRequestRecord> => {
+  const { payload } = await bff2RequestJson<DatasetIngestRequestRecord>(
+    `pipelines/datasets/ingest-requests/${encodeURIComponent(datasetId)}`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? { ingest_request_id: '', dataset_id: datasetId, db_name: '' }
+}
+
+export const approvePipelineDatasetSchema = async (
+  context: RequestContext,
+  ingestRequestId: string,
+  schemaJson: Record<string, unknown>,
+) => {
+  const datasetRid = `ri.foundry.main.dataset.${ingestRequestId}`
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/datasets/${encodeURIComponent(datasetRid)}/putSchema`,
+    { method: 'PUT', body: JSON.stringify({ schema: schemaJson }) },
+    context,
+  )
+  return payload ?? {}
+}
+
+/* ── Foundry v2 Datasets ─────────────────────────────── */
+
 export const createDatasetV2 = async (
   context: RequestContext,
   input: {
@@ -2214,6 +2490,69 @@ export const runObjectifyDataset = async (
   return payload ?? {}
 }
 
+export const runObjectifyDag = async (
+  context: RequestContext,
+  dbName: string,
+  input?: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `objectify/databases/${encodeURIComponent(dbName)}/run-dag`,
+    { method: 'POST', body: JSON.stringify(input ?? {}) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const detectObjectifyRelationships = async (
+  context: RequestContext,
+  dbName: string,
+  datasetId: string,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `objectify/databases/${encodeURIComponent(dbName)}/datasets/${encodeURIComponent(datasetId)}/detect-relationships`,
+    { method: 'POST' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const triggerIncrementalObjectify = async (
+  context: RequestContext,
+  mappingSpecId: string,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `objectify/mapping-specs/${encodeURIComponent(mappingSpecId)}/trigger-incremental`,
+    { method: 'POST' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const getObjectifyWatermark = async (
+  context: RequestContext,
+  mappingSpecId: string,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `objectify/mapping-specs/${encodeURIComponent(mappingSpecId)}/watermark`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listObjectifyMappingSpecs = async (
+  context: RequestContext,
+  params?: { db_name?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>[]>(
+    'objectify/mapping-specs',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  return payload ?? []
+}
+
 export const getMappingsSummary = async (context: RequestContext, dbName: string) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     `databases/${encodeURIComponent(dbName)}/mappings/`,
@@ -3146,6 +3485,355 @@ export const runAiQuery = async (
 ) => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     `ai/query/${encodeURIComponent(dbName)}`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+/* ── Governance: Gate Policies (v1) ──────────────────── */
+
+export const createGatePolicy = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'gate-policies',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listGatePolicies = async (
+  context: RequestContext,
+  params?: { db_name?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'gate-policies',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  if (Array.isArray(data.gate_policies)) return data.gate_policies as Record<string, unknown>[]
+  if (Array.isArray(root.gate_policies)) return root.gate_policies as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+export const listGateResults = async (
+  context: RequestContext,
+  params?: { db_name?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'gate-results',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  if (Array.isArray(data.gate_results)) return data.gate_results as Record<string, unknown>[]
+  if (Array.isArray(root.gate_results)) return root.gate_results as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+/* ── Governance: Key Specs (v1) ──────────────────────── */
+
+export const createKeySpec = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'key-specs',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listKeySpecs = async (
+  context: RequestContext,
+  params?: { db_name?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'key-specs',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  if (Array.isArray(data.key_specs)) return data.key_specs as Record<string, unknown>[]
+  if (Array.isArray(root.key_specs)) return root.key_specs as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+/* ── Governance: Schema Changes (v1) ─────────────────── */
+
+export const listSchemaChangeHistory = async (
+  context: RequestContext,
+  params?: { db_name?: string; limit?: number },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'schema-changes/history',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : {}
+  if (Array.isArray(data.changes)) return data.changes as Record<string, unknown>[]
+  if (Array.isArray(root.changes)) return root.changes as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+export const acknowledgeSchemaChangeDrift = async (
+  context: RequestContext,
+  driftId: string,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `schema-changes/drifts/${encodeURIComponent(driftId)}/acknowledge`,
+    { method: 'PUT' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const getSchemaChangeStats = async (
+  context: RequestContext,
+  params?: { db_name?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'schema-changes/stats',
+    { method: 'GET' },
+    context,
+    params as Bff2SearchParams,
+  )
+  return payload ?? {}
+}
+
+export const checkSchemaCompatibility = async (
+  context: RequestContext,
+  mappingId: string,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `schema-changes/mappings/${encodeURIComponent(mappingId)}/compatibility`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
+}
+
+/* ── Orchestration: Builds (v2) ──────────────────────── */
+
+export const createOrchestrationBuild = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    '/api/v2/orchestration/builds/create',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const getOrchestrationBuild = async (
+  context: RequestContext,
+  buildRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/builds/${encodeURIComponent(buildRid)}`,
+    { method: 'GET' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const cancelOrchestrationBuild = async (
+  context: RequestContext,
+  buildRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/builds/${encodeURIComponent(buildRid)}/cancel`,
+    { method: 'POST' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const listOrchestrationBuildJobs = async (
+  context: RequestContext,
+  buildRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/builds/${encodeURIComponent(buildRid)}/jobs`,
+    { method: 'GET' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  if (Array.isArray(root.data)) return root.data as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+/* ── Orchestration: Schedules (v2) ───────────────────── */
+
+export const createOrchestrationSchedule = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    '/api/v2/orchestration/schedules',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const getOrchestrationSchedule = async (
+  context: RequestContext,
+  scheduleRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/schedules/${encodeURIComponent(scheduleRid)}`,
+    { method: 'GET' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const deleteOrchestrationSchedule = async (
+  context: RequestContext,
+  scheduleRid: string,
+  params?: { dbName?: string },
+) => {
+  await bff2RequestJson<unknown>(
+    `/api/v2/orchestration/schedules/${encodeURIComponent(scheduleRid)}`,
+    { method: 'DELETE' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+}
+
+export const pauseOrchestrationSchedule = async (
+  context: RequestContext,
+  scheduleRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/schedules/${encodeURIComponent(scheduleRid)}/pause`,
+    { method: 'POST' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const unpauseOrchestrationSchedule = async (
+  context: RequestContext,
+  scheduleRid: string,
+  params?: { dbName?: string },
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/schedules/${encodeURIComponent(scheduleRid)}/unpause`,
+    { method: 'POST' },
+    context,
+    undefined,
+    bff2DbContextHeaders(params?.dbName),
+  )
+  return payload ?? {}
+}
+
+export const listOrchestrationScheduleRuns = async (
+  context: RequestContext,
+  scheduleRid: string,
+  params?: { dbName?: string; pageSize?: number },
+) => {
+  const pageSize = Number.isFinite(params?.pageSize) ? Math.max(1, Math.min(500, Number(params?.pageSize))) : 100
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    `/api/v2/orchestration/schedules/${encodeURIComponent(scheduleRid)}/runs`,
+    { method: 'GET' },
+    context,
+    { pageSize },
+    bff2DbContextHeaders(params?.dbName),
+  )
+  const root = payload && typeof payload === 'object' ? payload : {}
+  if (Array.isArray(root.data)) return root.data as Record<string, unknown>[]
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  return []
+}
+
+/* ── AI: Intent Classification & Agent ───────────────── */
+
+export const classifyAiIntent = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'ai/intent',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const runPipelineAgent = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'agent/pipeline-runs',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const runOntologyAgent = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'ontology-agent/runs',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const searchContext7 = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'context7/search',
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )

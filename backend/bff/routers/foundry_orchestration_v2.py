@@ -190,8 +190,8 @@ def _extract_job_outputs(run: dict[str, Any] | None) -> list[dict[str, Any]]:
             kind, rid_id = parse_rid(dataset_rid)
             if kind == "dataset":
                 dataset_rid = build_rid("dataset", rid_id)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.debug("Failed to normalize dataset RID in build outputs (datasetRid=%s): %s", dataset_rid, exc)
         row: dict[str, Any] = {
             "type": "datasetJobOutput",
             "datasetRid": dataset_rid,
@@ -202,8 +202,12 @@ def _extract_job_outputs(run: dict[str, Any] | None) -> list[dict[str, Any]]:
                 kind, rid_id = parse_rid(transaction_rid)
                 if kind == "transaction":
                     transaction_rid = build_rid("transaction", rid_id)
-            except ValueError:
-                pass
+            except ValueError as exc:
+                logger.debug(
+                    "Failed to normalize output transaction RID in build outputs (outputTransactionRid=%s): %s",
+                    transaction_rid,
+                    exc,
+                )
             row["outputTransactionRid"] = transaction_rid
         materialized.append(row)
     return materialized

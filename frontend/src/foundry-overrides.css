@@ -1,0 +1,105 @@
+/* Palantir Foundry Blueprint Overrides */
+
+/* Core Theme Settings (applied globally in styles.css but enforcing here) */
+body {
+    font-family: "Inter", "Segoe UI", sans-serif;
+    font-size: 12px;
+    /* Foundry uses dense 12px base */
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 1. Buttons - Foundry buttons are extremely crisp, zero radius, flat borders */
+.bp6-button {
+    border-radius: 2px !important;
+    box-shadow: none !important;
+    background-image: none !important;
+    border: 1px solid transparent;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    transition: all 0.1s ease-in-out;
+}
+
+.bp6-button:not([class*="bp6-intent-"]),
+.bp6-button.bp6-minimal {
+    color: var(--foundry-text) !important;
+}
+
+.bp6-button.bp6-minimal:hover {
+    background: var(--foundry-accent-hover) !important;
+    color: #fff !important;
+}
+
+.bp6-button.bp6-intent-primary {
+    background-color: #2b95d6 !important;
+    /* Foundry blue */
+    border-color: transparent !important;
+    color: #ffffff !important;
+}
+
+.bp6-button.bp6-intent-primary:hover {
+    background-color: #32a1e6 !important;
+}
+
+/* 2. Inputs */
+.bp6-input {
+    border-radius: 2px !important;
+    box-shadow: none !important;
+    background: var(--foundry-bg-deepest) !important;
+    border: 1px solid var(--foundry-border) !important;
+    color: var(--foundry-text) !important;
+    transition: border-color 0.1s ease-in-out;
+}
+
+.bp6-input:focus {
+    border-color: #2b95d6 !important;
+    box-shadow: 0 0 0 1px #2b95d6 !important;
+}
+
+/* 3. Cards & Dialogs - Darker backgrounds, very thin borders */
+.bp6-card {
+    background-color: var(--foundry-bg-panel) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: 1px solid var(--foundry-border) !important;
+    padding: 16px !important;
+}
+
+.bp6-dialog {
+    background-color: var(--foundry-bg-panel) !important;
+    border-radius: 2px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+    border: 1px solid var(--foundry-border) !important;
+}
+
+.bp6-dialog-header {
+    background-color: var(--foundry-bg-deepest) !important;
+    border-bottom: 1px solid var(--foundry-border) !important;
+    border-radius: 2px 2px 0 0 !important;
+    box-shadow: none !important;
+}
+
+/* 4. Tags - High density */
+.bp6-tag {
+    border-radius: 2px !important;
+    font-weight: 500;
+    padding: 2px 6px !important;
+    min-height: 18px !important;
+}
+
+.bp6-tag.bp6-minimal {
+    background-color: var(--foundry-accent-hover) !important;
+    color: var(--foundry-text-muted) !important;
+}
+
+/* 5. Drawers / Panels */
+.bp6-drawer {
+    background-color: var(--foundry-bg-panel) !important;
+    box-shadow: -1px 0 0 var(--foundry-border) !important;
+}
+
+.bp6-drawer-header {
+    box-shadow: none !important;
+    border-bottom: 1px solid var(--foundry-border) !important;
+    background-color: var(--foundry-bg-deepest) !important;
+}

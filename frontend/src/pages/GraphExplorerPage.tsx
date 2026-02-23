@@ -12,7 +12,7 @@ import {
   Switch,
   Tag,
   Text,
-  TextArea,
+  Tooltip,
 } from '@blueprintjs/core'
 import { getGraphHealth, getGraphPaths, runAiQuery, runGraphQueryCtx, translateQueryPlan } from '../api/bff'
 import { useRateLimitRetry } from '../api/useRateLimitRetry'
@@ -20,6 +20,7 @@ import { useRequestContext } from '../api/useRequestContext'
 import { GraphCanvas } from '../components/GraphCanvas'
 import { PageHeader } from '../components/layout/PageHeader'
 import { JsonViewer } from '../components/JsonViewer'
+import { KeyValueEditor } from '../components/ux/KeyValueEditor'
 import { toastApiError } from '../errors/toastApiError'
 import { useOntologyRegistry } from '../query/useOntologyRegistry'
 import { useAppStore } from '../store/useAppStore'
@@ -45,7 +46,7 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
   const [startClass, setStartClass] = useState('')
   const [targetClass, setTargetClass] = useState('')
   const [hops, setHops] = useState<Hop[]>([])
-  const [filtersJson, setFiltersJson] = useState('{}')
+  const [filtersKv, setFiltersKv] = useState<Record<string, string>>({})
   const [limit, setLimit] = useState('10')
   const [maxNodes, setMaxNodes] = useState('200')
   const [maxEdges, setMaxEdges] = useState('500')
@@ -86,7 +87,7 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
 
   const runMutation = useMutation({
     mutationFn: () => {
-      const filters = parseJson<Record<string, unknown>>(filtersJson, {})
+      const filters = filtersKv as Record<string, unknown>
       const normalizedHops = hops.filter((hop) => hop.predicate && hop.target_class)
       return runGraphQueryCtx(requestContext, dbName, branch, {
         start_class: startClass,
@@ -141,7 +142,10 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
     if (!graph) return
     setStartClass(String(graph.start_class ?? ''))
     setHops(Array.isArray(graph.hops) ? (graph.hops as Hop[]) : [])
-    setFiltersJson(JSON.stringify(graph.filters ?? {}, null, 2))
+    const filterObj = (graph.filters ?? {}) as Record<string, unknown>
+    const kv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(filterObj)) kv[k] = String(v ?? '')
+    setFiltersKv(kv)
     if (graph.limit) setLimit(String(graph.limit))
     if (graph.max_nodes) setMaxNodes(String(graph.max_nodes))
     if (graph.max_edges) setMaxEdges(String(graph.max_edges))
@@ -265,8 +269,18 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
               Add hop
             </Button>
           </FormGroup>
-          <FormGroup label="Filters (JSON object)">
-            <TextArea value={filtersJson} onChange={(event) => setFiltersJson(event.currentTarget.value)} rows={3} />
+          <FormGroup label={
+            <Tooltip content="Filter graph traversal by property values (key = property, value = filter)" placement="top">
+              <span className="tooltip-label">Filters</span>
+            </Tooltip>
+          }>
+            <KeyValueEditor
+              value={filtersKv}
+              onChange={setFiltersKv}
+              keyPlaceholder="Property name"
+              valuePlaceholder="Filter value"
+              addLabel="Add filter"
+            />
           </FormGroup>
           <FormGroup label="Limit / Max nodes / Max edges">
             <div className="form-row">

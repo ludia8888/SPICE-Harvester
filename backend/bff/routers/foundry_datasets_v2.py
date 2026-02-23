@@ -46,7 +46,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from bff.routers.data_connector_deps import get_dataset_registry, get_pipeline_registry
-from bff.routers.pipeline_datasets_ops_lakefs import _resolve_lakefs_raw_repository
+from bff.routers.pipeline_datasets_ops_lakefs import _resolve_lakefs_raw_repository, _ensure_lakefs_branch_exists
 from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid, parse_rid
@@ -67,6 +67,46 @@ from shared.utils.foundry_page_token import decode_offset_page_token, encode_off
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/datasets", tags=["Foundry Datasets v2"])
+
+_DATASETS_JSON_EXCEPTIONS = (ValueError, TypeError)
+_DATASETS_HANDLED_EXCEPTIONS = (
+    RuntimeError,
+    LookupError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    OSError,
+    AssertionError,
+)
+
+
+def _datasets_invalid_json_response() -> JSONResponse:
+    return foundry_error(
+        400,
+        error_code="INVALID_ARGUMENT",
+        error_name="InvalidArgument",
+        parameters={"message": "Invalid JSON body"},
+    )
+
+
+def _datasets_internal_error_response(
+    *,
+    exc: Exception,
+    error_name: str,
+    parameters: Dict[str, Any] | None = None,
+    log_message: str | None = None,
+) -> JSONResponse:
+    if log_message:
+        logger.error("%s: %s", log_message, exc)
+    payload: Dict[str, Any] = dict(parameters or {})
+    payload.setdefault("message", str(exc))
+    return foundry_error(
+        500,
+        error_code="INTERNAL",
+        error_name=error_name,
+        parameters=payload,
+    )
 
 # ---------------------------------------------------------------------------
 # RID helpers
@@ -309,7 +349,7 @@ async def _extract_commit_preview(
             prefix=dataset_prefix,
             amount=200,
         )
-    except Exception as exc:
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
         logger.warning("Failed to list dataset objects for transaction preview: %s", exc)
         objects = []
 
@@ -326,7 +366,7 @@ async def _extract_commit_preview(
             csv_bytes = await lakefs_storage_service.load_bytes(repository, f"{branch}/{key}")
         except (FileNotFoundError, LakeFSNotFoundError):
             continue
-        except Exception as exc:
+        except _DATASETS_HANDLED_EXCEPTIONS as exc:
             logger.warning("Failed to load candidate CSV object during commit preview (%s): %s", key, exc)
             continue
 
@@ -356,13 +396,8 @@ async def create_dataset_v2(
     """POST /v2/datasets — Create a new dataset."""
     try:
         body = await request.json()
-    except Exception:
-        return foundry_error(
-            400,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "Invalid JSON body"},
-        )
+    except _DATASETS_JSON_EXCEPTIONS:
+        return _datasets_invalid_json_response()
 
     name = str(body.get("name") or "").strip()
     if not name:
@@ -405,13 +440,11 @@ async def create_dataset_v2(
             source_type="foundry_api",
             branch=branch,
         )
-    except Exception as exc:
-        logger.error("Failed to create dataset: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="DatasetCreationFailed",
-            parameters={"message": str(exc)},
+            log_message="Failed to create dataset",
         )
 
     return JSONResponse(content=_dataset_response(dataset))
@@ -578,13 +611,8 @@ async def put_dataset_schema_v2(
 
     try:
         body = await request.json()
-    except Exception:
-        return foundry_error(
-            400,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "Invalid JSON body"},
-        )
+    except _DATASETS_JSON_EXCEPTIONS:
+        return _datasets_invalid_json_response()
 
     normalized_branch = str(branchName or "master").strip() or "master"
     try:
@@ -621,13 +649,11 @@ async def put_dataset_schema_v2(
 
     try:
         await dataset_registry.update_schema(dataset_id=dataset_id, schema_json=new_schema)
-    except Exception as exc:
-        logger.error("Failed to update schema: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="PutSchemaFailed",
-            parameters={"message": str(exc)},
+            log_message="Failed to update schema",
         )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -657,13 +683,8 @@ async def get_schema_batch_v2(
 
     try:
         body = await request.json()
-    except Exception:
-        return foundry_error(
-            400,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "Invalid JSON body"},
-        )
+    except _DATASETS_JSON_EXCEPTIONS:
+        return _datasets_invalid_json_response()
 
     dataset_rids = body.get("datasetRids")
     if not isinstance(dataset_rids, list) or not dataset_rids:
@@ -778,7 +799,7 @@ async def list_branches_v2(
     except LakeFSError as exc:
         logger.warning("Failed to list lakeFS branches: %s", exc)
         branches = [{"name": dataset.branch or "master"}]
-    except Exception:
+    except _DATASETS_HANDLED_EXCEPTIONS:
         branches = [{"name": dataset.branch or "master"}]
 
     sliced = branches[int(offset) : int(offset) + int(pageSize) + 1]
@@ -834,13 +855,8 @@ async def create_branch_v2(
 
     try:
         body = await request.json()
-    except Exception:
-        return foundry_error(
-            400,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "Invalid JSON body"},
-        )
+    except _DATASETS_JSON_EXCEPTIONS:
+        return _datasets_invalid_json_response()
 
     branch_name = str(body.get("name") or "").strip()
     if not branch_name:
@@ -1084,13 +1100,8 @@ async def create_transaction_v2(
 
     try:
         body = await request.json()
-    except Exception:
-        return foundry_error(
-            400,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": "Invalid JSON body"},
-        )
+    except _DATASETS_JSON_EXCEPTIONS:
+        return _datasets_invalid_json_response()
 
     transaction_type = str(body.get("transactionType") or "").strip().upper()
     if transaction_type not in {"APPEND", "UPDATE"}:
@@ -1128,13 +1139,11 @@ async def create_transaction_v2(
             ingest_request_id=ingest_request.ingest_request_id,
             status="OPEN",
         )
-    except Exception as exc:
-        logger.error("Failed to create transaction: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="CreateTransactionError",
-            parameters={"message": str(exc)},
+            log_message="Failed to create transaction",
         )
 
     created_time = txn.created_at.isoformat() if getattr(txn, "created_at", None) else None
@@ -1225,13 +1234,11 @@ async def list_transactions_v2(
             limit=int(pageSize) + 1,
             offset=int(offset),
         )
-    except Exception as exc:
-        logger.error("Failed to list transactions: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="ListTransactionsError",
-            parameters={"message": str(exc)},
+            log_message="Failed to list transactions",
         )
 
     has_next = len(records) > int(pageSize)
@@ -1248,7 +1255,7 @@ async def list_transactions_v2(
             source_metadata = getattr(ingest_request, "source_metadata", None) if ingest_request else None
             if isinstance(source_metadata, dict) and source_metadata.get("transactionType"):
                 transaction_type = str(source_metadata.get("transactionType")).strip().upper() or transaction_type
-        except Exception:
+        except _DATASETS_HANDLED_EXCEPTIONS:
             transaction_type = "APPEND"
 
         created_time = row.created_at.isoformat() if getattr(row, "created_at", None) else None
@@ -1460,13 +1467,12 @@ async def commit_transaction_v2(
                 "message": "lakeFS commit failed; transaction remains OPEN",
             },
         )
-    except Exception as exc:
-        logger.error("Unexpected transaction commit failure: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="CommitTransactionError",
-            parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
+            parameters={"transactionRid": transactionRid, "datasetRid": datasetRid},
+            log_message="Unexpected transaction commit failure",
         )
 
     lakefs_storage_service = await _get_lakefs_storage(pipeline_registry, request)
@@ -1499,7 +1505,7 @@ async def commit_transaction_v2(
             lakefs_commit_id=commit_id,
             artifact_key=committed_artifact_key,
         )
-    except Exception as raw_commit_exc:
+    except _DATASETS_HANDLED_EXCEPTIONS as raw_commit_exc:
         logger.warning("Failed to mark ingest RAW_COMMITTED before publish: %s", raw_commit_exc)
 
     try:
@@ -1521,7 +1527,7 @@ async def commit_transaction_v2(
             error_name="TransactionCommitFailed",
             parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": str(exc)},
         )
-    except Exception as exc:
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to publish ingest request during transaction commit: %s", exc)
         try:
             await dataset_registry.reconcile_ingest_state(
@@ -1544,7 +1550,7 @@ async def commit_transaction_v2(
                 dataset_id,
                 commit_id,
             )
-        except Exception as reconcile_exc:
+        except _DATASETS_HANDLED_EXCEPTIONS as reconcile_exc:
             return foundry_error(
                 500,
                 error_code="INTERNAL",
@@ -1782,13 +1788,12 @@ async def list_files_v2(
             error_name="BranchNotFound",
             parameters={"branchName": ref, "datasetRid": datasetRid},
         )
-    except Exception as exc:
-        logger.error("Unexpected list_files failure: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="ListFilesError",
-            parameters={"datasetRid": datasetRid, "message": str(exc)},
+            parameters={"datasetRid": datasetRid},
+            log_message="Unexpected list_files failure",
         )
 
     return JSONResponse(content={"data": files, "nextPageToken": next_token})
@@ -1888,13 +1893,12 @@ async def get_file_content_v2(
             error_name="GetFileContentError",
             parameters={"datasetRid": datasetRid, "message": str(exc)},
         )
-    except Exception as exc:
-        logger.warning("Failed to load file content: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="GetFileContentError",
-            parameters={"datasetRid": datasetRid, "message": str(exc)},
+            parameters={"datasetRid": datasetRid},
+            log_message="Failed to load file content",
         )
 
     media_type = mimetypes.guess_type(filePath)[0] or "application/octet-stream"
@@ -2010,13 +2014,11 @@ async def upload_file_v2(
                 status="OPEN",
             )
             txn_id = transaction_record.transaction_id
-        except Exception as exc:
-            logger.error("Failed to create upload transaction: %s", exc)
-            return foundry_error(
-                500,
-                error_code="INTERNAL",
+        except _DATASETS_HANDLED_EXCEPTIONS as exc:
+            return _datasets_internal_error_response(
+                exc=exc,
                 error_name="UploadFileError",
-                parameters={"message": str(exc)},
+                log_message="Failed to create upload transaction",
             )
     object_key = f"{dataset.db_name}/{dataset.dataset_id}/{dataset.name}/{file_path}"
 
@@ -2024,6 +2026,12 @@ async def upload_file_v2(
         body_bytes = await request.body()
         content_type = request.headers.get("Content-Type") or "application/octet-stream"
         storage_service = await _get_lakefs_storage(pipeline_registry, request)
+        lakefs_client = await _get_lakefs_client(pipeline_registry, request)
+        await _ensure_lakefs_branch_exists(
+            lakefs_client=lakefs_client,
+            repository=repo,
+            branch=branch,
+        )
         resolved_offset = int(byteOffset) if byteOffset is not None else 0
         if resolved_offset < 0:
             return foundry_error(
@@ -2077,13 +2085,11 @@ async def upload_file_v2(
             error_name="BranchNotFound",
             parameters={"branchName": branch, "datasetRid": datasetRid},
         )
-    except Exception as exc:
-        logger.error("Failed to upload file: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="UploadFileError",
-            parameters={"message": str(exc)},
+            log_message="Failed to upload file",
         )
 
     return JSONResponse(
@@ -2194,13 +2200,12 @@ async def get_file_v2(
             error_name="GetFileError",
             parameters={"datasetRid": datasetRid, "message": str(exc)},
         )
-    except Exception as exc:
-        logger.warning("Failed to load file metadata: %s", exc)
-        return foundry_error(
-            500,
-            error_code="INTERNAL",
+    except _DATASETS_HANDLED_EXCEPTIONS as exc:
+        return _datasets_internal_error_response(
+            exc=exc,
             error_name="GetFileError",
-            parameters={"datasetRid": datasetRid, "message": str(exc)},
+            parameters={"datasetRid": datasetRid},
+            log_message="Failed to load file metadata",
         )
 
     updated = meta.get("last_modified")
@@ -2208,7 +2213,7 @@ async def get_file_v2(
     size = meta.get("size")
     try:
         size_bytes = int(size) if size is not None else 0
-    except Exception:
+    except (TypeError, ValueError):
         size_bytes = 0
 
     return JSONResponse(
@@ -2293,7 +2298,7 @@ async def read_table_v2(
 
     try:
         requested_limit = int(rowLimit)
-    except Exception:
+    except (TypeError, ValueError):
         return foundry_error(
             400,
             error_code="INVALID_ARGUMENT",
@@ -2351,7 +2356,7 @@ async def read_table_v2(
                 use_lock=False,
             )
             version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
-        except Exception as reconcile_exc:
+        except _DATASETS_HANDLED_EXCEPTIONS as reconcile_exc:
             logger.warning("Dataset ingest reconcile before readTable failed: %s", reconcile_exc)
 
     if version and getattr(version, "sample_json", None):

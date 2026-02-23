@@ -15,8 +15,9 @@ import {
   Tabs,
   Tag,
   Text,
-  TextArea,
+  Tooltip,
 } from '@blueprintjs/core'
+import MonacoEditor from '@monaco-editor/react'
 import {
   bulkCreateInstances,
   createInstance,
@@ -28,6 +29,7 @@ import {
   updateInstance,
 } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
+import { KeyValueEditor } from '../components/ux/KeyValueEditor'
 import { PageHeader } from '../components/layout/PageHeader'
 import { JsonViewer } from '../components/JsonViewer'
 import { showAppToast } from '../app/AppToaster'
@@ -126,10 +128,10 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
   const [activeTab, setActiveTab] = useState('view')
   const [occRetry, setOccRetry] = useState<{ action: 'update' | 'delete'; actualSeq: number } | null>(null)
   const [unknownLabels, setUnknownLabels] = useState<string[]>([])
-  const [createJson, setCreateJson] = useState('{}')
-  const [createMetadataJson, setCreateMetadataJson] = useState('{}')
+  const [createKv, setCreateKv] = useState<Record<string, string>>({})
+  const [createMetaKv, setCreateMetaKv] = useState<Record<string, string>>({})
   const [bulkJson, setBulkJson] = useState('[]')
-  const [bulkMetadataJson, setBulkMetadataJson] = useState('{}')
+  const [bulkMetaKv, setBulkMetaKv] = useState<Record<string, string>>({})
   const [createJsonError, setCreateJsonError] = useState<string | null>(null)
   const [bulkJsonError, setBulkJsonError] = useState<string | null>(null)
   const [createUnknownLabels, setCreateUnknownLabels] = useState<string[]>([])
@@ -321,11 +323,11 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
   const handleCreate = () => {
     setCreateJsonError(null)
     try {
-      const data = parseJsonObject(createJson, 'Create payload')
-      const metadata = parseJsonObject(createMetadataJson, 'Metadata')
+      const data = createKv as Record<string, unknown>
+      const metadata = createMetaKv as Record<string, unknown>
       createMutation.mutate({ data, metadata })
     } catch (error) {
-      setCreateJsonError(error instanceof Error ? error.message : 'Invalid JSON')
+      setCreateJsonError(error instanceof Error ? error.message : 'Invalid input')
     }
   }
 
@@ -333,10 +335,10 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
     setBulkJsonError(null)
     try {
       const instances = parseJsonArray(bulkJson, 'Instances payload')
-      const metadata = parseJsonObject(bulkMetadataJson, 'Metadata')
+      const metadata = bulkMetaKv as Record<string, unknown>
       bulkCreateMutation.mutate({ instances, metadata })
     } catch (error) {
-      setBulkJsonError(error instanceof Error ? error.message : 'Invalid JSON')
+      setBulkJsonError(error instanceof Error ? error.message : 'Invalid JSON in bulk data')
     }
   }
 
@@ -441,18 +443,30 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
               title="Create"
               panel={
                 <div className="card-stack">
-                  <FormGroup label="Create payload (JSON object, label keys)">
-                    <TextArea
-                      value={createJson}
-                      onChange={(event) => setCreateJson(event.currentTarget.value)}
-                      rows={6}
+                  <FormGroup label={
+                    <Tooltip content="Enter property name-value pairs for the new instance" placement="top">
+                      <span className="tooltip-label">Instance Properties</span>
+                    </Tooltip>
+                  }>
+                    <KeyValueEditor
+                      value={createKv}
+                      onChange={setCreateKv}
+                      keyPlaceholder="Property name (e.g. name)"
+                      valuePlaceholder="Value (e.g. John Doe)"
+                      addLabel="Add property"
                     />
                   </FormGroup>
-                  <FormGroup label="Metadata (JSON object)">
-                    <TextArea
-                      value={createMetadataJson}
-                      onChange={(event) => setCreateMetadataJson(event.currentTarget.value)}
-                      rows={4}
+                  <FormGroup label={
+                    <Tooltip content="Optional metadata like source, author, or tags" placement="top">
+                      <span className="tooltip-label">Metadata</span>
+                    </Tooltip>
+                  }>
+                    <KeyValueEditor
+                      value={createMetaKv}
+                      onChange={setCreateMetaKv}
+                      keyPlaceholder="Metadata key"
+                      valuePlaceholder="Metadata value"
+                      addLabel="Add metadata"
                     />
                   </FormGroup>
                   {createJsonError ? <Callout intent={Intent.DANGER}>{createJsonError}</Callout> : null}
@@ -482,18 +496,41 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
               title="Bulk create"
               panel={
                 <div className="card-stack">
-                  <FormGroup label="Instances (JSON array of objects)">
-                    <TextArea
-                      value={bulkJson}
-                      onChange={(event) => setBulkJson(event.currentTarget.value)}
-                      rows={6}
-                    />
+                  <FormGroup label={
+                    <Tooltip content="Paste a JSON array of objects for batch creation" placement="top">
+                      <span className="tooltip-label">Instances (JSON array)</span>
+                    </Tooltip>
+                  }>
+                    <div style={{ border: '1px solid #d8e1e8', borderRadius: 4, overflow: 'hidden' }}>
+                      <MonacoEditor
+                        height="160px"
+                        language="json"
+                        theme="vs-light"
+                        value={bulkJson}
+                        onChange={(val) => setBulkJson(val ?? '[]')}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 12,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          tabSize: 2,
+                          wordWrap: 'on',
+                        }}
+                      />
+                    </div>
                   </FormGroup>
-                  <FormGroup label="Metadata (JSON object)">
-                    <TextArea
-                      value={bulkMetadataJson}
-                      onChange={(event) => setBulkMetadataJson(event.currentTarget.value)}
-                      rows={4}
+                  <FormGroup label={
+                    <Tooltip content="Optional metadata applied to all bulk-created instances" placement="top">
+                      <span className="tooltip-label">Metadata</span>
+                    </Tooltip>
+                  }>
+                    <KeyValueEditor
+                      value={bulkMetaKv}
+                      onChange={setBulkMetaKv}
+                      keyPlaceholder="Metadata key"
+                      valuePlaceholder="Metadata value"
+                      addLabel="Add metadata"
                     />
                   </FormGroup>
                   {bulkJsonError ? <Callout intent={Intent.DANGER}>{bulkJsonError}</Callout> : null}
@@ -571,8 +608,29 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
               title="Edit"
               panel={
                 <div className="card-stack">
-                  <FormGroup label="Edit payload (JSON)">
-                    <TextArea value={editJson} onChange={(event) => setEditJson(event.currentTarget.value)} rows={10} />
+                  <FormGroup label={
+                    <Tooltip content="Edit the instance properties as JSON" placement="top">
+                      <span className="tooltip-label">Edit Payload</span>
+                    </Tooltip>
+                  }>
+                    <div style={{ border: '1px solid #d8e1e8', borderRadius: 4, overflow: 'hidden' }}>
+                      <MonacoEditor
+                        height="260px"
+                        language="json"
+                        theme="vs-light"
+                        value={editJson}
+                        onChange={(val) => setEditJson(val ?? '')}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 12,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          tabSize: 2,
+                          wordWrap: 'on',
+                        }}
+                      />
+                    </div>
                   </FormGroup>
                   {unknownLabels.length ? (
                     <Callout intent={Intent.WARNING}>

@@ -9,10 +9,26 @@ from typing import Any, Optional
 import httpx
 import pytest
 
+from shared.utils.repo_dotenv import load_repo_dotenv
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
+
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or "http://localhost:8000").rstrip("/")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+
+
+def _resolve_admin_token() -> str:
+    dotenv = load_repo_dotenv(keys=("BFF_ADMIN_TOKEN", "ADMIN_TOKEN"))
+    return (
+        os.getenv("BFF_ADMIN_TOKEN")
+        or os.getenv("ADMIN_TOKEN")
+        or dotenv.get("BFF_ADMIN_TOKEN")
+        or dotenv.get("ADMIN_TOKEN")
+        or "change_me"
+    ).strip()
+
+
+ADMIN_TOKEN = _resolve_admin_token()
 HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "120") or 120)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 COMMAND_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_COMMAND_TIMEOUT_SECONDS", "120") or 120)
@@ -148,7 +164,8 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
     """
 
     headers = {"X-Admin-Token": ADMIN_TOKEN}
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         suffix = uuid.uuid4().hex[:12]
         db_name = f"e2e_tm_{suffix}"
         headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}

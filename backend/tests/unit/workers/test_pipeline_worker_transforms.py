@@ -17,8 +17,8 @@ if _pyspark_spec is None:  # pragma: no cover
 
 from pyspark.sql import SparkSession  # noqa: E402
 
-from pipeline_worker.main import (
-    PipelineWorker,
+from pipeline_worker.main import PipelineWorker
+from pipeline_worker.spark_schema_helpers import (
     _hash_schema_columns,
     _is_data_object,
     _list_part_files,

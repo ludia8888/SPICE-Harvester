@@ -697,6 +697,18 @@
       "subsystem": "{SUBSYS}"
     },
     {
+      "code": "PIPELINE_PREFLIGHT_FAILED",
+      "enterprise_code": "SHV-{SUBSYS}-PIP-CON-3001",
+      "domain": "pipeline",
+      "error_class": "conflict",
+      "severity": "error",
+      "title": "Pipeline preflight failed",
+      "http_status": 409,
+      "retryable": false,
+      "retry_policy": "none",
+      "subsystem": "{SUBSYS}"
+    },
+    {
       "code": "dataset_not_found",
       "enterprise_code": "SHV-OBJ-DAT-NOT-0001",
       "domain": "data",

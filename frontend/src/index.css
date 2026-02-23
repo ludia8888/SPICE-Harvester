@@ -1,1 +1,2 @@
 /* Intentionally minimal. Global layout/theme styles live in styles.css and App.css. */
+@import "./foundry-overrides.css";

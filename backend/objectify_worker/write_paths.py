@@ -304,10 +304,11 @@ class DatasetPrimaryIndexWritePath:
                 mappings=self._INSTANCE_MAPPING,
                 settings=get_default_index_settings(),
             )
-            logger.info("Created dataset-primary instances index: %s", index_name)
-        else:
-            # Ensure required fields exist for forward compatibility.
-            await self._es.update_mapping(index=index_name, properties=self._INSTANCE_MAPPING["properties"])
+
+        # Always reconcile mapping after create attempt to close
+        # index-exists/create race windows.
+        await self._es.update_mapping(index=index_name, properties=self._INSTANCE_MAPPING["properties"])
+        logger.info("Ensured dataset-primary instances index + mapping: %s", index_name)
 
         self._created_indices.add(index_name)
         return index_name

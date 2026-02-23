@@ -31,6 +31,9 @@ from bff.routers.object_types import (
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.oms_client import OMSClient
 from bff.services import object_type_contract_service
+from shared.config.settings import get_settings
+from shared.foundry.compute_routing import choose_search_around_backend
+from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispatcher
 from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid
@@ -43,6 +46,7 @@ from shared.security.input_sanitizer import (
 )
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.core.audit_log_store import AuditLogStore
 from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 from shared.utils.object_type_backing import list_backing_sources
@@ -60,6 +64,8 @@ _FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
 _TEMP_OBJECT_SET_TTL_SECONDS = 60 * 60
 _TEMP_OBJECT_SET_STORE: dict[str, tuple[float, dict[str, Any]]] = {}
 _TEMP_OBJECT_SET_LOCK = asyncio.Lock()
+_SEARCH_ROUTING_AUDIT_STORE: AuditLogStore | None = None
+_SEARCH_ROUTING_AUDIT_DISABLED = False
 _FORWARDED_ACTOR_HEADER_KEYS = (
     "X-User-ID",
     "X-User-Type",
@@ -101,6 +107,26 @@ class ApiFeaturePreviewUsageOnlyError(ValueError):
 
 class ObjectSetNotFoundError(ValueError):
     pass
+
+
+_ONTOLOGY_HANDLED_EXCEPTIONS = (
+    OntologyNotFoundError,
+    PermissionDeniedError,
+    ApiFeaturePreviewUsageOnlyError,
+    ObjectSetNotFoundError,
+    SecurityViolationError,
+    ActionPermissionProfileError,
+    httpx.HTTPError,
+    HTTPException,
+    RuntimeError,
+    LookupError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    OSError,
+    AssertionError,
+)
 
 
 class ApplyActionRequestOptionsV2(BaseModel):
@@ -714,23 +740,25 @@ async def _resolve_search_around_target_primary_keys(
     return target_primary_keys_by_type, link_type
 
 
-async def _load_rows_for_search_around_object_set(
+def _estimate_search_around_candidate_count(target_primary_keys_by_type: dict[str, list[str]]) -> int:
+    total = 0
+    for values in target_primary_keys_by_type.values():
+        if isinstance(values, list):
+            total += len(values)
+    return max(0, total)
+
+
+async def _execute_search_around_index_pruning(
     *,
     oms_client: OMSClient,
     db_name: str,
     branch: str,
-    object_set: dict[str, Any],
     payload: dict[str, Any],
     endpoint_scope: str,
+    link_type: str,
+    target_object_types: list[str],
+    target_primary_keys_by_type: dict[str, list[str]],
 ) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
-    target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
-        oms_client=oms_client,
-        db_name=db_name,
-        branch=branch,
-        object_set=object_set,
-    )
-
-    target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
     if not target_object_types:
         return [], "0", None, []
 
@@ -805,6 +833,139 @@ async def _load_rows_for_search_around_object_set(
     next_offset = offset + len(page_rows)
     next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(projected_rows) else None
     return page_rows, str(len(projected_rows)), next_page_token, target_object_types
+
+
+async def _audit_search_around_compute_routing(
+    *,
+    db_name: str,
+    branch: str,
+    endpoint_scope: str,
+    actor: str | None,
+    link_type: str,
+    target_object_types: list[str],
+    decision_metadata: dict[str, Any],
+) -> None:
+    logger.info(
+        "Search Around compute route (ontology=%s branch=%s endpoint=%s actor=%s decision=%s)",
+        db_name,
+        branch,
+        endpoint_scope,
+        actor or "system",
+        decision_metadata,
+    )
+
+    global _SEARCH_ROUTING_AUDIT_STORE, _SEARCH_ROUTING_AUDIT_DISABLED
+    if _SEARCH_ROUTING_AUDIT_DISABLED:
+        return
+
+    try:
+        if _SEARCH_ROUTING_AUDIT_STORE is None:
+            _SEARCH_ROUTING_AUDIT_STORE = AuditLogStore()
+        await _SEARCH_ROUTING_AUDIT_STORE.log(
+            partition_key=f"ontology_compute:{db_name}",
+            actor=actor or "system",
+            action="SEARCH_AROUND_COMPUTE_ROUTED",
+            status="success",
+            resource_type="ontology",
+            resource_id=db_name,
+            metadata={
+                "branch": branch,
+                "endpoint_scope": endpoint_scope,
+                "link_type": link_type,
+                "target_object_types": list(target_object_types),
+                **decision_metadata,
+            },
+        )
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
+        _SEARCH_ROUTING_AUDIT_DISABLED = True
+        logger.warning(
+            "Search Around compute routing audit disabled after persistence error (ontology=%s): %s",
+            db_name,
+            exc,
+            exc_info=True,
+        )
+
+
+async def _load_rows_for_search_around_object_set(
+    *,
+    oms_client: OMSClient,
+    db_name: str,
+    branch: str,
+    object_set: dict[str, Any],
+    payload: dict[str, Any],
+    endpoint_scope: str,
+    actor: str | None = None,
+) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
+    target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
+        oms_client=oms_client,
+        db_name=db_name,
+        branch=branch,
+        object_set=object_set,
+    )
+
+    target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
+    settings = get_settings()
+    estimated_count = _estimate_search_around_candidate_count(target_primary_keys_by_type)
+    routing_decision = choose_search_around_backend(
+        estimated_count=estimated_count,
+        threshold=int(settings.ontology.search_around_spark_threshold),
+    )
+    execution_backend = "spark_on_demand" if routing_decision.spark_routed else "index_pruning"
+    decision_metadata = routing_decision.as_metadata(execution_backend=execution_backend)
+
+    if routing_decision.spark_routed:
+        dispatcher = get_spark_on_demand_dispatcher()
+        dispatch_result = await dispatcher.dispatch(
+            route="search_around",
+            payload={
+                "ontology": db_name,
+                "branch": branch,
+                "endpoint_scope": endpoint_scope,
+                "estimated_count": estimated_count,
+                "target_object_types": list(target_object_types),
+            },
+            execute=lambda _ctx: _execute_search_around_index_pruning(
+                oms_client=oms_client,
+                db_name=db_name,
+                branch=branch,
+                payload=payload,
+                endpoint_scope=endpoint_scope,
+                link_type=link_type,
+                target_object_types=target_object_types,
+                target_primary_keys_by_type=target_primary_keys_by_type,
+            ),
+            timeout_seconds=60.0,
+        )
+        decision_metadata.update(
+            {
+                "spark_job_id": dispatch_result.job_id,
+                "queue_wait_ms": dispatch_result.queue_wait_ms,
+                "execution_ms": dispatch_result.execution_ms,
+            }
+        )
+        rows, total_count, next_page_token, resolved_object_types = dispatch_result.result
+    else:
+        rows, total_count, next_page_token, resolved_object_types = await _execute_search_around_index_pruning(
+            oms_client=oms_client,
+            db_name=db_name,
+            branch=branch,
+            payload=payload,
+            endpoint_scope=endpoint_scope,
+            link_type=link_type,
+            target_object_types=target_object_types,
+            target_primary_keys_by_type=target_primary_keys_by_type,
+        )
+
+    await _audit_search_around_compute_routing(
+        db_name=db_name,
+        branch=branch,
+        endpoint_scope=endpoint_scope,
+        actor=actor,
+        link_type=link_type,
+        target_object_types=target_object_types,
+        decision_metadata=decision_metadata,
+    )
+    return rows, total_count, next_page_token, resolved_object_types
 
 
 def _object_set_runtime_value_error_response(
@@ -2972,7 +3133,7 @@ async def list_ontologies_v2(
             error_name="UpstreamError",
             parameters={},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list ontologies (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2993,7 +3154,7 @@ async def get_ontology_v2(
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
     try:
@@ -3017,7 +3178,7 @@ async def get_ontology_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get ontology (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -3048,7 +3209,7 @@ async def get_full_metadata_v2(
             endpoint="GET /api/v2/ontologies/{ontologyRid}/fullMetadata",
         )
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3202,7 +3363,7 @@ async def get_full_metadata_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get full metadata (v2)",
             exc=exc,
@@ -3227,7 +3388,7 @@ async def list_action_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/actionTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
     try:
@@ -3268,7 +3429,7 @@ async def list_action_types_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list action types (v2)",
             exc=exc,
@@ -3294,7 +3455,7 @@ async def get_action_type_v2(
         if not action_type:
             raise ValueError("actionType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3354,7 +3515,7 @@ async def get_action_type_v2(
             ontology=db_name,
             parameters={"actionType": action_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get action type (v2)",
             exc=exc,
@@ -3380,7 +3541,7 @@ async def get_action_type_by_rid_v2(
         if not action_type_rid:
             raise ValueError("actionTypeRid is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3432,7 +3593,7 @@ async def get_action_type_by_rid_v2(
             ontology=db_name,
             parameters={"actionTypeRid": action_type_rid},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get action type by rid (v2)",
             exc=exc,
@@ -3594,7 +3755,7 @@ async def apply_action_v2(
             explicit_mode=(body.options.mode if body.options else None),
         )
         parameters = dict(body.parameters or {})
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3641,7 +3802,7 @@ async def apply_action_v2(
             ontology=db_name,
             parameters={"actionType": action_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to apply action (v2)",
             exc=exc,
@@ -3676,7 +3837,7 @@ async def apply_action_batch_v2(
         requests = list(body.requests or [])
         if not requests:
             raise ValueError("requests must not be empty")
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3722,7 +3883,7 @@ async def apply_action_batch_v2(
             ontology=db_name,
             parameters={"actionType": action_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to apply action batch (v2)",
             exc=exc,
@@ -3746,7 +3907,7 @@ async def list_query_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/queryTypes", db_name, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
     try:
@@ -3773,7 +3934,7 @@ async def list_query_types_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list query types (v2)",
             exc=exc,
@@ -3800,7 +3961,7 @@ async def get_query_type_v2(
         if not query_api_name:
             raise ValueError("queryApiName is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3854,7 +4015,7 @@ async def get_query_type_v2(
             ontology=db_name,
             parameters={"queryApiName": query_api_name},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get query type (v2)",
             exc=exc,
@@ -3884,7 +4045,7 @@ async def execute_query_v2(
         if not query_api_name:
             raise ValueError("queryApiName is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -3981,7 +4142,7 @@ async def execute_query_v2(
             ontology=db_name,
             parameters={"queryApiName": query_api_name},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to execute query (v2)",
             exc=exc,
@@ -4015,7 +4176,7 @@ async def list_interface_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4046,7 +4207,7 @@ async def list_interface_types_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list interface types (v2)",
             exc=exc,
@@ -4083,7 +4244,7 @@ async def get_interface_type_v2(
         if not interface_type:
             raise ValueError("interfaceType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4128,7 +4289,7 @@ async def get_interface_type_v2(
             ontology=db_name,
             parameters={"interfaceType": interface_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get interface type (v2)",
             exc=exc,
@@ -4162,7 +4323,7 @@ async def list_shared_property_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4193,7 +4354,7 @@ async def list_shared_property_types_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list shared property types (v2)",
             exc=exc,
@@ -4227,7 +4388,7 @@ async def get_shared_property_type_v2(
         if not shared_property_type:
             raise ValueError("sharedPropertyType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4272,7 +4433,7 @@ async def get_shared_property_type_v2(
             ontology=db_name,
             parameters={"sharedPropertyType": shared_property_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get shared property type (v2)",
             exc=exc,
@@ -4300,7 +4461,7 @@ async def list_value_types_v2(
             endpoint="ontologies/{ontologyRid}/valueTypes",
         )
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4328,7 +4489,7 @@ async def list_value_types_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list value types (v2)",
             exc=exc,
@@ -4360,7 +4521,7 @@ async def get_value_type_v2(
         if not value_type:
             raise ValueError("valueType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4405,7 +4566,7 @@ async def get_value_type_v2(
             ontology=db_name,
             parameters={"valueType": value_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get value type (v2)",
             exc=exc,
@@ -4433,7 +4594,7 @@ async def list_object_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/objectTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
     try:
@@ -4491,7 +4652,7 @@ async def list_object_types_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list object types (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -4521,7 +4682,7 @@ async def create_object_type_v2(
         if not object_type:
             raise ValueError("apiName is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4582,7 +4743,7 @@ async def create_object_type_v2(
         return out
     except HTTPException as exc:
         return _service_http_error_response(exc, ontology=db_name, object_type=object_type)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to create object type (v2)",
             exc=exc,
@@ -4613,7 +4774,7 @@ async def update_object_type_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4693,7 +4854,7 @@ async def update_object_type_v2(
         return out
     except HTTPException as exc:
         return _service_http_error_response(exc, ontology=db_name, object_type=object_type)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to update object type (v2)",
             exc=exc,
@@ -4722,7 +4883,7 @@ async def get_object_type_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4766,7 +4927,7 @@ async def get_object_type_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get object type (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -4805,7 +4966,7 @@ async def get_object_type_full_metadata_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4885,7 +5046,7 @@ async def get_object_type_full_metadata_v2(
             ontology=db_name,
             parameters={"objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get object type full metadata (v2)",
             exc=exc,
@@ -4918,7 +5079,7 @@ async def list_outgoing_link_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/outgoingLinkTypes", db_name, branch, source_object_type, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -4998,7 +5159,7 @@ async def list_outgoing_link_types_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": source_object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list outgoing link types (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5036,7 +5197,7 @@ async def get_outgoing_link_type_v2(
         if not link_type:
             raise ValueError("linkType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5102,7 +5263,7 @@ async def get_outgoing_link_type_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": source_object_type, "linkType": link_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get outgoing link type (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5141,7 +5302,7 @@ async def list_incoming_link_types_v2(
         await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/incomingLinkTypes", db_name, branch, target_object_type, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5221,7 +5382,7 @@ async def list_incoming_link_types_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": target_object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list incoming link types (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5259,7 +5420,7 @@ async def get_incoming_link_type_v2(
         if not link_type:
             raise ValueError("linkType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5325,7 +5486,7 @@ async def get_incoming_link_type_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": target_object_type, "linkType": link_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get incoming link type (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5357,7 +5518,7 @@ async def search_objects_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5391,7 +5552,7 @@ async def search_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to search objects (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5422,7 +5583,7 @@ async def count_objects_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5454,7 +5615,7 @@ async def count_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to count objects (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5488,7 +5649,7 @@ async def aggregate_objects_v2(
         if not object_type:
             raise ValueError("objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5519,7 +5680,7 @@ async def aggregate_objects_v2(
             ontology=db_name,
             parameters={"objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to aggregate objects (v2)",
             exc=exc,
@@ -5543,6 +5704,7 @@ async def load_object_set_objects_v2(
     search_around = False
     object_type: str | None = None
     search_payload: dict[str, Any] = {}
+    actor: str | None = None
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
@@ -5555,13 +5717,14 @@ async def load_object_set_objects_v2(
             if not object_type:
                 raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
+        _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
                 object_set=object_set,
                 payload=payload,
                 require_select=True,
             )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5577,6 +5740,7 @@ async def load_object_set_objects_v2(
                 object_set=object_set,
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjects",
+                actor=actor,
             )
         else:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -5617,7 +5781,7 @@ async def load_object_set_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectSet": "loadObjects"},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to load object set objects (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -5675,7 +5839,7 @@ async def load_object_set_links_v2(
             ",".join(requested_links),
             str(payload.get("objectSet") or ""),
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5718,7 +5882,7 @@ async def load_object_set_links_v2(
             ontology=db_name,
             parameters={"objectSet": "loadLinks"},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to load object set source rows (v2)",
             exc=exc,
@@ -5810,7 +5974,15 @@ async def load_object_set_links_v2(
                 branch=branch,
                 oms_client=oms_client,
             )
-        except Exception:
+        except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
+            logger.warning(
+                "Failed to resolve source object primary key for link expansion (ontology=%s sourceObjectType=%s branch=%s): %s",
+                db_name,
+                source_object_type,
+                branch,
+                exc,
+                exc_info=True,
+            )
             continue
 
     data = _collect_load_links_rows(
@@ -5847,6 +6019,7 @@ async def load_object_set_multiple_object_types_v2(
     search_payload: dict[str, Any] = {}
     request_page_token: str | None = None
     pagination_scope: str | None = None
+    actor: str | None = None
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
@@ -5865,6 +6038,7 @@ async def load_object_set_multiple_object_types_v2(
             if not object_types:
                 raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
+        _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
                 object_set=object_set,
@@ -5883,7 +6057,7 @@ async def load_object_set_multiple_object_types_v2(
                 ",".join(_normalize_select_values(payload)),
                 str(payload.get("snapshot") if "snapshot" in payload else ""),
             )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -5899,6 +6073,7 @@ async def load_object_set_multiple_object_types_v2(
                 object_set=object_set,
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsMultipleObjectTypes",
+                actor=actor,
             )
             object_types = resolved_object_types
         elif len(object_types) == 1:
@@ -5952,7 +6127,7 @@ async def load_object_set_multiple_object_types_v2(
             ontology=db_name,
             parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to load object set multiple object types (v2)",
             exc=exc,
@@ -5978,6 +6153,7 @@ async def load_object_set_objects_or_interfaces_v2(
     search_payload: dict[str, Any] = {}
     request_page_token: str | None = None
     pagination_scope: str | None = None
+    actor: str | None = None
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
@@ -5996,6 +6172,7 @@ async def load_object_set_objects_or_interfaces_v2(
             if not object_types:
                 raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
+        _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
                 object_set=object_set,
@@ -6014,7 +6191,7 @@ async def load_object_set_objects_or_interfaces_v2(
                 ",".join(_normalize_select_values(payload)),
                 str(payload.get("snapshot") if "snapshot" in payload else ""),
             )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6030,6 +6207,7 @@ async def load_object_set_objects_or_interfaces_v2(
                 object_set=object_set,
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsOrInterfaces",
+                actor=actor,
             )
         elif len(object_types) == 1:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -6077,7 +6255,7 @@ async def load_object_set_objects_or_interfaces_v2(
             ontology=db_name,
             parameters={"objectSet": "loadObjectsOrInterfaces"},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to load object set objects or interfaces (v2)",
             exc=exc,
@@ -6109,7 +6287,7 @@ async def aggregate_object_set_v2(
         if not object_types:
             raise ValueError("objectSet.objectType is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6159,7 +6337,7 @@ async def aggregate_object_set_v2(
             ontology=db_name,
             parameters={"objectSet": "aggregate"},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to aggregate objectSet (v2)",
             exc=exc,
@@ -6186,7 +6364,7 @@ async def create_temporary_object_set_v2(
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
         object_set_rid = await _store_temporary_object_set(object_set)
         return {"objectSetRid": object_set_rid}
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6207,7 +6385,7 @@ async def get_object_set_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_domain_role(request, db_name=db_name)
         return await _load_temporary_object_set(objectSetRid)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6255,7 +6433,7 @@ async def list_objects_v2(
             payload["excludeRid"] = bool(exclude_rid)
         if snapshot is not None:
             payload["snapshot"] = bool(snapshot)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6289,7 +6467,7 @@ async def list_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list objects (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6326,7 +6504,7 @@ async def get_object_v2(
         if not primary_key_value:
             raise ValueError("primaryKey is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6427,7 +6605,7 @@ async def get_object_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get object (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6492,7 +6670,7 @@ async def list_linked_objects_v2(
         )
         offset = _decode_page_token(page_token, scope=page_scope)
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6513,7 +6691,7 @@ async def list_linked_objects_v2(
             object_type=object_type,
             parameters={"primaryKey": primary_key_value},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve source primary key field (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6556,7 +6734,7 @@ async def list_linked_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve source object (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6629,7 +6807,7 @@ async def list_linked_objects_v2(
             link_type=link_type,
             parameters={"primaryKey": primary_key_value},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve link context (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6693,7 +6871,7 @@ async def list_linked_objects_v2(
             error_name="UpstreamError",
             parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to list linked objects (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6742,7 +6920,7 @@ async def get_linked_object_v2(
         if not linked_primary_key_value:
             raise ValueError("linkedObjectPrimaryKey is required")
         await _require_domain_role(request, db_name=db_name)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
             ontology=str(ontology),
@@ -6780,7 +6958,7 @@ async def get_linked_object_v2(
             link_type=link_type,
             linked_primary_key=linked_primary_key_value,
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve source primary key field (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6827,7 +7005,7 @@ async def get_linked_object_v2(
             error_name="UpstreamError",
             parameters=error_parameters,
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve source object (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6905,7 +7083,7 @@ async def get_linked_object_v2(
             link_type=link_type,
             linked_primary_key=linked_primary_key_value,
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to resolve link context (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -6988,7 +7166,7 @@ async def get_linked_object_v2(
             error_name="UpstreamError",
             parameters=error_parameters,
         )
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         logger.error("Failed to get linked object (v2): %s", exc)
         return _foundry_error(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -7054,7 +7232,7 @@ async def get_timeseries_first_point_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get timeseries firstPoint (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7112,7 +7290,7 @@ async def get_timeseries_last_point_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get timeseries lastPoint (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7176,7 +7354,7 @@ async def stream_timeseries_points_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to stream timeseries points (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7214,7 +7392,7 @@ async def upload_attachment_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology="attachments", parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to upload attachment (v2)", exc=exc,
             ontology="attachments", parameters=error_parameters,
@@ -7272,7 +7450,7 @@ async def list_attachment_property_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to list attachment property (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7333,7 +7511,7 @@ async def get_attachment_by_rid_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get attachment by RID (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7395,7 +7573,7 @@ async def get_attachment_content_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get attachment content (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,
@@ -7460,7 +7638,7 @@ async def get_attachment_content_by_rid_v2(
         )
     except httpx.HTTPError:
         return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except Exception as exc:
+    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _internal_error_response(
             log_message="Failed to get attachment content by RID (v2)", exc=exc,
             ontology=ontology, parameters=error_parameters,

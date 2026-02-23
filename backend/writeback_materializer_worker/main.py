@@ -160,8 +160,14 @@ class WritebackMaterializerWorker:
 
         try:
             await self.lakefs_client.create_branch(repository=repo, name=staging_branch, source=branch)
-        except LakeFSConflictError:
-            pass
+        except LakeFSConflictError as exc:
+            logger.debug(
+                "Writeback snapshot staging branch already exists (repository=%s branch=%s staging_branch=%s): %s",
+                repo,
+                branch,
+                staging_branch,
+                exc,
+            )
 
         merger = WritebackMergeService(base_storage=self.base_storage, lakefs_storage=self.lakefs_storage)
 

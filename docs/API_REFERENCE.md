@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **264**
+- Total documented endpoints: **258**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 155 |
+| `v1` | 149 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -46,8 +46,8 @@
 | `context7` | 7 |
 | `objectify` | 7 |
 | `schema-changes` | 7 |
-| `backing-datasources` | 5 |
 | `graph-query` | 5 |
+| `tasks` | 5 |
 
 ## Endpoint Catalog (`/api/v1`, `/api/v2`)
 
@@ -305,12 +305,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/access-policies` | List Access Policies | `v1` | no | no | `list_access_policies_api_v1_access_policies_get` |
 | `POST` | `/api/v1/access-policies` | Upsert Access Policy | `v1` | no | no | `upsert_access_policy_api_v1_access_policies_post` |
-| `GET` | `/api/v1/backing-datasource-versions/{version_id}` | Get Backing Datasource Version | `v1` | no | no | `get_backing_datasource_version_api_v1_backing_datasource_versions__version_id__get` |
-| `GET` | `/api/v1/backing-datasources` | List Backing Datasources | `v1` | no | no | `list_backing_datasources_api_v1_backing_datasources_get` |
-| `POST` | `/api/v1/backing-datasources` | Create Backing Datasource | `v1` | no | no | `create_backing_datasource_api_v1_backing_datasources_post` |
-| `GET` | `/api/v1/backing-datasources/{backing_id}` | Get Backing Datasource | `v1` | no | no | `get_backing_datasource_api_v1_backing_datasources__backing_id__get` |
-| `GET` | `/api/v1/backing-datasources/{backing_id}/versions` | List Backing Datasource Versions | `v1` | no | no | `list_backing_datasource_versions_api_v1_backing_datasources__backing_id__versions_get` |
-| `POST` | `/api/v1/backing-datasources/{backing_id}/versions` | Create Backing Datasource Version | `v1` | no | no | `create_backing_datasource_version_api_v1_backing_datasources__backing_id__versions_post` |
 | `GET` | `/api/v1/gate-policies` | List Gate Policies | `v1` | no | no | `list_gate_policies_api_v1_gate_policies_get` |
 | `POST` | `/api/v1/gate-policies` | Upsert Gate Policy | `v1` | no | no | `upsert_gate_policy_api_v1_gate_policies_post` |
 | `GET` | `/api/v1/gate-results` | List Gate Results | `v1` | no | no | `list_gate_results_api_v1_gate_results_get` |

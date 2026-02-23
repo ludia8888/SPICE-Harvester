@@ -1287,6 +1287,20 @@ class OntologySettings(BaseSettings):
             "(ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres)"
         ),
     )
+    search_around_spark_threshold: int = Field(
+        default=100_000,
+        description=(
+            "Search Around request object-count threshold for Spark on-demand routing "
+            "(ONTOLOGY_SEARCH_AROUND_SPARK_THRESHOLD)"
+        ),
+    )
+    writeback_spark_threshold: int = Field(
+        default=10_000,
+        description=(
+            "Writeback request object-count threshold for Spark on-demand routing "
+            "(ONTOLOGY_WRITEBACK_SPARK_THRESHOLD)"
+        ),
+    )
 
     # Linter strictness defaults (domain-neutral)
     require_primary_key: bool = Field(
@@ -1340,6 +1354,16 @@ class OntologySettings(BaseSettings):
                 backend,
             )
         return "postgres"
+
+    @field_validator("search_around_spark_threshold", mode="before")
+    @classmethod
+    def clamp_search_around_spark_threshold(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=100_000, min_value=1, max_value=10_000_000)
+
+    @field_validator("writeback_spark_threshold", mode="before")
+    @classmethod
+    def clamp_writeback_spark_threshold(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=1, max_value=10_000_000)
 
     @property
     def protected_branches_set(self) -> set[str]:

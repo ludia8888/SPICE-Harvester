@@ -1,8 +1,30 @@
 :root {
   color-scheme: dark;
   font-family: "Inter", "Segoe UI", sans-serif;
-  background: #10161a;
-  color: #f5f8fa;
+  --foundry-bg-deepest: #0B1014;
+  --foundry-bg-panel: #11181E;
+  --foundry-border: #293742;
+  --foundry-text: #f5f8fa;
+  --foundry-text-muted: #8a9ba8;
+  --foundry-accent-hover: #1A232A;
+
+  /* Proxy existing variables to Foundry theme */
+  --panel: var(--foundry-bg-panel);
+  --panel-soft: var(--foundry-bg-panel);
+  --border: var(--foundry-border);
+  --text-muted: var(--foundry-text-muted);
+  --text-primary: var(--foundry-text);
+  --accent: #2b95d6;
+  --rail-bg: var(--foundry-bg-deepest);
+  --rail-border: var(--foundry-border);
+  --rail-button: var(--foundry-text-muted);
+  --rail-button-active: #ffffff;
+  --rail-button-active-bg: var(--foundry-accent-hover);
+  --rail-button-hover: #ffffff;
+  --rail-button-hover-bg: var(--foundry-accent-hover);
+
+  background: var(--foundry-bg-deepest);
+  color: var(--foundry-text);
 }
 
 html,
@@ -13,7 +35,7 @@ body,
 
 body {
   margin: 0;
-  background: #10161a;
+  background: var(--foundry-bg-deepest);
 }
 
 .app-shell {
@@ -917,8 +939,8 @@ body {
   overflow: hidden;
 }
 
-.files-panel-body > .files-table-header,
-.files-panel-body > .files-table {
+.files-panel-body>.files-table-header,
+.files-panel-body>.files-table {
   flex-shrink: 0;
 }
 
@@ -1951,7 +1973,7 @@ body {
   background: #202b33;
 }
 
-.ontology-create-item + .ontology-create-item {
+.ontology-create-item+.ontology-create-item {
   border-top: 1px solid #293742;
 }
 
@@ -2372,6 +2394,7 @@ body {
     opacity: 0;
     transform: translateX(-4px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);

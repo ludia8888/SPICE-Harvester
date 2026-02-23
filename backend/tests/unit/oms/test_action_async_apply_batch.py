@@ -153,6 +153,14 @@ async def test_foundry_apply_batch_v2_uses_submit_batch_pipeline(
     assert submit_request.items[0].input["ticket"]["instance_id"] == "t1"
     assert submit_request.items[0].metadata["user_id"] == "alice"
     assert submit_request.items[0].metadata["user_type"] == "service"
+    routing = submit_request.items[0].metadata.get("__compute_routing")
+    assert isinstance(routing, dict)
+    assert routing["route"] == "writeback"
+    assert routing["estimated_count"] == 2
+    assert routing["threshold"] == 10_000
+    assert routing["selected_backend"] == "index_pruning"
+    assert routing["execution_backend"] == "index_pruning"
+    assert routing["request_count"] == 2
 
 
 @pytest.mark.unit
@@ -197,6 +205,14 @@ async def test_foundry_apply_v2_validate_only_returns_validation_payload(
     assert sim_request.base_branch == "main"
     assert sim_request.include_effects is False
     assert sim_request.metadata["user_id"] == "alice"
+    routing = sim_request.metadata.get("__compute_routing")
+    assert isinstance(routing, dict)
+    assert routing["route"] == "writeback"
+    assert routing["estimated_count"] == 1
+    assert routing["threshold"] == 10_000
+    assert routing["selected_backend"] == "index_pruning"
+    assert routing["execution_backend"] == "index_pruning"
+    assert routing["request_count"] == 1
 
 
 @pytest.mark.unit
@@ -244,3 +260,61 @@ async def test_foundry_apply_v2_validate_and_execute_returns_validation_payload(
     submit_request = captured.get("request")
     assert isinstance(submit_request, action_async.ActionSubmitBatchRequest)
     assert submit_request.base_branch == "main"
+    assert len(submit_request.items) == 1
+    routing = submit_request.items[0].metadata.get("__compute_routing")
+    assert isinstance(routing, dict)
+    assert routing["route"] == "writeback"
+    assert routing["estimated_count"] == 1
+    assert routing["threshold"] == 10_000
+    assert routing["selected_backend"] == "index_pruning"
+    assert routing["execution_backend"] == "index_pruning"
+    assert routing["request_count"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_apply_batch_v2_routes_to_spark_when_threshold_exceeded(
+    app_with_router: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Dict[str, Any] = {}
+
+    async def _fake_ensure_ontology_database_exists(ontology: str) -> str:
+        return ontology
+
+    async def _fake_submit_action_batch_async(**kwargs: Any) -> action_async.ActionSubmitBatchResponse:  # noqa: ANN401
+        captured.update(kwargs)
+        return action_async.ActionSubmitBatchResponse(
+            batch_id="batch-1",
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            items=[],
+        )
+
+    monkeypatch.setenv("ONTOLOGY_WRITEBACK_SPARK_THRESHOLD", "1")
+    monkeypatch.setattr(action_async, "_ensure_ontology_database_exists", _fake_ensure_ontology_database_exists)
+    monkeypatch.setattr(action_async, "submit_action_batch_async", _fake_submit_action_batch_async)
+
+    transport = ASGITransport(app=app_with_router)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v2/ontologies/demo/actions/ApproveTicket/applyBatch?branch=master",
+            json={
+                "requests": [
+                    {"parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}}},
+                    {"parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t2"}}},
+                ],
+                "metadata": {"user_id": "alice", "user_type": "service"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    submit_request = captured.get("request")
+    assert isinstance(submit_request, action_async.ActionSubmitBatchRequest)
+    routing = submit_request.items[0].metadata.get("__compute_routing")
+    assert isinstance(routing, dict)
+    assert routing["estimated_count"] == 2
+    assert routing["threshold"] == 1
+    assert routing["selected_backend"] == "spark_on_demand"
+    assert routing["execution_backend"] == "spark_on_demand"
+    assert routing["spark_job_id"]

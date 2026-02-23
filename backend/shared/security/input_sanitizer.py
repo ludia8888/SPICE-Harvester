@@ -30,7 +30,7 @@ class InputSanitizer:
         r"(\bAND\b\s+\d+\s*=\s*\d+)",  # AND 1=1 pattern
         r"(--|#|/\*|\*/)",
         r"(\b(CHAR|NCHAR|VARCHAR|NVARCHAR|CAST|CONVERT|SUBSTRING)\s*\()",
-        r"(\b(INFORMATION_SCHEMA|MASTER|MSDB|TEMPDB)\b)",
+        r"(\b(INFORMATION_SCHEMA|MSDB|TEMPDB)\b|\bMASTER\s*\.)",
         r"(\bSYS\.[A-Za-z0-9_]+)",
         r"(\b(XP_|SP_)\w+)",
         r"(\b(LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b)",
@@ -153,12 +153,16 @@ class InputSanitizer:
             re.compile(pattern, re.IGNORECASE) for pattern in self.LDAP_INJECTION_PATTERNS
         ]
 
+    def _find_sql_injection_match(self, value: str) -> tuple[str, str] | None:
+        for pattern in self.sql_regex:
+            match = pattern.search(value)
+            if match:
+                return pattern.pattern, match.group(0)
+        return None
+
     def detect_sql_injection(self, value: str) -> bool:
         """SQL Injection 패턴 탐지"""
-        for pattern in self.sql_regex:
-            if pattern.search(value):
-                return True
-        return False
+        return self._find_sql_injection_match(value) is not None
 
     def detect_xss(self, value: str) -> bool:
         """XSS 패턴 탐지"""
@@ -218,7 +222,15 @@ class InputSanitizer:
             raise SecurityViolationError(f"String too long: {len(value)} > {max_length}")
 
         # 악성 패턴 탐지
-        if self.detect_sql_injection(value):
+        sql_match = self._find_sql_injection_match(value)
+        if sql_match is not None:
+            pattern, matched = sql_match
+            logger.warning(
+                "SQL injection pattern matched (string): pattern=%s matched=%r sample=%r",
+                pattern,
+                matched,
+                value[:200],
+            )
             raise SecurityViolationError("SQL injection pattern detected")
 
         if self.detect_xss(value):
@@ -414,7 +426,15 @@ class InputSanitizer:
             raise SecurityViolationError(f"Description too long: {len(value)} > 5000")
 
         # SQL injection, XSS, Path traversal만 체크
-        if self.detect_sql_injection(value):
+        sql_match = self._find_sql_injection_match(value)
+        if sql_match is not None:
+            pattern, matched = sql_match
+            logger.warning(
+                "SQL injection pattern matched (description): pattern=%s matched=%r sample=%r",
+                pattern,
+                matched,
+                value[:200],
+            )
             raise SecurityViolationError("SQL injection pattern detected")
 
         if self.detect_xss(value):

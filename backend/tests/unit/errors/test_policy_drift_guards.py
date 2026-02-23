@@ -8,7 +8,7 @@ from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
 
 EXPECTED_ENTERPRISE_CATALOG_FINGERPRINT = (
-    "sha256:b5c7e092647078a95d03679f8eeb14bbbcc57f9b39c8ea88ea0ab452238ba2fd"
+    "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631"
 )
 EXPECTED_AGENT_TOOL_ALLOWLIST_BUNDLE_HASH = (
     "sha256:e11c5b1408a99ed7bb94284ae49f5fa18c1973afa0281edd8be73ac7c23fbdd2"

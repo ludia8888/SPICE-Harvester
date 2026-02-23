@@ -23,7 +23,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DB_NAME="${DB_NAME:-demo_pipeline_agent}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-master}"
 SCENARIO="${SCENARIO:-synthetic_3pl_topn}"
 
 ADMIN_TOKEN="${ADMIN_TOKEN:-${BFF_ADMIN_TOKEN:-${BFF_WRITE_TOKEN:-${ADMIN_API_KEY:-}}}}"
@@ -160,33 +160,88 @@ upload_csv_dataset() {
   local file_path="$1"
   local dataset_name="$2"
   local resp_file="${E2E_DIR}/dataset_upload_${dataset_name}.response.json"
-  local url="${API_BASE_URL}/pipelines/datasets/csv-upload?db_name=${DB_NAME}&branch=${BRANCH}"
-  local idem_key="ingest-${RUN_ID}-${dataset_name}"
+  local create_url="${BFF_URL}/api/v2/datasets"
+  local idem_key="ingest-v2-${RUN_ID}-${dataset_name}"
 
   if [[ ! -f "${file_path}" ]]; then
     echo "CSV file not found: ${file_path}" >&2
     exit 1
   fi
 
-  echo "Uploading dataset: ${dataset_name} (${file_path})"
-  local resp
-  resp="$(curl -sS -X POST "${url}" \
+  echo "Creating dataset (v2): ${dataset_name} (${file_path})"
+  local create_resp
+  create_resp="$(curl -sS -X POST "${create_url}" \
     "${AUTH_HEADERS_ADMIN[@]}" \
-    -H "Idempotency-Key: ${idem_key}" \
-    -F "file=@${file_path}" \
-    -F "dataset_name=${dataset_name}" \
-    -F "description=${DATASET_DESCRIPTION}")"
-  printf '%s' "${resp}" > "${resp_file}"
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: ${idem_key}-create" \
+    -d @- <<JSON
+{"name":"${dataset_name}","parentFolderRid":"ri.foundry.main.folder.${DB_NAME}"}
+JSON
+)"
 
-  "${PYTHON_BIN}" - <<'PY' "${resp}"
+  local dataset_rid
+  dataset_rid="$("${PYTHON_BIN}" - <<'PY' "${create_resp}"
+import json
+import sys
+payload = json.loads(sys.argv[1])
+rid = str(payload.get("rid") or "").strip()
+if not rid:
+    raise SystemExit("Failed to create dataset via /api/v2/datasets")
+print(rid)
+PY
+)"
+
+  local txn_resp
+  txn_resp="$(curl -sS -X POST "${BFF_URL}/api/v2/datasets/${dataset_rid}/transactions?branchName=${BRANCH}" \
+    "${AUTH_HEADERS_ADMIN[@]}" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: ${idem_key}-txn" \
+    -d '{}')"
+
+  local transaction_rid
+  transaction_rid="$("${PYTHON_BIN}" - <<'PY' "${txn_resp}"
+import json
+import sys
+payload = json.loads(sys.argv[1])
+rid = str(payload.get("rid") or "").strip()
+if not rid:
+    raise SystemExit("Failed to create transaction via /api/v2/datasets/{datasetRid}/transactions")
+print(rid)
+PY
+)"
+
+  local upload_resp
+  upload_resp="$(curl -sS -X POST "${BFF_URL}/api/v2/datasets/${dataset_rid}/files/source.csv/upload?transactionRid=${transaction_rid}" \
+    "${AUTH_HEADERS_ADMIN[@]}" \
+    -H "Content-Type: text/csv" \
+    --data-binary @"${file_path}")"
+
+  local commit_resp
+  commit_resp="$(curl -sS -X POST "${BFF_URL}/api/v2/datasets/${dataset_rid}/transactions/${transaction_rid}/commit" \
+    "${AUTH_HEADERS_ADMIN[@]}" \
+    -H "Idempotency-Key: ${idem_key}-commit")"
+
+  printf '%s\n' "${create_resp}" > "${resp_file}"
+  printf '%s\n' "${txn_resp}" >> "${resp_file}"
+  printf '%s\n' "${upload_resp}" >> "${resp_file}"
+  printf '%s\n' "${commit_resp}" >> "${resp_file}"
+
+  "${PYTHON_BIN}" - <<'PY' "${dataset_rid}" "${commit_resp}"
 import json
 import sys
 
-payload = json.loads(sys.argv[1])
-ds = (payload.get("data") or {}).get("dataset") or {}
-dataset_id = ds.get("dataset_id") or ds.get("datasetId") or ""
+dataset_rid = str(sys.argv[1]).strip()
+commit_payload = json.loads(sys.argv[2])
+if str(commit_payload.get("status") or "").strip().upper() != "COMMITTED":
+    raise SystemExit("Dataset transaction commit failed")
+prefixes = ("ri.foundry.main.dataset.", "ri.spice.main.dataset.")
+dataset_id = ""
+for prefix in prefixes:
+    if dataset_rid.startswith(prefix):
+        dataset_id = dataset_rid[len(prefix):]
+        break
 if not dataset_id:
-    raise SystemExit("Failed to parse dataset_id from upload response")
+    raise SystemExit("Failed to parse dataset_id from dataset RID")
 print(dataset_id)
 PY
 }
@@ -275,4 +330,3 @@ PY
 run_pipeline_agent "${goal_json}" "${dataset_ids_json}"
 
 echo "Done. Artifacts written under: ${E2E_DIR}"
-

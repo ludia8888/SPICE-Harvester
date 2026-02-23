@@ -750,6 +750,13 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         title="Configuration error",
         severity=EnterpriseSeverity.ERROR,
     ),
+    ErrorCode.PIPELINE_PREFLIGHT_FAILED: EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-CON-3001",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.CONFLICT,
+        title="Pipeline preflight failed",
+        severity=EnterpriseSeverity.ERROR,
+    ),
 }
 
 _CATEGORY_SPECS: Dict[ErrorCategory, EnterpriseErrorSpec] = {

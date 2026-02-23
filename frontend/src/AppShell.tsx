@@ -39,16 +39,26 @@ const copyByLang = {
     appTitle: 'SPICE Harvester',
     nav: {
       databases: 'Databases',
+      connections: 'Connections',
       overview: 'Overview',
+      datasets: 'Datasets',
+      pipelines: 'Pipelines',
+      objectify: 'Objectify',
       ontology: 'Ontology',
+      actions: 'Actions',
+      governance: 'Governance',
       mappings: 'Mappings',
       instances: 'Instances',
+      objectExplorer: 'Object Explorer',
       graph: 'Graph Explorer',
       query: 'Query Builder',
+      dataAnalysis: 'Data Analysis',
       audit: 'Audit',
       lineage: 'Lineage',
       tasks: 'Tasks',
+      scheduler: 'Scheduler',
       admin: 'Admin',
+      ai: 'AI Assistant',
       commands: 'Commands',
       settings: 'Settings',
       project: 'Project',
@@ -61,7 +71,10 @@ const copyByLang = {
       flow: 'Flow',
       navigation: 'Navigation',
       data: 'Data',
+      ontology: 'Ontology',
       explore: 'Explore',
+      observe: 'Observe',
+      develop: 'Develop',
       ops: 'Operations',
     },
     steps: [
@@ -128,16 +141,26 @@ const copyByLang = {
     appTitle: 'SPICE Harvester',
     nav: {
       databases: '프로젝트',
+      connections: '연결',
       overview: '요약',
+      datasets: '데이터셋',
+      pipelines: '파이프라인',
+      objectify: '오브젝트화',
       ontology: '온톨로지',
+      actions: '액션',
+      governance: '거버넌스',
       mappings: '매핑',
       instances: '인스턴스',
+      objectExplorer: '오브젝트 탐색기',
       graph: '그래프 탐색',
       query: '쿼리 빌더',
+      dataAnalysis: '데이터 분석',
       audit: '감사 로그',
       lineage: '리니지',
       tasks: '작업',
+      scheduler: '스케줄러',
       admin: '관리자',
+      ai: 'AI 어시스턴트',
       commands: '커맨드',
       settings: '설정',
       project: '프로젝트',
@@ -150,7 +173,10 @@ const copyByLang = {
       flow: '진행 흐름',
       navigation: '내비게이션',
       data: '데이터',
+      ontology: '온톨로지',
       explore: '탐색',
+      observe: '관측',
+      develop: '개발',
       ops: '운영',
     },
     steps: [
@@ -222,7 +248,10 @@ const getNavSections = (project: string | null, copy: Copy) => {
         title: copy.sections.navigation,
         items: [
           { label: copy.nav.databases, path: '/' },
+          { label: copy.nav.connections, path: '/connections', match: '/connections' },
+          { label: copy.nav.ai, path: '/ai', match: '/ai' },
           { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
+          { label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' },
           { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
         ],
       },
@@ -232,28 +261,52 @@ const getNavSections = (project: string | null, copy: Copy) => {
   const base = `/db/${encodeURIComponent(project)}`
   return [
     {
-      title: copy.sections.navigation,
+      title: copy.sections.data,
       items: [
         { label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` },
+        { label: copy.nav.datasets, path: `${base}/datasets`, match: `${base}/datasets` },
+        { label: copy.nav.pipelines, path: `${base}/pipelines`, match: `${base}/pipelines` },
+        { label: copy.nav.objectify, path: `${base}/objectify`, match: `${base}/objectify` },
+      ],
+    },
+    {
+      title: copy.sections.ontology,
+      items: [
         { label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` },
+        { label: copy.nav.actions, path: `${base}/actions`, match: `${base}/actions` },
+        { label: copy.nav.governance, path: `${base}/governance`, match: `${base}/governance` },
         { label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` },
-        { label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` },
-        { label: copy.nav.audit, path: `${base}/audit`, match: `${base}/audit` },
-        { label: copy.nav.lineage, path: `${base}/lineage`, match: `${base}/lineage` },
       ],
     },
     {
       title: copy.sections.explore,
       items: [
+        { label: copy.nav.objectExplorer, path: `${base}/explore/objects`, match: `${base}/explore/objects` },
         { label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` },
         { label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` },
+        { label: copy.nav.dataAnalysis, path: `${base}/analyze`, match: `${base}/analyze` },
+      ],
+    },
+    {
+      title: copy.sections.observe,
+      items: [
+        { label: copy.nav.audit, path: `${base}/audit`, match: `${base}/audit` },
+        { label: copy.nav.lineage, path: `${base}/lineage`, match: `${base}/lineage` },
+      ],
+    },
+    {
+      title: copy.sections.develop,
+      items: [
+        { label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` },
       ],
     },
     {
       title: copy.sections.ops,
       items: [
         { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
+        { label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' },
         { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
+        { label: copy.nav.ai, path: '/ai', match: '/ai' },
       ],
     },
   ] as NavSection[]
@@ -268,16 +321,21 @@ const getRailItems = (
 
   if (!project) {
     items.push({ icon: 'database', label: copy.nav.databases, path: '/' })
+    items.push({ icon: 'data-connection', label: copy.nav.connections, path: '/connections', match: '/connections' })
+    items.push({ icon: 'lightbulb', label: copy.nav.ai, path: '/ai', match: '/ai' })
     items.push({ icon: 'timeline-events', label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' })
+    items.push({ icon: 'time', label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' })
     items.push({ icon: 'shield', label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' })
   } else {
     const base = `/db/${encodeURIComponent(project)}`
     items.push({ icon: 'home', label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` })
+    items.push({ icon: 'th', label: copy.nav.datasets, path: `${base}/datasets`, match: `${base}/datasets` })
+    items.push({ icon: 'data-lineage', label: copy.nav.pipelines, path: `${base}/pipelines`, match: `${base}/pipelines` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
-    items.push({ icon: 'flow-branch', label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` })
-    items.push({ icon: 'database', label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` })
+    items.push({ icon: 'search', label: copy.nav.objectExplorer, path: `${base}/explore/objects`, match: `${base}/explore/objects` })
+    items.push({ icon: 'chart', label: copy.nav.dataAnalysis, path: `${base}/analyze`, match: `${base}/analyze` })
     items.push({ icon: 'graph', label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` })
-    items.push({ icon: 'search', label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` })
+    items.push({ icon: 'lock', label: copy.nav.governance, path: `${base}/governance`, match: `${base}/governance` })
   }
 
   return items.map((item) => ({
@@ -319,13 +377,27 @@ const AppShell = () => {
   return (
     <div className="app-shell">
       <Navbar className="top-nav">
-        <NavbarGroup align={Alignment.LEFT}>
-          <NavbarHeading>{copy.appTitle}</NavbarHeading>
-          <Tag minimal icon="database">
-            {context.project ?? copy.nav.noProject}
-          </Tag>
-          <Tag minimal icon="git-branch">{context.branch}</Tag>
-          {adminMode ? <Tag intent="warning">{copy.nav.adminMode}</Tag> : null}
+        <NavbarGroup align={Alignment.LEFT} className="top-nav-breadcrumbs">
+          <Button className="breadcrumb-btn" minimal icon="application" onClick={() => navigate('/')} text={copy.appTitle} />
+          {context.project ? (
+            <>
+              <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
+              <Button className="breadcrumb-btn" minimal icon="database" onClick={() => navigate(`/db/${encodeURIComponent(context.project!)}/overview`)} text={context.project} />
+              <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
+              <Tag minimal icon="git-branch" className="breadcrumb-tag">{context.branch}</Tag>
+            </>
+          ) : (
+            <>
+              <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
+              <Tag minimal icon="database" className="breadcrumb-tag">{copy.nav.noProject}</Tag>
+            </>
+          )}
+          {adminMode ? (
+            <>
+              <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
+              <Tag intent="warning" className="breadcrumb-tag">{copy.nav.adminMode}</Tag>
+            </>
+          ) : null}
         </NavbarGroup>
         <NavbarGroup align={Alignment.RIGHT}>
           <Button minimal icon="database" onClick={() => navigate('/')} aria-label={copy.nav.databases}>

@@ -9,12 +9,27 @@ from typing import Any, Optional
 import httpx
 import pytest
 
+from shared.utils.repo_dotenv import load_repo_dotenv
 from shared.services.registries.dataset_registry import DatasetRegistry
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or "http://localhost:8000").rstrip("/")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+
+
+def _resolve_admin_token() -> str:
+    dotenv = load_repo_dotenv(keys=("BFF_ADMIN_TOKEN", "ADMIN_TOKEN"))
+    return (
+        os.getenv("BFF_ADMIN_TOKEN")
+        or os.getenv("ADMIN_TOKEN")
+        or dotenv.get("BFF_ADMIN_TOKEN")
+        or dotenv.get("ADMIN_TOKEN")
+        or "change_me"
+    ).strip()
+
+
+ADMIN_TOKEN = _resolve_admin_token()
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 
 
@@ -167,7 +182,8 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     db_name = f"e2e_stream_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=120.0) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="stream")
 
         create_dataset = await _post_with_retry(
@@ -253,7 +269,13 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
         build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
         assert build_job_id
         build_run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
-        assert str(build_run.get("status") or "").upper() == "SUCCESS"
+        build_status = str(build_run.get("status") or "").upper()
+        assert build_status == "SUCCESS", {
+            "status": build_status,
+            "job_id": build_run.get("job_id"),
+            "error": build_run.get("error"),
+            "output_json": build_run.get("output_json"),
+        }
 
         deploy_resp = await _post_with_retry(
             client,
@@ -273,8 +295,8 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()
     try:
-        out_a = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_a", branch="main")
-        out_b = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_b", branch="main")
+        out_a = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_a", branch="master")
+        out_b = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_b", branch="master")
         assert out_a and out_b
         ver_a = await dataset_registry.get_latest_version(dataset_id=out_a.dataset_id)
         ver_b = await dataset_registry.get_latest_version(dataset_id=out_b.dataset_id)
@@ -296,7 +318,8 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
     db_name = f"e2e_stream_fail_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=120.0) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="stream")
 
         create_dataset = await client.post(
@@ -396,13 +419,13 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
             assert deploy_resp.status_code == 409
             payload = deploy_resp.json()
             detail = _extract_error_detail(payload)
-            assert detail.get("code") == "BUILD_NOT_SUCCESS"
+            assert detail.get("code") in {"BUILD_NOT_SUCCESS", "PIPELINE_BUILD_FAILED"}
 
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()
     try:
-        out_ok = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_ok", branch="main")
-        out_bad = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_bad", branch="main")
+        out_ok = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_ok", branch="master")
+        out_bad = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_bad", branch="master")
         assert out_ok is None
         assert out_bad is None
     finally:

@@ -1427,7 +1427,7 @@
     {
       "name": "OntologySettings",
       "docstring": "Ontology API + linter governance settings.",
-      "field_count": 12,
+      "field_count": 14,
       "fields": [
         {
           "name": "protected_branches",
@@ -1486,6 +1486,26 @@
           "description": "Ontology resource storage backend (ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres)",
           "env_vars": [
             "RESOURCE_STORAGE_BACKEND"
+          ],
+          "required": false
+        },
+        {
+          "name": "search_around_spark_threshold",
+          "type": "int",
+          "default": "100000",
+          "description": "Search Around request object-count threshold for Spark on-demand routing (ONTOLOGY_SEARCH_AROUND_SPARK_THRESHOLD)",
+          "env_vars": [
+            "SEARCH_AROUND_SPARK_THRESHOLD"
+          ],
+          "required": false
+        },
+        {
+          "name": "writeback_spark_threshold",
+          "type": "int",
+          "default": "10000",
+          "description": "Writeback request object-count threshold for Spark on-demand routing (ONTOLOGY_WRITEBACK_SPARK_THRESHOLD)",
+          "env_vars": [
+            "WRITEBACK_SPARK_THRESHOLD"
           ],
           "required": false
         },
@@ -5629,5 +5649,5 @@
       ]
     }
   ],
-  "total_fields": 524
+  "total_fields": 526
 }

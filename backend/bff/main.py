@@ -658,19 +658,27 @@ async def lifespan(app: FastAPI):
 
         enable_outbox = bool(settings.workers.dataset_ingest_outbox.enabled)
         if enable_outbox:
-            dataset_outbox_stop = asyncio.Event()
             dataset_registry = _bff_container.get_dataset_registry()
-            lineage_store = await container.get(LineageStore)
-            dataset_outbox_task = asyncio.create_task(
-                run_dataset_ingest_outbox_worker(
-                    dataset_registry=dataset_registry,
-                    lineage_store=lineage_store,
-                    poll_interval_seconds=int(settings.workers.dataset_ingest_outbox.poll_seconds),
-                    stop_event=dataset_outbox_stop,
+            dataset_outbox_stop = asyncio.Event()
+            try:
+                lineage_store = await asyncio.wait_for(container.get(LineageStore), timeout=15.0)
+            except Exception as exc:
+                dataset_outbox_stop = None
+                logger.warning(
+                    "Skipping dataset ingest outbox worker startup due to LineageStore init failure: %s",
+                    exc,
                 )
-            )
-            app.state.dataset_ingest_outbox_task = dataset_outbox_task
-            app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
+            else:
+                dataset_outbox_task = asyncio.create_task(
+                    run_dataset_ingest_outbox_worker(
+                        dataset_registry=dataset_registry,
+                        lineage_store=lineage_store,
+                        poll_interval_seconds=int(settings.workers.dataset_ingest_outbox.poll_seconds),
+                        stop_event=dataset_outbox_stop,
+                    )
+                )
+                app.state.dataset_ingest_outbox_task = dataset_outbox_task
+                app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
 
         enable_reconciler = bool(settings.workers.ingest_reconciler.enabled)
         if enable_reconciler:

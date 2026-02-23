@@ -53,17 +53,16 @@ services:
   elasticsearch:
     # NOTE:
     # - 8.13.x bundles JDK 22 which is unstable on some ARM hosts (SIGILL).
-    # - Some Apple Silicon hosts also hit SIGILL even on 8.12.x aarch64 builds.
-    #   Force linux/amd64 for deterministic local/dev runs.
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    # - ES 8.12.x / 8.17.x arm64 SIGILL on Colima vz (JDK 21.0.2 / JDK 23).
+    # - ES 8.15.5 (JDK 21 patched) stable on Apple Silicon / Colima vz.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.5
     container_name: spice-harvester-elasticsearch
-    platform: linux/amd64
     environment:
       - discovery.type=single-node
       - cluster.name=spice-harvester-cluster
       - node.name=spice-harvester-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms384m -Xmx384m"
+      - "ES_JAVA_OPTS=-Xms${ELASTICSEARCH_HEAP:-1g} -Xmx${ELASTICSEARCH_HEAP:-1g}"
       # Dev/test only: avoid RED cluster when the Docker VM disk is tight (shards become unassigned).
       - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false
@@ -95,9 +94,8 @@ services:
 
   # Kibana (Optional - Elasticsearch UI)
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.12.2
+    image: docker.elastic.co/kibana/kibana:8.17.0
     container_name: spice-harvester-kibana
-    platform: linux/amd64
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - SERVER_NAME=spice-harvester-kibana
@@ -248,7 +246,7 @@ services:
           ns="$2"
           code="$$(curl -sS -o /dev/null -w '%{http_code}' -u "$$auth_user:$$auth_pass" -X POST http://lakefs:8000/api/v1/repositories \
             -H 'Content-Type: application/json' \
-            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"master\"}")"
+            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"main\"}")"
           if [ "$$code" != "201" ] && [ "$$code" != "409" ]; then
             echo "Failed to create repo $$name (http=$$code)"
             exit 1

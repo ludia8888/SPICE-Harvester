@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **524 settings** total.
+SPICE Harvester uses **45 configuration classes** with **526 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -266,7 +266,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Ontology API + linter governance settings.
 
-**12 settings**
+**14 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -276,6 +276,8 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `resource_strict` | `bool` | `True` | `RESOURCE_STRICT` | Strict resource checks (ONTOLOGY_RESOURCE_STRICT) |
 | `require_health_gate` | `bool` | `True` | `REQUIRE_HEALTH_GATE` | Require health gate for destructive ops (ONTOLOGY_REQUIRE_HEALTH_GATE) |
 | `resource_storage_backend` | `str` | `postgres` | `RESOURCE_STORAGE_BACKEND` | Ontology resource storage backend (ONTOLOGY_RESOURCE_STORAGE_BACKEND: postgres) |
+| `search_around_spark_threshold` | `int` | `100000` | `SEARCH_AROUND_SPARK_THRESHOLD` | Search Around request object-count threshold for Spark on-demand routing (ONTOLOGY_SEARCH_AROUND_SPARK_THRESHOLD) |
+| `writeback_spark_threshold` | `int` | `10000` | `WRITEBACK_SPARK_THRESHOLD` | Writeback request object-count threshold for Spark on-demand routing (ONTOLOGY_WRITEBACK_SPARK_THRESHOLD) |
 | `require_primary_key` | `bool` | `True` | `REQUIRE_PRIMARY_KEY` | Require primary key (ONTOLOGY_REQUIRE_PRIMARY_KEY) |
 | `allow_implicit_primary_key` | `Optional[bool]` | **required** | `ALLOW_IMPLICIT_PRIMARY_KEY` | Allow implicit primary key (ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY). When unset, defaults to false in production and on protected branches requiring proposals. |
 | `require_title_key` | `bool` | `True` | `REQUIRE_TITLE_KEY` | Require title key (ONTOLOGY_REQUIRE_TITLE_KEY) |

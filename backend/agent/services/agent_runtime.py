@@ -18,6 +18,7 @@ import httpx
 from agent.models import AgentToolCall
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode
+from shared.foundry.rids import build_rid as build_foundry_rid, parse_rid
 from shared.models.event_envelope import EventEnvelope
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.storage.event_store import EventStore
@@ -29,8 +30,8 @@ _COMMAND_PENDING_STATUSES = {"PENDING", "PROCESSING", "RETRYING"}
 _COMMAND_TERMINAL_STATUSES = {"COMPLETED", "FAILED", "CANCELLED"}
 _COMMAND_STATUSES = _COMMAND_PENDING_STATUSES | _COMMAND_TERMINAL_STATUSES
 
-_PIPELINE_PENDING_STATUSES = {"QUEUED", "RUNNING", "PENDING", "PROCESSING"}
-_PIPELINE_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "DEPLOYED"}
+_PIPELINE_PENDING_STATUSES = {"QUEUED", "RUNNING", "PENDING", "PROCESSING", "WAITING", "IN_PROGRESS"}
+_PIPELINE_TERMINAL_STATUSES = {"SUCCESS", "SUCCEEDED", "FAILED", "CANCELLED", "CANCELED", "DEPLOYED", "DID_NOT_RUN"}
 _PIPELINE_STATUSES = _PIPELINE_PENDING_STATUSES | _PIPELINE_TERMINAL_STATUSES
 
 _TEMPLATE_TOKEN_RE = re.compile(r"\$\{([^{}]+)\}")
@@ -38,11 +39,15 @@ _TEMPLATE_KEY_ALLOWED = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
 
 _STEP_OUTPUT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "pipeline_id": ("pipeline_id", "pipelineId"),
+    "pipeline_rid": ("pipeline_rid", "pipelineRid"),
     "dataset_id": ("dataset_id", "datasetId"),
+    "dataset_rid": ("dataset_rid", "datasetRid"),
     "dataset_version_id": ("dataset_version_id", "datasetVersionId", "version_id", "versionId"),
     "job_id": ("job_id", "jobId"),
+    "build_rid": ("build_rid", "buildRid"),
     "artifact_id": ("artifact_id", "artifactId"),
     "ingest_request_id": ("ingest_request_id", "ingestRequestId"),
+    "transaction_rid": ("transaction_rid", "transactionRid"),
     "mapping_spec_id": ("mapping_spec_id", "mappingSpecId"),
     "action_log_id": ("action_log_id", "actionLogId"),
     "command_id": ("command_id", "commandId"),
@@ -344,6 +349,40 @@ def _coerce_scalar(value: Any) -> Any:
     return str(value)
 
 
+def _extract_foundry_rid_derived_outputs(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, (dict, list)):
+        return {}
+
+    found = _walk_json_for_key(
+        payload,
+        wanted_keys={"rid", "buildRid", "datasetRid", "pipelineRid", "targetRid", "transactionRid"},
+    )
+
+    outputs: dict[str, Any] = {}
+    for value in found.values():
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        try:
+            kind, rid_id = parse_rid(raw)
+        except ValueError:
+            continue
+
+        if kind == "build":
+            outputs.setdefault("build_rid", build_foundry_rid("build", rid_id))
+            outputs.setdefault("job_id", rid_id)
+        elif kind == "dataset":
+            outputs.setdefault("dataset_rid", build_foundry_rid("dataset", rid_id))
+            outputs.setdefault("dataset_id", rid_id)
+        elif kind == "pipeline":
+            outputs.setdefault("pipeline_rid", build_foundry_rid("pipeline", rid_id))
+            outputs.setdefault("pipeline_id", rid_id)
+        elif kind == "transaction":
+            outputs.setdefault("transaction_rid", build_foundry_rid("transaction", rid_id))
+
+    return outputs
+
+
 def _extract_step_outputs(payload: Any) -> dict[str, Any]:
     outputs: dict[str, Any] = {}
     if not isinstance(payload, (dict, list)):
@@ -359,6 +398,7 @@ def _extract_step_outputs(payload: Any) -> dict[str, Any]:
         scalar = _coerce_scalar(value)
         if scalar not in (None, ""):
             outputs[canonical] = scalar
+    outputs.update(_extract_foundry_rid_derived_outputs(payload))
     return outputs
 
 
@@ -454,6 +494,9 @@ def _extract_pipeline_job_id(payload: Any) -> Optional[str]:
             value = data.get(key)
             if value:
                 return str(value)
+    build_rid = _extract_build_rid(payload)
+    if build_rid:
+        return _extract_build_job_id_from_rid(build_rid)
     return None
 
 
@@ -473,11 +516,46 @@ def _extract_pipeline_id(payload: Any) -> Optional[str]:
     return None
 
 
-def _extract_pipeline_id_from_path(path: str) -> Optional[str]:
-    match = re.search(r"/api/v1/pipelines/([^/]+)", path or "")
-    if not match:
+def _extract_build_job_id_from_rid(build_rid: str) -> Optional[str]:
+    try:
+        kind, rid_id = parse_rid(str(build_rid or "").strip())
+    except ValueError:
         return None
-    return match.group(1)
+    if kind != "build":
+        return None
+    return rid_id
+
+
+def _extract_build_rid(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+
+    candidates: list[Any] = []
+    for key in ("buildRid", "rid"):
+        if key in payload:
+            candidates.append(payload.get(key))
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("buildRid", "rid"):
+            if key in data:
+                candidates.append(data.get(key))
+    result = payload.get("result")
+    if isinstance(result, dict):
+        for key in ("buildRid", "rid"):
+            if key in result:
+                candidates.append(result.get(key))
+
+    for candidate in candidates:
+        raw = str(candidate or "").strip()
+        if not raw:
+            continue
+        try:
+            kind, rid_id = parse_rid(raw)
+        except ValueError:
+            continue
+        if kind == "build":
+            return build_foundry_rid("build", rid_id)
+    return None
 
 
 def _extract_status_url(payload: Any) -> Optional[str]:
@@ -544,12 +622,10 @@ def _method_is_write(method: str) -> bool:
 
 def _tool_call_expects_pipeline_job(*, tool_id: Optional[str], path: str) -> bool:
     resolved_tool = str(tool_id or "").strip()
-    if resolved_tool in {"pipelines.build", "pipelines.deploy"}:
+    if resolved_tool == "orchestration.builds.create":
         return True
     normalized_path = str(path or "").rstrip("/")
-    if normalized_path.endswith("/build") or normalized_path.endswith("/deploy"):
-        return "/api/v1/pipelines/" in normalized_path
-    return False
+    return normalized_path == "/api/v2/orchestration/builds/create"
 
 
 def _extract_overlay_status(payload: Any) -> Optional[str]:
@@ -1138,42 +1214,46 @@ class AgentRuntime:
         self,
         *,
         context: Dict[str, Any],
-        pipeline_id: str,
+        pipeline_id: Optional[str],
         job_id: str,
+        build_rid: Optional[str],
         status: Optional[str],
-        run_payload: Optional[Dict[str, Any]] = None,
+        build_payload: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not isinstance(context, dict):
             return
-        entry: Dict[str, Any] = {"pipeline_id": pipeline_id, "job_id": job_id}
+        entry: Dict[str, Any] = {"job_id": job_id}
+        if pipeline_id:
+            entry["pipeline_id"] = pipeline_id
+        if build_rid:
+            entry["build_rid"] = build_rid
         if status:
             entry["status"] = status
-        if isinstance(run_payload, dict):
-            if run_payload.get("mode"):
-                entry["mode"] = run_payload.get("mode")
-            if run_payload.get("run_id"):
-                entry["run_id"] = run_payload.get("run_id")
+        if isinstance(build_payload, dict):
+            if build_payload.get("createdTime"):
+                entry["created_time"] = build_payload.get("createdTime")
+            if build_payload.get("createdBy"):
+                entry["created_by"] = build_payload.get("createdBy")
         pipeline_progress = context.setdefault("pipeline_progress", {})
         if isinstance(pipeline_progress, dict):
             pipeline_progress[job_id] = entry
         context["latest_pipeline_progress"] = entry
 
-    async def _fetch_pipeline_runs(
+    async def _fetch_orchestration_build(
         self,
         *,
-        pipeline_id: str,
+        build_rid: str,
         actor: str,
         request_headers: Dict[str, str],
-        limit: int = 50,
     ) -> Optional[Dict[str, Any]]:
-        if not pipeline_id:
+        if not build_rid:
             return None
-        url = f"{self.config.bff_url}/api/v1/pipelines/{quote(str(pipeline_id))}/runs"
+        encoded_build_rid = quote(str(build_rid), safe="")
+        url = f"{self.config.bff_url}/api/v2/orchestration/builds/{encoded_build_rid}"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     url,
-                    params={"limit": max(1, min(int(limit), 200))},
                     headers=self._forward_headers(request_headers, actor),
                 )
             if response.status_code >= 400:
@@ -1182,7 +1262,7 @@ class AgentRuntime:
                 return response.json()
             return None
         except Exception as exc:
-            logger.debug("Pipeline runs poll failed: %s", exc)
+            logger.debug("Orchestration build poll failed: %s", exc)
             return None
 
     async def _wait_for_pipeline_run_completion(
@@ -1192,8 +1272,9 @@ class AgentRuntime:
         actor: str,
         step_index: int,
         attempt: int,
-        pipeline_id: str,
+        pipeline_id: Optional[str],
         job_id: str,
+        build_rid: str,
         initial_payload: Any,
         request_id: Optional[str],
         request_headers: Dict[str, str],
@@ -1204,26 +1285,19 @@ class AgentRuntime:
 
         last_status: Optional[str] = None
         last_payload: Any = initial_payload
-        pipeline_id = str(pipeline_id)
+        pipeline_id_value = str(pipeline_id or "").strip() or None
         job_id = str(job_id)
+        build_rid = str(build_rid)
 
         while time.monotonic() < deadline:
-            payload = await self._fetch_pipeline_runs(
-                pipeline_id=pipeline_id,
+            payload = await self._fetch_orchestration_build(
+                build_rid=build_rid,
                 actor=actor,
                 request_headers=request_headers,
-                limit=50,
             )
             if isinstance(payload, dict):
                 last_payload = payload
-                data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-                runs = data.get("runs") if isinstance(data.get("runs"), list) else []
-                run_payload = None
-                for item in runs:
-                    if isinstance(item, dict) and str(item.get("job_id") or "") == job_id:
-                        run_payload = item
-                        break
-                status_value = _normalize_status((run_payload or {}).get("status")) if isinstance(run_payload, dict) else None
+                status_value = _normalize_status(payload.get("status"))
                 if status_value:
                     if status_value != last_status:
                         await self.record_event(
@@ -1234,7 +1308,8 @@ class AgentRuntime:
                             data={
                                 "step_index": step_index,
                                 "attempt": attempt,
-                                "pipeline_id": pipeline_id,
+                                "pipeline_id": pipeline_id_value,
+                                "build_rid": build_rid,
                                 "job_id": job_id,
                                 "status": status_value,
                             },
@@ -1244,10 +1319,11 @@ class AgentRuntime:
                         )
                     self._update_pipeline_progress_context(
                         context=context,
-                        pipeline_id=pipeline_id,
+                        pipeline_id=pipeline_id_value,
                         job_id=job_id,
+                        build_rid=build_rid,
                         status=status_value,
-                        run_payload=(dict(run_payload) if isinstance(run_payload, dict) else None),
+                        build_payload=dict(payload),
                     )
                     last_status = status_value
                     if status_value in _PIPELINE_TERMINAL_STATUSES:
@@ -1257,7 +1333,8 @@ class AgentRuntime:
                             data_out = enriched.get("data") if isinstance(enriched.get("data"), dict) else {}
                             enriched["data"] = {
                                 **data_out,
-                                "pipeline_run": dict(run_payload) if isinstance(run_payload, dict) else None,
+                                "build": dict(payload),
+                                "build_rid": build_rid,
                                 "pipeline_run_status": status_value,
                             }
                         else:
@@ -1265,9 +1342,10 @@ class AgentRuntime:
                                 "status": "success",
                                 "message": "Pipeline run completed",
                                 "data": {
-                                    "pipeline_id": pipeline_id,
+                                    "pipeline_id": pipeline_id_value,
+                                    "build_rid": build_rid,
                                     "job_id": job_id,
-                                    "pipeline_run": dict(run_payload) if isinstance(run_payload, dict) else None,
+                                    "build": dict(payload),
                                     "pipeline_run_status": status_value,
                                 },
                             }
@@ -1284,7 +1362,8 @@ class AgentRuntime:
             data={
                 "step_index": step_index,
                 "attempt": attempt,
-                "pipeline_id": pipeline_id,
+                "pipeline_id": pipeline_id_value,
+                "build_rid": build_rid,
                 "job_id": job_id,
                 "status": "TIMEOUT",
                 "progress": {"message": f"Pipeline job timed out after {int(self.config.command_timeout_s)}s"},
@@ -1662,6 +1741,7 @@ class AgentRuntime:
         command_id: Optional[str] = None
         command_status: Optional[str] = None
         pipeline_job_id: Optional[str] = None
+        pipeline_build_rid: Optional[str] = None
         pipeline_run_status: Optional[str] = None
         error_key: Optional[str] = None
         api_code: Optional[str] = None
@@ -1703,6 +1783,7 @@ class AgentRuntime:
                 response_payload = response.text
             command_id = _extract_command_id(response_payload)
             command_status = _extract_command_status(response_payload)
+            pipeline_build_rid = _extract_build_rid(response_payload)
             pipeline_job_id = _extract_pipeline_job_id(response_payload)
             detected_overlay_status = _extract_overlay_status(response_payload)
             if detected_overlay_status and isinstance(context, dict):
@@ -1763,26 +1844,27 @@ class AgentRuntime:
 
             if (
                 not error
-                and pipeline_job_id
+                and pipeline_build_rid
                 and self.config.pipeline_wait_enabled
                 and _tool_call_expects_pipeline_job(tool_id=tool_call.tool_id, path=path)
             ):
-                resolved_pipeline_id = _extract_pipeline_id(response_payload) or _extract_pipeline_id_from_path(path)
-                if resolved_pipeline_id:
-                    response_payload, pipeline_run_status = await self._wait_for_pipeline_run_completion(
-                        run_id=run_id,
-                        actor=actor,
-                        step_index=step_index,
-                        attempt=attempt,
-                        pipeline_id=resolved_pipeline_id,
-                        job_id=pipeline_job_id,
-                        initial_payload=response_payload,
-                        request_id=request_id,
-                        request_headers=request_headers,
-                        context=context,
-                    )
-                    if pipeline_run_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
-                        error = f"pipeline job {pipeline_job_id} {pipeline_run_status}"
+                if pipeline_job_id is None:
+                    pipeline_job_id = _extract_build_job_id_from_rid(pipeline_build_rid)
+                response_payload, pipeline_run_status = await self._wait_for_pipeline_run_completion(
+                    run_id=run_id,
+                    actor=actor,
+                    step_index=step_index,
+                    attempt=attempt,
+                    pipeline_id=_extract_pipeline_id(response_payload),
+                    job_id=str(pipeline_job_id or "unknown"),
+                    build_rid=pipeline_build_rid,
+                    initial_payload=response_payload,
+                    request_id=request_id,
+                    request_headers=request_headers,
+                    context=context,
+                )
+                if pipeline_run_status in {"FAILED", "CANCELLED", "CANCELED", "TIMEOUT"}:
+                    error = f"pipeline job {pipeline_job_id or 'unknown'} {pipeline_run_status}"
         except Exception as exc:
             logging.getLogger(__name__).warning("Exception fallback at agent/services/agent_runtime.py:1787", exc_info=True)
             error = str(exc)
@@ -1802,6 +1884,8 @@ class AgentRuntime:
             side_effect_summary["command_id"] = command_id
         if pipeline_job_id:
             side_effect_summary["pipeline_job_id"] = pipeline_job_id
+        if pipeline_build_rid:
+            side_effect_summary["pipeline_build_rid"] = pipeline_build_rid
         if pipeline_run_status:
             side_effect_summary["pipeline_run_status"] = pipeline_run_status
         if isinstance(signals, dict) and signals:
@@ -1841,6 +1925,7 @@ class AgentRuntime:
                 "command_id": command_id,
                 "command_status": command_status,
                 "pipeline_job_id": pipeline_job_id,
+                "pipeline_build_rid": pipeline_build_rid,
                 "pipeline_run_status": pipeline_run_status,
                 "duration_ms": duration_ms,
                 "error": error,
@@ -1866,6 +1951,8 @@ class AgentRuntime:
                     extracted.setdefault("command_id", command_id)
                 if pipeline_job_id:
                     extracted.setdefault("job_id", pipeline_job_id)
+                if pipeline_build_rid:
+                    extracted.setdefault("build_rid", pipeline_build_rid)
                 if pipeline_run_status:
                     extracted.setdefault("pipeline_run_status", pipeline_run_status)
                 step_outputs = context.setdefault("step_outputs", {})
@@ -1905,6 +1992,7 @@ class AgentRuntime:
             "command_id": command_id,
             "command_status": command_status,
             "pipeline_job_id": pipeline_job_id,
+            "pipeline_build_rid": pipeline_build_rid,
             "pipeline_run_status": pipeline_run_status,
             "error": error,
             "error_key": error_key,

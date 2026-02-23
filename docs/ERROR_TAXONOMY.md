@@ -58,6 +58,7 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | PERMISSION_DENIED | SHV-{SUBSYS}-ACC-PER-0001 | access | permission | error | Permission denied | false | none | 1 | 0 | 0 | none | false | true | PERMISSION_DENIED | request_human | 403 |
 | PIPELINE_BUILD_FAILED | SHV-{SUBSYS}-PIP-CON-0001 | pipeline | conflict | error | Pipeline build failed | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_BUILD_FAILED | request_human | 409 |
 | PIPELINE_NOT_FOUND | SHV-{SUBSYS}-PIP-NOT-0001 | pipeline | not_found | error | Pipeline not found | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_NOT_FOUND | request_human | 404 |
+| PIPELINE_PREFLIGHT_FAILED | SHV-{SUBSYS}-PIP-CON-3001 | pipeline | conflict | error | Pipeline preflight failed | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_PREFLIGHT_FAILED | request_human | 409 |
 | PIPELINE_VALIDATION_FAILED | SHV-{SUBSYS}-PIP-VAL-0001 | pipeline | validation | error | Pipeline validation failed | false | none | 1 | 0 | 0 | none | false | true | PIPELINE_VALIDATION_FAILED | request_human | 400 |
 | RATE_LIMITED | SHV-{SUBSYS}-RAT-LIM-0001 | rate_limit | limit | error | Rate limit exceeded | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | true | false | RATE_LIMITED | retry_backoff | 429 |
 | REQUEST_VALIDATION_FAILED | SHV-{SUBSYS}-INP-VAL-0001 | input | validation | error | Request validation failed | false | none | 1 | 0 | 0 | none | false | true | REQUEST_VALIDATION_FAILED | request_human | 400 |

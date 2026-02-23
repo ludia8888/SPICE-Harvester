@@ -10,11 +10,26 @@ from typing import Any, Optional
 import httpx
 import pytest
 
+from shared.utils.repo_dotenv import load_repo_dotenv
 from shared.utils.s3_uri import parse_s3_uri
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+
+
+def _resolve_admin_token() -> str:
+    dotenv = load_repo_dotenv(keys=("BFF_ADMIN_TOKEN", "ADMIN_TOKEN"))
+    return (
+        os.getenv("BFF_ADMIN_TOKEN")
+        or os.getenv("ADMIN_TOKEN")
+        or dotenv.get("BFF_ADMIN_TOKEN")
+        or dotenv.get("ADMIN_TOKEN")
+        or "change_me"
+    ).strip()
+
+
+ADMIN_TOKEN = _resolve_admin_token()
 HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "180") or 180)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "420") or 420)
 
@@ -358,7 +373,8 @@ async def test_pipeline_transform_cleansing_and_validation_e2e() -> None:
         {"customer_id": "c4", "name": "Dana"},
     ]
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pipeline transform e2e")
 
         create_orders = await _post_with_retry(

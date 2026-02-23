@@ -1145,10 +1145,10 @@ def _assert_build_preflight_passes(preflight: Dict[str, Any]) -> None:
             status.HTTP_409_CONFLICT,
             {
                 "message": "Pipeline preflight checks failed",
-                "code": "PIPELINE_PREFLIGHT_FAILED",
                 "category": ErrorCategory.CONFLICT.value,
                 "preflight": preflight,
             },
+            code=ErrorCode.PIPELINE_PREFLIGHT_FAILED,
         )
 
 

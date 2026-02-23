@@ -1,8 +1,13 @@
 -- 015_ontology_resource_versions.sql
 -- Add explicit versioned records for ontology resources.
 
-ALTER TABLE ontology_resources
-    ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='ontology_resources') THEN
+        ALTER TABLE ontology_resources
+            ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS ontology_resource_versions (
     db_name TEXT NOT NULL,

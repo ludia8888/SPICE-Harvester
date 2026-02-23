@@ -408,12 +408,16 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 mappings=INSTANCE_INDEX_MAPPING,
                 settings=get_default_index_settings(),
             )
-            logger.info("Created instances index: %s", index_name)
-        else:
-            await self.elasticsearch_service.update_mapping(
-                index=index_name,
-                properties=INSTANCE_INDEX_MAPPING["properties"],
-            )
+
+        # Always reconcile mapping after create attempt.
+        # `create_index()` can race and return "already exists" after an earlier
+        # `index_exists()` check, in which case we still must enforce canonical
+        # mapping to avoid transient type-conflict failures.
+        await self.elasticsearch_service.update_mapping(
+            index=index_name,
+            properties=INSTANCE_INDEX_MAPPING["properties"],
+        )
+        logger.info("Ensured instances index + mapping: %s", index_name)
 
         self._created_es_indices.add(index_name)
         return index_name

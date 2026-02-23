@@ -35,5 +35,15 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE spice_connectors.connector_sync_state
-    ADD COLUMN IF NOT EXISTS sync_state_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'spice_connectors'
+          AND table_name = 'connector_sync_state'
+    ) THEN
+        ALTER TABLE spice_connectors.connector_sync_state
+            ADD COLUMN IF NOT EXISTS sync_state_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    END IF;
+END $$;

@@ -2776,7 +2776,15 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
 
 
 @pytest.mark.asyncio
-async def test_load_object_set_objects_v2_supports_search_around():
+async def test_load_object_set_objects_v2_supports_search_around(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured_routing: dict[str, Any] = {}
+
+    async def _capture_routing(**kwargs: Any) -> None:  # noqa: ANN401
+        captured_routing.update(dict(kwargs.get("decision_metadata") or {}))
+
+    monkeypatch.setattr(router_v2, "_audit_search_around_compute_routing", _capture_routing)
     request = Request({"type": "http", "headers": []})
     original_require = router_v2._require_domain_role
     router_v2._require_domain_role = _noop_require_domain_role
@@ -2809,6 +2817,59 @@ async def test_load_object_set_objects_v2_supports_search_around():
     assert response["totalCount"] == "1"
     assert response["data"][0]["user_id"] == "u-1"
     assert response["data"][0]["name"] == "Owner User"
+    assert captured_routing["route"] == "search_around"
+    assert captured_routing["selected_backend"] == "index_pruning"
+    assert captured_routing["execution_backend"] == "index_pruning"
+
+
+@pytest.mark.asyncio
+async def test_load_object_set_objects_v2_search_around_routes_to_spark_on_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured_routing: dict[str, Any] = {}
+
+    async def _capture_routing(**kwargs: Any) -> None:  # noqa: ANN401
+        captured_routing.update(dict(kwargs.get("decision_metadata") or {}))
+
+    monkeypatch.setenv("ONTOLOGY_SEARCH_AROUND_SPARK_THRESHOLD", "1")
+    monkeypatch.setattr(router_v2, "_audit_search_around_compute_routing", _capture_routing)
+
+    request = Request({"type": "http", "headers": []})
+    original_require = router_v2._require_domain_role
+    router_v2._require_domain_role = _noop_require_domain_role
+    try:
+        response = await router_v2.load_object_set_objects_v2(
+            ontologyRid="test_db",
+            payload={
+                "objectSet": {
+                    "type": "searchAround",
+                    "link": "owned_by",
+                    "objectSet": {
+                        "objectType": "Account",
+                        "where": {"type": "eq", "field": "account_id", "value": "acc-1"},
+                    },
+                },
+                "select": ["user_id", "name"],
+                "pageSize": 10,
+            },
+            request=request,
+            branch="master",
+            transaction_id=None,
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=_LinkedPaginationOMSClient(),
+        )
+    finally:
+        router_v2._require_domain_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["totalCount"] == "5"
+    assert captured_routing["route"] == "search_around"
+    assert captured_routing["estimated_count"] == 5
+    assert captured_routing["threshold"] == 1
+    assert captured_routing["selected_backend"] == "spark_on_demand"
+    assert captured_routing["execution_backend"] == "spark_on_demand"
+    assert captured_routing["spark_job_id"]
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ import pytest
 from shared.config.search_config import get_instances_index_name
 from shared.security.database_access import ensure_database_access_table
 from tests.utils.auth import bff_auth_headers
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
@@ -117,12 +118,33 @@ async def _create_db_with_retry(client: httpx.AsyncClient, *, db_name: str) -> N
         await _wait_for_command(client, command_id, timeout_seconds=180)
 
 
+async def _post_with_conflict_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    json_payload: dict[str, Any],
+    timeout_seconds: int = 90,
+    retry_sleep: float = 2.0,
+) -> httpx.Response:
+    deadline = time.monotonic() + timeout_seconds
+    last_response: Optional[httpx.Response] = None
+    while time.monotonic() < deadline:
+        response = await client.post(url, json=json_payload)
+        if response.status_code != 409:
+            return response
+        last_response = response
+        await asyncio.sleep(retry_sleep)
+    if last_response is not None:
+        return last_response
+    return await client.post(url, json=json_payload)
+
+
 async def _wait_for_ontology(
     client: httpx.AsyncClient,
     *,
     db_name: str,
     class_id: str,
-    branch: str = "main",
+    branch: str = "master",
     timeout_seconds: int = 90,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
@@ -180,14 +202,15 @@ async def _upsert_object_type_contract(
             "label": {"en": class_id, "ko": class_id},
             "description": {"en": f"{class_id} object type contract", "ko": f"{class_id} 오브젝트 타입 계약"},
             "metadata": contract_payload.get("metadata") or {},
-            "spec": {
-                "backing_source": {
-                    "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
-                    **(
-                        {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
-                        if str(contract_payload.get("dataset_version_id") or "").strip()
-                        else {}
-                    ),
+                "spec": {
+                    "backing_source": {
+                        "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
+                        "branch": str(branch or "master").strip() or "master",
+                        **(
+                            {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
+                            if str(contract_payload.get("dataset_version_id") or "").strip()
+                            else {}
+                        ),
                 },
                 "pk_spec": contract_payload.get("pk_spec") or {},
                 "status": str(contract_payload.get("status") or "ACTIVE").upper(),
@@ -206,6 +229,7 @@ async def _upsert_object_type_contract(
             "spec": {
                 "backing_source": {
                     "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
+                    "branch": str(branch or "master").strip() or "master",
                     **(
                         {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
                         if str(contract_payload.get("dataset_version_id") or "").strip()
@@ -315,7 +339,8 @@ async def test_financial_investigation_workflow_e2e() -> None:
         }
     )
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         # Phase 0: DB + permissions
         await _create_db_with_retry(client, db_name=db_name)
         await _grant_db_role(db_name=db_name, principal_id=user_id, principal_type="user", role="Owner")
@@ -325,7 +350,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         tx_excel_idem = f"idem-tx-excel-{suffix}"
         tx_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/excel-upload",
-            params={"db_name": db_name, "branch": "main"},
+            params={"db_name": db_name, "branch": "master"},
             headers={**headers, "Idempotency-Key": tx_excel_idem},
             data={"dataset_name": "kb_bank_transactions_2026q1", "description": "bank tx"},
             files={
@@ -361,7 +386,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         tx_csv_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "main"},
+            params={"db_name": db_name, "branch": "master"},
             headers={**headers, "Idempotency-Key": f"idem-tx-csv-{suffix}"},
             data={
                 "dataset_name": "kb_bank_transactions_2026q1_csv",
@@ -390,7 +415,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         owners_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "main"},
+            params={"db_name": db_name, "branch": "master"},
             headers={**headers, "Idempotency-Key": f"idem-owners-{suffix}"},
             data={"dataset_name": "account_owners", "description": "owners", "delimiter": ",", "has_header": "true"},
             files={"file": ("account_owners.csv", owners_csv, "text/csv")},
@@ -414,7 +439,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         calls_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "main"},
+            params={"db_name": db_name, "branch": "master"},
             headers={**headers, "Idempotency-Key": f"idem-calls-{suffix}"},
             data={"dataset_name": "telecom_calls", "description": "calls", "delimiter": ",", "has_header": "true"},
             files={"file": ("telecom_records_202601.csv", calls_csv, "text/csv")},
@@ -484,11 +509,11 @@ async def test_financial_investigation_workflow_e2e() -> None:
         for cls in classes:
             resp = await client.post(
                 f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
-                params={"branch": "main"},
+                params={"branch": "master"},
                 json={**cls, "metadata": {"source": "financial_investigation_workflow_e2e"}},
             )
             resp.raise_for_status()
-            await _wait_for_ontology(client, db_name=db_name, class_id=str(cls["id"]), branch="main")
+            await _wait_for_ontology(client, db_name=db_name, class_id=str(cls["id"]), branch="master")
 
         # Phase 3: Object types (pk specs)
         object_types = [
@@ -502,7 +527,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
                 client,
                 db_name=db_name,
                 class_id=class_id,
-                branch="main",
+                branch="master",
                 contract_payload={
                     "backing_dataset_id": backing_dataset_id,
                     "pk_spec": pk_spec,
@@ -525,7 +550,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
                     "dataset_id": dataset_id,
                     "artifact_output_name": artifact_output_name,
                     "target_class_id": target_class_id,
-                    "options": {"ontology_branch": "main"},
+                    "options": {"ontology_branch": "master"},
                     "mappings": mappings,
                 },
             )
@@ -582,36 +607,42 @@ async def test_financial_investigation_workflow_e2e() -> None:
         )
 
         # Use enterprise DAG orchestrator: infer safe order from mapping-spec relationship deps.
-        dag_plan_resp = await client.post(
+        dag_plan_resp = await _post_with_conflict_retry(
+            client,
             f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
-            json={
+            json_payload={
                 "class_ids": ["Transaction", "PhoneCall"],
-                "branch": "main",
+                "branch": "master",
                 "include_dependencies": True,
                 "dry_run": True,
             },
+            timeout_seconds=120,
         )
-        dag_plan_resp.raise_for_status()
+        if dag_plan_resp.status_code >= 400:
+            raise AssertionError(f"run-dag dry_run failed: status={dag_plan_resp.status_code} body={dag_plan_resp.text}")
         dag_plan = dag_plan_resp.json().get("data") or {}
         ordered_classes = list(dag_plan.get("ordered_classes") or [])
         assert {"Person", "BankAccount", "Transaction", "PhoneCall"}.issubset(set(ordered_classes)), ordered_classes
         assert ordered_classes.index("Person") < ordered_classes.index("BankAccount") < ordered_classes.index("Transaction")
         assert ordered_classes.index("Person") < ordered_classes.index("PhoneCall")
 
-        dag_run_resp = await client.post(
+        dag_run_resp = await _post_with_conflict_retry(
+            client,
             f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
-            json={
+            json_payload={
                 "class_ids": ["Transaction", "PhoneCall"],
-                "branch": "main",
+                "branch": "master",
                 "include_dependencies": True,
                 "dry_run": False,
             },
+            timeout_seconds=120,
         )
-        dag_run_resp.raise_for_status()
+        if dag_run_resp.status_code >= 400:
+            raise AssertionError(f"run-dag execute failed: status={dag_run_resp.status_code} body={dag_run_resp.text}")
         dag_run = dag_run_resp.json().get("data") or {}
         assert dag_run.get("jobs"), dag_run
 
-        index_name = get_instances_index_name(db_name, branch="main")
+        index_name = get_instances_index_name(db_name, branch="master")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="010-1234-5678")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="010-2222-3333")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="110-123-4567")
@@ -621,7 +652,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         # Phase 5: Graph queries (reverse traversal + multi-hop)
         query_accounts = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "main"},
+            params={"base_branch": "master"},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},
@@ -651,7 +682,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         query_flow = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "main"},
+            params={"base_branch": "master"},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},
@@ -678,7 +709,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         query_calls = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "main"},
+            params={"base_branch": "master"},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},

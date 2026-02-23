@@ -19,6 +19,8 @@ from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.foundry.compute_routing import choose_writeback_backend
+from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispatcher
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.request_context import get_correlation_id
@@ -254,6 +256,164 @@ def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict
             "result": "VALID",
         }
     return results
+
+
+_OBJECT_TYPE_KEY_CANDIDATES = ("class_id", "classId", "objectTypeApiName", "objectType")
+_INSTANCE_KEY_CANDIDATES = ("instance_id", "instanceId", "primaryKey", "id")
+
+
+def _normalize_locator_value(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _extract_first_non_empty(payload: Dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        candidate = _normalize_locator_value(payload.get(key))
+        if candidate:
+            return candidate
+    return ""
+
+
+def _collect_writeback_target_markers(payload: Any, markers: Set[tuple[str, str]]) -> None:
+    if isinstance(payload, dict):
+        object_type = _extract_first_non_empty(payload, _OBJECT_TYPE_KEY_CANDIDATES)
+        instance_id = _extract_first_non_empty(payload, _INSTANCE_KEY_CANDIDATES)
+        if object_type and instance_id:
+            markers.add((object_type, instance_id))
+        for value in payload.values():
+            _collect_writeback_target_markers(value, markers)
+        return
+    if isinstance(payload, list):
+        for value in payload:
+            _collect_writeback_target_markers(value, markers)
+
+
+def _estimate_writeback_object_count(parameters: Dict[str, Any] | None) -> int:
+    if not isinstance(parameters, dict) or not parameters:
+        return 0
+    markers: Set[tuple[str, str]] = set()
+    _collect_writeback_target_markers(parameters, markers)
+    if markers:
+        return len(markers)
+    return 1
+
+
+def _resolve_writeback_execution_backend(*, spark_routed: bool) -> str:
+    if spark_routed:
+        return "spark_on_demand"
+    return "index_pruning"
+
+
+def _build_writeback_compute_routing_metadata(
+    *,
+    action_type_id: str,
+    branch: str,
+    parameters_list: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    settings = get_settings()
+    estimated_count = sum(_estimate_writeback_object_count(parameters) for parameters in parameters_list)
+    decision = choose_writeback_backend(
+        estimated_count=estimated_count,
+        threshold=int(settings.ontology.writeback_spark_threshold),
+    )
+    execution_backend = _resolve_writeback_execution_backend(
+        spark_routed=decision.spark_routed,
+    )
+    decision_metadata = decision.as_metadata(
+        execution_backend=execution_backend,
+    )
+    routing_metadata = {
+        **decision_metadata,
+        "action_type_id": action_type_id,
+        "branch": branch,
+        "request_count": len(parameters_list),
+    }
+    logger.info(
+        "Writeback compute route (action=%s branch=%s decision=%s)",
+        action_type_id,
+        branch,
+        routing_metadata,
+    )
+    return routing_metadata
+
+
+def _stamp_compute_routing_metadata_on_submit_items(
+    *,
+    request: ActionSubmitBatchRequest,
+    routing_metadata: Dict[str, Any],
+) -> None:
+    stamped = dict(routing_metadata or {})
+    for item in request.items:
+        item_metadata = dict(item.metadata or {})
+        item_metadata["__compute_routing"] = dict(stamped)
+        item.metadata = item_metadata
+
+
+async def _submit_action_batch_with_compute_backend(
+    *,
+    db_name: str,
+    action_type_id: str,
+    request: ActionSubmitBatchRequest,
+    event_store: Any,
+    routing_metadata: Dict[str, Any],
+) -> ActionSubmitBatchResponse:
+    execution_backend = str(routing_metadata.get("execution_backend") or "index_pruning").strip().lower()
+    if execution_backend != "spark_on_demand":
+        return await submit_action_batch_async(
+            db_name=db_name,
+            action_type_id=action_type_id,
+            request=request,
+            event_store=event_store,
+        )
+
+    dispatcher = get_spark_on_demand_dispatcher()
+    dispatch_result = await dispatcher.dispatch(
+        route="writeback",
+        payload={
+            "db_name": db_name,
+            "action_type_id": action_type_id,
+            "branch": request.base_branch,
+            "request_count": len(request.items),
+        },
+        execute=lambda context: _submit_action_batch_via_on_demand_job(
+            db_name=db_name,
+            action_type_id=action_type_id,
+            request=request,
+            event_store=event_store,
+            spark_job_id=context.job_id,
+        ),
+        timeout_seconds=60.0,
+    )
+    routing_metadata["spark_job_id"] = dispatch_result.job_id
+    routing_metadata["queue_wait_ms"] = dispatch_result.queue_wait_ms
+    routing_metadata["execution_ms"] = dispatch_result.execution_ms
+    _stamp_compute_routing_metadata_on_submit_items(
+        request=request,
+        routing_metadata=routing_metadata,
+    )
+    return dispatch_result.result
+
+
+async def _submit_action_batch_via_on_demand_job(
+    *,
+    db_name: str,
+    action_type_id: str,
+    request: ActionSubmitBatchRequest,
+    event_store: Any,
+    spark_job_id: str,
+) -> ActionSubmitBatchResponse:
+    for item in request.items:
+        item_metadata = dict(item.metadata or {})
+        routing = dict(item_metadata.get("__compute_routing") or {})
+        routing["spark_job_id"] = spark_job_id
+        item_metadata["__compute_routing"] = routing
+        item.metadata = item_metadata
+    return await submit_action_batch_async(
+        db_name=db_name,
+        action_type_id=action_type_id,
+        request=request,
+        event_store=event_store,
+    )
 
 
 def _foundry_valid_action_validation_payload_for_parameters(
@@ -975,17 +1135,24 @@ async def apply_action_v2_oms(
     metadata = dict(body.metadata or {})
     metadata.setdefault("user_id", "system")
     metadata.setdefault("user_type", "user")
+    parameters_payload = dict(body.parameters or {})
     mode = _resolve_v2_apply_mode(
         explicit_mode=body.options.mode if body.options else None,
     )
     resolved_branch = str(branch or "").strip() or "master"
+    routing_metadata = _build_writeback_compute_routing_metadata(
+        action_type_id=action_type_id,
+        branch=resolved_branch,
+        parameters_list=[parameters_payload],
+    )
+    metadata["__compute_routing"] = dict(routing_metadata)
 
     if mode == "VALIDATE_ONLY":
         await simulate_action_async(
             db_name=db_name,
             action_type_id=action_type_id,
             request=ActionSimulateRequest(
-                input=dict(body.parameters or {}),
+                input=parameters_payload,
                 correlation_id=body.correlation_id,
                 metadata=metadata,
                 base_branch=resolved_branch,
@@ -993,30 +1160,36 @@ async def apply_action_v2_oms(
             ),
         )
         return _foundry_valid_action_validation_payload_for_parameters(
-            parameters=body.parameters,
+            parameters=parameters_payload,
             writeback_status="not_submitted",
         )
 
-    submit_response = await submit_action_batch_async(
+    submit_request = ActionSubmitBatchRequest(
+        items=[
+            ActionSubmitBatchItemRequest(
+                input=parameters_payload,
+                correlation_id=body.correlation_id,
+                metadata=metadata,
+            )
+        ],
+        base_branch=resolved_branch,
+        overlay_branch=resolved_branch,
+    )
+    _stamp_compute_routing_metadata_on_submit_items(
+        request=submit_request,
+        routing_metadata=routing_metadata,
+    )
+    submit_response = await _submit_action_batch_with_compute_backend(
         db_name=db_name,
         action_type_id=action_type_id,
-        request=ActionSubmitBatchRequest(
-            items=[
-                ActionSubmitBatchItemRequest(
-                    input=dict(body.parameters or {}),
-                    correlation_id=body.correlation_id,
-                    metadata=metadata,
-                )
-            ],
-            base_branch=resolved_branch,
-            overlay_branch=resolved_branch,
-        ),
+        request=submit_request,
         event_store=event_store,
+        routing_metadata=routing_metadata,
     )
     first_item = submit_response.items[0] if submit_response.items else None
     action_log_id = str(first_item.action_log_id).strip() if first_item and first_item.action_log_id else None
     return _foundry_valid_action_validation_payload_for_parameters(
-        parameters=body.parameters,
+        parameters=parameters_payload,
         action_log_id=action_log_id,
         writeback_status="submitted" if action_log_id else "missing",
         side_effect_delivery={"status": "not_configured"},
@@ -1058,25 +1231,38 @@ async def apply_action_batch_v2_oms(
     base_metadata.setdefault("user_id", "system")
     base_metadata.setdefault("user_type", "user")
     resolved_branch = str(branch or "").strip() or "master"
+    request_parameter_payloads: List[Dict[str, Any]] = [dict(item.parameters or {}) for item in body.requests]
+    routing_metadata = _build_writeback_compute_routing_metadata(
+        action_type_id=action_type_id,
+        branch=resolved_branch,
+        parameters_list=request_parameter_payloads,
+    )
+    base_metadata["__compute_routing"] = dict(routing_metadata)
 
     items: List[ActionSubmitBatchItemRequest] = []
-    for item in body.requests:
+    for item, parameters_payload in zip(body.requests, request_parameter_payloads):
         items.append(
             ActionSubmitBatchItemRequest(
-                input=dict(item.parameters or {}),
+                input=parameters_payload,
                 correlation_id=body.correlation_id,
                 metadata=dict(base_metadata),
             )
         )
 
-    await submit_action_batch_async(
+    submit_request = ActionSubmitBatchRequest(
+        items=items,
+        base_branch=resolved_branch,
+    )
+    _stamp_compute_routing_metadata_on_submit_items(
+        request=submit_request,
+        routing_metadata=routing_metadata,
+    )
+    await _submit_action_batch_with_compute_backend(
         db_name=db_name,
         action_type_id=action_type_id,
-        request=ActionSubmitBatchRequest(
-            items=items,
-            base_branch=resolved_branch,
-        ),
+        request=submit_request,
         event_store=event_store,
+        routing_metadata=routing_metadata,
     )
     return {}
 

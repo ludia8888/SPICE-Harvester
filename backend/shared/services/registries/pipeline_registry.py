@@ -2996,9 +2996,14 @@ class PipelineRegistry(PostgresSchemaRegistry):
                 name=new_branch,
                 source=source.branch,
             )
-        except LakeFSConflictError:
-            # Branch already exists (idempotent create).
-            pass
+        except LakeFSConflictError as exc:
+            logging.getLogger(__name__).debug(
+                "Pipeline branch already exists; treating create as idempotent (pipeline_id=%s repository=%s branch=%s): %s",
+                pipeline_id,
+                repository,
+                new_branch,
+                exc,
+            )
         except LakeFSError as e:
             raise RuntimeError(f"lakeFS create_branch failed: {e}") from e
 

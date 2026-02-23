@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from shared.security.input_sanitizer import SecurityViolationError, validate_branch_name
+from shared.security.input_sanitizer import (
+    SecurityViolationError,
+    input_sanitizer,
+    sanitize_input,
+    validate_branch_name,
+)
 
 
 def test_validate_branch_name_accepts_foundry_branch_rid() -> None:
@@ -13,3 +18,20 @@ def test_validate_branch_name_accepts_foundry_branch_rid() -> None:
 def test_validate_branch_name_rejects_reserved_head() -> None:
     with pytest.raises(SecurityViolationError):
         validate_branch_name("HEAD")
+
+
+def test_sanitize_input_accepts_master_branch_value() -> None:
+    payload = {
+        "spec": {
+            "backing_source": {
+                "dataset_id": "dataset_123",
+                "branch": "master",
+            }
+        }
+    }
+    sanitized = sanitize_input(payload)
+    assert sanitized["spec"]["backing_source"]["branch"] == "master"
+
+
+def test_sql_detector_still_matches_information_schema_keyword() -> None:
+    assert input_sanitizer.detect_sql_injection("select * from INFORMATION_SCHEMA.tables")

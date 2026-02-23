@@ -54,7 +54,7 @@ class RunObjectifyDAGRequest(BaseModel):
     """Topologically enqueue objectify jobs based on mapping-spec relationship dependencies."""
 
     class_ids: List[str] = Field(..., min_length=1, description="Target ontology class ids to objectify")
-    branch: str = Field(default="main", description="Ontology branch to use for all jobs")
+    branch: str = Field(default="master", description="Ontology branch to use for all jobs")
     include_dependencies: bool = Field(
         default=True,
         description="If true, automatically include transitive dependencies referenced via relationships",
@@ -80,4 +80,3 @@ class TriggerIncrementalRequest(BaseModel):
     force_full_refresh: bool = Field(default=False)
     max_rows: Optional[int] = None
     batch_size: Optional[int] = None
-

@@ -327,8 +327,13 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
                 command=command_data,
                 envelope=envelope,
             )
-        except _ActionRejected:
-            pass
+        except _ActionRejected as exc:
+            logger.info(
+                "Action execution rejected (action_log_id=%s db_name=%s reason=%s)",
+                action_log_id,
+                db_name,
+                exc,
+            )
         finally:
             try:
                 await self._trigger_dependent_actions(
@@ -2436,8 +2441,14 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         staging_branch = AppConfig.sanitize_lakefs_branch_id(f"{branch}__staging__{action_log_id}")
         try:
             await self.lakefs_client.create_branch(repository=repository, name=staging_branch, source=branch)
-        except LakeFSConflictError:
-            pass
+        except LakeFSConflictError as exc:
+            logger.debug(
+                "Writeback patchset staging branch already exists (repository=%s branch=%s staging_branch=%s): %s",
+                repository,
+                branch,
+                staging_branch,
+                exc,
+            )
 
         patchset_key = ref_key(staging_branch, writeback_patchset_key(action_log_id))
         meta_key = ref_key(staging_branch, writeback_patchset_metadata_key(action_log_id))
@@ -2550,8 +2561,14 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
 
         try:
             await self.lakefs_client.create_branch(repository=repository, name=staging_branch, source=branch)
-        except LakeFSConflictError:
-            pass
+        except LakeFSConflictError as exc:
+            logger.debug(
+                "Writeback queue staging branch already exists (repository=%s branch=%s staging_branch=%s): %s",
+                repository,
+                branch,
+                staging_branch,
+                exc,
+            )
 
         for key, payload in entries:
             await self.lakefs_storage.save_json(bucket=repository, key=key, data=payload)

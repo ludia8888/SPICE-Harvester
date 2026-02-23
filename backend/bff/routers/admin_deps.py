@@ -67,9 +67,10 @@ async def require_admin_strict(request: Request) -> None:
     expected_tokens = auth.bff_expected_tokens
     if not expected_tokens:
         raise classified_http_exception(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
+            status.HTTP_401_UNAUTHORIZED,
             "Admin auth required but no token configured",
             code=ErrorCode.AUTH_REQUIRED,
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     presented = extract_presented_token(request.headers)
@@ -83,9 +84,10 @@ async def require_admin_strict(request: Request) -> None:
 
     if not any(hmac.compare_digest(presented, expected) for expected in expected_tokens):
         raise classified_http_exception(
-            status.HTTP_403_FORBIDDEN,
+            status.HTTP_401_UNAUTHORIZED,
             "Invalid authentication credentials",
             code=ErrorCode.AUTH_INVALID,
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     actor = (request.headers.get("X-Admin-Actor") or "admin").strip() or "admin"

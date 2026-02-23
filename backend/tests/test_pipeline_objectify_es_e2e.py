@@ -11,7 +11,9 @@ import pytest
 
 from shared.config.search_config import get_instances_index_name
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.utils.repo_dotenv import load_repo_dotenv
 from shared.utils.s3_uri import parse_s3_uri
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
@@ -25,7 +27,20 @@ ELASTICSEARCH_URL = os.getenv(
     "ELASTICSEARCH_URL",
     f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{_ES_PORT}",
 )
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+
+
+def _resolve_admin_token() -> str:
+    dotenv = load_repo_dotenv(keys=("BFF_ADMIN_TOKEN", "ADMIN_TOKEN"))
+    return (
+        os.getenv("BFF_ADMIN_TOKEN")
+        or os.getenv("ADMIN_TOKEN")
+        or dotenv.get("BFF_ADMIN_TOKEN")
+        or dotenv.get("ADMIN_TOKEN")
+        or "change_me"
+    ).strip()
+
+
+ADMIN_TOKEN = _resolve_admin_token()
 HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "180") or 180)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "420") or 420)
 ES_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_ES_TIMEOUT_SECONDS", "240") or 240)
@@ -437,7 +452,8 @@ async def test_pipeline_objectify_es_projection() -> None:
     sample_json = {"rows": sample_rows}
     schema_json = {"columns": schema_columns}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pipeline objectify e2e")
         await _grant_db_role(
             db_name=db_name,

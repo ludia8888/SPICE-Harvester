@@ -128,7 +128,11 @@ async def get_command_status(
                         command_uuid=command_uuid,
                         registry=processed_event_registry,
                     )
-                    if fallback and fallback.status != CommandStatus.PENDING:
+                    # Keep Redis command status as authority while command is still
+                    # active. processed_event_registry stores per-attempt rows and can
+                    # transiently show FAILED even when worker retry is in-flight.
+                    # We only fast-forward when registry already observed COMPLETED.
+                    if fallback and fallback.status == CommandStatus.COMPLETED:
                         return fallback
 
                 return CommandResult(

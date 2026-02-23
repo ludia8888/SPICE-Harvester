@@ -13,6 +13,16 @@ import { AuditPage } from '../pages/AuditPage'
 import { LineagePage } from '../pages/LineagePage'
 import { TasksPage } from '../pages/TasksPage'
 import { AdminPage } from '../pages/AdminPage'
+import { DatasetsPage } from '../pages/DatasetsPage'
+import { ConnectionsPage } from '../pages/ConnectionsPage'
+import { PipelineBuilderPage } from '../pages/PipelineBuilderPage'
+import { ObjectifyPage } from '../pages/ObjectifyPage'
+import { ActionsPage } from '../pages/ActionsPage'
+import { ObjectExplorerPage } from '../pages/ObjectExplorerPage'
+import { DatasetAnalysisPage } from '../pages/DatasetAnalysisPage'
+import { GovernancePage } from '../pages/GovernancePage'
+import { SchedulerPage } from '../pages/SchedulerPage'
+import { AIAssistantPage } from '../pages/AIAssistantPage'
 
 export const AppRouter = () => {
   const pathname = usePathname()
@@ -35,6 +45,15 @@ export const AppRouter = () => {
     return <DatabasesPage />
   }
 
+  /* Global routes (no project context) */
+  if (segments[0] === 'connections') {
+    return <ConnectionsPage />
+  }
+
+  if (segments[0] === 'ai') {
+    return <AIAssistantPage />
+  }
+
   if (segments[0] === 'db' && segments[1]) {
     const dbName = decodeURIComponent(segments[1])
     const section = segments[2] ?? 'overview'
@@ -50,6 +69,26 @@ export const AppRouter = () => {
     if (section === 'instances') {
       return <InstancesPage dbName={dbName} />
     }
+    if (section === 'datasets') {
+      /* /db/:name/datasets/:datasetId/analyze */
+      if (segments[4] === 'analyze') {
+        return <DatasetAnalysisPage dbName={dbName} />
+      }
+      return <DatasetsPage dbName={dbName} />
+    }
+    if (section === 'pipelines') {
+      const pipelineId = segments[3] ?? null
+      return <PipelineBuilderPage dbName={dbName} pipelineId={pipelineId} />
+    }
+    if (section === 'objectify') {
+      return <ObjectifyPage dbName={dbName} />
+    }
+    if (section === 'actions') {
+      return <ActionsPage dbName={dbName} />
+    }
+    if (section === 'governance') {
+      return <GovernancePage dbName={dbName} />
+    }
     if (section === 'explore') {
       const sub = segments[3] ?? 'graph'
       if (sub === 'graph') {
@@ -58,6 +97,12 @@ export const AppRouter = () => {
       if (sub === 'query') {
         return <QueryBuilderPage dbName={dbName} />
       }
+      if (sub === 'objects') {
+        return <ObjectExplorerPage dbName={dbName} />
+      }
+    }
+    if (section === 'analyze') {
+      return <DatasetAnalysisPage dbName={dbName} />
     }
     if (section === 'audit') {
       return <AuditPage dbName={dbName} />
@@ -70,6 +115,9 @@ export const AppRouter = () => {
   if (segments[0] === 'operations') {
     if (segments[1] === 'tasks') {
       return <TasksPage />
+    }
+    if (segments[1] === 'scheduler') {
+      return <SchedulerPage />
     }
     if (segments[1] === 'admin') {
       return <AdminPage />

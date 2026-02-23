@@ -14,6 +14,7 @@ from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.storage.lakefs_client import LakeFSConflictError
 from shared.utils.path_utils import safe_lakefs_ref, safe_path_segment
 from shared.utils.s3_uri import build_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
@@ -170,8 +171,13 @@ class ConnectorIngestService:
         client = await self._pipeline_registry.get_lakefs_client()
         try:
             await client.create_branch(repository=repository, name=safe_lakefs_ref(branch), source=safe_lakefs_ref(source_branch))
-        except Exception:
-            # Branch may already exist.
+        except LakeFSConflictError:
+            logger.debug(
+                "LakeFS branch already exists during connector ingest bootstrap (repo=%s branch=%s source=%s)",
+                repository,
+                branch,
+                source_branch,
+            )
             return
 
     async def _commit(
@@ -211,7 +217,13 @@ class ConnectorIngestService:
         try:
             payload = await storage.load_bytes(repository, f"{branch_name}/{object_key}")
             return _parse_csv_bytes(payload)
-        except Exception:
+        except FileNotFoundError:
+            logger.debug(
+                "Connector ingest base CSV not found; treating as empty dataset (repo=%s branch=%s key=%s)",
+                repository,
+                branch_name,
+                object_key,
+            )
             return [], []
 
     async def _maybe_enqueue_objectify_job(

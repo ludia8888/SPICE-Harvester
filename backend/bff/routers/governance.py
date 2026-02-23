@@ -14,8 +14,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from bff.routers.registry_deps import get_dataset_registry
 from bff.schemas.governance_requests import (
     AccessPolicyRequest,
-    CreateBackingDatasourceRequest,
-    CreateBackingDatasourceVersionRequest,
     CreateKeySpecRequest,
     GatePolicyRequest,
 )
@@ -24,102 +22,6 @@ from shared.models.requests import ApiResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 
 router = APIRouter(tags=["Governance"])
-
-
-@router.post("/backing-datasources", response_model=ApiResponse)
-@trace_endpoint("bff.governance.create_backing_datasource")
-async def create_backing_datasource(
-    body: CreateBackingDatasourceRequest,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.create_backing_datasource,
-        body=body,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
-
-
-@router.get("/backing-datasources", response_model=ApiResponse)
-@trace_endpoint("bff.governance.list_backing_datasources")
-async def list_backing_datasources(
-    request: Request,
-    dataset_id: Optional[str] = Query(default=None),
-    db_name: Optional[str] = Query(default=None),
-    branch: Optional[str] = Query(default=None),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.list_backing_datasources,
-        request=request,
-        dataset_id=dataset_id,
-        db_name=db_name,
-        branch=branch,
-        dataset_registry=dataset_registry,
-    )
-
-
-@router.get("/backing-datasources/{backing_id}", response_model=ApiResponse)
-@trace_endpoint("bff.governance.get_backing_datasource")
-async def get_backing_datasource(
-    backing_id: str,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.get_backing_datasource,
-        backing_id=backing_id,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
-
-
-@router.post("/backing-datasources/{backing_id}/versions", response_model=ApiResponse)
-@trace_endpoint("bff.governance.create_backing_datasource_version")
-async def create_backing_datasource_version(
-    backing_id: str,
-    body: CreateBackingDatasourceVersionRequest,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.create_backing_datasource_version,
-        backing_id=backing_id,
-        body=body,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
-
-
-@router.get("/backing-datasources/{backing_id}/versions", response_model=ApiResponse)
-@trace_endpoint("bff.governance.list_backing_datasource_versions")
-async def list_backing_datasource_versions(
-    backing_id: str,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.list_backing_datasource_versions,
-        backing_id=backing_id,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
-
-
-@router.get("/backing-datasource-versions/{version_id}", response_model=ApiResponse)
-@trace_endpoint("bff.governance.get_backing_datasource_version")
-async def get_backing_datasource_version(
-    version_id: str,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    return await governance_service.handle_request_errors(
-        governance_service.get_backing_datasource_version,
-        version_id=version_id,
-        request=request,
-        dataset_registry=dataset_registry,
-    )
 
 
 @router.post("/key-specs", response_model=ApiResponse)

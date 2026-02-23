@@ -13,11 +13,26 @@ import pytest
 from shared.models.pipeline_job import PipelineJob
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSNotFoundError
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
+from shared.utils.repo_dotenv import load_repo_dotenv
 from shared.utils.path_utils import safe_lakefs_ref
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+
+
+def _resolve_admin_token() -> str:
+    dotenv = load_repo_dotenv(keys=("BFF_ADMIN_TOKEN", "ADMIN_TOKEN"))
+    return (
+        os.getenv("BFF_ADMIN_TOKEN")
+        or os.getenv("ADMIN_TOKEN")
+        or dotenv.get("BFF_ADMIN_TOKEN")
+        or dotenv.get("ADMIN_TOKEN")
+        or "change_me"
+    ).strip()
+
+
+ADMIN_TOKEN = _resolve_admin_token()
 HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "120") or 120)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 
@@ -431,7 +446,8 @@ async def test_snapshot_overwrites_outputs_across_runs() -> None:
     db_name = f"e2e_snap_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="snap")
 
         create_dataset = await client.post(
@@ -556,7 +572,8 @@ async def test_incremental_appends_outputs_and_preserves_previous_parts() -> Non
     db_name = f"e2e_inc_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="inc")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -695,7 +712,8 @@ async def test_incremental_watermark_boundary_includes_equal_timestamp_rows() ->
     db_name = f"e2e_inc_boundary_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="boundary")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -822,7 +840,8 @@ async def test_incremental_empty_diff_noop() -> None:
     db_name = f"e2e_inc_noop_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="noop")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -963,7 +982,8 @@ async def test_incremental_removed_files_noop() -> None:
     db_name = f"e2e_inc_removed_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="removed")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -1170,7 +1190,8 @@ async def test_run_branch_conflict_fallback_and_cleanup() -> None:
     lakefs_client = LakeFSClient()
     artifact_repo = (os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "pipeline-artifacts").strip()
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="branch")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}]}
@@ -1286,7 +1307,8 @@ async def test_partition_column_special_chars_roundtrip() -> None:
     db_name = f"e2e_part_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="part")
 
         schema_json = {
@@ -1395,7 +1417,8 @@ async def test_pk_semantics_append_log_allows_duplicate_ids() -> None:
     db_name = f"e2e_pk_log_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pk log")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -1523,7 +1546,8 @@ async def test_pk_semantics_append_state_blocks_duplicate_ids() -> None:
     db_name = f"e2e_pk_state_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pk state")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -1652,7 +1676,8 @@ async def test_pk_semantics_remove_requires_delete_column() -> None:
     db_name = f"e2e_pk_remove_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pk remove")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -1749,7 +1774,8 @@ async def test_schema_contract_breach_blocks_deploy() -> None:
     db_name = f"e2e_schema_contract_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="schema")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "name", "type": "xsd:string"}]}
@@ -1889,7 +1915,8 @@ async def test_executor_vs_worker_validation_consistency() -> None:
     suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_consistency_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="consistency")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -1994,7 +2021,8 @@ async def test_incremental_small_files_compaction_metrics() -> None:
     db_name = f"e2e_perf_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="perf")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
@@ -2169,7 +2197,8 @@ async def test_composite_pk_unique_perf() -> None:
     db_name = f"e2e_pk_perf_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pk perf")
 
         schema_json = {

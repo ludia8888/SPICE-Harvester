@@ -178,6 +178,13 @@ async def upload_tabular_dataset(
         artifact_key = ingest_request.artifact_key
         if not commit_id or not artifact_key:
             repo = ops._resolve_lakefs_raw_repository()
+            # Ensure the target lakeFS branch exists before S3-gateway writes.
+            # Without this, PutObject returns misleading "NoSuchBucket" errors.
+            await ops._ensure_lakefs_branch_exists(
+                lakefs_client=lakefs_client,
+                repository=repo,
+                branch=inputs.dataset_branch,
+            )
             prefix = ops._dataset_artifact_prefix(
                 db_name=inputs.db_name,
                 dataset_id=dataset.dataset_id,

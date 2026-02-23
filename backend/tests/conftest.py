@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 from pathlib import Path
+
+import pytest
 
 from shared.utils.repo_dotenv import load_repo_dotenv
 
@@ -78,3 +81,23 @@ def pytest_configure() -> None:
     if "LAKEFS_API_URL" not in os.environ:
         os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{lakefs_port}"
     os.environ.setdefault("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "20")
+
+
+def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def pytest_collection_modifyitems(config, items) -> None:  # type: ignore[no-untyped-def]
+    """Auto-skip ``requires_infra`` tests when local services are not reachable."""
+    postgres_port = int(os.environ.get("POSTGRES_PORT_HOST", "5433"))
+    infra_available = _is_port_open("localhost", postgres_port)
+    if infra_available:
+        return
+    skip_marker = pytest.mark.skip(reason="local infrastructure not available (requires_infra)")
+    for item in items:
+        if item.get_closest_marker("requires_infra"):
+            item.add_marker(skip_marker)

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -112,6 +113,12 @@ REMOVED_V1_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/v1/data-connectors/google-sheets/drive/spreadsheets"),
     ("get", "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets"),
     ("delete", "/api/v1/data-connectors/google-sheets/connections/{connection_id}"),
+    ("post", "/api/v1/backing-datasources"),
+    ("get", "/api/v1/backing-datasources"),
+    ("get", "/api/v1/backing-datasources/{backing_id}"),
+    ("post", "/api/v1/backing-datasources/{backing_id}/versions"),
+    ("get", "/api/v1/backing-datasources/{backing_id}/versions"),
+    ("get", "/api/v1/backing-datasource-versions/{version_id}"),
 )
 
 _BROKEN_OFFICIAL_DOC_URLS: tuple[str, ...] = (
@@ -419,6 +426,57 @@ def test_removed_v1_query_path_not_present_in_seed_allowlist_script() -> None:
     script_path = repo_root / "scripts" / "seed_agent_tool_allowlist.py"
     script_text = script_path.read_text(encoding="utf-8")
     assert "/api/v1/databases/{db_name}/query" not in script_text
+
+
+@pytest.mark.unit
+def test_agent_runtime_and_migrated_e2e_scripts_do_not_reference_v1_pipelines_prefix() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    targets = [
+        repo_root / "backend" / "agent" / "services" / "agent_runtime.py",
+        repo_root / "scripts" / "run_pipeline_artifact_e2e.sh",
+        repo_root / "scripts" / "e2e_agent_pipeline_demo.sh",
+    ]
+    forbidden_prefixes = [
+        "/api/v1/pipelines",
+        "/pipelines/datasets/csv-upload",
+    ]
+
+    hits: list[tuple[str, str]] = []
+    for path in targets:
+        text = path.read_text(encoding="utf-8")
+        for needle in forbidden_prefixes:
+            if needle in text:
+                hits.append((str(path.resolve()), needle))
+
+    assert not hits
+
+
+@pytest.mark.unit
+def test_pipeline_e2e_suites_route_legacy_v1_calls_through_v2_adapter() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    targets = [
+        repo_root / "backend" / "tests" / "test_pipeline_execution_semantics_e2e.py",
+        repo_root / "backend" / "tests" / "test_pipeline_transform_cleansing_e2e.py",
+        repo_root / "backend" / "tests" / "test_pipeline_streaming_semantics_e2e.py",
+        repo_root / "backend" / "tests" / "test_pipeline_type_mismatch_guard_e2e.py",
+        repo_root / "backend" / "tests" / "test_pipeline_objectify_es_e2e.py",
+        repo_root / "backend" / "tests" / "test_foundry_e2e_qa.py",
+        repo_root / "backend" / "tests" / "test_financial_investigation_workflow_e2e.py",
+    ]
+
+    missing_adapter: list[str] = []
+    raw_async_client_contexts: list[str] = []
+    for path in targets:
+        text = path.read_text(encoding="utf-8")
+        if "/api/v1/pipelines" not in text:
+            continue
+        if "PipelinesV2AdapterClient" not in text:
+            missing_adapter.append(str(path.resolve()))
+        if re.search(r"async with httpx\.AsyncClient\([^\n]*\) as client:", text):
+            raw_async_client_contexts.append(str(path.resolve()))
+
+    assert not missing_adapter
+    assert not raw_async_client_contexts
 
 
 @pytest.mark.unit

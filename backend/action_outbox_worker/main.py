@@ -180,8 +180,14 @@ class ActionOutboxWorker:
         staging_branch = AppConfig.sanitize_lakefs_branch_id(f"{branch}__queue__{action_applied_seq}_{action_log_id}")
         try:
             await self.lakefs_client.create_branch(repository=repo, name=staging_branch, source=branch)
-        except LakeFSConflictError:
-            pass
+        except LakeFSConflictError as exc:
+            logger.debug(
+                "Writeback queue staging branch already exists (repository=%s branch=%s staging_branch=%s): %s",
+                repo,
+                branch,
+                staging_branch,
+                exc,
+            )
 
         patchset = await self.lakefs_storage.load_json(
             bucket=repo,

@@ -54,10 +54,10 @@ async def test_agent_runtime_blocks_missing_required_artifacts(monkeypatch: pyte
 
     tool_call = AgentToolCall(
         step_id="needs_artifact",
-        tool_id="pipelines.preview",
+        tool_id="orchestration.builds.create",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines/abc/preview",
+        path="/api/v2/orchestration/builds/create",
         query={},
         body={"limit": 10},
         headers={},
@@ -140,19 +140,18 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
             return False
 
         async def request(self, method, url, params=None, json=None, headers=None):  # noqa: ANN001
-            if url.rstrip("/") == "http://bff/api/v1/pipelines/simulate-definition":
+            if url.rstrip("/") == "http://bff/api/v2/datasets/getSchemaBatch":
                 return FakeResponse(
                     {
-                        "status": "success",
-                        "data": {
+                        "schemas": {
                             "nodes": [{"node_id": "n1", "type": "source"}],
                             "edges": [],
                         },
                     }
                 )
-            if url.rstrip("/") == "http://bff/api/v1/pipelines":
+            if url.rstrip("/") == "http://bff/api/v2/datasets":
                 captured.append({"method": method, "url": url, "json": json})
-                return FakeResponse({"status": "success", "data": {"pipeline_id": "p1"}})
+                return FakeResponse({"rid": "ri.foundry.main.dataset.p1"})
             raise AssertionError(f"unexpected url: {url}")
 
     monkeypatch.setattr(module.httpx, "AsyncClient", FakeClient)
@@ -160,29 +159,33 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
     context: dict[str, object] = {}
 
     step1 = AgentToolCall(
-        step_id="suggest_definition",
-        tool_id="pipelines.simulate_definition",
+        step_id="suggest_schema",
+        tool_id="datasets.get_schema_batch",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines/simulate-definition",
+        path="/api/v2/datasets/getSchemaBatch",
         query={},
-        body={"definition_json": {"nodes": [], "edges": []}},
+        body={"datasetRids": ["ri.foundry.main.dataset.demo"]},
         headers={},
         data_scope={},
-        produces=["artifact.pipeline_definition"],
+        produces=["artifact.dataset_schema"],
     )
 
     step2 = AgentToolCall(
-        step_id="create_pipeline",
-        tool_id="pipelines.create",
+        step_id="create_dataset",
+        tool_id="datasets.create",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines",
+        path="/api/v2/datasets",
         query={},
-        body={"definition_json": "${artifacts.artifact.pipeline_definition}"},
+        body={
+            "name": "from_artifact",
+            "parentFolderRid": "ri.foundry.main.folder.demo",
+            "schema": "${artifacts.artifact.dataset_schema}",
+        },
         headers={},
         data_scope={},
-        consumes=["artifact.pipeline_definition"],
+        consumes=["artifact.dataset_schema"],
     )
 
     result1 = await runtime.execute_tool_call(
@@ -201,9 +204,11 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
 
     artifacts = context.get("artifacts")
     assert isinstance(artifacts, dict)
-    assert artifacts["artifact.pipeline_definition"] == {
-        "nodes": [{"node_id": "n1", "type": "source"}],
-        "edges": [],
+    assert artifacts["artifact.dataset_schema"] == {
+        "schemas": {
+            "nodes": [{"node_id": "n1", "type": "source"}],
+            "edges": [],
+        },
     }
 
     result2 = await runtime.execute_tool_call(
@@ -223,12 +228,11 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
     assert captured == [
         {
             "method": "POST",
-            "url": "http://bff/api/v1/pipelines",
+            "url": "http://bff/api/v2/datasets",
             "json": {
-                "definition_json": {
-                    "nodes": [{"node_id": "n1", "type": "source"}],
-                    "edges": [],
-                }
+                "name": "from_artifact",
+                "parentFolderRid": "ri.foundry.main.folder.demo",
+                "schema": {"schemas": {"nodes": [{"node_id": "n1", "type": "source"}], "edges": []}},
             },
         }
     ]
@@ -290,7 +294,7 @@ async def test_agent_runtime_compacts_large_tool_payload_instead_of_omitting(mon
             return False
 
         async def request(self, method, url, params=None, json=None, headers=None):  # noqa: ANN001
-            if url.rstrip("/") != "http://bff/api/v1/pipelines/p1/preview":
+            if url.rstrip("/") != "http://bff/api/v2/orchestration/builds/create":
                 raise AssertionError(f"unexpected url: {url}")
             return FakeResponse(
                 {
@@ -311,10 +315,10 @@ async def test_agent_runtime_compacts_large_tool_payload_instead_of_omitting(mon
 
     tool_call = AgentToolCall(
         step_id="preview",
-        tool_id="pipelines.preview",
+        tool_id="orchestration.builds.create",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines/p1/preview",
+        path="/api/v2/orchestration/builds/create",
         query={},
         body={"include_run_tables": True},
         headers={},

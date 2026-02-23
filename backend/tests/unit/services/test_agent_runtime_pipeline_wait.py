@@ -73,11 +73,7 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
             captured["calls"].append(("request", method, url))
             return FakeResponse(
                 {
-                    "status": "success",
-                    "data": {
-                        "pipeline_id": "11111111-1111-1111-1111-111111111111",
-                        "job_id": "build-1",
-                    },
+                    "rid": "ri.foundry.main.build.build-1",
                 }
             )
 
@@ -85,19 +81,8 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
             captured["calls"].append(("get", url))
             return FakeResponse(
                 {
-                    "status": "success",
-                    "data": {
-                        "runs": [
-                            {
-                                "run_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                                "pipeline_id": "11111111-1111-1111-1111-111111111111",
-                                "job_id": "build-1",
-                                "mode": "build",
-                                "status": "SUCCESS",
-                            }
-                        ],
-                        "count": 1,
-                    },
+                    "rid": "ri.foundry.main.build.build-1",
+                    "status": "SUCCEEDED",
                 }
             )
 
@@ -105,12 +90,15 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
     monkeypatch.setenv("AGENT_PIPELINE_WAIT_ENABLED", "true")
 
     tool_call = AgentToolCall(
-        tool_id="pipelines.build",
+        tool_id="orchestration.builds.create",
         service="bff",
         method="POST",
-        path="/api/v1/pipelines/11111111-1111-1111-1111-111111111111/build",
+        path="/api/v2/orchestration/builds/create",
         query={},
-        body={"db_name": "demo"},
+        body={
+            "target": {"targetRids": ["ri.foundry.main.pipeline.11111111-1111-1111-1111-111111111111"]},
+            "branchName": "master",
+        },
         headers={},
         data_scope={},
     )
@@ -129,8 +117,10 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
 
     assert result["status"] == "success"
     assert result["pipeline_job_id"] == "build-1"
-    assert result["pipeline_run_status"] == "SUCCESS"
+    assert result["pipeline_build_rid"] == "ri.foundry.main.build.build-1"
+    assert result["pipeline_run_status"] == "SUCCEEDED"
     assert UUID(str(result["tool_run_id"]))
     assert result["side_effect_summary"]["pipeline_job_id"] == "build-1"
-    assert result["side_effect_summary"]["pipeline_run_status"] == "SUCCESS"
+    assert result["side_effect_summary"]["pipeline_build_rid"] == "ri.foundry.main.build.build-1"
+    assert result["side_effect_summary"]["pipeline_run_status"] == "SUCCEEDED"
     assert any(call[0] == "get" for call in captured["calls"])

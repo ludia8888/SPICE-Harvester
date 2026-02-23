@@ -75,7 +75,7 @@ class _ObjectifyDagOrchestrator:
         self.job_queue = job_queue
         self.oms_client = oms_client
 
-        self.branch = validate_branch_name(body.branch or "main")
+        self.branch = validate_branch_name(body.branch or "master")
         self.include_dependencies = bool(body.include_dependencies)
         self.max_depth = int(body.max_depth or 0)
         self.run_id = uuid4().hex
@@ -117,7 +117,7 @@ class _ObjectifyDagOrchestrator:
         backing_source: Dict[str, Any],
     ) -> tuple[Any, str, str]:
         dataset_id = str(backing_source.get("dataset_id") or "").strip()
-        dataset_branch = str(backing_source.get("branch") or "main").strip() or "main"
+        dataset_branch = str(backing_source.get("branch") or "master").strip() or "master"
         schema_hash = str(backing_source.get("schema_hash") or backing_source.get("schemaHash") or "").strip() or None
         if not dataset_id:
             raise classified_http_exception(
@@ -127,18 +127,30 @@ class _ObjectifyDagOrchestrator:
                 extra={"class_id": class_id},
             )
 
-        mapping_spec = await self.objectify_registry.get_active_mapping_spec(
-            dataset_id=dataset_id,
-            dataset_branch=dataset_branch,
-            target_class_id=class_id,
-            schema_hash=schema_hash,
-        )
-        if not mapping_spec and schema_hash:
+        branch_candidates: list[str] = [dataset_branch]
+        if dataset_branch == "main":
+            branch_candidates.append("master")
+        elif dataset_branch == "master":
+            branch_candidates.append("main")
+
+        mapping_spec = None
+        resolved_branch = dataset_branch
+        for candidate in branch_candidates:
             mapping_spec = await self.objectify_registry.get_active_mapping_spec(
                 dataset_id=dataset_id,
-                dataset_branch=dataset_branch,
+                dataset_branch=candidate,
                 target_class_id=class_id,
+                schema_hash=schema_hash,
             )
+            if not mapping_spec and schema_hash:
+                mapping_spec = await self.objectify_registry.get_active_mapping_spec(
+                    dataset_id=dataset_id,
+                    dataset_branch=candidate,
+                    target_class_id=class_id,
+                )
+            if mapping_spec:
+                resolved_branch = candidate
+                break
         if not mapping_spec:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
@@ -148,10 +160,11 @@ class _ObjectifyDagOrchestrator:
                     "class_id": class_id,
                     "dataset_id": dataset_id,
                     "dataset_branch": dataset_branch,
+                    "dataset_branch_candidates": branch_candidates,
                     "schema_hash": schema_hash,
                 },
             )
-        return mapping_spec, dataset_id, dataset_branch
+        return mapping_spec, dataset_id, resolved_branch
 
     async def _fetch_relationship_targets(self, class_id: str) -> Dict[str, str]:
         ontology_payload = await self.oms_client.get_ontology(self.db_name, class_id, branch=self.branch)

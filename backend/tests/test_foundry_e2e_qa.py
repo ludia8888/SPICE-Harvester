@@ -42,6 +42,7 @@ from tests.utils.qa_helpers import (
     fetch_open_meteo_csv,
     fetch_usgs_earthquake_csv,
 )
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 # ── Gate: opt-in only ─────────────────────────────────────────────────────────
@@ -2085,7 +2086,8 @@ async def test_foundry_e2e_qa() -> None:
     print(f"  Fixture dir: {FIXTURE_DIR}")
     print(f"{'#'*60}")
 
-    async with httpx.AsyncClient(headers=state.headers, timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(headers=state.headers, timeout=HTTPX_TIMEOUT) as raw_client:
+        client = PipelinesV2AdapterClient(raw_client)
         # Phase 1: Data Ingestion
         await phase1_data_ingestion(state, client)
 

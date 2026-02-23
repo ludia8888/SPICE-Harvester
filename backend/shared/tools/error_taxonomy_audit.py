@@ -267,9 +267,15 @@ def _count_runtime_guard_patterns(
                 issues["dataset_required_columns_gap"].append((str(path), 1))
 
         if rel == "pipeline_worker/main.py":
-            if "resolve_dataset_write_policy(" not in source:
+            # After domain-split refactor, these guards may live in
+            # output_domain.py instead of main.py.  Check both.
+            _pw_sources = [source]
+            _od_path = path.parent / "output_domain.py"
+            if _od_path.exists():
+                _pw_sources.append(_od_path.read_text(encoding="utf-8"))
+            if not any("resolve_dataset_write_policy(" in s for s in _pw_sources):
                 issues["dataset_write_mode_gap"].append((str(path), 1))
-            if "{\"parquet\", \"json\", \"csv\", \"avro\", \"orc\"}" not in source:
+            if not any("{\"parquet\", \"json\", \"csv\", \"avro\", \"orc\"}" in s for s in _pw_sources):
                 issues["dataset_write_format_gap"].append((str(path), 1))
 
         action_permission_required_snippets = {
