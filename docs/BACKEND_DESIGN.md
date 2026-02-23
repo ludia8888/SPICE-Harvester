@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-22T22:35:30+09:00
+> Generated: 2026-02-24T01:04:18+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **1008**
-- Modules with module docstring: **540/1008**
+- Modules scanned: **1010**
+- Modules with module docstring: **542/1010**
 - Modules with broad `except Exception`: **280**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **250056**
+- Total code lines (non-empty, non-comment): **250363**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2430 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2846 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 221 | 166/221 (75%) | 77 | 358 | 1140 | 781 | 59613 |
+| `bff` | 222 | 167/222 (75%) | 77 | 358 | 1143 | 788 | 59790 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -41,7 +41,7 @@
 | `pipeline_worker` | 10 | 5/10 (50%) | 5 | 50 | 90 | 12 | 8110 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1868 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
-| `shared` | 304 | 204/304 (67%) | 106 | 386 | 869 | 1140 | 80382 |
+| `shared` | 305 | 205/305 (67%) | 106 | 386 | 869 | 1143 | 80512 |
 | `tests` | 307 | 53/307 (17%) | 23 | 116 | 1646 | 1499 | 52550 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
@@ -51,7 +51,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `backend/tests/test_foundry_e2e_qa.py` | 363 | 61 | 0 | 0 | 65 | 7 | 1828 |
 | `backend/pipeline_worker/main.py` | 221 | 42 | 0 | 0 | 57 | 46 | 5592 |
-| `backend/bff/main.py` | 208 | 39 | 0 | 0 | 41 | 28 | 814 |
+| `backend/bff/main.py` | 208 | 39 | 0 | 0 | 41 | 28 | 816 |
 | `backend/instance_worker/main.py` | 190 | 38 | 0 | 0 | 46 | 73 | 2381 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 521 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2642 |
@@ -72,7 +72,7 @@
 | `backend/action_outbox_worker/main.py` | 9 | 7 | 9 | 9 | 383 |
 | `backend/action_worker/main.py` | 41 | 8 | 26 | 47 | 2429 |
 | `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
-| `backend/bff/main.py` | 32 | 39 | 41 | 28 | 814 |
+| `backend/bff/main.py` | 32 | 39 | 41 | 28 | 816 |
 | `backend/connector_sync_worker/main.py` | 11 | 4 | 4 | 7 | 414 |
 | `backend/connector_trigger_service/main.py` | 8 | 9 | 10 | 3 | 293 |
 | `backend/funnel/main.py` | 3 | 1 | 1 | 1 | 60 |
@@ -405,7 +405,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=1038 | code_lines=814 | risk_score=208
+- Source footprint: total_lines=1040 | code_lines=816 | risk_score=208
 - API surface: public=15 | top-level functions=14 | classes=1 | methods=33
 - Runtime signals: async_functions=32 | try=41 | raise=28 | broad_except=39 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=10/14 (71%) | classes=1/1 (100%) | methods=32/33 (96%)
@@ -437,7 +437,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1536 | code_lines=1376 | risk_score=65
+- Source footprint: total_lines=1538 | code_lines=1378 | risk_score=65
 - API surface: public=3 | top-level functions=38 | classes=1 | methods=0
 - Runtime signals: async_functions=18 | try=29 | raise=4 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/38 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -636,6 +636,22 @@
 - Internal imports (4): shared.dependencies.providers; shared.errors.error_types; shared.models.requests; shared.observability.tracing
 - External imports (3): datetime; fastapi; typing
 - Public API names: get_chain_head; list_audit_logs
+
+### `backend/bff/routers/auth.py`
+- Module summary: Authentication router — login, token refresh, user info.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: HTTP contract/endpoint routing
+- Source footprint: total_lines=227 | code_lines=173 | risk_score=0
+- API surface: public=7 | top-level functions=7 | classes=4 | methods=0
+- Runtime signals: async_functions=3 | try=1 | raise=7 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=4/7 (57%) | classes=0/4 (0%) | methods=0/0 (n/a)
+- Internal imports (2): shared.config.settings; shared.security.user_store
+- External imports (7): __future__; fastapi; jose; logging; pydantic; time; typing
+- Public API names: LoginRequest; RefreshRequest; TokenResponse; UserMeResponse; login; me; refresh
 
 ### `backend/bff/routers/ci_webhooks.py`
 - Module summary: CI integration endpoints (webhook/polling ingestion).
@@ -6637,7 +6653,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=4444 | code_lines=3876 | risk_score=14
+- Source footprint: total_lines=4462 | code_lines=3892 | risk_score=14
 - API surface: public=53 | top-level functions=18 | classes=46 | methods=207
 - Runtime signals: async_functions=0 | try=13 | raise=4 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/18 (33%) | classes=46/46 (100%) | methods=16/207 (7%)
@@ -7796,6 +7812,22 @@
 - Internal imports (0): not documented
 - External imports (6): __future__; dataclasses; httpx; jose; time; typing
 - Public API names: UserPrincipal; UserTokenError; extract_bearer_token; verify_user_token
+
+### `backend/shared/security/user_store.py`
+- Module summary: Simple user store for local/dev authentication.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=165 | code_lines=114 | risk_score=1
+- API surface: public=3 | top-level functions=2 | classes=2 | methods=4
+- Runtime signals: async_functions=0 | try=1 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=2/2 (100%) | methods=2/4 (50%)
+- Internal imports (0): not documented
+- External imports (8): __future__; dataclasses; hashlib; hmac; json; logging; os; typing
+- Public API names: UserInfo; UserStore; get_user_store
 
 ### `backend/shared/serializers/__init__.py`
 - Module summary: Serializers for SPICE HARVESTER

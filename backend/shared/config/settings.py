@@ -1758,6 +1758,24 @@ class AuthSettings(BaseSettings):
         description="Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS)",
     )
 
+    # Login / local auth settings
+    auth_login_enabled: bool = Field(
+        default=True,
+        description="Enable /auth/login endpoint (AUTH_LOGIN_ENABLED)",
+    )
+    auth_users: Optional[str] = Field(
+        default=None,
+        description="JSON user list for local auth (AUTH_USERS)",
+    )
+    auth_access_token_ttl: int = Field(
+        default=3600,
+        description="Access-token lifetime in seconds (AUTH_ACCESS_TOKEN_TTL)",
+    )
+    auth_refresh_token_ttl: int = Field(
+        default=604800,
+        description="Refresh-token lifetime in seconds (AUTH_REFRESH_TOKEN_TTL)",
+    )
+
     # Require flags (Optional so 'unset' can use heuristics)
     bff_require_auth: Optional[bool] = Field(
         default=None,

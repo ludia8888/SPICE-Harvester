@@ -16,7 +16,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 149**
+**Total v1 endpoints: 152**
 
 ### Object Types & Schema (22 endpoints)
 
@@ -166,13 +166,16 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 |--------|------|---------|------|
 | `GET` | `/api/v1/ops/status` | Ops Status | No |
 
-### Other (46 endpoints)
+### Other (49 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `GET` | `/api/v1/` | Root | No |
 | `GET` | `/api/v1/access-policies` | List Access Policies | No |
 | `POST` | `/api/v1/access-policies` | Upsert Access Policy | No |
+| `POST` | `/api/v1/auth/login` | Login | No |
+| `GET` | `/api/v1/auth/me` | Me | No |
+| `POST` | `/api/v1/auth/refresh` | Refresh | No |
 | `GET` | `/api/v1/commands/{command_id}/status` | Get Command Status | No |
 | `POST` | `/api/v1/document-bundles/{bundle_id}/search` | Search Document Bundle | No |
 | `GET` | `/api/v1/gate-policies` | List Gate Policies | No |

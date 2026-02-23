@@ -1,6 +1,6 @@
 # Enterprise Error Taxonomy
 
-> Updated: 2026-02-17
+> Updated: 2026-02-24
 
 This file is auto-generated from `backend/shared/errors/enterprise_catalog.py`.
 Run: `python scripts/generate_error_taxonomy.py`.

@@ -81,6 +81,7 @@ from bff.routers import (
     admin,
     ai,
     audit,
+    auth,
     ci_webhooks,
     command_status,
     context7,
@@ -995,6 +996,7 @@ async def get_pipeline_executor() -> PipelineExecutor:
 
 
 # Router registration (unchanged)
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(database.router, prefix="/api/v1")
 # NOTE: Ontology fixed-subpath routers must be registered before generic ontology routes because
 # `/ontology/{class_id}` can greedily capture subpaths like `/ontology/object-types`.

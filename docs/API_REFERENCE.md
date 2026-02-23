@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **258**
+- Total documented endpoints: **261**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 149 |
+| `v1` | 152 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -104,6 +104,14 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/audit/chain-head` | Get Chain Head | `v1` | no | no | `get_chain_head_api_v1_audit_chain_head_get` |
 | `GET` | `/api/v1/audit/logs` | List Audit Logs | `v1` | no | no | `list_audit_logs_api_v1_audit_logs_get` |
+
+### auth
+
+| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/login` | Login | `v1` | no | no | `login_api_v1_auth_login_post` |
+| `GET` | `/api/v1/auth/me` | Me | `v1` | no | no | `me_api_v1_auth_me_get` |
+| `POST` | `/api/v1/auth/refresh` | Refresh | `v1` | no | no | `refresh_api_v1_auth_refresh_post` |
 
 ### Background Tasks
 

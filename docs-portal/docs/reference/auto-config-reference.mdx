@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **526 settings** total.
+SPICE Harvester uses **45 configuration classes** with **530 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -370,7 +370,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Service auth configuration (BFF/OMS).
 
-**27 settings**
+**31 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -388,6 +388,10 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `user_jwt_public_key` | `Optional[str]` | **required** | `USER_JWT_PUBLIC_KEY` | PEM public key for JWT verification (USER_JWT_PUBLIC_KEY) |
 | `user_jwt_hs256_secret` | `Optional[str]` | **required** | `USER_JWT_HS256_SECRET` | HS256 shared secret(s), comma-separated for rotation (USER_JWT_HS256_SECRET) |
 | `user_jwt_algorithms` | `Optional[str]` | **required** | `USER_JWT_ALGORITHMS` | Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS) |
+| `auth_login_enabled` | `bool` | `True` | `AUTH_LOGIN_ENABLED` | Enable /auth/login endpoint (AUTH_LOGIN_ENABLED) |
+| `auth_users` | `Optional[str]` | **required** | `AUTH_USERS` | JSON user list for local auth (AUTH_USERS) |
+| `auth_access_token_ttl` | `int` | `3600` | `AUTH_ACCESS_TOKEN_TTL` | Access-token lifetime in seconds (AUTH_ACCESS_TOKEN_TTL) |
+| `auth_refresh_token_ttl` | `int` | `604800` | `AUTH_REFRESH_TOKEN_TTL` | Refresh-token lifetime in seconds (AUTH_REFRESH_TOKEN_TTL) |
 | `bff_require_auth` | `Optional[bool]` | **required** | `BFF_REQUIRE_AUTH` | Require auth for BFF (BFF_REQUIRE_AUTH) |
 | `oms_require_auth` | `Optional[bool]` | **required** | `OMS_REQUIRE_AUTH` | Require auth for OMS (OMS_REQUIRE_AUTH) |
 | `bff_require_db_scope` | `bool` | `False` | `BFF_REQUIRE_DB_SCOPE` | Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE) |

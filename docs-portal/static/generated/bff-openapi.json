@@ -44,7 +44,6 @@
           "context": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -150,7 +149,6 @@
           "llm": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -315,7 +313,11 @@
             "type": "integer"
           },
           "mode": {
-            "$ref": "#/components/schemas/AIQueryMode",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AIQueryMode"
+              }
+            ],
             "default": "auto"
           },
           "question": {
@@ -349,12 +351,10 @@
             "$ref": "#/components/schemas/AIAnswer"
           },
           "execution": {
-            "additionalProperties": true,
             "title": "Execution",
             "type": "object"
           },
           "llm": {
-            "additionalProperties": true,
             "title": "Llm",
             "type": "object"
           },
@@ -394,7 +394,6 @@
             "type": "string"
           },
           "policy": {
-            "additionalProperties": true,
             "title": "Policy",
             "type": "object"
           },
@@ -525,7 +524,6 @@
           "raw": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -589,7 +587,6 @@
           "data": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -669,7 +666,6 @@
             ]
           },
           "parameters": {
-            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
           }
@@ -680,7 +676,6 @@
       "BatchApplyActionRequestItemV2": {
         "properties": {
           "parameters": {
-            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
           }
@@ -957,7 +952,6 @@
           "instances": {
             "description": "인스턴스 데이터 목록 (Label 키 사용)",
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "title": "Instances",
@@ -966,7 +960,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1096,7 +1089,6 @@
           "format_stats": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1177,7 +1169,6 @@
           "result": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1194,7 +1185,11 @@
             "type": "integer"
           },
           "status": {
-            "$ref": "#/components/schemas/CommandStatus",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CommandStatus"
+              }
+            ],
             "description": "실행 상태"
           }
         },
@@ -1349,7 +1344,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1426,7 +1420,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1539,7 +1532,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1574,7 +1566,6 @@
           "properties": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1613,7 +1604,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1623,7 +1613,6 @@
             "title": "Options"
           },
           "parameters": {
-            "additionalProperties": true,
             "title": "Parameters",
             "type": "object"
           }
@@ -1649,7 +1638,6 @@
             "type": "string"
           },
           "rules": {
-            "additionalProperties": true,
             "title": "Rules",
             "type": "object"
           },
@@ -1695,7 +1683,6 @@
           "provenance": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1747,7 +1734,6 @@
           "data": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1767,7 +1753,6 @@
           "display": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1794,7 +1779,6 @@
           "index_status": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1806,7 +1790,6 @@
           "provenance": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1837,7 +1820,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1954,7 +1936,6 @@
           "index_summary": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -1995,7 +1976,6 @@
           "page": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2008,7 +1988,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -2020,7 +1999,6 @@
             "title": "Paths"
           },
           "query": {
-            "additionalProperties": true,
             "title": "Query",
             "type": "object"
           },
@@ -2081,7 +2059,6 @@
         "description": "인스턴스 생성 요청 (Label 기반)",
         "properties": {
           "data": {
-            "additionalProperties": true,
             "description": "인스턴스 데이터 (Label 키 사용)",
             "title": "Data",
             "type": "object"
@@ -2089,7 +2066,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2110,7 +2086,6 @@
         "description": "인스턴스 수정 요청 (Label 기반)",
         "properties": {
           "data": {
-            "additionalProperties": true,
             "description": "수정할 데이터 (Label 키 사용)",
             "title": "Data",
             "type": "object"
@@ -2118,7 +2093,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2146,7 +2120,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2221,6 +2194,26 @@
         "title": "LakeFSCredentialsUpsertRequest",
         "type": "object"
       },
+      "LoginRequest": {
+        "properties": {
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
       "MappingSpecField": {
         "properties": {
           "source_field": {
@@ -2293,7 +2286,6 @@
           "backingSource": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2306,7 +2298,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -2353,7 +2344,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2365,7 +2355,6 @@
           "pkSpec": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2463,7 +2452,6 @@
           "backingSource": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2476,7 +2464,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -2523,7 +2510,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2535,7 +2521,6 @@
           "migration": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2547,7 +2532,6 @@
           "pkSpec": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2610,7 +2594,6 @@
           "answers": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2629,7 +2612,6 @@
           "dataset_sample": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -2775,7 +2757,6 @@
             "title": "Label"
           },
           "metadata": {
-            "additionalProperties": true,
             "description": "Additional metadata",
             "title": "Metadata",
             "type": "object"
@@ -2830,7 +2811,6 @@
             "title": "Deployed By"
           },
           "metadata": {
-            "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
           },
@@ -2898,12 +2878,10 @@
             "title": "Label"
           },
           "metadata": {
-            "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
           },
           "spec": {
-            "additionalProperties": true,
             "title": "Spec",
             "type": "object"
           }
@@ -2948,7 +2926,6 @@
           "answers": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3056,7 +3033,6 @@
           "planner_hints": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3087,7 +3063,6 @@
           "task_spec": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3332,7 +3307,6 @@
             "title": "Cardinality"
           },
           "constraints": {
-            "additionalProperties": true,
             "description": "Property constraints",
             "title": "Constraints",
             "type": "object"
@@ -3380,7 +3354,6 @@
           "items": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3728,6 +3701,19 @@
         "title": "RecomputeProjectionResponse",
         "type": "object"
       },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest",
+        "type": "object"
+      },
       "Relationship": {
         "description": "Relationship model",
         "properties": {
@@ -3932,7 +3918,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3955,7 +3940,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -3995,7 +3979,6 @@
           "filters": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4102,7 +4085,6 @@
           "dataset": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4114,7 +4096,6 @@
           "ingest_request": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4129,7 +4110,6 @@
           "version": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4156,7 +4136,6 @@
             "type": "array"
           },
           "risk_policy": {
-            "additionalProperties": true,
             "title": "Risk Policy",
             "type": "object"
           },
@@ -4192,7 +4171,6 @@
             "title": "Column"
           },
           "evidence": {
-            "additionalProperties": true,
             "description": "Structured context",
             "title": "Evidence",
             "type": "object"
@@ -4327,7 +4305,11 @@
         "description": "Task metrics response model.",
         "properties": {
           "metrics": {
-            "$ref": "#/components/schemas/TaskMetrics",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskMetrics"
+              }
+            ],
             "description": "Task execution metrics"
           },
           "timestamp": {
@@ -4393,7 +4375,6 @@
           "progress": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4406,7 +4387,6 @@
           "result": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4430,7 +4410,11 @@
             "title": "Started At"
           },
           "status": {
-            "$ref": "#/components/schemas/TaskStatus",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TaskStatus"
+              }
+            ],
             "description": "Current status"
           },
           "task_id": {
@@ -4457,6 +4441,34 @@
           "created_at"
         ],
         "title": "TaskStatusResponse",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in"
+        ],
+        "title": "TokenResponse",
         "type": "object"
       },
       "TriggerIncrementalRequest": {
@@ -4585,7 +4597,6 @@
           "options": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4623,7 +4634,6 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -4692,6 +4702,47 @@
           "code"
         ],
         "title": "UdfVersionCreateRequest",
+        "type": "object"
+      },
+      "UserMeResponse": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "email",
+          "roles",
+          "tenant_id",
+          "org_id",
+          "display_name"
+        ],
+        "title": "UserMeResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -5094,7 +5145,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Cleanup Old Replay Results Api V1 Admin Cleanup Old Replays Post",
                   "type": "object"
                 }
@@ -5173,7 +5223,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Rebuild Instance Index Endpoint Api V1 Admin Databases  Db Name  Rebuild Index Post",
                   "type": "object"
                 }
@@ -5251,7 +5300,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Rebuild Status Api V1 Admin Databases  Db Name  Rebuild Index  Task Id  Status Get",
                   "type": "object"
                 }
@@ -5310,7 +5358,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response List Lakefs Credentials Api V1 Admin Lakefs Credentials Get",
                   "type": "object"
                 }
@@ -5367,7 +5414,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Upsert Lakefs Credentials Api V1 Admin Lakefs Credentials Post",
                   "type": "object"
                 }
@@ -5502,7 +5548,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Recompute Projection Result Api V1 Admin Recompute Projection  Task Id  Result Get",
                   "type": "object"
                 }
@@ -5597,7 +5642,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Reindex Instances Endpoint Api V1 Admin Reindex Instances Post",
                   "type": "object"
                 }
@@ -5732,7 +5776,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Replay Result Api V1 Admin Replay Instance State  Task Id  Result Get",
                   "type": "object"
                 }
@@ -5921,7 +5964,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Replay Trace Api V1 Admin Replay Instance State  Task Id  Trace Get",
                   "type": "object"
                 }
@@ -5980,7 +6022,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get System Health Api V1 Admin System Health Get",
                   "type": "object"
                 }
@@ -6649,6 +6690,187 @@
         "summary": "List Audit Logs",
         "tags": [
           "Audit"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "description": "Authenticate with username/password and receive JWT tokens.",
+        "operationId": "login_api_v1_auth_login_post",
+        "parameters": [
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "Return current authenticated user info from the request principal.",
+        "operationId": "me_api_v1_auth_me_get",
+        "parameters": [
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "description": "Exchange a refresh token for a new access token.",
+        "operationId": "refresh_api_v1_auth_refresh_post",
+        "parameters": [
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -7419,7 +7641,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Analyze Ontology Api V1 Context7 Analyze Ontology Post",
                   "type": "object"
                 }
@@ -7492,7 +7713,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Entity Context Api V1 Context7 Context  Entity Id  Get",
                   "type": "object"
                 }
@@ -7556,7 +7776,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Check Context7 Health Api V1 Context7 Health Get",
                   "type": "object"
                 }
@@ -7620,7 +7839,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Add Knowledge Api V1 Context7 Knowledge Post",
                   "type": "object"
                 }
@@ -7694,7 +7912,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Create Entity Link Api V1 Context7 Link Post",
                   "type": "object"
                 }
@@ -7768,7 +7985,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Search Context7 Api V1 Context7 Search Post",
                   "type": "object"
                 }
@@ -7850,7 +8066,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Ontology Suggestions Api V1 Context7 Suggestions  Db Name   Class Id  Get",
                   "type": "object"
                 }
@@ -10416,7 +10631,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Query",
                 "type": "object"
               }
@@ -10429,7 +10643,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Execute Multi Hop Query Api V1 Graph Query  Db Name  Multi Hop Post",
                   "type": "object"
                 }
@@ -10639,7 +10852,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Execute Simple Graph Query Api V1 Graph Query  Db Name  Simple Post",
                   "type": "object"
                 }
@@ -13387,11 +13599,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DetectRelationshipsRequest",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DetectRelationshipsRequest"
+                  }
+                ],
                 "default": {
                   "confidence_threshold": 0.6,
                   "include_sample_analysis": true
-                }
+                },
+                "title": "Body"
               }
             }
           }
@@ -13401,7 +13618,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Detect Relationships Api V1 Objectify Databases  Db Name  Datasets  Dataset Id  Detect Relationships Post",
                   "type": "object"
                 }
@@ -13479,7 +13695,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Run Objectify Dag Api V1 Objectify Databases  Db Name  Run Dag Post",
                   "type": "object"
                 }
@@ -13557,7 +13772,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Run Objectify Api V1 Objectify Datasets  Dataset Id  Run Post",
                   "type": "object"
                 }
@@ -13642,7 +13856,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response List Mapping Specs Api V1 Objectify Mapping Specs Get",
                   "type": "object"
                 }
@@ -13709,7 +13922,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Create Mapping Spec Api V1 Objectify Mapping Specs Post",
                   "type": "object"
                 }
@@ -13787,11 +13999,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TriggerIncrementalRequest",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TriggerIncrementalRequest"
+                  }
+                ],
                 "default": {
                   "execution_mode": "incremental",
                   "force_full_refresh": false
-                }
+                },
+                "title": "Body"
               }
             }
           }
@@ -13801,7 +14018,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Trigger Incremental Objectify Api V1 Objectify Mapping Specs  Mapping Spec Id  Trigger Incremental Post",
                   "type": "object"
                 }
@@ -13880,7 +14096,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Mapping Spec Watermark Api V1 Objectify Mapping Specs  Mapping Spec Id  Watermark Get",
                   "type": "object"
                 }
@@ -14006,7 +14221,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Ops Status Api V1 Ops Status Get",
                   "type": "object"
                 }
@@ -14133,7 +14347,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -14283,7 +14496,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -14623,7 +14835,6 @@
               "schema": {
                 "anyOf": [
                   {
-                    "additionalProperties": true,
                     "type": "object"
                   },
                   {
@@ -14906,7 +15117,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -15548,7 +15758,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -15795,7 +16004,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -15873,7 +16081,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -15951,7 +16158,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -16029,7 +16235,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -16107,7 +16312,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -16185,7 +16389,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -17211,7 +17414,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Summary Api V1 Summary Get",
                   "type": "object"
                 }
@@ -17433,7 +17635,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Cancel Task Api V1 Tasks  Task Id  Delete",
                   "type": "object"
                 }
@@ -17565,7 +17766,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "title": "Response Get Task Result Api V1 Tasks  Task Id  Result Get",
                   "type": "object"
                 }
@@ -17676,7 +17876,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -17730,7 +17929,6 @@
             "application/json": {
               "schema": {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "title": "Payload",
@@ -17968,7 +18166,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -18169,7 +18366,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -18354,7 +18550,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -18605,7 +18800,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -18790,7 +18984,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -18961,7 +19154,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -19023,7 +19215,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -19236,7 +19427,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -19421,7 +19611,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -21589,7 +21778,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -21673,7 +21861,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -21779,7 +21966,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -21891,7 +22077,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -22013,7 +22198,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -22119,7 +22303,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -23201,7 +23384,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -23399,7 +23581,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -25284,7 +25465,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }
@@ -25326,7 +25506,6 @@
             "application/json": {
               "schema": {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "title": "Payload",
@@ -25522,7 +25701,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "title": "Payload",
                 "type": "object"
               }

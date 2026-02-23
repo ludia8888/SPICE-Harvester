@@ -374,6 +374,11 @@ const AppShell = () => {
   )
   const activeCommandCount = useMemo(() => countActiveCommands(commands), [commands])
 
+  // Login page renders without shell chrome
+  if (pathname === '/login') {
+    return <AppRouter />
+  }
+
   return (
     <div className="app-shell">
       <Navbar className="top-nav">

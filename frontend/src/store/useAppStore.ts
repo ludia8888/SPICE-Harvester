@@ -9,6 +9,8 @@ const STORAGE_KEYS = {
   theme: 'spice.theme',
   rememberToken: 'spice.rememberToken',
   adminToken: 'spice.adminToken',
+  accessToken: 'spice.accessToken',
+  refreshToken: 'spice.refreshToken',
   commands: 'commandTracker.items',
 } as const
 
@@ -57,6 +59,8 @@ type AppState = {
   context: AppContext
   theme: Theme
   adminToken: string
+  accessToken: string
+  refreshToken: string
   rememberToken: boolean
   adminMode: boolean
   settingsOpen: boolean
@@ -68,6 +72,9 @@ type AppState = {
   setBranch: (branch: string) => void
   setLanguage: (language: Language) => void
   setAdminToken: (token: string) => void
+  setAccessToken: (token: string) => void
+  setRefreshToken: (token: string) => void
+  clearAuth: () => void
   setRememberToken: (remember: boolean) => void
   setAdminMode: (enabled: boolean) => void
   setSettingsOpen: (open: boolean) => void
@@ -75,6 +82,7 @@ type AppState = {
   trackCommand: (command: TrackedCommand) => void
   patchCommand: (commandId: string, patch: Partial<TrackedCommand>) => void
   removeCommand: (commandId: string) => void
+  isAuthenticated: () => boolean
 }
 
 const safeLocalStorageGet = (key: string) => {
@@ -238,6 +246,8 @@ export const useAppStore = create<AppState>((set, get) => {
   const rememberToken = readRememberToken()
   const tokenFromEnv = import.meta.env.VITE_ADMIN_TOKEN ?? ''
   const adminToken = tokenFromEnv || (rememberToken ? readCachedAdminToken() : '')
+  const accessToken = safeLocalStorageGet(STORAGE_KEYS.accessToken) ?? ''
+  const refreshToken = safeLocalStorageGet(STORAGE_KEYS.refreshToken) ?? ''
   const context = getInitialContext()
   const theme = readCachedTheme() ?? DEFAULT_THEME
 
@@ -245,6 +255,8 @@ export const useAppStore = create<AppState>((set, get) => {
     context,
     theme,
     adminToken,
+    accessToken,
+    refreshToken,
     rememberToken,
     adminMode: false,
     settingsOpen: false,
@@ -284,6 +296,19 @@ export const useAppStore = create<AppState>((set, get) => {
       if (get().rememberToken) {
         safeLocalStorageSet(STORAGE_KEYS.adminToken, normalized)
       }
+    },
+    setAccessToken: (token) => {
+      set({ accessToken: token })
+      safeLocalStorageSet(STORAGE_KEYS.accessToken, token)
+    },
+    setRefreshToken: (token) => {
+      set({ refreshToken: token })
+      safeLocalStorageSet(STORAGE_KEYS.refreshToken, token)
+    },
+    clearAuth: () => {
+      set({ accessToken: '', refreshToken: '' })
+      safeLocalStorageRemove(STORAGE_KEYS.accessToken)
+      safeLocalStorageRemove(STORAGE_KEYS.refreshToken)
     },
     setRememberToken: (remember) => {
       set({ rememberToken: remember })
@@ -325,6 +350,10 @@ export const useAppStore = create<AppState>((set, get) => {
         persistCommands(next)
         return { commands: next }
       }),
+    isAuthenticated: () => {
+      const s = get()
+      return Boolean(s.accessToken || s.adminToken)
+    },
   }
 })
 

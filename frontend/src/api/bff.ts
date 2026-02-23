@@ -620,9 +620,73 @@ const bff2BuildApiUrl = (path: string, language: Language, searchParams?: Bff2Se
   return url.toString()
 }
 
+/* ------------------------------------------------------------------ */
+/* Token refresh helper                                               */
+/* ------------------------------------------------------------------ */
+
+let _refreshPromise: Promise<boolean> | null = null
+
+/**
+ * Attempt to refresh the access token using the stored refresh token.
+ * If no refresh token exists or refresh fails, redirect to /login.
+ * Returns true if we handled the situation (either refreshed or redirected).
+ */
+const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
+  const { refreshToken, accessToken } = useAppStore.getState()
+
+  // No JWT auth in use — fall back to legacy settings dialog
+  if (!accessToken && !refreshToken) {
+    return false
+  }
+
+  if (!refreshToken) {
+    useAppStore.getState().clearAuth()
+    window.location.href = '/login'
+    return true
+  }
+
+  // Deduplicate concurrent refresh attempts
+  if (!_refreshPromise) {
+    _refreshPromise = (async () => {
+      try {
+        const res = await fetch('/api/v1/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+        if (!res.ok) {
+          return false
+        }
+        const data = (await res.json()) as {
+          access_token: string
+          refresh_token: string
+        }
+        useAppStore.getState().setAccessToken(data.access_token)
+        useAppStore.getState().setRefreshToken(data.refresh_token)
+        return true
+      } catch {
+        return false
+      } finally {
+        _refreshPromise = null
+      }
+    })()
+  }
+
+  const refreshed = await _refreshPromise
+  if (!refreshed) {
+    useAppStore.getState().clearAuth()
+    window.location.href = '/login'
+  }
+  return true
+}
+
 const bff2BuildHeaders = (language: Language, adminToken: string, json = false) => {
   const headers = new Headers({ 'Accept-Language': language })
-  if (adminToken) {
+  // Prefer JWT access token over legacy admin token
+  const accessToken = useAppStore.getState().accessToken
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  } else if (adminToken) {
     headers.set('X-Admin-Token', adminToken)
   }
   if (json) {
@@ -742,7 +806,9 @@ const bff2RequestJson = async <T>(
 
   if (!response.ok) {
     const retryAfter = bff2ParseRetryAfterSeconds(response.headers.get('Retry-After'))
-    if (response.status === 401 || response.status === 403 || response.status === 503) {
+    if (response.status === 401 || response.status === 403) {
+      await _tryTokenRefreshAndRedirect()
+    } else if (response.status === 503) {
       useAppStore.getState().setSettingsOpen(true)
     }
     throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
@@ -776,7 +842,9 @@ const bff2RequestRaw = async (
   if (!response.ok) {
     const payload = await bff2ParseJson(response)
     const retryAfter = bff2ParseRetryAfterSeconds(response.headers.get('Retry-After'))
-    if (response.status === 401 || response.status === 403 || response.status === 503) {
+    if (response.status === 401 || response.status === 403) {
+      await _tryTokenRefreshAndRedirect()
+    } else if (response.status === 503) {
       useAppStore.getState().setSettingsOpen(true)
     }
     throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)

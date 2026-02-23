@@ -1969,7 +1969,7 @@
     {
       "name": "AuthSettings",
       "docstring": "Service auth configuration (BFF/OMS).",
-      "field_count": 27,
+      "field_count": 31,
       "fields": [
         {
           "name": "bff_admin_token",
@@ -2110,6 +2110,46 @@
             "USER_JWT_ALGORITHMS"
           ],
           "required": true
+        },
+        {
+          "name": "auth_login_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable /auth/login endpoint (AUTH_LOGIN_ENABLED)",
+          "env_vars": [
+            "AUTH_LOGIN_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "auth_users",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "JSON user list for local auth (AUTH_USERS)",
+          "env_vars": [
+            "AUTH_USERS"
+          ],
+          "required": true
+        },
+        {
+          "name": "auth_access_token_ttl",
+          "type": "int",
+          "default": "3600",
+          "description": "Access-token lifetime in seconds (AUTH_ACCESS_TOKEN_TTL)",
+          "env_vars": [
+            "AUTH_ACCESS_TOKEN_TTL"
+          ],
+          "required": false
+        },
+        {
+          "name": "auth_refresh_token_ttl",
+          "type": "int",
+          "default": "604800",
+          "description": "Refresh-token lifetime in seconds (AUTH_REFRESH_TOKEN_TTL)",
+          "env_vars": [
+            "AUTH_REFRESH_TOKEN_TTL"
+          ],
+          "required": false
         },
         {
           "name": "bff_require_auth",
@@ -5649,5 +5689,5 @@
       ]
     }
   ],
-  "total_fields": 526
+  "total_fields": 530
 }

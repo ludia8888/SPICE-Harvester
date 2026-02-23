@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { usePathname } from '../state/usePathname'
 import { useAppStore } from '../store/useAppStore'
+import { navigate } from '../state/pathname'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { DatabasesPage } from '../pages/DatabasesPage'
 import { OverviewPage } from '../pages/OverviewPage'
@@ -23,6 +24,7 @@ import { DatasetAnalysisPage } from '../pages/DatasetAnalysisPage'
 import { GovernancePage } from '../pages/GovernancePage'
 import { SchedulerPage } from '../pages/SchedulerPage'
 import { AIAssistantPage } from '../pages/AIAssistantPage'
+import { LoginPage } from '../pages/LoginPage'
 
 export const AppRouter = () => {
   const pathname = usePathname()
@@ -30,7 +32,13 @@ export const AppRouter = () => {
 
   const context = useAppStore((state) => state.context)
   const setProject = useAppStore((state) => state.setProject)
+  const accessToken = useAppStore((state) => state.accessToken)
+  const adminToken = useAppStore((state) => state.adminToken)
 
+  const isLoginRoute = segments[0] === 'login'
+  const isAuthenticated = Boolean(accessToken || adminToken)
+
+  // Sync project from URL when on /db/:name routes
   useEffect(() => {
     if (segments[0] !== 'db' || !segments[1]) {
       return
@@ -40,6 +48,27 @@ export const AppRouter = () => {
       setProject(dbName)
     }
   }, [context.project, segments, setProject])
+
+  // Redirect to /login if not authenticated and not already on /login
+  useEffect(() => {
+    if (!isAuthenticated && !isLoginRoute) {
+      navigate('/login')
+    }
+  }, [isAuthenticated, isLoginRoute])
+
+  // Login route — render without auth guard
+  if (isLoginRoute) {
+    if (isAuthenticated) {
+      navigate('/')
+      return null
+    }
+    return <LoginPage />
+  }
+
+  // Auth guard: block rendering if not authenticated (redirect effect above handles navigation)
+  if (!isAuthenticated) {
+    return null
+  }
 
   if (segments.length === 0) {
     return <DatabasesPage />
