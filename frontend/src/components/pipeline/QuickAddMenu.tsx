@@ -40,11 +40,15 @@ export const QuickAddMenu = ({ position, onSelect, onClose }: Props) => {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        const target = e.target as Element | null
+        // If clicking on a ReactFlow node, let onNodeClick handle it
+        // instead of closing here (avoids mid-click re-render that breaks ReactFlow events)
+        if (target?.closest('.react-flow__node')) return
         onClose()
       }
     }
     // Delay to avoid the same click that opened the menu
-    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 50)
+    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 80)
     return () => {
       clearTimeout(timer)
       document.removeEventListener('mousedown', handler)

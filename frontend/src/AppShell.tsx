@@ -11,6 +11,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { CommandTrackerDrawer } from './commands/CommandTrackerDrawer'
 import { useCommandTracker } from './commands/useCommandTracker'
 import { InspectorDrawer } from './components/layout/InspectorDrawer'
+import { BuilderAgentChat } from './components/agent/BuilderAgentChat'
 import { AppRouter } from './app/AppRouter'
 import { useAppStore } from './store/useAppStore'
 import { usePathname } from './state/usePathname'
@@ -365,14 +366,6 @@ const getLnbGroups = (project: string | null, copy: Copy): LnbGroup[] => {
             { id: 'governance', label: copy.nav.governance, path: p('/governance'), match: base ? `${base}/governance` : undefined, requiresProject: true },
           ],
         },
-        {
-          id: 'ai',
-          icon: 'lightbulb',
-          label: copy.nav.ai,
-          path: '/ai',
-          match: '/ai',
-          requiresProject: false,
-        },
       ],
     },
     {
@@ -446,6 +439,7 @@ const AppShell = () => {
   const toggleSidebar = useAppStore((state) => state.toggleSidebar)
 
   const [commandOpen, setCommandOpen] = useState(false)
+  const [shellTab, setShellTab] = useState<'gui' | 'cowork' | 'agent'>('gui')
 
   useCommandTracker()
 
@@ -479,13 +473,20 @@ const AppShell = () => {
               <Tag minimal icon="database" className="breadcrumb-tag">{copy.nav.noProject}</Tag>
             </>
           )}
-          {activePageLabel ? (
+          {(shellTab !== 'gui' || activePageLabel) ? (
             <>
               <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
-              <Tag minimal className="breadcrumb-tag">{activePageLabel}</Tag>
+              <Tag minimal className="breadcrumb-tag">
+                {shellTab === 'cowork' ? 'Cowork' : shellTab === 'agent' ? 'Builder Agent' : activePageLabel}
+              </Tag>
             </>
           ) : null}
         </NavbarGroup>
+        <div className="top-nav-tabs">
+          <button className={`top-nav-tab${shellTab === 'gui' ? ' is-active' : ''}`} onClick={() => setShellTab('gui')}>GUI</button>
+          <button className={`top-nav-tab${shellTab === 'agent' ? ' is-active' : ''}`} onClick={() => setShellTab('agent')}>Builder Agent</button>
+          <button className={`top-nav-tab${shellTab === 'cowork' ? ' is-active' : ''}`} onClick={() => setShellTab('cowork')}>Cowork</button>
+        </div>
         <NavbarGroup align={Alignment.RIGHT}>
           <Tag minimal icon="git-branch" className="breadcrumb-tag" style={{ marginRight: 8 }}>{context.branch}</Tag>
           <Button minimal icon="history" onClick={() => setCommandOpen(true)} aria-label={copy.nav.commands}>
@@ -499,21 +500,41 @@ const AppShell = () => {
         </NavbarGroup>
       </Navbar>
 
-      <div className={`app-body ${sidebarExpanded ? 'is-expanded' : ''}`}>
-        <LeftNavBar
-          groups={lnbGroups}
-          expanded={sidebarExpanded}
-          onToggleExpanded={toggleSidebar}
-          pathname={pathname}
-          project={context.project}
-          onNavigate={navigate}
-          onSettingsClick={() => setSettingsOpen(true)}
-          selectProjectLabel={copy.nav.selectProject}
-        />
-        <main className={`main${isPipelineEditor ? ' is-pipeline' : ''}`}>
-          <AppRouter />
-        </main>
-      </div>
+      {shellTab === 'gui' ? (
+        <div className={`app-body ${sidebarExpanded ? 'is-expanded' : ''}`}>
+          <LeftNavBar
+            groups={lnbGroups}
+            expanded={sidebarExpanded}
+            onToggleExpanded={toggleSidebar}
+            pathname={pathname}
+            project={context.project}
+            onNavigate={navigate}
+            onSettingsClick={() => setSettingsOpen(true)}
+            selectProjectLabel={copy.nav.selectProject}
+          />
+          <main className={`main${isPipelineEditor ? ' is-pipeline' : ''}`}>
+            <AppRouter />
+          </main>
+        </div>
+      ) : shellTab === 'agent' ? (
+        <BuilderAgentChat project={context.project} />
+      ) : (
+        <div className="app-body-empty">
+          <div className="app-body-empty-inner">
+            {context.project ? (
+              <>
+                <span className="app-body-empty-label">Cowork</span>
+                <span className="app-body-empty-hint">{context.project} — Coming soon</span>
+              </>
+            ) : (
+              <>
+                <span className="app-body-empty-label">Cowork</span>
+                <span className="app-body-empty-hint">{copy.nav.selectProject}</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <CommandTrackerDrawer
         isOpen={commandOpen}

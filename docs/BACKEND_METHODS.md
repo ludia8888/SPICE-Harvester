@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-24T20:10:33+09:00
+> Generated: 2026-02-25T04:53:27+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1084,8 +1084,10 @@
 ### `backend/bff/routers/pipeline_datasets_catalog.py`
 - **Functions**
   - `async list_datasets(db_name, branch, dataset_registry)` (line 34): no docstring
-  - `async delete_dataset(dataset_id, request, dataset_registry)` (line 55): no docstring
-  - `async get_dataset_raw_file(dataset_id, file_name, file_index, request, pipeline_registry, dataset_registry)` (line 83): no docstring
+  - `async list_pipeline_branches(db_name, request, pipeline_registry)` (line 55): no docstring
+  - `async create_pipeline_branch(request, pipeline_registry)` (line 74): no docstring
+  - `async delete_dataset(dataset_id, request, dataset_registry)` (line 107): no docstring
+  - `async get_dataset_raw_file(dataset_id, file_name, file_index, request, pipeline_registry, dataset_registry)` (line 135): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_deps.py`
 
@@ -5959,6 +5961,17 @@
   - `ConcurrencyControl` (line 89): Utility class for concurrency control operations.
     - `validate_version_for_update(current_version, provided_version)` (line 96): Validate version for update operation.
     - `get_next_version(current_version)` (line 119): Calculate next version number.
+
+### `backend/shared/models/builder_agent.py`
+- **Classes**
+  - `BuilderClarificationQuestion` (line 10): no docstring
+    - `_accept_key_as_id(cls, data)` (line 20): no docstring
+  - `BuilderAgentRunOptions` (line 36): no docstring
+  - `BuilderAgentRunRequest` (line 42): no docstring
+  - `BuilderAgentApprovalDecisionRequest` (line 52): no docstring
+  - `BuilderBranchExecutionStep` (line 58): no docstring
+  - `BuilderBranchExecutionPlan` (line 67): no docstring
+  - `BuilderExecutionSummary` (line 74): no docstring
 
 ### `backend/shared/models/commands.py`
 - **Classes**

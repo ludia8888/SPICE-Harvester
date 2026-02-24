@@ -1,4 +1,5 @@
-import { Icon, Menu, MenuItem, Popover } from '@blueprintjs/core'
+import { useState, useMemo } from 'react'
+import { Icon, InputGroup, Menu, MenuItem, Popover, Spinner } from '@blueprintjs/core'
 import type { UseMutationResult } from '@tanstack/react-query'
 
 export type PipelineTab = 'edit' | 'proposals' | 'history'
@@ -21,10 +22,111 @@ type Props = {
   canUndo?: boolean
   canRedo?: boolean
   onBack: () => void
-  onBranchClick?: () => void
   onDeployClick?: () => void
   activeTab?: PipelineTab
   onTabChange?: (tab: PipelineTab) => void
+  /** Branch selector */
+  branches?: string[]
+  branchesLoading?: boolean
+  onBranchChange?: (branch: string) => void
+  onBranchCreate?: (name: string) => void
+  branchCreating?: boolean
+}
+
+/* ── Branch Dropdown (rendered inside Popover) ─── */
+const BranchDropdown = ({
+  branches,
+  current,
+  loading,
+  creating,
+  onSelect,
+  onCreate,
+}: {
+  branches: string[]
+  current: string
+  loading?: boolean
+  creating?: boolean
+  onSelect?: (branch: string) => void
+  onCreate?: (name: string) => void
+}) => {
+  const [filter, setFilter] = useState('')
+  const [newName, setNewName] = useState('')
+
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return branches
+    const q = filter.toLowerCase()
+    return branches.filter((b) => b.toLowerCase().includes(q))
+  }, [branches, filter])
+
+  const handleCreate = () => {
+    const name = newName.trim()
+    if (!name) return
+    onCreate?.(name)
+    setNewName('')
+  }
+
+  return (
+    <div className="ptb-branch-dropdown">
+      <div className="ptb-branch-search">
+        <InputGroup
+          leftIcon="search"
+          placeholder="Find a branch..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          small
+          autoFocus
+        />
+      </div>
+      {loading ? (
+        <div style={{ padding: 16, textAlign: 'center' }}>
+          <Spinner size={20} />
+        </div>
+      ) : (
+        <Menu className="ptb-branch-menu">
+          {filtered.length === 0 && (
+            <MenuItem disabled text="No branches found" />
+          )}
+          {filtered.map((b) => (
+            <MenuItem
+              key={b}
+              text={b}
+              icon={b === current ? 'tick' : 'blank'}
+              active={b === current}
+              onClick={() => onSelect?.(b)}
+            />
+          ))}
+        </Menu>
+      )}
+      {onCreate && (
+        <div className="ptb-branch-create">
+          <InputGroup
+            placeholder="New branch name..."
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreate()
+            }}
+            small
+            disabled={creating}
+            rightElement={
+              <button
+                className="ptb-branch-create-btn"
+                onClick={handleCreate}
+                disabled={!newName.trim() || creating}
+                title="Create branch"
+              >
+                {creating ? (
+                  <Spinner size={12} />
+                ) : (
+                  <Icon icon="plus" size={12} />
+                )}
+              </button>
+            }
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export const PipelineToolbar = ({
@@ -40,10 +142,14 @@ export const PipelineToolbar = ({
   canUndo = false,
   canRedo = false,
   onBack,
-  onBranchClick,
   onDeployClick,
   activeTab = 'edit',
   onTabChange,
+  branches = [],
+  branchesLoading = false,
+  onBranchChange,
+  onBranchCreate,
+  branchCreating = false,
 }: Props) => {
   return (
     <div className="pipeline-topbar">
@@ -123,12 +229,27 @@ export const PipelineToolbar = ({
           </button>
         </div>
 
-        {/* Branch */}
-        <button className="ptb-branch-btn" title="Switch branch" onClick={onBranchClick}>
-          <Icon icon="git-branch" size={13} />
-          <span>{branch}</span>
-          <Icon icon="caret-down" size={10} className="ptb-branch-caret" />
-        </button>
+        {/* Branch dropdown */}
+        <Popover
+          content={
+            <BranchDropdown
+              branches={branches}
+              current={branch}
+              loading={branchesLoading}
+              creating={branchCreating}
+              onSelect={onBranchChange}
+              onCreate={onBranchCreate}
+            />
+          }
+          placement="bottom-start"
+          minimal
+        >
+          <button className="ptb-branch-btn" title="Switch branch">
+            <Icon icon="git-branch" size={13} />
+            <span>{branch}</span>
+            <Icon icon="caret-down" size={10} className="ptb-branch-caret" />
+          </button>
+        </Popover>
 
         {/* Save */}
         <button

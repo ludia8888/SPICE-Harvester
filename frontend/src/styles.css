@@ -31,6 +31,13 @@
   --foundry-tooltip-bg: rgba(0, 0, 0, 0.9);
   --foundry-gradient-base: #1C2127;
 
+  /* ── JSON syntax colors (dark) ── */
+  --json-key: #ff7b72;
+  --json-string: #a5d6ff;
+  --json-number: #79c0ff;
+  --json-bool: #ffa657;
+  --json-null: #8b949e;
+
   /* ── Proxy aliases ── */
   --panel: var(--foundry-bg-panel);
   --panel-soft: var(--foundry-bg-panel);
@@ -80,6 +87,13 @@
   --foundry-code-bg: #F6F8FA;
   --foundry-tooltip-bg: rgba(28, 33, 39, 0.9);
   --foundry-gradient-base: #E8ECF0;
+
+  /* ── JSON syntax colors (light) ── */
+  --json-key: #d73a49;
+  --json-string: #032f62;
+  --json-number: #005cc5;
+  --json-bool: #e36209;
+  --json-null: #6a737d;
 
   background: var(--foundry-bg-deepest);
   color: var(--foundry-text);
@@ -2482,6 +2496,69 @@ body {
 .ptb-branch-btn:hover { background: var(--foundry-bg-hover); color: var(--foundry-text); }
 .ptb-branch-caret { opacity: 0.5; }
 
+/* Branch dropdown (inside Popover) */
+.ptb-branch-dropdown {
+  min-width: 240px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--foundry-bg-elevated);
+  border-radius: 6px;
+}
+.ptb-branch-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--foundry-border);
+}
+.ptb-branch-search .bp5-input-group input,
+.ptb-branch-search .bp6-input-group input {
+  background: var(--foundry-bg);
+  color: var(--foundry-text);
+  border: 1px solid var(--foundry-border);
+}
+.ptb-branch-menu {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 260px;
+  padding: 4px 0;
+}
+.ptb-branch-menu .bp5-menu-item,
+.ptb-branch-menu .bp6-menu-item {
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.ptb-branch-menu .bp5-menu-item.bp5-active,
+.ptb-branch-menu .bp6-menu-item.bp6-active {
+  background: var(--foundry-accent-muted);
+  color: var(--foundry-accent);
+  font-weight: 600;
+}
+
+/* Branch create section */
+.ptb-branch-create {
+  padding: 8px;
+  border-top: 1px solid var(--foundry-border);
+}
+.ptb-branch-create .bp5-input-group input,
+.ptb-branch-create .bp6-input-group input {
+  background: var(--foundry-bg);
+  color: var(--foundry-text);
+  border: 1px solid var(--foundry-border);
+}
+.ptb-branch-create-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--foundry-accent);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.ptb-branch-create-btn:disabled {
+  color: var(--foundry-text-muted);
+  cursor: default;
+}
+
 /* Save button — primary/filled green */
 .ptb-save-btn {
   display: inline-flex;
@@ -4381,28 +4458,35 @@ body {
   padding: 0 12px;
   font-size: 12px;
   color: var(--foundry-text-secondary);
+  flex: 0 0 160px;
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+/* Header cells need flex-column for name + type stacking */
+.pipeline-preview-table-cell.is-header {
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  min-width: 140px;
-  max-width: 220px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--foundry-text);
+  font-weight: 600;
+  white-space: normal;
+  text-overflow: clip;
 }
 
 .pipeline-preview-table-cell.is-index {
   color: var(--foundry-text-muted);
   font-weight: 600;
-  min-width: 40px;
-  max-width: 40px;
-}
-
-.pipeline-preview-table-cell.is-header {
-  color: var(--foundry-text);
-  font-weight: 600;
+  flex: 0 0 48px;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
 }
 
 .pipeline-preview-table-cell.is-active {
@@ -5946,6 +6030,40 @@ body {
 
 .pipeline-quick-add-menu .bp6-menu-divider {
   border-color: var(--foundry-border);
+}
+
+/* ═══════════════════════════════════════════════════
+   Node Context Toolbar (click node → quick-add)
+   ═══════════════════════════════════════════════════ */
+.node-context-toolbar {
+  position: fixed;
+  z-index: 100;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+.node-context-toolbar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.node-context-toolbar-item:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 
 /* Transform config checkbox rows */

@@ -30,6 +30,8 @@ import {
   buildPipeline,
   deployPipeline,
   listPipelineDatasets,
+  listPipelineBranches,
+  createPipelineBranch,
   listPipelineRuns,
   getDatasetSchema,
 } from '../api/bff'
@@ -42,6 +44,7 @@ import { PipelinePreviewPanel } from '../components/pipeline/PipelinePreviewPane
 import { PipelineRightPanel } from '../components/pipeline/PipelineRightPanel'
 import { DatasetPickerDialog } from '../components/pipeline/DatasetPickerDialog'
 import { QuickAddMenu } from '../components/pipeline/QuickAddMenu'
+import { NodeContextToolbar } from '../components/pipeline/NodeContextToolbar'
 import { ScheduleDialog } from '../components/pipeline/ScheduleDialog'
 import { PipelineManagerDialog } from '../components/pipeline/PipelineManagerDialog'
 import { PipelineProposalsView } from '../components/pipeline/PipelineProposalsView'
@@ -196,6 +199,9 @@ const PipelineEditorView = ({
   const [pipelineManagerOpen, setPipelineManagerOpen] = useState(false)
   const [legendColors, setLegendColors] = useState<LegendColor[]>([])
   const [lastBuildJobId, setLastBuildJobId] = useState<string | null>(null)
+  const [nodeContextToolbar, setNodeContextToolbar] = useState<{
+    x: number; y: number; sourceNodeId: string
+  } | null>(null)
 
   /* ── Preview polling state ────────────────────── */
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null)
@@ -303,6 +309,35 @@ const PipelineEditorView = ({
     enabled: !!dbName,
   })
   const availableDatasets: DatasetRecord[] = Array.isArray(datasetsQ.data) ? datasetsQ.data : []
+
+  /* ── Load available branches ─────────────────────── */
+  const branchesQ = useQuery({
+    queryKey: ['pipeline-branches', dbName],
+    queryFn: () => listPipelineBranches(ctx, { db_name: dbName }),
+    enabled: !!dbName,
+    retry: 1,
+    staleTime: 30_000,
+  })
+  const branches: string[] = Array.isArray(branchesQ.data) ? branchesQ.data : ['main']
+
+  const setBranch = useAppStore((s) => s.setBranch)
+  const handleBranchChange = useCallback((newBranch: string) => {
+    setBranch(newBranch)
+    queryClient.invalidateQueries({ queryKey: plKeys.detail(pipelineId) })
+    queryClient.invalidateQueries({ queryKey: ['pipeline-datasets', dbName] })
+  }, [setBranch, queryClient, pipelineId, dbName])
+
+  const createBranchMut = useMutation({
+    mutationFn: (name: string) =>
+      createPipelineBranch(ctx, { pipeline_id: pipelineId, branch: name }),
+    onSuccess: (_data, name) => {
+      queryClient.invalidateQueries({ queryKey: ['pipeline-branches', dbName] })
+      handleBranchChange(name)
+    },
+  })
+  const handleBranchCreate = useCallback((name: string) => {
+    createBranchMut.mutate(name)
+  }, [createBranchMut])
 
   /* ── Dataset schema cache ─────────────────────────── */
   type ColSchema = { name: string; type: string }
@@ -952,6 +987,40 @@ const PipelineEditorView = ({
     [quickAddMenu, nodes, edges, setNodes, setEdges],
   )
 
+  /* ── Node context toolbar select ──────────────── */
+  const onContextToolbarSelect = useCallback(
+    (transformType: string) => {
+      if (!nodeContextToolbar) return
+      pushUndo(nodes, edges)
+      const catalog = getCatalog(transformType)
+      const id = nextNodeId()
+      const sourceNode = nodes.find((n) => n.id === nodeContextToolbar.sourceNodeId)
+      const newNode: PipelineNode = {
+        id,
+        type: resolveRFNodeType(transformType),
+        position: { x: (sourceNode?.position.x ?? 200) + 280, y: sourceNode?.position.y ?? 150 },
+        data: {
+          label: catalog.label,
+          transformType,
+          config: { type: transformType, name: catalog.label },
+        },
+      }
+      setNodes((prev) => [...prev, newNode])
+      const targetHandle = catalog.inputs.length > 0 ? catalog.inputs[0].id : 'in'
+      const newEdge: Edge = {
+        id: `edge_${nodeContextToolbar.sourceNodeId}_${id}`,
+        source: nodeContextToolbar.sourceNodeId,
+        target: id,
+        sourceHandle: 'out',
+        targetHandle,
+      }
+      setEdges((prev) => addEdge(newEdge, prev))
+      setNodeContextToolbar(null)
+      setSelectedNodeId(id)
+    },
+    [nodeContextToolbar, nodes, edges, setNodes, setEdges],
+  )
+
   /* ── Collect all expectations from output nodes ── */
   const collectExpectations = useCallback(() => {
     return nodes
@@ -1152,7 +1221,11 @@ const PipelineEditorView = ({
         canUndo={undoStack.current.length > 0}
         canRedo={redoStack.current.length > 0}
         onBack={goBack}
-        onBranchClick={() => setSettingsOpen(true)}
+        branches={branches}
+        branchesLoading={branchesQ.isLoading && !branchesQ.isError}
+        onBranchChange={handleBranchChange}
+        onBranchCreate={handleBranchCreate}
+        branchCreating={createBranchMut.isPending}
         onDeployClick={() => setScheduleDialogOpen(true)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -1202,6 +1275,16 @@ const PipelineEditorView = ({
                     )
                   }
                   return
+                }
+                // Show context toolbar next to node
+                const nodeEl = document.querySelector(`.react-flow__node[data-id="${node.id}"]`)
+                if (nodeEl) {
+                  const rect = nodeEl.getBoundingClientRect()
+                  setNodeContextToolbar({
+                    x: rect.right + 8,
+                    y: rect.top,
+                    sourceNodeId: node.id,
+                  })
                 }
                 setSelectedNodeId(node.id)
                 setPreviewOpen(true)
@@ -1311,6 +1394,15 @@ const PipelineEditorView = ({
           position={{ x: quickAddMenu.x, y: quickAddMenu.y }}
           onSelect={onQuickAddSelect}
           onClose={() => setQuickAddMenu(null)}
+        />
+      )}
+
+      {/* Node context toolbar (click a node → quick-add next to it) */}
+      {nodeContextToolbar && (
+        <NodeContextToolbar
+          position={{ x: nodeContextToolbar.x, y: nodeContextToolbar.y }}
+          onSelect={onContextToolbarSelect}
+          onClose={() => setNodeContextToolbar(null)}
         />
       )}
 

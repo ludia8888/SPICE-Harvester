@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Icon } from '@blueprintjs/core'
 
 /* ── Types ─────────────────────────────────────────── */
@@ -88,8 +88,29 @@ export const PipelineLegend = ({
   const [val, setVal] = useState(0.65)
   const [hexInput, setHexInput] = useState('29A634')
 
+  const pickerRef = useRef<HTMLDivElement>(null)
   const gradientRef = useRef<HTMLDivElement>(null)
   const hueRef = useRef<HTMLDivElement>(null)
+
+  /* Close color picker on click-away */
+  useEffect(() => {
+    if (!pickerOpen) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        const target = e.target as Element | null
+        // Don't close if clicking ReactFlow node (avoids mid-click re-render)
+        if (target?.closest('.react-flow__node')) return
+        // Don't close if clicking legend header or add-color button
+        if (target?.closest('.pipeline-legend')) return
+        setPickerOpen(false)
+      }
+    }
+    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 80)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handler)
+    }
+  }, [pickerOpen])
 
   const rgb = hsvToRgb(hue, sat, val)
   const currentHex = rgbToHex(rgb.r, rgb.g, rgb.b)
@@ -204,7 +225,7 @@ export const PipelineLegend = ({
 
           {/* Color picker popover */}
           {pickerOpen && (
-            <div className="pipeline-color-picker">
+            <div className="pipeline-color-picker" ref={pickerRef}>
               {/* Name input */}
               <input
                 className="pipeline-cp-name"

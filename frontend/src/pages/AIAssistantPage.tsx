@@ -75,12 +75,16 @@ export const AIAssistantPage = () => {
 
   /* pipeline agent */
   const pipelineMut = useMutation({
-    mutationFn: (text: string) => runPipelineAgent(ctx, { instruction: text, db_name: dbName }),
+    mutationFn: (text: string) =>
+      runPipelineAgent(ctx, {
+        goal: text,
+        data_scope: { db_name: dbName, branch: 'main', dataset_ids: [] },
+      }),
   })
 
   /* ontology agent */
   const ontologyMut = useMutation({
-    mutationFn: (text: string) => runOntologyAgent(ctx, { instruction: text, db_name: dbName }),
+    mutationFn: (text: string) => runOntologyAgent(ctx, { goal: text, db_name: dbName }),
   })
 
   /* knowledge search */
@@ -142,7 +146,10 @@ export const AIAssistantPage = () => {
           break
         }
         case 'pipeline': {
-          result = await runPipelineAgent(ctx, { instruction: text, db_name: dbName })
+          result = await runPipelineAgent(ctx, {
+            goal: text,
+            data_scope: { db_name: dbName, branch: 'main', dataset_ids: [] },
+          })
           responseText = typeof result.message === 'string'
             ? result.message
             : typeof result.status === 'string'
@@ -151,7 +158,7 @@ export const AIAssistantPage = () => {
           break
         }
         case 'ontology': {
-          result = await runOntologyAgent(ctx, { instruction: text, db_name: dbName })
+          result = await runOntologyAgent(ctx, { goal: text, db_name: dbName })
           responseText = typeof result.message === 'string'
             ? result.message
             : typeof result.status === 'string'

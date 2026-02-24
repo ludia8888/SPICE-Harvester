@@ -23,7 +23,6 @@ import { ObjectExplorerPage } from '../pages/ObjectExplorerPage'
 import { DatasetAnalysisPage } from '../pages/DatasetAnalysisPage'
 import { GovernancePage } from '../pages/GovernancePage'
 import { SchedulerPage } from '../pages/SchedulerPage'
-import { AIAssistantPage } from '../pages/AIAssistantPage'
 import { LoginPage } from '../pages/LoginPage'
 
 export const AppRouter = () => {
@@ -92,10 +91,6 @@ export const AppRouter = () => {
   /* Global routes (no project context) */
   if (segments[0] === 'connections') {
     return <ConnectionsPage />
-  }
-
-  if (segments[0] === 'ai') {
-    return <AIAssistantPage />
   }
 
   if (segments[0] === 'db' && segments[1]) {

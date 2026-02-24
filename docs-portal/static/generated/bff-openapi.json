@@ -14464,6 +14464,119 @@
         ]
       }
     },
+    "/api/v1/pipelines/branches": {
+      "get": {
+        "operationId": "list_pipeline_branches_api_v1_pipelines_branches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "db_name",
+            "required": true,
+            "schema": {
+              "title": "Db Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Pipeline Branches",
+        "tags": [
+          "Pipeline Builder",
+          "Pipeline Builder",
+          "Pipeline Builder"
+        ]
+      },
+      "post": {
+        "operationId": "create_pipeline_branch_api_v1_pipelines_branches_post",
+        "parameters": [
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Pipeline Branch",
+        "tags": [
+          "Pipeline Builder",
+          "Pipeline Builder",
+          "Pipeline Builder"
+        ]
+      }
+    },
     "/api/v1/pipelines/datasets": {
       "get": {
         "operationId": "list_datasets_api_v1_pipelines_datasets_get",

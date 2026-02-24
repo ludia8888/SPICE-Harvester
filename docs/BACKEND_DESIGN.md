@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-02-24T20:10:33+09:00
+> Generated: 2026-02-25T04:53:27+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **1010**
-- Modules with module docstring: **542/1010**
+- Modules scanned: **1011**
+- Modules with module docstring: **542/1011**
 - Modules with broad `except Exception`: **280**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **250511**
+- Total code lines (non-empty, non-comment): **250625**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2430 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2846 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 77 | 359 | 1144 | 789 | 59926 |
+| `bff` | 222 | 167/222 (75%) | 77 | 361 | 1146 | 791 | 59974 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -41,7 +41,7 @@
 | `pipeline_worker` | 10 | 5/10 (50%) | 5 | 50 | 90 | 12 | 8110 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1868 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
-| `shared` | 305 | 205/305 (67%) | 106 | 386 | 870 | 1143 | 80524 |
+| `shared` | 306 | 205/306 (66%) | 106 | 386 | 870 | 1150 | 80590 |
 | `tests` | 307 | 53/307 (17%) | 23 | 116 | 1646 | 1499 | 52550 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
@@ -1285,13 +1285,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=213 | code_lines=187 | risk_score=25
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=8 | raise=16 | broad_except=5 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=265 | code_lines=235 | risk_score=35
+- API surface: public=5 | top-level functions=5 | classes=0 | methods=0
+- Runtime signals: async_functions=5 | try=10 | raise=19 | broad_except=7 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (10): bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.auth_utils; shared.security.input_sanitizer; shared.services.registries.dataset_registry (+2 more)
 - External imports (5): base64; fastapi; logging; mimetypes; typing
-- Public API names: delete_dataset; get_dataset_raw_file; list_datasets
+- Public API names: create_pipeline_branch; delete_dataset; get_dataset_raw_file; list_datasets; list_pipeline_branches
 
 ### `backend/bff/routers/pipeline_datasets_deps.py`
 - Module summary: Pipeline datasets dependencies (BFF).
@@ -7124,6 +7124,22 @@
 - Internal imports (0): not documented
 - External imports (2): pydantic; typing
 - Public API names: ConcurrencyControl; OptimisticLockError; VersionedModelMixin
+
+### `backend/shared/models/builder_agent.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=84 | code_lines=66 | risk_score=0
+- API surface: public=7 | top-level functions=0 | classes=7 | methods=1
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/7 (0%) | methods=0/1 (0%)
+- Internal imports (1): shared.models.pipeline_plan
+- External imports (3): __future__; pydantic; typing
+- Public API names: BuilderAgentApprovalDecisionRequest; BuilderAgentRunOptions; BuilderAgentRunRequest; BuilderBranchExecutionPlan; BuilderBranchExecutionStep; BuilderClarificationQuestion; BuilderExecutionSummary
 
 ### `backend/shared/models/commands.py`
 - Module summary: Command Models for Command/Event Sourcing Pattern

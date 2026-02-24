@@ -50,6 +50,58 @@ async def list_datasets(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
+@router.get("/branches", response_model=ApiResponse)
+@trace_endpoint("list_pipeline_branches")
+async def list_pipeline_branches(
+    db_name: str = Query(...),
+    request: Request = None,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+):
+    db_name = validate_db_name(db_name)
+    repo = _resolve_lakefs_raw_repository()
+    try:
+        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+        lakefs_client = await pipeline_registry.get_lakefs_client(user_id=actor_user_id)
+        raw = await lakefs_client.list_branches(repository=repo)
+        branch_names = [br.get("name") if isinstance(br, dict) else str(br) for br in raw]
+    except Exception:
+        branch_names = ["main"]
+    return ApiResponse.success(data={"branches": branch_names}).to_dict()
+
+
+@router.post("/branches", response_model=ApiResponse)
+@trace_endpoint("create_pipeline_branch")
+async def create_pipeline_branch(
+    request: Request,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+):
+    body = await request.json()
+    pipeline_id = str(body.get("pipeline_id") or "").strip()
+    new_branch = str(body.get("branch") or "").strip()
+    if not pipeline_id or not new_branch:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "pipeline_id and branch are required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    try:
+        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+        created = await pipeline_registry.create_branch(
+            pipeline_id=pipeline_id,
+            new_branch=new_branch,
+            user_id=actor_user_id,
+        )
+        return ApiResponse.success(
+            message="Branch created",
+            data={"pipeline": created._asdict() if hasattr(created, '_asdict') else created.__dict__},
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create branch: {e}")
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
+
+
 @router.delete("/datasets/{dataset_id}", response_model=ApiResponse)
 @trace_endpoint("delete_dataset")
 async def delete_dataset(

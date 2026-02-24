@@ -704,16 +704,21 @@ const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
 
 const bff2BuildHeaders = (language: Language, adminToken: string, json = false) => {
   const headers = new Headers({ 'Accept-Language': language })
+  const accessToken = stripBearerPrefix(useAppStore.getState().accessToken || '')
+  const delegatedToken = accessToken || API_USER_JWT
   // Admin token takes priority — sending both causes JWT principal to
   // override admin's full-scope principal in the backend middleware,
   // breaking v2 API scope checks (api:ontologies-read etc.)
   if (adminToken) {
     headers.set('X-Admin-Token', adminToken)
   } else {
-    const accessToken = useAppStore.getState().accessToken
     if (accessToken) {
       headers.set('Authorization', `Bearer ${accessToken}`)
     }
+  }
+  // Agent endpoints require delegated user context even when admin token auth is used.
+  if (delegatedToken) {
+    headers.set('X-Delegated-Authorization', `Bearer ${delegatedToken}`)
   }
   if (json) {
     headers.set('Content-Type', 'application/json')
@@ -1351,6 +1356,34 @@ export const listPipelineDatasets = async (
   const inner = unwrapApiResponse<{ datasets?: DatasetRecord[] }>(payload)
   if (Array.isArray(inner)) return inner as DatasetRecord[]
   return (inner as { datasets?: DatasetRecord[] })?.datasets ?? []
+}
+
+export const listPipelineBranches = async (
+  context: RequestContext,
+  params: { db_name: string },
+): Promise<string[]> => {
+  const { payload } = await bff2RequestJson<{ branches?: string[] } | string[]>(
+    'pipelines/branches',
+    { method: 'GET' },
+    context,
+    { db_name: params.db_name },
+  )
+  if (Array.isArray(payload)) return payload as string[]
+  const inner = unwrapApiResponse<{ branches?: string[] }>(payload)
+  if (Array.isArray(inner)) return inner as string[]
+  return (inner as { branches?: string[] })?.branches ?? ['main']
+}
+
+export const createPipelineBranch = async (
+  context: RequestContext,
+  input: { pipeline_id: string; branch: string },
+): Promise<Record<string, unknown>> => {
+  const { payload } = await bff2RequestJson<Record<string, unknown>>(
+    'pipelines/branches',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return (unwrapApiResponse<Record<string, unknown>>(payload) ?? {}) as Record<string, unknown>
 }
 
 export const createPipelineDataset = async (
@@ -4004,13 +4037,68 @@ export const classifyAiIntent = async (
   return payload ?? {}
 }
 
+const normalizePipelineAgentInput = (input: Record<string, unknown>) => {
+  const payload: Record<string, unknown> = { ...input }
+  const goal = typeof payload.goal === 'string' && payload.goal.trim()
+    ? payload.goal.trim()
+    : typeof payload.instruction === 'string'
+    ? payload.instruction.trim()
+    : ''
+  if (goal) {
+    payload.goal = goal
+  }
+
+  const scope = asRecord(payload.data_scope) ? { ...(payload.data_scope as Record<string, unknown>) } : {}
+  const dbName = typeof payload.db_name === 'string' ? payload.db_name.trim() : ''
+  if (dbName && !scope.db_name) {
+    scope.db_name = dbName
+  }
+  if (!Array.isArray(scope.dataset_ids)) {
+    scope.dataset_ids = []
+  }
+  if (typeof scope.branch !== 'string' || !scope.branch.trim()) {
+    scope.branch = 'main'
+  }
+
+  payload.data_scope = scope
+  delete payload.instruction
+  delete payload.db_name
+  return payload
+}
+
+const normalizeOntologyAgentInput = (input: Record<string, unknown>) => {
+  const payload: Record<string, unknown> = { ...input }
+  const goal = typeof payload.goal === 'string' && payload.goal.trim()
+    ? payload.goal.trim()
+    : typeof payload.instruction === 'string'
+    ? payload.instruction.trim()
+    : ''
+  if (goal) {
+    payload.goal = goal
+  }
+
+  if (typeof payload.db_name !== 'string' || !payload.db_name.trim()) {
+    const scope = asRecord(payload.data_scope)
+    const dbName = typeof scope?.db_name === 'string' ? scope.db_name.trim() : ''
+    if (dbName) {
+      payload.db_name = dbName
+    }
+  } else {
+    payload.db_name = payload.db_name.trim()
+  }
+
+  delete payload.instruction
+  return payload
+}
+
 export const runPipelineAgent = async (
   context: RequestContext,
   input: Record<string, unknown>,
 ) => {
+  const normalizedInput = normalizePipelineAgentInput(input)
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     'agent/pipeline-runs',
-    { method: 'POST', body: JSON.stringify(input) },
+    { method: 'POST', body: JSON.stringify(normalizedInput) },
     context,
   )
   return payload ?? {}
@@ -4020,9 +4108,10 @@ export const runOntologyAgent = async (
   context: RequestContext,
   input: Record<string, unknown>,
 ) => {
+  const normalizedInput = normalizeOntologyAgentInput(input)
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     'ontology-agent/runs',
-    { method: 'POST', body: JSON.stringify(input) },
+    { method: 'POST', body: JSON.stringify(normalizedInput) },
     context,
   )
   return payload ?? {}
