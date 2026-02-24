@@ -35,6 +35,31 @@ import {
   listOrchestrationScheduleRuns,
 } from '../api/bff'
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const normalizePipelineRid = (value: string): string | null => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (raw.startsWith('ri.') && raw.includes('.pipeline.')) return raw
+  if (UUID_REGEX.test(raw)) return `ri.foundry.main.pipeline.${raw}`
+  return null
+}
+
+const parseIsoMs = (value: unknown): number | null => {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  const ms = new Date(text).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+const computeDurationSeconds = (start: unknown, end: unknown): number | null => {
+  const startMs = parseIsoMs(start)
+  const endMs = parseIsoMs(end)
+  if (startMs === null || endMs === null || endMs < startMs) return null
+  return Math.round((endMs - startMs) / 1000)
+}
+
 /* ── page ────────────────────────────────────────────── */
 export const SchedulerPage = () => {
   const ctx = useRequestContext()
@@ -86,17 +111,21 @@ const BuildsTab = ({
   const [buildDetail, setBuildDetail] = useState<Record<string, unknown> | null>(null)
   const [buildJobs, setBuildJobs] = useState<Record<string, unknown>[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const buildTargetRid = useMemo(() => normalizePipelineRid(buildTarget), [buildTarget])
 
   /* create build mutation */
   const createMut = useMutation({
     mutationFn: () => {
-      let config: Record<string, unknown> = {}
-      config = buildConfigKv as Record<string, unknown>
+      const config = buildConfigKv as Record<string, unknown>
+      if (!buildTargetRid) {
+        throw new Error('Pipeline RID (or UUID) is required.')
+      }
       return createOrchestrationBuild(ctx, {
-        target: { type: 'MANUAL', dataset: buildTarget || undefined },
-        type: buildType,
-        branch: branchName,
         ...config,
+        targetRid: buildTargetRid,
+        target: { targetRids: [buildTargetRid] },
+        type: buildType,
+        branchName: branchName || 'master',
       })
     },
     onSuccess: (data) => {
@@ -252,29 +281,38 @@ const BuildsTab = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {buildJobs.map((job, i) => (
-                        <tr key={i}>
-                          <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                            {String(job.jobId ?? job.rid ?? `job_${i}`)}
-                          </td>
-                          <td>
-                            <Tag
-                              minimal
-                              intent={
-                                String(job.status).toLowerCase() === 'succeeded' ? Intent.SUCCESS :
-                                String(job.status).toLowerCase() === 'failed' ? Intent.DANGER :
-                                String(job.status).toLowerCase() === 'running' ? Intent.PRIMARY :
-                                Intent.NONE
-                              }
-                            >
-                              {String(job.status ?? '—')}
-                            </Tag>
-                          </td>
-                          <td style={{ fontSize: 12 }}>
-                            {job.duration ? `${String(job.duration)}s` : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {buildJobs.map((job, i) => {
+                        const jobStatus = String(job.jobStatus ?? job.status ?? '')
+                        const startedAt = job.startedTime ?? job.startedAt
+                        const finishedAt = job.finishedTime ?? job.finishedAt
+                        const durationSeconds =
+                          Number.isFinite(Number(job.duration))
+                            ? Number(job.duration)
+                            : computeDurationSeconds(startedAt, finishedAt)
+                        return (
+                          <tr key={i}>
+                            <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                              {String(job.jobId ?? job.rid ?? `job_${i}`)}
+                            </td>
+                            <td>
+                              <Tag
+                                minimal
+                                intent={
+                                  jobStatus.toLowerCase() === 'succeeded' ? Intent.SUCCESS :
+                                  jobStatus.toLowerCase() === 'failed' ? Intent.DANGER :
+                                  jobStatus.toLowerCase() === 'running' ? Intent.PRIMARY :
+                                  Intent.NONE
+                                }
+                              >
+                                {jobStatus || '—'}
+                              </Tag>
+                            </td>
+                            <td style={{ fontSize: 12 }}>
+                              {durationSeconds != null ? `${durationSeconds}s` : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </HTMLTable>
                 </>
@@ -300,7 +338,7 @@ const BuildsTab = ({
             <InputGroup
               value={buildTarget}
               onChange={(e) => setBuildTarget(e.target.value)}
-              placeholder="e.g. ri.foundry.main.dataset.abc123"
+              placeholder="e.g. ri.foundry.main.pipeline.<uuid> or <uuid>"
             />
           </FormGroup>
           <FormGroup label="Build Type">
@@ -341,6 +379,7 @@ const BuildsTab = ({
               intent={Intent.PRIMARY}
               icon="build"
               loading={createMut.isPending}
+              disabled={!buildTargetRid}
               onClick={() => createMut.mutate()}
             >
               Create Build
@@ -381,17 +420,21 @@ const SchedulesTab = ({
   const [scheduleDetail, setScheduleDetail] = useState<Record<string, unknown> | null>(null)
   const [scheduleRuns, setScheduleRuns] = useState<Record<string, unknown>[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const scheduleTargetRid = useMemo(() => normalizePipelineRid(scheduleTarget), [scheduleTarget])
 
   /* create schedule */
   const createMut = useMutation({
     mutationFn: () => {
       const config = schedConfigKv as Record<string, unknown>
+      if (!scheduleTargetRid) {
+        throw new Error('Pipeline RID (or UUID) is required.')
+      }
       return createOrchestrationSchedule(ctx, {
-        displayName: scheduleName,
-        cronExpression: cronExpr,
-        target: scheduleTarget || undefined,
-        branch: scheduleBranch,
         ...config,
+        displayName: scheduleName,
+        targetRid: scheduleTargetRid,
+        trigger: { cronExpression: cronExpr },
+        action: { type: 'build', branchName: scheduleBranch || 'master' },
       })
     },
     onSuccess: (data) => {
@@ -449,6 +492,14 @@ const SchedulesTab = ({
       setScheduleInput('')
     }
   }
+
+  const scheduleStatus = String(scheduleDetail?.status ?? '').toUpperCase()
+  const isSchedulePaused = scheduleStatus === 'PAUSED'
+  const scheduleTrigger =
+    scheduleDetail?.trigger && typeof scheduleDetail.trigger === 'object'
+      ? (scheduleDetail.trigger as Record<string, unknown>)
+      : null
+  const scheduleCronExpression = String(scheduleTrigger?.cronExpression ?? '').trim()
 
   return (
     <div style={{ marginTop: 12 }}>
@@ -508,16 +559,15 @@ const SchedulesTab = ({
             <div>
               <div className="form-row" style={{ gap: 8, marginBottom: 12 }}>
                 <Tag intent={
-                  String(scheduleDetail.paused).toLowerCase() === 'true' ? Intent.WARNING :
-                  Intent.SUCCESS
+                  isSchedulePaused ? Intent.WARNING : Intent.SUCCESS
                 }>
-                  {String(scheduleDetail.paused).toLowerCase() === 'true' ? 'Paused' : 'Active'}
+                  {isSchedulePaused ? 'Paused' : 'Active'}
                 </Tag>
-                {typeof scheduleDetail.cronExpression === 'string' && (
-                  <Tag minimal icon="time">{scheduleDetail.cronExpression}</Tag>
+                {scheduleCronExpression && (
+                  <Tag minimal icon="time">{scheduleCronExpression}</Tag>
                 )}
                 <div style={{ marginLeft: 'auto' }}>
-                  {String(scheduleDetail.paused).toLowerCase() === 'true' ? (
+                  {isSchedulePaused ? (
                     <Button
                       minimal
                       icon="play"
@@ -585,32 +635,41 @@ const SchedulesTab = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {scheduleRuns.slice(0, 20).map((run, i) => (
-                        <tr key={i}>
-                          <td style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                            {String(run.runId ?? run.rid ?? `run_${i}`).slice(0, 20)}
-                          </td>
-                          <td>
-                            <Tag
-                              minimal
-                              intent={
-                                String(run.status).toLowerCase() === 'succeeded' ? Intent.SUCCESS :
-                                String(run.status).toLowerCase() === 'failed' ? Intent.DANGER :
-                                String(run.status).toLowerCase() === 'running' ? Intent.PRIMARY :
-                                Intent.NONE
-                              }
-                            >
-                              {String(run.status ?? '—')}
-                            </Tag>
-                          </td>
-                          <td style={{ fontSize: 12 }}>
-                            {run.startedAt ? new Date(String(run.startedAt)).toLocaleString() : '—'}
-                          </td>
-                          <td style={{ fontSize: 12 }}>
-                            {run.duration ? `${String(run.duration)}s` : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {scheduleRuns.slice(0, 20).map((run, i) => {
+                        const runStatus = String(run.status ?? '')
+                        const startedAt = run.startedTime ?? run.startedAt
+                        const finishedAt = run.finishedTime ?? run.finishedAt
+                        const durationSeconds =
+                          Number.isFinite(Number(run.duration))
+                            ? Number(run.duration)
+                            : computeDurationSeconds(startedAt, finishedAt)
+                        return (
+                          <tr key={i}>
+                            <td style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                              {String(run.buildRid ?? run.runId ?? run.rid ?? `run_${i}`).slice(0, 20)}
+                            </td>
+                            <td>
+                              <Tag
+                                minimal
+                                intent={
+                                  runStatus.toLowerCase() === 'succeeded' ? Intent.SUCCESS :
+                                  runStatus.toLowerCase() === 'failed' ? Intent.DANGER :
+                                  runStatus.toLowerCase() === 'running' ? Intent.PRIMARY :
+                                  Intent.NONE
+                                }
+                              >
+                                {runStatus || '—'}
+                              </Tag>
+                            </td>
+                            <td style={{ fontSize: 12 }}>
+                              {startedAt ? new Date(String(startedAt)).toLocaleString() : '—'}
+                            </td>
+                            <td style={{ fontSize: 12 }}>
+                              {durationSeconds != null ? `${durationSeconds}s` : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </HTMLTable>
                 </>
@@ -650,7 +709,7 @@ const SchedulesTab = ({
             <InputGroup
               value={scheduleTarget}
               onChange={(e) => setScheduleTarget(e.target.value)}
-              placeholder="e.g. ri.foundry.main.dataset.abc123"
+              placeholder="e.g. ri.foundry.main.pipeline.<uuid> or <uuid>"
             />
           </FormGroup>
           <FormGroup label="Branch">
@@ -679,7 +738,7 @@ const SchedulesTab = ({
               intent={Intent.PRIMARY}
               icon="time"
               loading={createMut.isPending}
-              disabled={!scheduleName}
+              disabled={!scheduleName || !scheduleTargetRid}
               onClick={() => createMut.mutate()}
             >
               Create Schedule

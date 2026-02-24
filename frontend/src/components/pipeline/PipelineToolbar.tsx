@@ -21,6 +21,7 @@ type Props = {
   canUndo?: boolean
   canRedo?: boolean
   onBack: () => void
+  onBranchClick?: () => void
   onDeployClick?: () => void
   activeTab?: PipelineTab
   onTabChange?: (tab: PipelineTab) => void
@@ -39,6 +40,7 @@ export const PipelineToolbar = ({
   canUndo = false,
   canRedo = false,
   onBack,
+  onBranchClick,
   onDeployClick,
   activeTab = 'edit',
   onTabChange,
@@ -122,7 +124,7 @@ export const PipelineToolbar = ({
         </div>
 
         {/* Branch */}
-        <button className="ptb-branch-btn" title="Switch branch">
+        <button className="ptb-branch-btn" title="Switch branch" onClick={onBranchClick}>
           <Icon icon="git-branch" size={13} />
           <span>{branch}</span>
           <Icon icon="caret-down" size={10} className="ptb-branch-caret" />

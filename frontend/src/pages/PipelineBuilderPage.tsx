@@ -184,6 +184,7 @@ const PipelineEditorView = ({
   ctx: RequestContext
 }) => {
   const queryClient = useQueryClient()
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
 
   /* ── UI state ───────────────────────────────────── */
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
@@ -194,6 +195,7 @@ const PipelineEditorView = ({
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false)
   const [pipelineManagerOpen, setPipelineManagerOpen] = useState(false)
   const [legendColors, setLegendColors] = useState<LegendColor[]>([])
+  const [lastBuildJobId, setLastBuildJobId] = useState<string | null>(null)
 
   /* ── Preview polling state ────────────────────── */
   const [previewData, setPreviewData] = useState<Record<string, unknown> | null>(null)
@@ -285,11 +287,19 @@ const PipelineEditorView = ({
 
   const pipeline = detailQ.data as PipelineDetailRecord | undefined
   const definition = pipeline?.definition_json ?? { nodes: [], edges: [] }
+  const pipelineBranch = useMemo(
+    () => String(pipeline?.branch ?? branch).trim() || 'main',
+    [pipeline?.branch, branch],
+  )
+
+  useEffect(() => {
+    setLastBuildJobId(null)
+  }, [pipelineId])
 
   /* ── Load available datasets (for right panel + picker) ── */
   const datasetsQ = useQuery({
-    queryKey: ['pipeline-datasets', dbName, branch],
-    queryFn: () => listPipelineDatasets(ctx, { db_name: dbName, branch }),
+    queryKey: ['pipeline-datasets', dbName, pipelineBranch],
+    queryFn: () => listPipelineDatasets(ctx, { db_name: dbName, branch: pipelineBranch }),
     enabled: !!dbName,
   })
   const availableDatasets: DatasetRecord[] = Array.isArray(datasetsQ.data) ? datasetsQ.data : []
@@ -560,14 +570,14 @@ const PipelineEditorView = ({
 
     // Fetch schemas in parallel
     for (const dsId of neededIds) {
-      getDatasetSchema(ctx, dsId, { branch }).then((cols) => {
+      getDatasetSchema(ctx, dsId, { branch: pipelineBranch }).then((cols) => {
         if (cols.length > 0) {
           setSchemaCache((prev) => new Map(prev).set(dsId, cols))
         }
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, ctx, branch])
+  }, [nodes, ctx, pipelineBranch])
 
   /* ── Compute upstream columns for selected node ─── */
   const upstreamColumns = useMemo((): ColSchema[] => {
@@ -1018,12 +1028,39 @@ const PipelineEditorView = ({
     toastTimer.current = setTimeout(() => setToast(null), 5000)
   }, [])
 
+  const resolveLatestSuccessfulBuildJobId = useCallback(async (): Promise<string | null> => {
+    const runs = await listPipelineRuns(ctx, pipelineId)
+    const successStatuses = new Set(['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'DONE'])
+    const successfulBuildRuns = runs
+      .filter((run) => {
+        const mode = String(run.mode ?? '').toLowerCase()
+        const status = String(run.status ?? '').toUpperCase()
+        return mode === 'build' && successStatuses.has(status) && String(run.job_id ?? '').trim().length > 0
+      })
+      .sort((a, b) => {
+        const ta = new Date(String(a.finished_at ?? a.started_at ?? '')).getTime()
+        const tb = new Date(String(b.finished_at ?? b.started_at ?? '')).getTime()
+        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0)
+      })
+    if (lastBuildJobId) {
+      const cached = successfulBuildRuns.find((run) => String(run.job_id ?? '').trim() === lastBuildJobId)
+      if (cached) {
+        return lastBuildJobId
+      }
+    }
+    const latest = successfulBuildRuns[0]
+    return latest ? String(latest.job_id) : null
+  }, [ctx, pipelineId, lastBuildJobId])
+
   /* ── Build ─────────────────────────────────────── */
   const buildMut = useMutation({
-    mutationFn: () => buildPipeline(ctx, pipelineId),
+    mutationFn: () => buildPipeline(ctx, pipelineId, { branch: pipelineBranch }),
     onSuccess: (data) => {
-      const taskId = (data as { task_id?: string })?.task_id
-      showToast(Intent.SUCCESS, `Build started${taskId ? ` (task: ${taskId})` : ''}`)
+      const jobId = String(data?.job_id ?? data?.task_id ?? '').trim()
+      if (jobId) {
+        setLastBuildJobId(jobId)
+      }
+      showToast(Intent.SUCCESS, `Build started${jobId ? ` (job: ${jobId})` : ''}`)
     },
     onError: (err) => {
       showToast(Intent.DANGER, `Build failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -1032,17 +1069,25 @@ const PipelineEditorView = ({
 
   /* ── Deploy ────────────────────────────────────── */
   const deployMut = useMutation({
-    mutationFn: (schedule?: { interval_seconds?: number; cron?: string }) => {
+    mutationFn: async (schedule?: { interval_seconds?: number; cron?: string }) => {
+      const buildJobId = await resolveLatestSuccessfulBuildJobId()
+      if (!buildJobId) {
+        throw new Error('No successful build found. Run Build first.')
+      }
       const allExpectations = collectExpectations()
-      const payload: Record<string, unknown> = {}
+      const payload: Record<string, unknown> = {
+        promote_build: true,
+        build_job_id: buildJobId,
+        branch: pipelineBranch,
+      }
       if (allExpectations.length > 0) payload.expectations = allExpectations
       if (schedule) payload.schedule = schedule
-      return deployPipeline(ctx, pipelineId, Object.keys(payload).length > 0 ? payload : undefined)
+      return deployPipeline(ctx, pipelineId, payload)
     },
     onSuccess: (data) => {
       setScheduleDialogOpen(false)
-      const taskId = (data as { task_id?: string })?.task_id
-      showToast(Intent.SUCCESS, `Deploy started${taskId ? ` (task: ${taskId})` : ''}`)
+      const jobId = String(data?.job_id ?? data?.task_id ?? '').trim()
+      showToast(Intent.SUCCESS, `Deploy started${jobId ? ` (job: ${jobId})` : ''}`)
     },
     onError: (err) => {
       showToast(Intent.DANGER, `Deploy failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -1098,7 +1143,7 @@ const PipelineEditorView = ({
         pipelineName={pipeline?.name ?? pipelineId}
         pipelineType={pipeline?.pipeline_type}
         pipelineStatus={pipeline?.status}
-        branch={branch}
+        branch={pipelineBranch}
         saveMut={saveMut}
         buildMut={buildMut}
         deployMut={deployMut}
@@ -1107,6 +1152,7 @@ const PipelineEditorView = ({
         canUndo={undoStack.current.length > 0}
         canRedo={redoStack.current.length > 0}
         onBack={goBack}
+        onBranchClick={() => setSettingsOpen(true)}
         onDeployClick={() => setScheduleDialogOpen(true)}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -1114,11 +1160,11 @@ const PipelineEditorView = ({
 
       {/* ─── Tab content ─── */}
       {activeTab === 'proposals' && (
-        <PipelineProposalsView pipelineId={pipelineId} branch={branch} />
+        <PipelineProposalsView pipelineId={pipelineId} branch={pipelineBranch} />
       )}
 
       {activeTab === 'history' && (
-        <PipelineHistoryView pipelineId={pipelineId} branch={branch} />
+        <PipelineHistoryView pipelineId={pipelineId} branch={pipelineBranch} />
       )}
 
       {/* Canvas area — only visible in Edit tab */}
@@ -1275,7 +1321,7 @@ const PipelineEditorView = ({
         onAdd={addDatasetNodes}
         ctx={ctx}
         dbName={dbName}
-        branch={branch}
+        branch={pipelineBranch}
       />
 
       {/* Schedule + Deploy dialog */}

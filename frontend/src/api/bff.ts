@@ -318,6 +318,12 @@ export type PipelineArtifactRecord = {
   updated_at?: string
 }
 
+export type PipelineExecutionStartResponse = {
+  job_id?: string
+  task_id?: string
+  pipeline_id?: string
+}
+
 export type PipelineReadinessInput = {
   node_id?: string | null
   dataset_id?: string | null
@@ -1253,30 +1259,38 @@ export const buildPipeline = async (
   context: RequestContext,
   pipelineId: string,
   input?: Record<string, unknown>,
-): Promise<{ task_id: string }> => {
-  const { payload } = await bff2RequestJson<{ task_id: string }>(
+): Promise<PipelineExecutionStartResponse> => {
+  const { payload } = await bff2RequestJson<PipelineExecutionStartResponse>(
     `pipelines/${encodeURIComponent(pipelineId)}/build`,
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
     undefined,
     { 'Idempotency-Key': createIdempotencyKey() },
   )
-  return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
+  const data = (unwrapApiResponse<PipelineExecutionStartResponse>(payload) ?? {}) as PipelineExecutionStartResponse
+  if (!data.job_id && data.task_id) {
+    return { ...data, job_id: data.task_id }
+  }
+  return data
 }
 
 export const deployPipeline = async (
   context: RequestContext,
   pipelineId: string,
   input?: Record<string, unknown>,
-): Promise<{ task_id: string }> => {
-  const { payload } = await bff2RequestJson<{ task_id: string }>(
+): Promise<PipelineExecutionStartResponse> => {
+  const { payload } = await bff2RequestJson<PipelineExecutionStartResponse>(
     `pipelines/${encodeURIComponent(pipelineId)}/deploy`,
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
     undefined,
     { 'Idempotency-Key': createIdempotencyKey() },
   )
-  return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
+  const data = (unwrapApiResponse<PipelineExecutionStartResponse>(payload) ?? {}) as PipelineExecutionStartResponse
+  if (!data.job_id && data.task_id) {
+    return { ...data, job_id: data.task_id }
+  }
+  return data
 }
 
 export const listPipelineRuns = async (
