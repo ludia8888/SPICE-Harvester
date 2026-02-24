@@ -586,7 +586,8 @@ const resolveOrderStatus = (row: Record<string, unknown>): string | null => {
 
 test.describe.serial('Live Foundry QA', () => {
   test('foundry lifecycle via frontend-exposed api only', async ({ page, request, browserName }, testInfo) => {
-    test.skip(browserName !== 'chromium', 'Foundry live QA is run in chromium only.')
+    const chromiumOnly = String(process.env.FOUNDRY_QA_CHROMIUM_ONLY ?? '').trim() === '1'
+    test.skip(chromiumOnly && browserName !== 'chromium', 'FOUNDRY_QA_CHROMIUM_ONLY=1 enforces chromium-only run.')
     test.setTimeout(20 * 60 * 1000)
 
     const bugs = new QABugCollector()
