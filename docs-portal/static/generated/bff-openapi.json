@@ -15055,6 +15055,73 @@
         ]
       }
     },
+    "/api/v1/pipelines/datasets/{dataset_id}": {
+      "delete": {
+        "operationId": "delete_dataset_api_v1_pipelines_datasets__dataset_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Dataset",
+        "tags": [
+          "Pipeline Builder",
+          "Pipeline Builder",
+          "Pipeline Builder"
+        ]
+      }
+    },
     "/api/v1/pipelines/datasets/{dataset_id}/raw-file": {
       "get": {
         "operationId": "get_dataset_raw_file_api_v1_pipelines_datasets__dataset_id__raw_file_get",

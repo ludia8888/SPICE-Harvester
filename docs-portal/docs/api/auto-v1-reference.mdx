@@ -16,7 +16,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 152**
+**Total v1 endpoints: 153**
 
 ### Object Types & Schema (22 endpoints)
 
@@ -166,7 +166,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 |--------|------|---------|------|
 | `GET` | `/api/v1/ops/status` | Ops Status | No |
 
-### Other (49 endpoints)
+### Other (50 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -198,6 +198,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}` | Get Dataset Ingest Request | No |
 | `POST` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve` | Approve Dataset Schema | No |
 | `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | No |
+| `DELETE` | `/api/v1/pipelines/datasets/{dataset_id}` | Delete Dataset | No |
 | `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | No |
 | `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | No |
 | `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | No |

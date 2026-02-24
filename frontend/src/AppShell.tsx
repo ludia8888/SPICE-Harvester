@@ -61,7 +61,7 @@ const copyByLang = {
       connections: 'Data Sources',
       overview: 'Overview',
       datasets: 'Datasets',
-      pipelines: 'Pipelines',
+      pipelines: 'Pipeline Builder',
       objectify: 'Objectify',
       ontology: 'Ontology',
       actions: 'Actions',
@@ -155,7 +155,7 @@ const copyByLang = {
       connections: '데이터 소스',
       overview: '요약',
       datasets: '데이터셋',
-      pipelines: '파이프라인',
+      pipelines: '파이프라인 빌더',
       objectify: '오브젝트화',
       ontology: '온톨로지',
       actions: '액션',
@@ -455,6 +455,9 @@ const AppShell = () => {
   const activeCommandCount = useMemo(() => countActiveCommands(commands), [commands])
   const activePageLabel = useMemo(() => findActiveLabel(lnbGroups, pathname), [lnbGroups, pathname])
 
+  // Pipeline editor needs full-height layout (no padding/scroll on <main>)
+  const isPipelineEditor = !!(context.project && /\/pipelines\/[^/]+/.test(pathname))
+
   // Login page renders without shell chrome
   if (pathname === '/login') {
     return <AppRouter />
@@ -507,7 +510,7 @@ const AppShell = () => {
           onSettingsClick={() => setSettingsOpen(true)}
           selectProjectLabel={copy.nav.selectProject}
         />
-        <main className="main">
+        <main className={`main${isPipelineEditor ? ' is-pipeline' : ''}`}>
           <AppRouter />
         </main>
       </div>

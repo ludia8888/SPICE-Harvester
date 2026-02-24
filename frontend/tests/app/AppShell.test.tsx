@@ -50,7 +50,7 @@ describe('AppShell', () => {
 
     expect(screen.getByText('Spice OS')).toBeInTheDocument()
     expect(screen.getAllByText('No project selected').length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: 'Databases' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Projects' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
     expect(screen.getByTestId('app-router')).toBeInTheDocument()
   })

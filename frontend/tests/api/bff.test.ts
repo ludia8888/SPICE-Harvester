@@ -62,7 +62,7 @@ describe('bff api helpers', () => {
     )
 
     const result = await listDatabasesCtx(defaultContext)
-    expect(result).toEqual(['core'])
+    expect(result).toEqual([{ name: 'core', created_at: null }])
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('http://example.com/api/v1/databases?lang=ko')

@@ -10,6 +10,7 @@ const ALLOWED_PREFIXES = [
   '/api/v1/objectify',
   '/api/v1/graph-query',
   '/api/v1/admin/recompute-projection',
+  '/api/v1/admin/system-health',
   '/api/v1/access-policies',
   '/api/v1/audit',
   '/api/v1/lineage',

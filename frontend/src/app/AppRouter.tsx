@@ -37,6 +37,11 @@ export const AppRouter = () => {
 
   const isLoginRoute = segments[0] === 'login'
   const isAuthenticated = Boolean(accessToken || adminToken)
+  const isLegacyDatasetsRoute =
+    segments[0] === 'db' &&
+    Boolean(segments[1]) &&
+    (segments[2] ?? 'overview') === 'datasets' &&
+    segments[4] !== 'analyze'
 
   // Sync project from URL when on /db/:name routes
   useEffect(() => {
@@ -56,13 +61,23 @@ export const AppRouter = () => {
     }
   }, [isAuthenticated, isLoginRoute])
 
+  // Avoid navigating during render when already authenticated on /login
+  useEffect(() => {
+    if (isLoginRoute && isAuthenticated) {
+      navigate('/', 'replace')
+    }
+  }, [isAuthenticated, isLoginRoute])
+
+  // Legacy /db/:name/datasets route now lives under /connections
+  useEffect(() => {
+    if (isLegacyDatasetsRoute) {
+      navigate('/connections', 'replace')
+    }
+  }, [isLegacyDatasetsRoute])
+
   // Login route — render without auth guard
   if (isLoginRoute) {
-    if (isAuthenticated) {
-      navigate('/')
-      return null
-    }
-    return <LoginPage />
+    return isAuthenticated ? null : <LoginPage />
   }
 
   // Auth guard: block rendering if not authenticated (redirect effect above handles navigation)
@@ -103,7 +118,6 @@ export const AppRouter = () => {
       if (segments[4] === 'analyze') {
         return <DatasetAnalysisPage dbName={dbName} />
       }
-      navigate('/connections')
       return null
     }
     if (section === 'pipelines') {

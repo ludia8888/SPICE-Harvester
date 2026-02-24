@@ -110,8 +110,10 @@ describe('OntologyPage', () => {
     fireEvent.click(classButton)
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('Order')).toBeInTheDocument()
-      expect(screen.getByDisplayValue(/"id": "Order"/)).toBeInTheDocument()
+      expect(apiMocks.getOntology).toHaveBeenCalledWith(expect.any(Object), 'core', 'Order', 'main')
+    })
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('order_id')).toBeInTheDocument()
     })
 
     const applyButton = screen.getByRole('button', { name: 'Apply' })
@@ -139,41 +141,27 @@ describe('OntologyPage', () => {
     )
   })
 
-  it('blocks apply early when backing metadata is present without datasetVersionId', async () => {
+  it('disables apply on protected branch when admin mode is off', async () => {
+    useAppStore.setState({ adminMode: false })
+    apiMocks.getSummary.mockResolvedValue({
+      data: {
+        policy: {
+          is_protected_branch: true,
+        },
+      },
+    })
+
     renderWithClient(<OntologyPage dbName="core" />)
 
     const classButton = await screen.findByRole('button', { name: 'Order' })
     fireEvent.click(classButton)
 
-    const payload = {
-      id: 'Order',
-      label: 'Order',
-      properties: [{ name: 'order_id', type: 'xsd:string', required: true, primaryKey: true }],
-      metadata: {},
-      backingDatasetId: 'dataset-orders',
-    }
-
     await waitFor(() => {
-      expect(screen.getByDisplayValue(/"id": "Order"/)).toBeInTheDocument()
+      expect(apiMocks.getOntology).toHaveBeenCalledWith(expect.any(Object), 'core', 'Order', 'main')
     })
-
-    const editor = screen
-      .getAllByRole('textbox')
-      .find((element) => element.tagName === 'TEXTAREA') as HTMLTextAreaElement | undefined
-    expect(editor).toBeDefined()
-    fireEvent.change(editor!, { target: { value: JSON.stringify(payload, null, 2) } })
 
     const applyButton = screen.getByRole('button', { name: 'Apply' })
-    fireEvent.click(applyButton)
-
-    await waitFor(() => {
-      expect(toastApiErrorMock).toHaveBeenCalled()
-    })
+    expect(applyButton).toBeDisabled()
     expect(apiMocks.updateObjectTypeV2).not.toHaveBeenCalled()
-    expect(toastApiErrorMock.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        message: 'datasetVersionId is required when mapping/backing source metadata is provided.',
-      }),
-    )
   })
 })

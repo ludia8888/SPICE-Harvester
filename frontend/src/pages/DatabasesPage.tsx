@@ -175,7 +175,6 @@ export const DatabasesPage = () => {
             <div style={{ marginLeft: 'auto' }}>
               <HTMLSelect
                 minimal
-                small
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.currentTarget.value as typeof sortOrder)}
                 options={[
@@ -185,7 +184,7 @@ export const DatabasesPage = () => {
                   { value: 'newest', label: 'Newest first' },
                   { value: 'oldest', label: 'Oldest first' },
                 ]}
-                iconName="sort"
+                iconName="double-caret-vertical"
               />
             </div>
           </div>

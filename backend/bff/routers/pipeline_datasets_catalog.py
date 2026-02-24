@@ -50,6 +50,34 @@ async def list_datasets(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
+@router.delete("/datasets/{dataset_id}", response_model=ApiResponse)
+@trace_endpoint("delete_dataset")
+async def delete_dataset(
+    dataset_id: str,
+    request: Request = None,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        if not dataset:
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED)
+
+        deleted = await dataset_registry.delete_dataset(dataset_id=dataset_id)
+        if not deleted:
+            raise classified_http_exception(status.HTTP_404_NOT_FOUND, "Dataset not found", code=ErrorCode.RESOURCE_NOT_FOUND)
+
+        return ApiResponse.success(message="Dataset deleted", data={"dataset_id": dataset_id}).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete dataset: {e}")
+        raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
+
+
 @router.get("/datasets/{dataset_id}/raw-file", response_model=ApiResponse)
 @trace_endpoint("get_dataset_raw_file")
 async def get_dataset_raw_file(

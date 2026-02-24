@@ -1416,6 +1416,17 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 updated_at=row["updated_at"],
             )
 
+    async def delete_dataset(self, *, dataset_id: str) -> bool:
+        """Delete a dataset and all related records (CASCADE)."""
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"DELETE FROM {self._schema}.datasets WHERE dataset_id = $1",
+                dataset_id,
+            )
+            return result.endswith("1")
+
     async def get_dataset_by_name(
         self,
         *,

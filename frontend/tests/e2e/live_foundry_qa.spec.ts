@@ -657,7 +657,7 @@ test.describe.serial('Live Foundry QA', () => {
 
     await page.goto('/?lang=en')
     qaLog(`started db=${dbName}`)
-    await expect(page.getByRole('heading', { level: 1, name: 'Databases' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
 
     qaLog('opening database from list')
     await openDatabaseFromList(page, request, dbName)

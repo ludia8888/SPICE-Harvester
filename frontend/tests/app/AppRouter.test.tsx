@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { AppRouter } from '../../src/app/AppRouter'
+import { useAppStore } from '../../src/store/useAppStore'
 import { resetAppStore, renderWithClient } from '../testUtils'
 
 let mockPathname = '/'
@@ -49,6 +50,7 @@ vi.mock('../../src/pages/AdminPage', () => ({
 describe('AppRouter', () => {
   beforeEach(() => {
     resetAppStore()
+    useAppStore.setState({ accessToken: 'test-access-token', adminToken: '' })
     mockPathname = '/'
   })
 

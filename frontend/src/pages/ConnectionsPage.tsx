@@ -55,6 +55,7 @@ import {
   listConnectionExportRunsV2,
   createConnectionExportRunV2,
   updateConnectionSecretsV2,
+  deletePipelineDataset,
   uploadCsvDataset,
   uploadExcelDataset,
 } from '../api/bff'
@@ -128,6 +129,9 @@ export const ConnectionsPage = () => {
   const queryClient = useQueryClient()
   const storeProject = useAppStore((s) => s.context.project)
   const storeBranch = useAppStore((s) => s.context.branch)
+  const adminMode = useAppStore((s) => s.adminMode)
+  const devMode = useAppStore((s) => s.devMode)
+  const skipConfirm = adminMode && devMode
 
   const [selected, setSelected] = useState<DataSourceItem | null>(null)
   const [newOpen, setNewOpen] = useState(false)
@@ -190,6 +194,15 @@ export const ConnectionsPage = () => {
     mutationFn: (rid: string) => deleteConnectionV2(ctx, rid),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: connKeys.list() })
+      setSelected(null)
+    },
+  })
+
+  /* dataset delete mutation */
+  const deleteDatasetMut = useMutation({
+    mutationFn: (datasetId: string) => deletePipelineDataset(ctx, datasetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasets'] })
       setSelected(null)
     },
   })
@@ -283,7 +296,10 @@ export const ConnectionsPage = () => {
                   deleteMut={deleteMut}
                   detailTab={detailTab}
                   setDetailTab={setDetailTab}
-                  onDelete={() => setDeleteOpen(true)}
+                  onDelete={() => {
+                    if (skipConfirm) { deleteMut.mutate((selected.raw as FoundryConnectionRecordV2).rid); return }
+                    setDeleteOpen(true)
+                  }}
                 />
               ) : (
                 <DatasetDetailPanel
@@ -291,6 +307,11 @@ export const ConnectionsPage = () => {
                   ctx={ctx}
                   detailTab={detailTab}
                   setDetailTab={setDetailTab}
+                  deleteMut={deleteDatasetMut}
+                  onDelete={() => {
+                    if (skipConfirm) { deleteDatasetMut.mutate((selected.raw as DatasetRecord).dataset_id); return }
+                    setDeleteOpen(true)
+                  }}
                 />
               )}
             </div>
@@ -299,19 +320,23 @@ export const ConnectionsPage = () => {
           {/* Delete Confirmation */}
           <DangerConfirmDialog
             isOpen={deleteOpen}
-            title="Delete Connection"
+            title={selected?.kind === 'dataset' ? 'Delete Dataset' : 'Delete Connection'}
             description={`Are you sure you want to delete "${selected?.name}"? This action cannot be undone.`}
             confirmLabel="Delete"
             cancelLabel="Cancel"
             reasonLabel="Reason for deletion"
             reasonPlaceholder="e.g. No longer needed, migrated to another source"
-            typedLabel="Type connection name to confirm"
+            typedLabel={`Type ${selected?.kind === 'dataset' ? 'dataset' : 'connection'} name to confirm`}
             typedPlaceholder={selected?.name ?? ''}
             confirmTextToType={selected?.name ?? ''}
-            loading={deleteMut.isPending}
+            loading={selected?.kind === 'dataset' ? deleteDatasetMut.isPending : deleteMut.isPending}
             onCancel={() => setDeleteOpen(false)}
             onConfirm={() => {
-              if (selectedConn) deleteMut.mutate(selectedConn.rid)
+              if (selected?.kind === 'dataset') {
+                deleteDatasetMut.mutate((selected.raw as DatasetRecord).dataset_id)
+              } else if (selectedConn) {
+                deleteMut.mutate(selectedConn.rid)
+              }
               setDeleteOpen(false)
             }}
           />
@@ -382,7 +407,7 @@ const ConnectionDetailPanel = ({
         </Button>
       </div>
 
-      {testMut.data && (
+      {Boolean(testMut.data) && (
         <Callout
           intent={(testMut.data as Record<string, unknown>).success === true ? Intent.SUCCESS : Intent.DANGER}
           icon="diagnosis"
@@ -402,8 +427,8 @@ const ConnectionDetailPanel = ({
         <Tab id="config" title="Configuration" panel={
           <div>
             {configQ.isLoading && <Spinner size={20} />}
-            {configQ.error && <Callout intent={Intent.DANGER}>Failed to load configuration.</Callout>}
-            {configQ.data && <JsonViewer value={configQ.data} />}
+            {Boolean(configQ.error) && <Callout intent={Intent.DANGER}>Failed to load configuration.</Callout>}
+            {configQ.data != null && <JsonViewer value={configQ.data} />}
           </div>
         } />
         <Tab id="raw" title="Raw JSON" panel={<JsonViewer value={conn} />} />
@@ -418,11 +443,15 @@ const DatasetDetailPanel = ({
   ctx,
   detailTab,
   setDetailTab,
+  deleteMut,
+  onDelete,
 }: {
   dataset: DatasetRecord
   ctx: RequestContext
   detailTab: string
   setDetailTab: (tab: string) => void
+  deleteMut: ReturnType<typeof useMutation<unknown, Error, string>>
+  onDelete: () => void
 }) => {
   const rawQ = useQuery({
     queryKey: ['datasets', 'raw-file', dataset.dataset_id],
@@ -439,7 +468,12 @@ const DatasetDetailPanel = ({
 
   return (
     <Card>
-      <div className="card-title">{dataset.name}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="card-title">{dataset.name}</div>
+        <Button small icon="trash" intent={Intent.DANGER} minimal loading={deleteMut.isPending} onClick={onDelete}>
+          Delete
+        </Button>
+      </div>
       <div className="form-row" style={{ marginBottom: 12 }}>
         <Tag icon="database">{dataset.source_type}</Tag>
         <Tag icon="git-branch">{dataset.branch}</Tag>
@@ -473,7 +507,8 @@ const DatasetDetailPanel = ({
             {rawQ.isLoading && <Spinner size={20} />}
             {rawQ.error && <Callout intent={Intent.DANGER}>Failed to load file.</Callout>}
             {rawQ.data && (() => {
-              const data = rawQ.data as { content: string; encoding?: string; content_type?: string; filename?: string; size_bytes?: number }
+              const raw = rawQ.data as { file?: { content: string; encoding?: string; content_type?: string; filename?: string; size_bytes?: number }; content?: string; encoding?: string; content_type?: string; filename?: string; size_bytes?: number }
+              const data = raw.file ?? raw
               if (data.encoding === 'base64') return <Callout>Binary file ({data.content_type}). Download to view.</Callout>
               const lines = (data.content ?? '').split('\n').slice(0, 50)
               return (
@@ -872,7 +907,7 @@ const CreateConnectionForm = ({
   )
 }
 
-/* ── Upload Panel (drag-and-drop CSV / Excel) ─────────── */
+/* ── Upload Panel (drag-and-drop CSV / Excel, multi-file) ─ */
 const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () => void }) => {
   const storeProject = useAppStore((s) => s.context.project)
   const storeBranch = useAppStore((s) => s.context.branch)
@@ -880,17 +915,50 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
   const [project, setProject] = useState(storeProject ?? '')
   const [branch, setBranch] = useState(storeBranch ?? 'main')
   const [datasetName, setDatasetName] = useState('')
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; failed: number; total: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const handleFile = useCallback((f: File) => {
-    setFile(f)
-    if (!datasetName) {
-      const base = f.name.replace(/\.(csv|xlsx|xls)$/i, '')
-      setDatasetName(base)
-    }
+  const isSingle = files.length <= 1
+
+  const VALID_EXTENSIONS = ['csv', 'xlsx', 'xls']
+  const isValidFile = (f: File) => {
+    const ext = f.name.split('.').pop()?.toLowerCase()
+    return ext != null && VALID_EXTENSIONS.includes(ext)
+  }
+
+  const handleFiles = useCallback((incoming: File[]) => {
+    const valid = incoming.filter(isValidFile)
+    if (valid.length === 0) return
+    setFiles((prev) => {
+      const existingNames = new Set(prev.map((f) => f.name))
+      const deduped = valid.filter((f) => !existingNames.has(f.name))
+      const merged = [...prev, ...deduped]
+      // Auto-set dataset name only when exactly 1 file total
+      if (merged.length === 1 && !datasetName) {
+        setDatasetName(merged[0].name.replace(/\.(csv|xlsx|xls)$/i, ''))
+      }
+      // Clear custom name when switching to multi-file
+      if (merged.length > 1) {
+        setDatasetName('')
+      }
+      return merged
+    })
   }, [datasetName])
+
+  const removeFile = useCallback((index: number) => {
+    setFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      if (next.length === 1) {
+        setDatasetName(next[0].name.replace(/\.(csv|xlsx|xls)$/i, ''))
+      }
+      if (next.length === 0) {
+        setDatasetName('')
+      }
+      return next
+    })
+  }, [])
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -913,34 +981,63 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
     e.preventDefault()
     e.stopPropagation()
     setIsDragging(false)
-    const dropped = e.dataTransfer.files[0]
-    if (dropped) {
-      const ext = dropped.name.split('.').pop()?.toLowerCase()
-      if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
-        handleFile(dropped)
-      }
-    }
-  }, [handleFile])
+    const dropped = Array.from(e.dataTransfer.files)
+    handleFiles(dropped)
+  }, [handleFiles])
 
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]
-    if (f) handleFile(f)
-  }, [handleFile])
+    const selected = Array.from(e.target.files ?? [])
+    if (selected.length > 0) handleFiles(selected)
+    // Reset input so the same files can be re-selected
+    if (fileRef.current) fileRef.current.value = ''
+  }, [handleFiles])
 
   const uploadMut = useMutation({
     mutationFn: async () => {
-      if (!file || !datasetName || !project) throw new Error('All fields required')
-      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
-      if (isExcel) {
-        return uploadExcelDataset(ctx, { db_name: project, name: datasetName, branch, file })
+      if (files.length === 0 || !project) throw new Error('All fields required')
+      // Single file: use custom dataset name
+      if (files.length === 1) {
+        const f = files[0]
+        const name = datasetName || f.name.replace(/\.(csv|xlsx|xls)$/i, '')
+        if (!name) throw new Error('Dataset name required')
+        const isExcel = f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+        if (isExcel) {
+          return uploadExcelDataset(ctx, { db_name: project, name, branch, file: f })
+        }
+        return uploadCsvDataset(ctx, { db_name: project, name, branch, file: f })
       }
-      return uploadCsvDataset(ctx, { db_name: project, name: datasetName, branch, file })
+      // Multi-file: upload each sequentially
+      let done = 0
+      let failed = 0
+      const total = files.length
+      setUploadProgress({ done: 0, failed: 0, total })
+      for (const f of files) {
+        const name = f.name.replace(/\.(csv|xlsx|xls)$/i, '')
+        try {
+          const isExcel = f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+          if (isExcel) {
+            await uploadExcelDataset(ctx, { db_name: project, name, branch, file: f })
+          } else {
+            await uploadCsvDataset(ctx, { db_name: project, name, branch, file: f })
+          }
+          done++
+        } catch {
+          failed++
+        }
+        setUploadProgress({ done, failed, total })
+      }
+      if (failed > 0 && done === 0) throw new Error(`All ${failed} files failed to upload`)
+      return { done, failed, total }
     },
     onSuccess: () => {
       setDatasetName('')
-      setFile(null)
+      setFiles([])
+      setUploadProgress(null)
       if (fileRef.current) fileRef.current.value = ''
       onSuccess?.()
+    },
+    onError: () => {
+      setUploadProgress(null)
     },
   })
 
@@ -981,7 +1078,8 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
               id="up-ds-name"
               value={datasetName}
               onChange={(e) => setDatasetName(e.target.value)}
-              placeholder="e.g. orders_2026q1"
+              placeholder={isSingle ? 'e.g. orders_2026q1' : '(auto from filename)'}
+              disabled={!isSingle}
             />
           </FormGroup>
         </div>
@@ -997,45 +1095,67 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
         >
           <Icon icon="document" size={32} className="upload-dropzone-icon" />
           <div className="upload-dropzone-text">
-            Drag &amp; drop a CSV or Excel file here
+            Drag &amp; drop CSV or Excel files here
           </div>
           <button type="button" className="upload-dropzone-link">
             or browse files
           </button>
           <div className="upload-dropzone-text" style={{ fontSize: 11 }}>
-            Supported: .csv, .xlsx, .xls
+            Supported: .csv, .xlsx, .xls &mdash; multiple files OK
           </div>
         </div>
         <input
           ref={fileRef}
           type="file"
           accept=".csv,.xlsx,.xls"
+          multiple
           className="upload-file-input"
           onChange={onFileChange}
         />
 
-        {/* File preview */}
-        {file && (
+        {/* File list */}
+        {files.length > 0 && (
           <div className="upload-file-list" style={{ marginTop: 12 }}>
-            <div className="upload-file-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Icon icon="document" />
-                <div>
-                  <div style={{ fontWeight: 500 }}>{file.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--foundry-text-muted)' }}>
-                    {formatSize(file.size)}
+            {files.map((f, idx) => (
+              <div className="upload-file-row" key={`${f.name}-${idx}`}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon icon="document" />
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{f.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--foundry-text-muted)' }}>
+                      {formatSize(f.size)}
+                    </div>
                   </div>
                 </div>
+                <Button
+                  small
+                  minimal
+                  icon="cross"
+                  disabled={uploadMut.isPending}
+                  onClick={() => removeFile(idx)}
+                />
               </div>
-              <Button
-                small
-                minimal
-                icon="cross"
-                onClick={() => {
-                  setFile(null)
-                  if (fileRef.current) fileRef.current.value = ''
-                }}
-              />
+            ))}
+          </div>
+        )}
+
+        {/* Upload progress */}
+        {uploadProgress && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Spinner size={14} />
+              <span style={{ fontSize: 12 }}>
+                Uploading {uploadProgress.done + uploadProgress.failed}/{uploadProgress.total}
+                {uploadProgress.failed > 0 && <span style={{ color: 'var(--red5)' }}> ({uploadProgress.failed} failed)</span>}
+              </span>
+            </div>
+            <div style={{ height: 3, background: 'var(--pt-divider-black, #ddd)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${((uploadProgress.done + uploadProgress.failed) / uploadProgress.total) * 100}%`,
+                background: uploadProgress.failed > 0 ? 'var(--orange5, #d9822b)' : 'var(--blue5, #2b95d6)',
+                transition: 'width 0.3s ease',
+              }} />
             </div>
           </div>
         )}
@@ -1046,10 +1166,10 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
             intent={Intent.PRIMARY}
             icon="upload"
             loading={uploadMut.isPending}
-            disabled={!project || !datasetName || !file}
+            disabled={!project || files.length === 0 || (isSingle && !datasetName)}
             onClick={() => uploadMut.mutate()}
           >
-            Upload Dataset
+            {files.length <= 1 ? 'Upload Dataset' : `Upload ${files.length} Datasets`}
           </Button>
         </div>
 
@@ -1061,7 +1181,11 @@ const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () =
         )}
         {uploadMut.isSuccess && (
           <Callout intent={Intent.SUCCESS} icon="tick-circle" style={{ marginTop: 12 }}>
-            Successfully uploaded &quot;{datasetName || 'dataset'}&quot; to project &quot;{project}&quot;.
+            {files.length <= 1
+              ? <>Successfully uploaded &quot;{datasetName || 'dataset'}&quot; to project &quot;{project}&quot;.</>
+              : <>Successfully uploaded {(uploadMut.data as { done: number; failed: number; total: number })?.done ?? files.length} dataset(s) to project &quot;{project}&quot;.
+                  {(uploadMut.data as { failed?: number })?.failed ? ` (${(uploadMut.data as { failed: number }).failed} failed)` : ''}</>
+            }
           </Callout>
         )}
     </div>

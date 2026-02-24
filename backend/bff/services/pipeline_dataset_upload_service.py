@@ -297,7 +297,7 @@ async def upload_tabular_dataset(
                 row_count=inputs.row_count,
                 sample_json=inputs.sample_json,
                 schema_json=inputs.schema_json,
-                apply_schema=False,
+                apply_schema=True,
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:

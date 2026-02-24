@@ -27,8 +27,9 @@ test('switches language to Korean', async ({ page }) => {
   await popover.getByRole('combobox').selectOption('ko')
   await page.keyboard.press('Escape')
 
-  await expect(page.locator('.step-title', { hasText: '프로젝트 설정' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '설정', exact: true }).first()).toBeVisible()
+  const lnb = page.locator('.lnb')
+  await expect(lnb.getByRole('button', { name: '프로젝트', exact: true })).toBeVisible()
+  await expect(lnb.getByRole('button', { name: '설정', exact: true })).toBeVisible()
 })
 
 test('toggles dark mode', async ({ page }) => {

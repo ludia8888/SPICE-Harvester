@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **261**
+- Total documented endpoints: **262**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 152 |
+| `v1` | 153 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 48 |
 | `connectivity` | 31 |
-| `pipelines` | 29 |
+| `pipelines` | 30 |
 | `databases` | 22 |
 | `datasets` | 19 |
 | `admin` | 13 |
@@ -433,6 +433,7 @@
 | `GET` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}` | Get Dataset Ingest Request | `v1` | no | no | `get_dataset_ingest_request_api_v1_pipelines_datasets_ingest_requests__ingest_request_id__get` |
 | `POST` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve` | Approve Dataset Schema | `v1` | no | no | `approve_dataset_schema_api_v1_pipelines_datasets_ingest_requests__ingest_request_id__schema_approve_post` |
 | `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | `v1` | no | no | `upload_media_dataset_api_v1_pipelines_datasets_media_upload_post` |
+| `DELETE` | `/api/v1/pipelines/datasets/{dataset_id}` | Delete Dataset | `v1` | no | no | `delete_dataset_api_v1_pipelines_datasets__dataset_id__delete` |
 | `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | `v1` | no | no | `get_dataset_raw_file_api_v1_pipelines_datasets__dataset_id__raw_file_get` |
 | `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | `v1` | no | no | `create_dataset_version_api_v1_pipelines_datasets__dataset_id__versions_post` |
 | `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | `v1` | no | no | `list_pipeline_proposals_api_v1_pipelines_proposals_get` |

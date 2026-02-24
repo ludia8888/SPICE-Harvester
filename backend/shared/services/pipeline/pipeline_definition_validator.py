@@ -156,7 +156,8 @@ def validate_pipeline_definition(
     errors: list[str] = []
     nodes_raw = definition_json.get("nodes")
     if not isinstance(nodes_raw, list) or not nodes_raw:
-        errors.append("Pipeline has no nodes")
+        if policy.require_output:
+            errors.append("Pipeline has no nodes")
         return PipelineDefinitionValidationResult(errors=errors, nodes={}, edges=[], incoming={})
 
     nodes = normalize_nodes(nodes_raw)

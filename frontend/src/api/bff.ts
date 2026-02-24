@@ -279,6 +279,22 @@ export type PipelineDetailRecord = PipelineRecord & {
   dependencies?: unknown[]
 }
 
+export type PipelineRunRecord = {
+  run_id?: string
+  pipeline_id?: string
+  job_id: string
+  mode?: string
+  status: string
+  node_id?: string | null
+  row_count?: number | null
+  sample_json?: Record<string, unknown> | null
+  output_json?: Record<string, unknown> | null
+  pipeline_spec_commit_id?: string | null
+  pipeline_spec_hash?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
 export type PipelineArtifactRecord = {
   artifact_id: string
   pipeline_id: string
@@ -629,7 +645,7 @@ let _refreshPromise: Promise<boolean> | null = null
 /**
  * Attempt to refresh the access token using the stored refresh token.
  * If no refresh token exists or refresh fails, redirect to /login.
- * Returns true if we handled the situation (either refreshed or redirected).
+ * Returns true only when refresh succeeded and the caller may retry once.
  */
 const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
   const { refreshToken, accessToken } = useAppStore.getState()
@@ -642,7 +658,7 @@ const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
   if (!refreshToken) {
     useAppStore.getState().clearAuth()
     window.location.href = '/login'
-    return true
+    return false
   }
 
   // Deduplicate concurrent refresh attempts
@@ -677,7 +693,7 @@ const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
     useAppStore.getState().clearAuth()
     window.location.href = '/login'
   }
-  return true
+  return refreshed
 }
 
 const bff2BuildHeaders = (language: Language, adminToken: string, json = false) => {
@@ -804,27 +820,38 @@ const bff2RequestJson = async <T>(
 ): Promise<{ status: number; payload: T | null }> => {
   assertLegacyEndpointNotRemoved(path)
   const isJsonBody = init.body !== undefined && !(init.body instanceof FormData)
-  const headers = bff2BuildHeaders(context.language, context.adminToken, isJsonBody)
-  if (context.adminActor) {
-    headers.set('X-Admin-Actor', context.adminActor)
+  const requestUrl = bff2BuildApiUrl(path, context.language, searchParams)
+  const buildHeaders = () => {
+    const headers = bff2BuildHeaders(context.language, context.adminToken, isJsonBody)
+    if (context.adminActor) {
+      headers.set('X-Admin-Actor', context.adminActor)
+    }
+    if (extraHeaders) {
+      const extra = new Headers(extraHeaders)
+      extra.forEach((value, key) => headers.set(key, value))
+    }
+    return headers
   }
-  if (extraHeaders) {
-    const extra = new Headers(extraHeaders)
-    extra.forEach((value, key) => headers.set(key, value))
+  const send = (headers: Headers) =>
+    fetch(requestUrl, {
+      ...init,
+      headers,
+    })
+
+  let response = await send(buildHeaders())
+  let payload = (await bff2ParseJson(response)) as T | null
+
+  if (!response.ok && (response.status === 401 || response.status === 403)) {
+    const refreshed = await _tryTokenRefreshAndRedirect()
+    if (refreshed) {
+      response = await send(buildHeaders())
+      payload = (await bff2ParseJson(response)) as T | null
+    }
   }
-
-  const response = await fetch(bff2BuildApiUrl(path, context.language, searchParams), {
-    ...init,
-    headers,
-  })
-
-  const payload = (await bff2ParseJson(response)) as T | null
 
   if (!response.ok) {
     const retryAfter = bff2ParseRetryAfterSeconds(response.headers.get('Retry-After'))
-    if (response.status === 401 || response.status === 403) {
-      await _tryTokenRefreshAndRedirect()
-    } else if (response.status === 503) {
+    if (response.status === 503) {
       useAppStore.getState().setSettingsOpen(true)
     }
     throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
@@ -841,26 +868,37 @@ const bff2RequestRaw = async (
   extraHeaders?: HeadersInit,
 ): Promise<Response> => {
   assertLegacyEndpointNotRemoved(path)
-  const headers = bff2BuildHeaders(context.language, context.adminToken, false)
-  if (context.adminActor) {
-    headers.set('X-Admin-Actor', context.adminActor)
+  const requestUrl = bff2BuildApiUrl(path, context.language, searchParams)
+  const buildHeaders = () => {
+    const headers = bff2BuildHeaders(context.language, context.adminToken, false)
+    if (context.adminActor) {
+      headers.set('X-Admin-Actor', context.adminActor)
+    }
+    if (extraHeaders) {
+      const extra = new Headers(extraHeaders)
+      extra.forEach((value, key) => headers.set(key, value))
+    }
+    return headers
   }
-  if (extraHeaders) {
-    const extra = new Headers(extraHeaders)
-    extra.forEach((value, key) => headers.set(key, value))
-  }
+  const send = (headers: Headers) =>
+    fetch(requestUrl, {
+      ...init,
+      headers,
+    })
 
-  const response = await fetch(bff2BuildApiUrl(path, context.language, searchParams), {
-    ...init,
-    headers,
-  })
+  let response = await send(buildHeaders())
+
+  if (!response.ok && (response.status === 401 || response.status === 403)) {
+    const refreshed = await _tryTokenRefreshAndRedirect()
+    if (refreshed) {
+      response = await send(buildHeaders())
+    }
+  }
 
   if (!response.ok) {
     const payload = await bff2ParseJson(response)
     const retryAfter = bff2ParseRetryAfterSeconds(response.headers.get('Retry-After'))
-    if (response.status === 401 || response.status === 403) {
-      await _tryTokenRefreshAndRedirect()
-    } else if (response.status === 503) {
+    if (response.status === 503) {
       useAppStore.getState().setSettingsOpen(true)
     }
     throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
@@ -1120,6 +1158,7 @@ export const createPipeline = async (
     description?: string
     pipeline_type?: string
     branch?: string
+    location?: string
     definition_json?: PipelineDefinition
   },
 ): Promise<PipelineRecord> => {
@@ -1127,6 +1166,8 @@ export const createPipeline = async (
     'pipelines',
     { method: 'POST', body: JSON.stringify(input) },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
   const unwrapped = unwrapApiResponse<PipelineCreatePayload | PipelineRecord>(payload) ?? payload
   if (unwrapped && typeof unwrapped === 'object' && 'pipeline_id' in unwrapped) return unwrapped as PipelineRecord
@@ -1161,6 +1202,8 @@ export const updatePipeline = async (
     `pipelines/${encodeURIComponent(pipelineId)}`,
     { method: 'PUT', body: JSON.stringify(input) },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
   const unwrapped = unwrapApiResponse<PipelineRecord>(payload) ?? payload
   return (unwrapped as PipelineRecord) ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
@@ -1174,6 +1217,8 @@ export const deletePipeline = async (
     `pipelines/${encodeURIComponent(pipelineId)}`,
     { method: 'DELETE' },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
 }
 
@@ -1192,12 +1237,14 @@ export const getPipelineReadiness = async (
 export const previewPipeline = async (
   context: RequestContext,
   pipelineId: string,
-  input?: { limit?: number },
+  input?: { limit?: number; node_id?: string },
 ): Promise<Record<string, unknown>> => {
   const { payload } = await bff2RequestJson<Record<string, unknown>>(
     `pipelines/${encodeURIComponent(pipelineId)}/preview`,
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
   return (unwrapApiResponse<Record<string, unknown>>(payload) ?? {}) as Record<string, unknown>
 }
@@ -1211,6 +1258,8 @@ export const buildPipeline = async (
     `pipelines/${encodeURIComponent(pipelineId)}/build`,
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
   return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
 }
@@ -1224,6 +1273,8 @@ export const deployPipeline = async (
     `pipelines/${encodeURIComponent(pipelineId)}/deploy`,
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
+    undefined,
+    { 'Idempotency-Key': createIdempotencyKey() },
   )
   return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
 }
@@ -1231,16 +1282,16 @@ export const deployPipeline = async (
 export const listPipelineRuns = async (
   context: RequestContext,
   pipelineId: string,
-): Promise<PipelineArtifactRecord[]> => {
-  const { payload } = await bff2RequestJson<PipelineArtifactListPayload | PipelineArtifactRecord[]>(
+): Promise<PipelineRunRecord[]> => {
+  const { payload } = await bff2RequestJson<{ runs?: PipelineRunRecord[]; count?: number } | PipelineRunRecord[]>(
     `pipelines/${encodeURIComponent(pipelineId)}/runs`,
     { method: 'GET' },
     context,
   )
   if (Array.isArray(payload)) return payload
-  const inner = unwrapApiResponse<PipelineArtifactListPayload>(payload)
-  if (Array.isArray(inner)) return inner as PipelineArtifactRecord[]
-  return (inner as PipelineArtifactListPayload)?.artifacts ?? (inner as any)?.runs ?? []
+  const inner = unwrapApiResponse<{ runs?: PipelineRunRecord[]; count?: number }>(payload)
+  if (Array.isArray(inner)) return inner as PipelineRunRecord[]
+  return (inner as { runs?: PipelineRunRecord[] })?.runs ?? []
 }
 
 export const listPipelineArtifacts = async (
@@ -1298,6 +1349,17 @@ export const createPipelineDataset = async (
     context,
   )
   return unwrapApiResponse<DatasetRecord>(payload) ?? {}
+}
+
+export const deletePipelineDataset = async (
+  context: RequestContext,
+  datasetId: string,
+): Promise<void> => {
+  await bff2RequestJson<unknown>(
+    `pipelines/datasets/${encodeURIComponent(datasetId)}`,
+    { method: 'DELETE' },
+    context,
+  )
 }
 
 export const uploadCsvDataset = async (
@@ -1370,6 +1432,33 @@ export const approvePipelineDatasetSchema = async (
     context,
   )
   return payload ?? {}
+}
+
+/** Fetch column schema for a dataset via getSchema endpoint */
+export const getDatasetSchema = async (
+  context: RequestContext,
+  datasetId: string,
+  params?: { branch?: string },
+): Promise<Array<{ name: string; type: string }>> => {
+  try {
+    const qs = new URLSearchParams({ preview: 'true' })
+    if (params?.branch) qs.set('branchName', params.branch)
+    const { payload } = await bff2RequestJson<Record<string, unknown>>(
+      `/api/v2/datasets/${encodeURIComponent(datasetId)}/getSchema?${qs}`,
+      { method: 'GET' },
+      context,
+    )
+    const schema = (payload as Record<string, unknown>)?.schema as Record<string, unknown> | undefined
+    const fieldList = ((schema?.fieldSchemaList ?? []) as Array<Record<string, unknown>>)
+    return fieldList
+      .map((f) => ({
+        name: String(f.fieldPath ?? ''),
+        type: String((f.type as Record<string, unknown>)?.type ?? 'unknown'),
+      }))
+      .filter((f) => f.name)
+  } catch {
+    return []
+  }
 }
 
 /* ── Foundry v2 Datasets ─────────────────────────────── */

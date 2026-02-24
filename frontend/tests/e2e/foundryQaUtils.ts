@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 import type { QABugRecord, QABugSeverity } from './foundryQaTypes'
@@ -26,6 +26,67 @@ const guessBugFilePath = () => {
   const fromFrontend = path.resolve(cwd, '../qa_bugs.json')
   const local = path.resolve(cwd, 'qa_bugs.json')
   return cwd.endsWith('/frontend') ? fromFrontend : local
+}
+
+const QA_BUG_ARCHIVE_DIRNAME = 'qa_bugs_archive'
+const QA_BUG_ARCHIVE_FILE_PREFIX = 'qa_bugs_run_'
+const preparedQaBugFiles = new Set<string>()
+const preparingQaBugFiles = new Map<string, Promise<void>>()
+
+const parseBugList = (raw: string): unknown[] => {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const archiveAndResetQaBugFileForRun = async (qaBugFilePath: string) => {
+  await mkdir(path.dirname(qaBugFilePath), { recursive: true })
+
+  let existing: unknown[] = []
+  try {
+    await access(qaBugFilePath)
+    const raw = await readFile(qaBugFilePath, 'utf-8')
+    existing = parseBugList(raw)
+  } catch {
+    existing = []
+  }
+
+  if (existing.length) {
+    const archiveDir = path.join(path.dirname(qaBugFilePath), QA_BUG_ARCHIVE_DIRNAME)
+    await mkdir(archiveDir, { recursive: true })
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const suffix = randomUUID().split('-')[0]
+    const archivePath = path.join(archiveDir, `${QA_BUG_ARCHIVE_FILE_PREFIX}${timestamp}_${suffix}.json`)
+    await writeFile(archivePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8')
+  }
+
+  await writeFile(qaBugFilePath, '[]\n', 'utf-8')
+}
+
+const ensureQaBugFileRunScope = async (qaBugFilePath: string) => {
+  if (preparedQaBugFiles.has(qaBugFilePath)) {
+    return
+  }
+  const inFlight = preparingQaBugFiles.get(qaBugFilePath)
+  if (inFlight) {
+    await inFlight
+    return
+  }
+
+  const task = (async () => {
+    await archiveAndResetQaBugFileForRun(qaBugFilePath)
+    preparedQaBugFiles.add(qaBugFilePath)
+  })()
+
+  preparingQaBugFiles.set(qaBugFilePath, task)
+  try {
+    await task
+  } finally {
+    preparingQaBugFiles.delete(qaBugFilePath)
+  }
 }
 
 const makeUrl = (endpoint: string, query?: ApiRequestOptions['query']) => {
@@ -175,16 +236,18 @@ export class QABugCollector {
   }
 
   async flush() {
+    await ensureQaBugFileRunScope(this.qaBugFilePath)
+
     let existing: unknown[] = []
     try {
       await access(this.qaBugFilePath)
       const raw = await readFile(this.qaBugFilePath, 'utf-8')
-      const parsed = JSON.parse(raw) as unknown
-      existing = Array.isArray(parsed) ? parsed : []
+      existing = parseBugList(raw)
     } catch {
       existing = []
     }
     const merged = [...existing, ...this.bugs]
     await writeFile(this.qaBugFilePath, `${JSON.stringify(merged, null, 2)}\n`, 'utf-8')
+    this.bugs.length = 0
   }
 }

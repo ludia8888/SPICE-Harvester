@@ -144,8 +144,10 @@ export const mockBffRoutes = async (page: Page, options: MockBffOptions = {}) =>
 }
 
 export const openSettingsPopover = async (page: Page) => {
-  await page.locator('.top-nav').getByRole('button', { name: 'Settings', exact: true }).click()
-  const popover = page.locator('.settings-popover')
+  const shell = page.locator('.app-shell')
+  const settingsButton = shell.locator('.lnb').getByRole('button', { name: 'Settings', exact: true })
+  await settingsButton.click()
+  const popover = page.locator('.settings-dialog .settings-popover')
   await popover.waitFor({ state: 'visible' })
   return popover
 }

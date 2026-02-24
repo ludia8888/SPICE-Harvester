@@ -22,7 +22,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('renders databases overview', async ({ page }) => {
-  await expect(page.getByRole('heading', { name: 'Databases', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
   await expect(page.locator('tbody tr', { hasText: 'demo' })).toBeVisible()
   await expect(page.locator('tbody tr', { hasText: 'sandbox' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Create', exact: true })).toBeVisible()
@@ -32,14 +32,16 @@ test('opens a selected database', async ({ page }) => {
   const row = page.locator('tbody tr', { hasText: 'demo' }).first()
   await row.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(page).toHaveURL(/\/db\/demo\/overview/)
-  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'demo', level: 1 })).toBeVisible()
 })
 
 test('creates a database and tracks command id', async ({ page }) => {
-  const createCard = page.locator('.card-stack .bp6-card').first()
-  await createCard.getByRole('textbox').first().fill('alpha_project')
-  await createCard.getByPlaceholder('Optional summary').fill('QA seed database')
-  await createCard.getByRole('button', { name: 'Create', exact: true }).click()
+  await page.getByRole('button', { name: 'Create', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create project' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByPlaceholder('my_project').fill('alpha_project')
+  await dialog.getByPlaceholder('Optional summary').fill('QA seed database')
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
 
   await expect.poll(async () => {
     const commands = await readTrackedCommands(page)
@@ -55,9 +57,9 @@ test('deletes a database with confirmation', async ({ page }) => {
   await expect(deleteButton).toBeEnabled()
   await deleteButton.click()
 
-  const dialog = page.getByRole('dialog', { name: 'Delete database' })
+  const dialog = page.getByRole('dialog', { name: 'Delete project' })
   await expect(dialog).toBeVisible()
-  await dialog.getByPlaceholder('Why are you deleting this database?').fill('cleanup')
+  await dialog.getByPlaceholder('Why are you deleting this project?').fill('cleanup')
   await dialog.getByPlaceholder('demo').fill('demo')
   await dialog.getByRole('button', { name: 'Delete', exact: true }).click()
 

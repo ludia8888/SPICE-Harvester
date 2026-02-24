@@ -395,7 +395,7 @@ async def update_pipeline(
             )
             validation_errors = _validate_pipeline_definition(
                 definition_json=definition_json,
-                require_output=True,
+                require_output=False,
             )
             if validation_errors:
                 raise classified_http_exception(

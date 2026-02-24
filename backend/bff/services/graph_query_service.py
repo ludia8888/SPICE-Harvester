@@ -423,9 +423,36 @@ async def execute_graph_query(
                     include_audit=query.include_audit,
                 )
                 degraded_fallback = True
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:367", exc_info=True)
-                _raise_overlay_degraded(ctx=ctx)
+            except Exception as fallback_exc:
+                if ctx.branch_virtualization_active and isinstance(fallback_exc, NotFoundError):
+                    logger.warning(
+                        "Virtualized base branch index missing (base=%s graph=%s); retrying requested branch",
+                        ctx.read_model_base_branch,
+                        ctx.graph_branch,
+                    )
+                    result = await graph_service.multi_hop_query(
+                        db_name=db_name,
+                        base_branch=ctx.graph_branch,
+                        overlay_branch=None,
+                        graph_branch=ctx.graph_branch,
+                        strict_overlay=False,
+                        start_class=query.start_class,
+                        hops=hops_tuples,
+                        filters=query.filters,
+                        limit=query.limit,
+                        offset=query.offset,
+                        max_nodes=query.max_nodes,
+                        max_edges=query.max_edges,
+                        include_paths=query.include_paths,
+                        max_paths=query.max_paths,
+                        no_cycles=query.no_cycles,
+                        include_documents=query.include_documents,
+                        include_audit=query.include_audit,
+                    )
+                    degraded_fallback = True
+                else:
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:367", exc_info=True)
+                    _raise_overlay_degraded(ctx=ctx)
 
         raw_nodes = list(result.get("nodes", []) or [])
         policies = await _load_access_policies(
@@ -726,9 +753,26 @@ async def execute_simple_graph_query(
                     filters=query.filters,
                 )
                 degraded_fallback = True
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:645", exc_info=True)
-                _raise_overlay_degraded(ctx=ctx)
+            except Exception as fallback_exc:
+                if ctx.branch_virtualization_active and isinstance(fallback_exc, NotFoundError):
+                    logger.warning(
+                        "Virtualized base branch index missing (base=%s graph=%s); retrying requested branch",
+                        ctx.read_model_base_branch,
+                        ctx.graph_branch,
+                    )
+                    result = await graph_service.simple_graph_query(
+                        db_name=db_name,
+                        base_branch=ctx.graph_branch,
+                        overlay_branch=None,
+                        graph_branch=ctx.graph_branch,
+                        strict_overlay=False,
+                        class_name=query.class_name,
+                        filters=query.filters,
+                    )
+                    degraded_fallback = True
+                else:
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:645", exc_info=True)
+                    _raise_overlay_degraded(ctx=ctx)
 
         policy = await dataset_registry.get_access_policy(
             db_name=db_name,
@@ -871,9 +915,30 @@ async def execute_multi_hop_query(
                     include_audit=include_audit,
                 )
                 degraded_fallback = True
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:782", exc_info=True)
-                _raise_overlay_degraded(ctx=ctx)
+            except Exception as fallback_exc:
+                if ctx.branch_virtualization_active and isinstance(fallback_exc, NotFoundError):
+                    logger.warning(
+                        "Virtualized base branch index missing (base=%s graph=%s); retrying requested branch",
+                        ctx.read_model_base_branch,
+                        ctx.graph_branch,
+                    )
+                    result = await graph_service.multi_hop_query(
+                        db_name=db_name,
+                        base_branch=ctx.graph_branch,
+                        overlay_branch=None,
+                        graph_branch=ctx.graph_branch,
+                        strict_overlay=False,
+                        start_class=start_class,
+                        hops=hops or [],
+                        filters=filters,
+                        limit=limit,
+                        include_documents=include_documents,
+                        include_audit=include_audit,
+                    )
+                    degraded_fallback = True
+                else:
+                    logging.getLogger(__name__).warning("Exception fallback at bff/services/graph_query_service.py:782", exc_info=True)
+                    _raise_overlay_degraded(ctx=ctx)
 
         raw_nodes = list(result.get("nodes", []) or [])
         policies = await _load_access_policies(

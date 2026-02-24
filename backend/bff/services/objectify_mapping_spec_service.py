@@ -229,7 +229,7 @@ async def create_mapping_spec(
                 extra={"missing_sources": sorted(set(missing_sources))},
             )
 
-        ontology_branch = str((options or {}).get("ontology_branch") or dataset.branch or "main").strip() or "main"
+        ontology_branch = str((options or {}).get("ontology_branch") or dataset_branch or dataset.branch or "main").strip() or "main"
         ontology_payload = await oms_client.get_ontology(dataset.db_name, target_class_id, branch=ontology_branch)
         prop_map, rel_map = _extract_ontology_fields(ontology_payload)
         if not prop_map:

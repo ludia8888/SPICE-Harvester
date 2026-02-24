@@ -11,6 +11,7 @@ describe('foundry API allowlist', () => {
 
   it('allows active QA endpoints', () => {
     expect(isAllowedFoundryQaEndpoint('GET', '/api/v1/summary?db=core&branch=main')).toBe(true)
+    expect(isAllowedFoundryQaEndpoint('GET', '/api/v1/admin/system-health')).toBe(true)
     expect(isAllowedFoundryQaEndpoint('POST', '/api/v2/datasets')).toBe(true)
     expect(isAllowedFoundryQaEndpoint('GET', '/api/v2/ontologies/core/actionTypes')).toBe(true)
   })
@@ -23,8 +24,11 @@ describe('foundry API allowlist', () => {
       '/api/v1/databases/core/suggest-mappings-from-google-sheets',
       '/api/v1/databases/core/import-from-google-sheets/dry-run',
       '/api/v1/databases/core/suggest-schema-from-google-sheets',
+      '/api/v1/databases/core/suggest-mappings-from-excel',
+      '/api/v1/databases/core/import-from-excel/dry-run',
+      '/api/v1/databases/core/suggest-schema-from-data',
       '/api/v1/databases/core/branches/main',
-      '/api/v1/pipelines/datasets/csv-upload',
+      '/api/v1/pipelines/datasets/media-upload',
       '/api/v1/pipelines/datasets/ingest-requests/ing-1/schema/approve',
       '/api/v1/agent/pipeline-runs',
       '/api/v1/pipeline-plans/plan-1/preview',

@@ -91,6 +91,17 @@ _ACTION_TYPE_SPEC_HINT_FIELDS = {
 
 _ONTOLOGY_READ = require_scopes(["api:ontologies-read"])
 _ONTOLOGY_WRITE = require_scopes(["api:ontologies-write"])
+_QUERY_TYPE_PRIMARY_BRANCH = "master"
+_QUERY_TYPE_FALLBACK_BRANCH = "main"
+
+
+def _query_type_branch_candidates() -> tuple[str, ...]:
+    branches: list[str] = []
+    for candidate in (_QUERY_TYPE_PRIMARY_BRANCH, _QUERY_TYPE_FALLBACK_BRANCH):
+        normalized = str(candidate or "").strip()
+        if normalized and normalized not in branches:
+            branches.append(normalized)
+    return tuple(branches)
 
 
 class OntologyNotFoundError(Exception):
@@ -3911,14 +3922,21 @@ async def list_query_types_v2(
         return _preflight_error_response(exc, ontology=str(ontology))
 
     try:
-        payload = await oms_client.list_ontology_resources(
-            db_name,
-            resource_type="function",
-            branch="master",
-            limit=page_size,
-            offset=offset,
-        )
-        resources = _extract_ontology_resource_rows(payload)
+        resources: list[dict[str, Any]] = []
+        for branch_name in _query_type_branch_candidates():
+            payload = await oms_client.list_ontology_resources(
+                db_name,
+                resource_type="function",
+                branch=branch_name,
+                limit=page_size,
+                offset=offset,
+            )
+            branch_resources = _extract_ontology_resource_rows(payload)
+            if branch_resources:
+                resources = branch_resources
+                break
+            if not resources:
+                resources = branch_resources
         data = [
             mapped
             for mapped in (_to_foundry_query_type(resource) for resource in resources)
@@ -3969,13 +3987,23 @@ async def get_query_type_v2(
         )
 
     try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="function",
-            resource_id=query_api_name,
-            branch="master",
-        )
-        resource = _extract_ontology_resource(payload)
+        resource = None
+        for branch_name in _query_type_branch_candidates():
+            try:
+                payload = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="function",
+                    resource_id=query_api_name,
+                    branch=branch_name,
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                    continue
+                raise
+            candidate = _extract_ontology_resource(payload)
+            if candidate:
+                resource = candidate
+                break
         if not resource:
             return _not_found_error(
                 "QueryTypeNotFound",
@@ -4053,13 +4081,25 @@ async def execute_query_v2(
         )
 
     try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="function",
-            resource_id=query_api_name,
-            branch="master",
-        )
-        resource = _extract_ontology_resource(payload)
+        resource = None
+        query_resource_branch = _query_type_branch_candidates()[0]
+        for branch_name in _query_type_branch_candidates():
+            try:
+                payload = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="function",
+                    resource_id=query_api_name,
+                    branch=branch_name,
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                    continue
+                raise
+            candidate = _extract_ontology_resource(payload)
+            if candidate:
+                resource = candidate
+                query_resource_branch = branch_name
+                break
         if not resource:
             return _not_found_error(
                 "QueryTypeNotFound",
@@ -4112,7 +4152,7 @@ async def execute_query_v2(
 
         result = await oms_client.post(
             f"/api/v2/ontologies/{db_name}/objects/{normalized_object_type}/search",
-            params={"branch": "master"},
+            params={"branch": query_resource_branch},
             json=resolved_payload,
         )
         if not isinstance(result, dict):
