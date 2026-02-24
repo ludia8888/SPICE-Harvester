@@ -5,7 +5,7 @@ sidebar_position: 3
 
 # Service Topology
 
-SPICE Harvester consists of 33+ Docker services organized into four categories. This page catalogs every service with its port, dependencies, and purpose.
+Spice OS consists of 33+ Docker services organized into four categories. This page catalogs every service with its port, dependencies, and purpose.
 
 {/* The interactive D3 topology visualization will be embedded here */}
 
@@ -102,7 +102,7 @@ Each data store uses a named Docker volume for persistence:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **Grafana** | 13000 | Dashboards and visualization. Pre-configured with SPICE Harvester dashboards |
+| **Grafana** | 13000 | Dashboards and visualization. Pre-configured with Spice OS dashboards |
 | **Prometheus** | 19090 | Metrics collection and alerting rules |
 | **Jaeger** | 16686 (UI) / 14268 (collector) | Distributed tracing with full request trace visualization |
 | **OTEL Collector** | 4317 (gRPC) / 4318 (HTTP) | OpenTelemetry collector aggregating traces, metrics, and logs |

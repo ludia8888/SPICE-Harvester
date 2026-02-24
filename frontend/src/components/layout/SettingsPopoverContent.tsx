@@ -1,4 +1,4 @@
-import { Button, FormGroup, HTMLSelect, InputGroup, Switch, Text } from '@blueprintjs/core'
+import { Button, Code, FormGroup, HTMLSelect, InputGroup, Switch, Text } from '@blueprintjs/core'
 import { navigate } from '../../state/pathname'
 import { useAppStore } from '../../store/useAppStore'
 import type { Language } from '../../types/app'
@@ -25,6 +25,9 @@ export type SettingsCopy = {
   adminModeLabel: string
   adminModeWarning: string
   auditLinkLabel: string
+  devModeLabel: string
+  devModeHelper: string
+  devEnvTitle: string
 }
 
 export const SettingsPopoverContent = ({ copy }: { copy: SettingsCopy }) => {
@@ -39,6 +42,9 @@ export const SettingsPopoverContent = ({ copy }: { copy: SettingsCopy }) => {
   const setTheme = useAppStore((state) => state.setTheme)
   const adminMode = useAppStore((state) => state.adminMode)
   const setAdminMode = useAppStore((state) => state.setAdminMode)
+  const devMode = useAppStore((state) => state.devMode)
+  const setDevMode = useAppStore((state) => state.setDevMode)
+  const accessToken = useAppStore((state) => state.accessToken)
   const project = context.project
 
   return (
@@ -65,20 +71,6 @@ export const SettingsPopoverContent = ({ copy }: { copy: SettingsCopy }) => {
         />
       </FormGroup>
 
-      <FormGroup label={copy.tokenLabel} helperText={copy.tokenHelper}>
-        <InputGroup
-          type="password"
-          placeholder={copy.tokenPlaceholder}
-          value={adminToken}
-          onChange={(event) => setAdminToken(event.currentTarget.value)}
-        />
-      </FormGroup>
-
-      <Switch
-        checked={rememberToken}
-        label={copy.rememberTokenLabel}
-        onChange={(event) => setRememberToken((event.currentTarget as HTMLInputElement).checked)}
-      />
       <Switch
         checked={theme === 'dark'}
         label={copy.darkModeLabel}
@@ -87,6 +79,7 @@ export const SettingsPopoverContent = ({ copy }: { copy: SettingsCopy }) => {
       <Text className="muted small" style={{ marginBottom: 8 }}>
         {copy.themeHelper}
       </Text>
+
       <Switch
         checked={adminMode}
         label={copy.adminModeLabel}
@@ -107,6 +100,58 @@ export const SettingsPopoverContent = ({ copy }: { copy: SettingsCopy }) => {
         }}
         disabled={!project}
       />
+
+      <div style={{ borderTop: '1px solid var(--pt-divider-black, rgba(17,20,24,.15))', marginTop: 12, paddingTop: 12 }}>
+        <Switch
+          checked={devMode}
+          label={copy.devModeLabel}
+          onChange={(event) => setDevMode((event.currentTarget as HTMLInputElement).checked)}
+        />
+        <Text className="muted small" style={{ marginBottom: 8 }}>
+          {copy.devModeHelper}
+        </Text>
+
+        {devMode && (
+          <div style={{ marginTop: 8 }}>
+            <FormGroup label={copy.tokenLabel} helperText={copy.tokenHelper}>
+              <InputGroup
+                type="password"
+                placeholder={copy.tokenPlaceholder}
+                value={adminToken}
+                onChange={(event) => setAdminToken(event.currentTarget.value)}
+              />
+            </FormGroup>
+
+            <Switch
+              checked={rememberToken}
+              label={copy.rememberTokenLabel}
+              onChange={(event) => setRememberToken((event.currentTarget as HTMLInputElement).checked)}
+            />
+
+            <Text className="sidebar-title" style={{ marginTop: 12, marginBottom: 8 }}>
+              {copy.devEnvTitle}
+            </Text>
+            <div style={{ fontSize: 11, lineHeight: '18px', fontFamily: 'monospace' }}>
+              <div>
+                <span className="muted">Auth: </span>
+                <Code>{accessToken ? 'JWT' : adminToken ? 'Admin Token' : 'None'}</Code>
+              </div>
+              <div>
+                <span className="muted">Project: </span>
+                <Code>{project ?? '(none)'}</Code>
+              </div>
+              <div>
+                <span className="muted">Branch: </span>
+                <Code>{context.branch}</Code>
+              </div>
+              <div>
+                <span className="muted">BFF: </span>
+                <Code>{window.location.origin}/api</Code>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

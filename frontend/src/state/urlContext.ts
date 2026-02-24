@@ -36,7 +36,12 @@ const buildProjectPath = (currentPath: string, project: string) => {
     const rest = segments.slice(2).join('/')
     return `/db/${encodeURIComponent(project)}${rest ? `/${rest}` : '/overview'}`
   }
-  return `/db/${encodeURIComponent(project)}/overview`
+  // Only redirect to /db/ overview from root or empty path
+  if (segments.length === 0) {
+    return `/db/${encodeURIComponent(project)}/overview`
+  }
+  // Preserve non-db paths (e.g. /operations/tasks, /connections, /ai)
+  return currentPath
 }
 
 export const writeUrlContext = (

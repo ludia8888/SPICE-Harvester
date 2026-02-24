@@ -5,11 +5,11 @@ sidebar_position: 2
 
 # Authentication Flow
 
-This guide walks integration developers through SPICE Harvester's authentication and authorization mechanisms. You will learn how the auth middleware works, the supported authentication strategies, and best practices for securing your integrations.
+This guide walks integration developers through Spice OS's authentication and authorization mechanisms. You will learn how the auth middleware works, the supported authentication strategies, and best practices for securing your integrations.
 
 ## Overview
 
-SPICE Harvester's BFF service enforces authentication on all API requests through a middleware layer. The middleware extracts credentials from HTTP headers, validates them against configured strategies, and attaches a **UserPrincipal** to the request context.
+Spice OS's BFF service enforces authentication on all API requests through a middleware layer. The middleware extracts credentials from HTTP headers, validates them against configured strategies, and attaches a **UserPrincipal** to the request context.
 
 ```
 Client Request
@@ -186,7 +186,7 @@ The `UserPrincipal.scopes()` method parses OAuth scopes from OIDC claims. It sup
 
 ### Platform API Scopes
 
-SPICE Harvester defines 8 platform API scopes for fine-grained access control:
+Spice OS defines 8 platform API scopes for fine-grained access control:
 
 | Scope | Description |
 |-------|-------------|
@@ -259,7 +259,7 @@ X-Job-ID: job-12345
 
 ## Multi-Tenant Isolation
 
-SPICE Harvester supports multi-tenant deployments with per-tenant data isolation:
+Spice OS supports multi-tenant deployments with per-tenant data isolation:
 
 1. **Tenant extraction** -- tenant ID is extracted from the JWT `tenant_id` claim
 2. **Fallback** -- if no tenant ID is present, defaults to `"default"`

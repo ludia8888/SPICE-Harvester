@@ -5,11 +5,11 @@ sidebar_position: 2
 
 # Role-Based Access Control (RBAC)
 
-This guide walks platform administrators through configuring role-based access control in SPICE Harvester. You will learn how the authorization model works, how to manage users and roles, and how to scope permissions to specific resources.
+This guide walks platform administrators through configuring role-based access control in Spice OS. You will learn how the authorization model works, how to manage users and roles, and how to scope permissions to specific resources.
 
 ## Authorization Model
 
-SPICE Harvester uses a layered authorization model:
+Spice OS uses a layered authorization model:
 
 ```
 User → Roles → Permissions → Resources
@@ -22,7 +22,7 @@ User → Roles → Permissions → Resources
 
 ## Authentication Strategies
 
-SPICE Harvester supports multiple authentication methods, each of which maps to an authorization context:
+Spice OS supports multiple authentication methods, each of which maps to an authorization context:
 
 | Strategy | Principal Source | Roles Source |
 |----------|----------------|-------------|
@@ -120,7 +120,7 @@ Restrict allowed operations:
 
 ## Platform API Scopes
 
-SPICE Harvester enforces **OAuth-style scopes** on v2 API endpoints. Scopes are extracted from the JWT `scope` or `scp` claim and checked at the endpoint level using the `require_scopes` dependency.
+Spice OS enforces **OAuth-style scopes** on v2 API endpoints. Scopes are extracted from the JWT `scope` or `scp` claim and checked at the endpoint level using the `require_scopes` dependency.
 
 | Scope | Grants Access To |
 |-------|-----------------|
@@ -145,7 +145,7 @@ When a principal lacks a required scope, the API returns:
 
 ## Agent Tool Policies
 
-For AI agent integrations, SPICE Harvester provides granular **tool policies** that restrict what each agent tool can access:
+For AI agent integrations, Spice OS provides granular **tool policies** that restrict what each agent tool can access:
 
 ```json
 {
@@ -203,7 +203,7 @@ JWT_JWKS_URL=https://your-idp.com/.well-known/jwks.json
 
 ## Multi-Tenant Isolation
 
-SPICE Harvester supports multi-tenant deployments:
+Spice OS supports multi-tenant deployments:
 
 1. **Tenant ID** is extracted from JWT `tenant_id` claim
 2. All database queries are automatically scoped to the tenant
@@ -244,7 +244,7 @@ docker compose logs bff | grep "X-User-ID: user-123"
 ### OIDC/SAML Setup
 
 1. **Configure your IdP** (Okta, Auth0, Azure AD, Keycloak):
-   - Create a SPICE Harvester application
+   - Create a Spice OS application
    - Set callback URL to your BFF service
    - Configure JWT claims to include `sub`, `roles`, `tenant_id`
 

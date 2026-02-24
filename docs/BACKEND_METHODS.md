@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-24T01:04:18+09:00
+> Generated: 2026-02-24T03:27:11+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -413,18 +413,18 @@
 
 ### `backend/bff/routers/auth.py`
 - **Functions**
-  - `_jwt_secret()` (line 59): no docstring
-  - `_build_access_token(user, ttl)` (line 67): no docstring
-  - `_build_refresh_token(user, ttl)` (line 87): no docstring
-  - `_decode_token(token, expected_type)` (line 98): Decode and validate a JWT. Raises HTTPException on failure.
-  - `async login(body)` (line 131): Authenticate with username/password and receive JWT tokens.
-  - `async refresh(body)` (line 165): Exchange a refresh token for a new access token.
-  - `async me(request)` (line 194): Return current authenticated user info from the request principal.
+  - `_jwt_secret()` (line 60): no docstring
+  - `_build_access_token(user, ttl)` (line 68): no docstring
+  - `_build_refresh_token(user, ttl)` (line 88): no docstring
+  - `_decode_token(token, expected_type)` (line 99): Decode and validate a JWT. Raises HTTPException on failure.
+  - `async login(body)` (line 132): Authenticate with username/password and receive JWT tokens.
+  - `async refresh(body)` (line 175): Exchange a refresh token for a new access token.
+  - `async me(request)` (line 204): Return current authenticated user info from the request principal.
 - **Classes**
   - `LoginRequest` (line 30): no docstring
   - `TokenResponse` (line 35): no docstring
-  - `RefreshRequest` (line 42): no docstring
-  - `UserMeResponse` (line 46): no docstring
+  - `RefreshRequest` (line 43): no docstring
+  - `UserMeResponse` (line 47): no docstring
 
 ### `backend/bff/routers/ci_webhooks.py`
 - **Functions**
@@ -1548,14 +1548,14 @@
   - `_coerce_db_entry(entry)` (line 71): no docstring
   - `_database_not_found_policy(db_name)` (line 85): no docstring
   - `_enrich_db_entry(entry, actor_type, actor_id, actor_name, access_rows)` (line 93): no docstring
-  - `async list_databases(request, oms, dataset_registry)` (line 140): 데이터베이스 목록 조회
-  - `async create_database(body, http_request, oms)` (line 195): 데이터베이스 생성
-  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 279): 데이터베이스 삭제
-  - `async get_database(db_name, oms)` (line 355): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 379): Resolve the current `expected_seq` for database (aggregate) operations.
-  - `async list_classes(db_name, type, limit, oms)` (line 403): 데이터베이스의 클래스 목록 조회
-  - `async create_class(db_name, class_data, oms)` (line 455): 데이터베이스에 새 클래스 생성
-  - `async get_class(db_name, class_id, oms)` (line 523): 특정 클래스 조회
+  - `async list_databases(request, oms, dataset_registry)` (line 142): 데이터베이스 목록 조회
+  - `async create_database(body, http_request, oms)` (line 197): 데이터베이스 생성
+  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 281): 데이터베이스 삭제
+  - `async get_database(db_name, oms)` (line 357): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 381): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_classes(db_name, type, limit, oms)` (line 405): 데이터베이스의 클래스 목록 조회
+  - `async create_class(db_name, class_data, oms)` (line 457): 데이터베이스에 새 클래스 생성
+  - `async get_class(db_name, class_id, oms)` (line 525): 특정 클래스 조회
 
 ### `backend/bff/services/dataset_ingest_commit_service.py`
 - **Functions**
@@ -6460,15 +6460,15 @@
   - `resolve_database_actor(headers)` (line 39): no docstring
   - `normalize_database_role(value)` (line 50): no docstring
   - `async fetch_database_access_entries(db_names)` (line 60): no docstring
-  - `async list_database_names()` (line 97): no docstring
-  - `async upsert_database_access_entry(db_name, principal_type, principal_id, principal_name, role)` (line 121): no docstring
-  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 160): no docstring
-  - `resolve_database_actor_with_name(headers)` (line 176): no docstring
-  - `async ensure_database_access_table(conn)` (line 182): no docstring
-  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 219): no docstring
-  - `async has_database_access_config(db_name)` (line 249): no docstring
-  - `async delete_database_access_entries(db_name)` (line 264): no docstring
-  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, require_env_key)` (line 278): no docstring
+  - `async list_database_names()` (line 98): no docstring
+  - `async upsert_database_access_entry(db_name, principal_type, principal_id, principal_name, role)` (line 122): no docstring
+  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 161): no docstring
+  - `resolve_database_actor_with_name(headers)` (line 177): no docstring
+  - `async ensure_database_access_table(conn)` (line 183): no docstring
+  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 220): no docstring
+  - `async has_database_access_config(db_name)` (line 250): no docstring
+  - `async delete_database_access_entries(db_name)` (line 265): no docstring
+  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, require_env_key)` (line 279): no docstring
 
 ### `backend/shared/security/input_sanitizer.py`
 - **Functions**

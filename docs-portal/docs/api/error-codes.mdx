@@ -5,7 +5,7 @@ sidebar_position: 9
 
 # Error Codes Reference
 
-SPICE Harvester defines 290+ structured error codes across all subsystems. This page documents the error format, naming conventions, severity levels, retry policies, and common error codes.
+Spice OS defines 290+ structured error codes across all subsystems. This page documents the error format, naming conventions, severity levels, retry policies, and common error codes.
 
 {/* The interactive ErrorTaxonomyHeatmap visualization will be embedded here */}
 
@@ -42,13 +42,13 @@ SHV-{SUBSYSTEM}-{DOMAIN}-{CLASS}-{NUMBER}
 
 | Segment | Description | Examples |
 |---------|-------------|---------|
-| `SHV` | Platform prefix (SPICE Harvester) | Always `SHV` |
+| `SHV` | Platform prefix (Spice OS) | Always `SHV` |
 | `SUBSYSTEM` | Service subsystem | `ONT`, `ACT`, `SRH`, `PIP`, `LIN`, `AUTH`, `SYS` |
 | `DOMAIN` | Functional domain | `OBJ`, `SCH`, `QRY`, `IDX`, `EVT`, `CFG` |
 | `CLASS` | Error classification | `VAL`, `NFD`, `CON`, `PRM`, `INT`, `TMO` |
 | `NUMBER` | Sequential number | `001`-`999` |
 
-**Example:** `SHV-ONT-OBJ-NFD-001` = SPICE Harvester, Ontology subsystem, Object domain, Not Found class, error #001.
+**Example:** `SHV-ONT-OBJ-NFD-001` = Spice OS, Ontology subsystem, Object domain, Not Found class, error #001.
 
 ## Subsystems
 

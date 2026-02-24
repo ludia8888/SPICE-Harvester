@@ -37,6 +37,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    admin_token: Optional[str] = None
 
 
 class RefreshRequest(BaseModel):
@@ -152,12 +153,21 @@ async def login(body: LoginRequest) -> TokenResponse:
     access_token = _build_access_token(user, access_ttl)
     refresh_token = _build_refresh_token(user, refresh_ttl)
 
+    # Return admin token for users with admin role so the frontend can
+    # auto-configure X-Admin-Token without a manual Settings step.
+    admin_token_value: Optional[str] = None
+    if "admin" in (user.roles or []):
+        tokens = auth.bff_expected_tokens
+        if tokens:
+            admin_token_value = tokens[0]
+
     logger.info("Login successful for user=%s", body.username)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
         expires_in=access_ttl,
+        admin_token=admin_token_value,
     )
 
 

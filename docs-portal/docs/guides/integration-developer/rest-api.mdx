@@ -5,11 +5,11 @@ sidebar_position: 1
 
 # REST API Integration
 
-This guide walks integration developers through building applications that consume the SPICE Harvester REST API. You will learn how to authenticate, query objects, execute actions, handle pagination, and implement robust error handling.
+This guide walks integration developers through building applications that consume the Spice OS REST API. You will learn how to authenticate, query objects, execute actions, handle pagination, and implement robust error handling.
 
 ## API Architecture
 
-SPICE Harvester exposes **264 REST endpoints** (109 v2 + 155 v1) through the BFF (Backend for Frontend) service, organized into several API families:
+Spice OS exposes **264 REST endpoints** (109 v2 + 155 v1) through the BFF (Backend for Frontend) service, organized into several API families:
 
 | API Family | Prefix | Description |
 |-----------|--------|-------------|
@@ -38,7 +38,7 @@ curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   http://localhost:8080/api/v2/ontologies
 ```
 
-SPICE Harvester supports multiple authentication strategies:
+Spice OS supports multiple authentication strategies:
 
 | Strategy | Header | Use Case |
 |----------|--------|----------|
@@ -204,7 +204,7 @@ Content-Type: application/json
 
 ### Search Operators
 
-SPICE Harvester supports **23 search operators**:
+Spice OS supports **23 search operators**:
 
 #### Comparison Operators
 
@@ -303,7 +303,7 @@ Request only the properties you need with `select`:
 
 ## Pagination
 
-SPICE Harvester uses **cursor-based pagination** with opaque page tokens.
+Spice OS uses **cursor-based pagination** with opaque page tokens.
 
 ### Paginating Through Results
 

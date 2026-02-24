@@ -682,12 +682,16 @@ const _tryTokenRefreshAndRedirect = async (): Promise<boolean> => {
 
 const bff2BuildHeaders = (language: Language, adminToken: string, json = false) => {
   const headers = new Headers({ 'Accept-Language': language })
-  // Prefer JWT access token over legacy admin token
-  const accessToken = useAppStore.getState().accessToken
-  if (accessToken) {
-    headers.set('Authorization', `Bearer ${accessToken}`)
-  } else if (adminToken) {
+  // Admin token takes priority — sending both causes JWT principal to
+  // override admin's full-scope principal in the backend middleware,
+  // breaking v2 API scope checks (api:ontologies-read etc.)
+  if (adminToken) {
     headers.set('X-Admin-Token', adminToken)
+  } else {
+    const accessToken = useAppStore.getState().accessToken
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`)
+    }
   }
   if (json) {
     headers.set('Content-Type', 'application/json')
@@ -701,6 +705,18 @@ const bff2ParseJson = async (response: Response) => {
   } catch {
     return null
   }
+}
+
+/** v1 ApiResponse 엔벨로프 { status, message, data } 를 언래핑.
+ *  엔벨로프가 아니면 (v2, 배열 등) 그대로 반환. */
+function unwrapApiResponse<T>(payload: unknown): T | null {
+  if (payload == null) return null
+  if (typeof payload !== 'object' || Array.isArray(payload)) return payload as T
+  const rec = payload as Record<string, unknown>
+  if (typeof rec.status === 'string' && 'data' in rec && rec.data != null && typeof rec.data === 'object') {
+    return rec.data as T
+  }
+  return payload as T
 }
 
 const parseCsvText = (text: string): string[][] => {
@@ -864,8 +880,13 @@ const bff2DbContextHeaders = (dbName?: string): HeadersInit | undefined => {
   }
 }
 
+export type DatabaseEntry = {
+  name: string
+  created_at?: string | null
+}
+
 type Bff2DatabaseListResponse = {
-  data?: { databases?: Array<{ name?: string }> }
+  data?: { databases?: Array<{ name?: string; created_at?: string | null } | string> }
 }
 
 type Bff2AcceptedContract = {
@@ -892,19 +913,23 @@ export type CommandResult = {
   retry_count?: number
 }
 
-export const listDatabasesCtx = async (context: RequestContext): Promise<string[]> => {
+export const listDatabasesCtx = async (context: RequestContext): Promise<DatabaseEntry[]> => {
   const { payload } = await bff2RequestJson<Bff2DatabaseListResponse>(
     'databases',
     { method: 'GET' },
     context,
   )
 
-  const names =
-    payload?.data?.databases
-      ?.map((db) => db?.name)
-      .filter((name): name is string => Boolean(name)) ?? []
-
-  return names
+  const raw = payload?.data?.databases ?? []
+  return raw
+    .map((entry): DatabaseEntry | null => {
+      if (typeof entry === 'string') return { name: entry, created_at: null }
+      if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+        return { name: entry.name, created_at: entry.created_at ?? null }
+      }
+      return null
+    })
+    .filter((e): e is DatabaseEntry => e !== null)
 }
 
 export const openDatabase = async (context: RequestContext, dbName: string) => {
@@ -1082,7 +1107,9 @@ export const listPipelines = async (
     { db_name: params.db_name, branch: params.branch },
   )
   if (Array.isArray(payload)) return payload
-  return (payload as PipelineListPayload)?.pipelines ?? []
+  const inner = unwrapApiResponse<PipelineListPayload>(payload)
+  if (Array.isArray(inner)) return inner as PipelineRecord[]
+  return (inner as PipelineListPayload)?.pipelines ?? []
 }
 
 export const createPipeline = async (
@@ -1101,8 +1128,9 @@ export const createPipeline = async (
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  if (payload && 'pipeline_id' in payload) return payload as PipelineRecord
-  return (payload as PipelineCreatePayload)?.pipeline ?? { pipeline_id: '', db_name: input.db_name, name: input.name, pipeline_type: input.pipeline_type ?? 'transform' }
+  const unwrapped = unwrapApiResponse<PipelineCreatePayload | PipelineRecord>(payload) ?? payload
+  if (unwrapped && typeof unwrapped === 'object' && 'pipeline_id' in unwrapped) return unwrapped as PipelineRecord
+  return (unwrapped as PipelineCreatePayload)?.pipeline ?? { pipeline_id: '', db_name: input.db_name, name: input.name, pipeline_type: input.pipeline_type ?? 'transform' }
 }
 
 export const getPipeline = async (
@@ -1114,8 +1142,9 @@ export const getPipeline = async (
     { method: 'GET' },
     context,
   )
-  if (payload && 'pipeline_id' in payload) return payload as PipelineDetailRecord
-  return (payload as PipelineGetPayload)?.pipeline ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
+  const unwrapped = unwrapApiResponse<PipelineGetPayload | PipelineDetailRecord>(payload) ?? payload
+  if (unwrapped && typeof unwrapped === 'object' && 'pipeline_id' in unwrapped) return unwrapped as PipelineDetailRecord
+  return (unwrapped as PipelineGetPayload)?.pipeline ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
 }
 
 export const updatePipeline = async (
@@ -1133,7 +1162,8 @@ export const updatePipeline = async (
     { method: 'PUT', body: JSON.stringify(input) },
     context,
   )
-  return payload ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
+  const unwrapped = unwrapApiResponse<PipelineRecord>(payload) ?? payload
+  return (unwrapped as PipelineRecord) ?? { pipeline_id: pipelineId, db_name: '', name: '', pipeline_type: '' }
 }
 
 export const deletePipeline = async (
@@ -1156,7 +1186,7 @@ export const getPipelineReadiness = async (
     { method: 'GET' },
     context,
   )
-  return (payload ?? {}) as PipelineReadiness
+  return (unwrapApiResponse<PipelineReadiness>(payload) ?? {}) as PipelineReadiness
 }
 
 export const previewPipeline = async (
@@ -1169,7 +1199,7 @@ export const previewPipeline = async (
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
   )
-  return payload ?? {}
+  return (unwrapApiResponse<Record<string, unknown>>(payload) ?? {}) as Record<string, unknown>
 }
 
 export const buildPipeline = async (
@@ -1182,7 +1212,7 @@ export const buildPipeline = async (
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
   )
-  return payload ?? { task_id: '' }
+  return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
 }
 
 export const deployPipeline = async (
@@ -1195,7 +1225,7 @@ export const deployPipeline = async (
     { method: 'POST', body: JSON.stringify(input ?? {}) },
     context,
   )
-  return payload ?? { task_id: '' }
+  return (unwrapApiResponse<{ task_id: string }>(payload) ?? { task_id: '' }) as { task_id: string }
 }
 
 export const listPipelineRuns = async (
@@ -1208,7 +1238,9 @@ export const listPipelineRuns = async (
     context,
   )
   if (Array.isArray(payload)) return payload
-  return (payload as PipelineArtifactListPayload)?.artifacts ?? []
+  const inner = unwrapApiResponse<PipelineArtifactListPayload>(payload)
+  if (Array.isArray(inner)) return inner as PipelineArtifactRecord[]
+  return (inner as PipelineArtifactListPayload)?.artifacts ?? (inner as any)?.runs ?? []
 }
 
 export const listPipelineArtifacts = async (
@@ -1221,7 +1253,9 @@ export const listPipelineArtifacts = async (
     context,
   )
   if (Array.isArray(payload)) return payload
-  return (payload as PipelineArtifactListPayload)?.artifacts ?? []
+  const inner = unwrapApiResponse<PipelineArtifactListPayload>(payload)
+  if (Array.isArray(inner)) return inner as PipelineArtifactRecord[]
+  return (inner as PipelineArtifactListPayload)?.artifacts ?? []
 }
 
 export const getTaskStatus = async (
@@ -1233,7 +1267,7 @@ export const getTaskStatus = async (
     { method: 'GET' },
     context,
   )
-  return payload ?? {}
+  return (unwrapApiResponse<Record<string, unknown>>(payload) ?? {}) as Record<string, unknown>
 }
 
 /* ── Pipeline Datasets (v1, non-blocked endpoints + v2 wrappers) ──── */
@@ -1241,14 +1275,17 @@ export const getTaskStatus = async (
 export const listPipelineDatasets = async (
   context: RequestContext,
   params: { db_name?: string; branch?: string },
-) => {
+): Promise<DatasetRecord[]> => {
   const { payload } = await bff2RequestJson<PipelineListPayload | DatasetRecord[]>(
     'pipelines/datasets',
     { method: 'GET' },
     context,
     { db_name: params.db_name, branch: params.branch },
   )
-  return payload ?? []
+  if (Array.isArray(payload)) return payload as DatasetRecord[]
+  const inner = unwrapApiResponse<{ datasets?: DatasetRecord[] }>(payload)
+  if (Array.isArray(inner)) return inner as DatasetRecord[]
+  return (inner as { datasets?: DatasetRecord[] })?.datasets ?? []
 }
 
 export const createPipelineDataset = async (
@@ -1260,49 +1297,41 @@ export const createPipelineDataset = async (
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload ?? {}
+  return unwrapApiResponse<DatasetRecord>(payload) ?? {}
 }
 
 export const uploadCsvDataset = async (
   context: RequestContext,
   input: { db_name: string; name: string; branch?: string; file: File },
 ): Promise<DatasetUploadResult> => {
-  const ds = await createDatasetV2(context, { dbName: input.db_name, name: input.name })
-  const txn = await createDatasetTransactionV2(context, ds.rid, {
-    dbName: input.db_name,
-    transactionType: 'APPEND',
-  })
-  await uploadDatasetFileV2(context, ds.rid, {
-    filePath: input.file.name,
-    content: input.file,
-    branchName: input.branch ?? 'master',
-    transactionRid: txn.rid,
-    contentType: 'text/csv',
-    dbName: input.db_name,
-  })
-  await commitDatasetTransactionV2(context, ds.rid, txn.rid, { dbName: input.db_name })
-  return { dataset: ds as unknown as DatasetRecord }
+  const form = new FormData()
+  form.append('file', input.file)
+  form.append('dataset_name', input.name)
+  const { payload } = await bff2RequestJson<DatasetUploadResult>(
+    'pipelines/datasets/csv-upload',
+    { method: 'POST', body: form },
+    context,
+    { db_name: input.db_name, branch: input.branch ?? 'main' },
+    { 'Idempotency-Key': crypto.randomUUID() },
+  )
+  return payload ?? { dataset: {} as DatasetRecord }
 }
 
 export const uploadExcelDataset = async (
   context: RequestContext,
   input: { db_name: string; name: string; branch?: string; file: File },
 ): Promise<DatasetUploadResult> => {
-  const ds = await createDatasetV2(context, { dbName: input.db_name, name: input.name })
-  const txn = await createDatasetTransactionV2(context, ds.rid, {
-    dbName: input.db_name,
-    transactionType: 'APPEND',
-  })
-  await uploadDatasetFileV2(context, ds.rid, {
-    filePath: input.file.name,
-    content: input.file,
-    branchName: input.branch ?? 'master',
-    transactionRid: txn.rid,
-    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    dbName: input.db_name,
-  })
-  await commitDatasetTransactionV2(context, ds.rid, txn.rid, { dbName: input.db_name })
-  return { dataset: ds as unknown as DatasetRecord }
+  const form = new FormData()
+  form.append('file', input.file)
+  form.append('dataset_name', input.name)
+  const { payload } = await bff2RequestJson<DatasetUploadResult>(
+    'pipelines/datasets/excel-upload',
+    { method: 'POST', body: form },
+    context,
+    { db_name: input.db_name, branch: input.branch ?? 'main' },
+    { 'Idempotency-Key': crypto.randomUUID() },
+  )
+  return payload ?? { dataset: {} as DatasetRecord }
 }
 
 export const getPipelineDatasetRawFile = async (
@@ -1314,7 +1343,7 @@ export const getPipelineDatasetRawFile = async (
     { method: 'GET' },
     context,
   )
-  return payload ?? { dataset_id: datasetId, filename: '', content: '', content_type: '', encoding: 'utf-8' as const }
+  return (unwrapApiResponse<DatasetRawFile>(payload) ?? { dataset_id: datasetId, filename: '', content: '', content_type: '', encoding: 'utf-8' as const }) as DatasetRawFile
 }
 
 export const getPipelineDatasetIngestRequest = async (
@@ -1326,7 +1355,7 @@ export const getPipelineDatasetIngestRequest = async (
     { method: 'GET' },
     context,
   )
-  return payload ?? { ingest_request_id: '', dataset_id: datasetId, db_name: '' }
+  return (unwrapApiResponse<DatasetIngestRequestRecord>(payload) ?? { ingest_request_id: '', dataset_id: datasetId, db_name: '' }) as DatasetIngestRequestRecord
 }
 
 export const approvePipelineDatasetSchema = async (

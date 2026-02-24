@@ -2,15 +2,11 @@ import { useMemo, useState } from 'react'
 import {
   Alignment,
   Button,
-  Card,
   Navbar,
   NavbarGroup,
-  NavbarHeading,
   Tag,
-  Text,
 } from '@blueprintjs/core'
-import { SidebarRail } from './components/layout/SidebarRail'
-import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
+import { LeftNavBar } from './components/layout/LeftNavBar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { CommandTrackerDrawer } from './commands/CommandTrackerDrawer'
 import { useCommandTracker } from './commands/useCommandTracker'
@@ -21,25 +17,48 @@ import { usePathname } from './state/usePathname'
 import { navigate } from './state/pathname'
 import './App.css'
 
-type NavItem = {
+import type { IconName } from '@blueprintjs/icons'
+
+/* ── LNB types ── */
+
+export type LnbChildItem = {
+  id: string
   label: string
   path: string
   match?: string
+  requiresProject?: boolean
 }
 
-type NavSection = {
+export type LnbItem = {
+  id: string
+  icon: IconName
+  label: string
+  path: string
+  match?: string
+  requiresProject?: boolean
+  children?: LnbChildItem[]
+}
+
+export type LnbGroup = {
+  id: 'workspace' | 'builder' | 'admin'
   title: string
-  items: NavItem[]
+  items: LnbItem[]
+  position: 'top' | 'bottom'
 }
 
 type Copy = (typeof copyByLang)[keyof typeof copyByLang]
 
 const copyByLang = {
   en: {
-    appTitle: 'SPICE Harvester',
+    appTitle: 'Spice OS',
+    groups: {
+      workspace: 'Workspace',
+      builder: 'Builder',
+      admin: 'Admin',
+    },
     nav: {
-      databases: 'Databases',
-      connections: 'Connections',
+      databases: 'Projects',
+      connections: 'Data Sources',
       overview: 'Overview',
       datasets: 'Datasets',
       pipelines: 'Pipelines',
@@ -61,28 +80,12 @@ const copyByLang = {
       ai: 'AI Assistant',
       commands: 'Commands',
       settings: 'Settings',
-      project: 'Project',
-      branch: 'Branch',
       adminMode: 'Admin mode',
       noProject: 'No project selected',
+      jobMonitor: 'Job Monitor',
+      profileAuth: 'Profile & Auth',
+      selectProject: 'Select a project first',
     },
-    sections: {
-      context: 'Context',
-      flow: 'Flow',
-      navigation: 'Navigation',
-      data: 'Data',
-      ontology: 'Ontology',
-      explore: 'Explore',
-      observe: 'Observe',
-      develop: 'Develop',
-      ops: 'Operations',
-    },
-    steps: [
-      { id: 1, title: 'Project setup', description: 'Create or select a project' },
-      { id: 2, title: 'Data ingest', description: 'Ingest and validate source datasets' },
-      { id: 3, title: 'Ontology', description: 'Define classes and relationships' },
-      { id: 4, title: 'Mappings', description: 'Connect source fields' },
-    ],
     commandDrawer: {
       title: 'Command Tracker',
       tabs: {
@@ -135,13 +138,21 @@ const copyByLang = {
       adminModeLabel: 'Admin mode (dangerous actions)',
       adminModeWarning: 'Admin mode enables irreversible operations. Proceed carefully.',
       auditLinkLabel: 'Open recent audit logs',
+      devModeLabel: 'Developer mode',
+      devModeHelper: 'Show token override, environment info, and debug options.',
+      devEnvTitle: 'Environment',
     },
   },
   ko: {
-    appTitle: 'SPICE Harvester',
+    appTitle: 'Spice OS',
+    groups: {
+      workspace: '워크스페이스',
+      builder: '빌더',
+      admin: '관리',
+    },
     nav: {
       databases: '프로젝트',
-      connections: '연결',
+      connections: '데이터 소스',
       overview: '요약',
       datasets: '데이터셋',
       pipelines: '파이프라인',
@@ -163,28 +174,12 @@ const copyByLang = {
       ai: 'AI 어시스턴트',
       commands: '커맨드',
       settings: '설정',
-      project: '프로젝트',
-      branch: '브랜치',
       adminMode: '관리자 모드',
       noProject: '선택된 프로젝트 없음',
+      jobMonitor: '작업 모니터',
+      profileAuth: '프로필 및 인증',
+      selectProject: '프로젝트를 먼저 선택하세요',
     },
-    sections: {
-      context: '컨텍스트',
-      flow: '진행 흐름',
-      navigation: '내비게이션',
-      data: '데이터',
-      ontology: '온톨로지',
-      explore: '탐색',
-      observe: '관측',
-      develop: '개발',
-      ops: '운영',
-    },
-    steps: [
-      { id: 1, title: '프로젝트 설정', description: '프로젝트 생성 또는 선택' },
-      { id: 2, title: '데이터 적재', description: '원본 데이터셋 적재 및 검증' },
-      { id: 3, title: '온톨로지', description: '클래스와 관계 정의' },
-      { id: 4, title: '매핑', description: '소스 필드 연결' },
-    ],
     commandDrawer: {
       title: '커맨드 트래커',
       tabs: {
@@ -237,113 +232,200 @@ const copyByLang = {
       adminModeLabel: '관리자 모드(위험 작업)',
       adminModeWarning: '관리자 모드는 되돌릴 수 없는 작업을 허용합니다.',
       auditLinkLabel: '최근 감사 로그 열기',
+      devModeLabel: '개발자 모드',
+      devModeHelper: '토큰 재설정, 환경 정보, 디버그 옵션을 표시합니다.',
+      devEnvTitle: '환경 정보',
     },
   },
 } as const
 
-const getNavSections = (project: string | null, copy: Copy) => {
-  if (!project) {
-    return [
-      {
-        title: copy.sections.navigation,
-        items: [
-          { label: copy.nav.databases, path: '/' },
-          { label: copy.nav.connections, path: '/connections', match: '/connections' },
-          { label: copy.nav.ai, path: '/ai', match: '/ai' },
-          { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
-          { label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' },
-          { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
-        ],
-      },
-    ] as NavSection[]
-  }
+const getLnbGroups = (project: string | null, copy: Copy): LnbGroup[] => {
+  const base = project ? `/db/${encodeURIComponent(project)}` : null
+  const p = (suffix: string) => (base ? `${base}${suffix}` : '')
 
-  const base = `/db/${encodeURIComponent(project)}`
   return [
     {
-      title: copy.sections.data,
+      id: 'workspace',
+      title: copy.groups.workspace,
+      position: 'top',
       items: [
-        { label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` },
-        { label: copy.nav.datasets, path: `${base}/datasets`, match: `${base}/datasets` },
-        { label: copy.nav.pipelines, path: `${base}/pipelines`, match: `${base}/pipelines` },
-        { label: copy.nav.objectify, path: `${base}/objectify`, match: `${base}/objectify` },
+        {
+          id: 'databases',
+          icon: 'folder-close',
+          label: copy.nav.databases,
+          path: '/',
+          requiresProject: false,
+        },
+        {
+          id: 'overview',
+          icon: 'home',
+          label: copy.nav.overview,
+          path: p('/overview'),
+          match: base ? `${base}/overview` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'object-explorer',
+          icon: 'search',
+          label: copy.nav.objectExplorer,
+          path: p('/explore/objects'),
+          match: base ? `${base}/explore/objects` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'graph-network',
+          icon: 'graph',
+          label: copy.nav.graph,
+          path: p('/explore/graph'),
+          match: base ? `${base}/explore/graph` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'action-center',
+          icon: 'take-action',
+          label: copy.nav.actions,
+          path: p('/actions'),
+          match: base ? `${base}/actions` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'query-builder',
+          icon: 'console',
+          label: copy.nav.query,
+          path: p('/explore/query'),
+          match: base ? `${base}/explore/query` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'data-analysis',
+          icon: 'chart',
+          label: copy.nav.dataAnalysis,
+          path: p('/analyze'),
+          match: base ? `${base}/analyze` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'audit',
+          icon: 'history',
+          label: copy.nav.audit,
+          path: p('/audit'),
+          match: base ? `${base}/audit` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'lineage',
+          icon: 'data-lineage',
+          label: copy.nav.lineage,
+          path: p('/lineage'),
+          match: base ? `${base}/lineage` : undefined,
+          requiresProject: true,
+        },
       ],
     },
     {
-      title: copy.sections.ontology,
+      id: 'builder',
+      title: copy.groups.builder,
+      position: 'top',
       items: [
-        { label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` },
-        { label: copy.nav.actions, path: `${base}/actions`, match: `${base}/actions` },
-        { label: copy.nav.governance, path: `${base}/governance`, match: `${base}/governance` },
-        { label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` },
+        {
+          id: 'connections',
+          icon: 'data-connection',
+          label: copy.nav.connections,
+          path: '/connections',
+          match: '/connections',
+          requiresProject: false,
+        },
+        {
+          id: 'pipelines',
+          icon: 'flow-linear',
+          label: copy.nav.pipelines,
+          path: p('/pipelines'),
+          match: base ? `${base}/pipelines` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'objectify',
+          icon: 'cube',
+          label: copy.nav.objectify,
+          path: p('/objectify'),
+          match: base ? `${base}/objectify` : undefined,
+          requiresProject: true,
+        },
+        {
+          id: 'ontology-manager',
+          icon: 'diagram-tree',
+          label: copy.nav.ontology,
+          path: p('/ontology'),
+          match: base ? `${base}/ontology` : undefined,
+          requiresProject: true,
+          children: [
+            { id: 'ontology', label: copy.nav.ontology, path: p('/ontology'), match: base ? `${base}/ontology` : undefined, requiresProject: true },
+            { id: 'mappings', label: copy.nav.mappings, path: p('/mappings'), match: base ? `${base}/mappings` : undefined, requiresProject: true },
+            { id: 'instances', label: copy.nav.instances, path: p('/instances'), match: base ? `${base}/instances` : undefined, requiresProject: true },
+            { id: 'governance', label: copy.nav.governance, path: p('/governance'), match: base ? `${base}/governance` : undefined, requiresProject: true },
+          ],
+        },
+        {
+          id: 'ai',
+          icon: 'lightbulb',
+          label: copy.nav.ai,
+          path: '/ai',
+          match: '/ai',
+          requiresProject: false,
+        },
       ],
     },
     {
-      title: copy.sections.explore,
+      id: 'admin',
+      title: copy.groups.admin,
+      position: 'bottom',
       items: [
-        { label: copy.nav.objectExplorer, path: `${base}/explore/objects`, match: `${base}/explore/objects` },
-        { label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` },
-        { label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` },
-        { label: copy.nav.dataAnalysis, path: `${base}/analyze`, match: `${base}/analyze` },
+        {
+          id: 'job-monitor',
+          icon: 'timeline-events',
+          label: copy.nav.jobMonitor,
+          path: '/operations/tasks',
+          match: '/operations',
+          requiresProject: false,
+          children: [
+            { id: 'tasks', label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
+            { id: 'scheduler', label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' },
+          ],
+        },
+        {
+          id: 'settings',
+          icon: 'cog',
+          label: copy.nav.settings,
+          path: '__settings__',
+          requiresProject: false,
+        },
+        {
+          id: 'profile',
+          icon: 'user',
+          label: copy.nav.profileAuth,
+          path: '/operations/admin',
+          match: '/operations/admin',
+          requiresProject: false,
+        },
       ],
     },
-    {
-      title: copy.sections.observe,
-      items: [
-        { label: copy.nav.audit, path: `${base}/audit`, match: `${base}/audit` },
-        { label: copy.nav.lineage, path: `${base}/lineage`, match: `${base}/lineage` },
-      ],
-    },
-    {
-      title: copy.sections.develop,
-      items: [
-        { label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` },
-      ],
-    },
-    {
-      title: copy.sections.ops,
-      items: [
-        { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
-        { label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' },
-        { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
-        { label: copy.nav.ai, path: '/ai', match: '/ai' },
-      ],
-    },
-  ] as NavSection[]
+  ]
 }
 
-const getRailItems = (
-  project: string | null,
-  pathname: string,
-  copy: Copy,
-) => {
-  const items = [] as Array<{ icon: string; label: string; path: string; match?: string }>
-
-  if (!project) {
-    items.push({ icon: 'database', label: copy.nav.databases, path: '/' })
-    items.push({ icon: 'data-connection', label: copy.nav.connections, path: '/connections', match: '/connections' })
-    items.push({ icon: 'lightbulb', label: copy.nav.ai, path: '/ai', match: '/ai' })
-    items.push({ icon: 'timeline-events', label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' })
-    items.push({ icon: 'time', label: copy.nav.scheduler, path: '/operations/scheduler', match: '/operations/scheduler' })
-    items.push({ icon: 'shield', label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' })
-  } else {
-    const base = `/db/${encodeURIComponent(project)}`
-    items.push({ icon: 'home', label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` })
-    items.push({ icon: 'th', label: copy.nav.datasets, path: `${base}/datasets`, match: `${base}/datasets` })
-    items.push({ icon: 'data-lineage', label: copy.nav.pipelines, path: `${base}/pipelines`, match: `${base}/pipelines` })
-    items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
-    items.push({ icon: 'search', label: copy.nav.objectExplorer, path: `${base}/explore/objects`, match: `${base}/explore/objects` })
-    items.push({ icon: 'chart', label: copy.nav.dataAnalysis, path: `${base}/analyze`, match: `${base}/analyze` })
-    items.push({ icon: 'graph', label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` })
-    items.push({ icon: 'lock', label: copy.nav.governance, path: `${base}/governance`, match: `${base}/governance` })
+const findActiveLabel = (groups: LnbGroup[], pathname: string): string | null => {
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (item.children) {
+        for (const child of item.children) {
+          const active = child.match ? pathname.startsWith(child.match) : pathname === child.path
+          if (active) return child.label
+        }
+      }
+      const active = item.match ? pathname.startsWith(item.match) : pathname === item.path
+      if (active) return item.label
+    }
   }
-
-  return items.map((item) => ({
-    icon: item.icon,
-    label: item.label,
-    active: item.match ? pathname.startsWith(item.match) : pathname === item.path,
-    onClick: () => navigate(item.path),
-  }))
+  return null
 }
 
 const countActiveCommands = (commands: Record<string, { writePhase: string; indexPhase: string; expired?: boolean }>) =>
@@ -360,6 +442,8 @@ const AppShell = () => {
   const adminMode = useAppStore((state) => state.adminMode)
   const commands = useAppStore((state) => state.commands)
   const setSettingsOpen = useAppStore((state) => state.setSettingsOpen)
+  const sidebarExpanded = useAppStore((state) => state.sidebarExpanded)
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar)
 
   const [commandOpen, setCommandOpen] = useState(false)
 
@@ -367,12 +451,9 @@ const AppShell = () => {
 
   const language = context.language
   const copy = copyByLang[language]
-  const navSections = useMemo(() => getNavSections(context.project, copy), [context.project, copy])
-  const railItems = useMemo(
-    () => getRailItems(context.project, pathname, copy),
-    [context.project, pathname, copy],
-  )
+  const lnbGroups = useMemo(() => getLnbGroups(context.project, copy), [context.project, copy])
   const activeCommandCount = useMemo(() => countActiveCommands(commands), [commands])
+  const activePageLabel = useMemo(() => findActiveLabel(lnbGroups, pathname), [lnbGroups, pathname])
 
   // Login page renders without shell chrome
   if (pathname === '/login') {
@@ -388,8 +469,6 @@ const AppShell = () => {
             <>
               <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
               <Button className="breadcrumb-btn" minimal icon="database" onClick={() => navigate(`/db/${encodeURIComponent(context.project!)}/overview`)} text={context.project} />
-              <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
-              <Tag minimal icon="git-branch" className="breadcrumb-tag">{context.branch}</Tag>
             </>
           ) : (
             <>
@@ -397,17 +476,15 @@ const AppShell = () => {
               <Tag minimal icon="database" className="breadcrumb-tag">{copy.nav.noProject}</Tag>
             </>
           )}
-          {adminMode ? (
+          {activePageLabel ? (
             <>
               <span className="bp6-icon bp6-icon-chevron-right breadcrumb-separator" />
-              <Tag intent="warning" className="breadcrumb-tag">{copy.nav.adminMode}</Tag>
+              <Tag minimal className="breadcrumb-tag">{activePageLabel}</Tag>
             </>
           ) : null}
         </NavbarGroup>
         <NavbarGroup align={Alignment.RIGHT}>
-          <Button minimal icon="database" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
-            {copy.nav.databases}
-          </Button>
+          <Tag minimal icon="git-branch" className="breadcrumb-tag" style={{ marginRight: 8 }}>{context.branch}</Tag>
           <Button minimal icon="history" onClick={() => setCommandOpen(true)} aria-label={copy.nav.commands}>
             {copy.nav.commands}
             {activeCommandCount > 0 ? (
@@ -416,67 +493,20 @@ const AppShell = () => {
               </Tag>
             ) : null}
           </Button>
-          <Button minimal icon="cog" onClick={() => setSettingsOpen(true)} aria-label={copy.nav.settings}>
-            {copy.nav.settings}
-          </Button>
         </NavbarGroup>
       </Navbar>
 
-      <div className="app-body">
-        <SidebarRail
-          items={railItems}
-          settingsLabel={copy.nav.settings}
-          userLabel="User"
-          settingsContent={<SettingsPopoverContent copy={copy.settings} />}
+      <div className={`app-body ${sidebarExpanded ? 'is-expanded' : ''}`}>
+        <LeftNavBar
+          groups={lnbGroups}
+          expanded={sidebarExpanded}
+          onToggleExpanded={toggleSidebar}
+          pathname={pathname}
+          project={context.project}
+          onNavigate={navigate}
+          onSettingsClick={() => setSettingsOpen(true)}
+          selectProjectLabel={copy.nav.selectProject}
         />
-        <aside className="sidebar-panel">
-          <div className="nav-section">
-            <div className="sidebar-title">{copy.sections.context}</div>
-            <Card className="context-card" elevation={0}>
-              <div className="context-tags">
-                <Tag icon="database">{context.project ?? copy.nav.noProject}</Tag>
-                <Tag icon="git-branch">{context.branch}</Tag>
-                <Tag>{language.toUpperCase()}</Tag>
-              </div>
-              <Text className="muted small">BFF public contract only (no internal API bypass)</Text>
-            </Card>
-          </div>
-          <div className="nav-section">
-            <div className="sidebar-title">{copy.sections.flow}</div>
-            <ul className="step-list">
-              {copy.steps.map((step) => (
-                <li key={step.id} className="step-item">
-                  <div className="step-index">{step.id}</div>
-                  <div>
-                    <div className="step-title">{step.title}</div>
-                    <div className="step-desc">{step.description}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {navSections.map((section) => (
-            <div className="nav-section" key={section.title}>
-              <div className="sidebar-title">{section.title}</div>
-              <div className="nav-list">
-                {section.items.map((item) => {
-                  const isActive = item.match
-                    ? pathname.startsWith(item.match)
-                    : pathname === item.path
-                  return (
-                    <button
-                      key={item.path}
-                      className={`nav-item ${isActive ? 'is-active' : ''}`}
-                      onClick={() => navigate(item.path)}
-                    >
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </aside>
         <main className="main">
           <AppRouter />
         </main>

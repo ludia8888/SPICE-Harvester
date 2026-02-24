@@ -12,6 +12,8 @@ const STORAGE_KEYS = {
   accessToken: 'spice.accessToken',
   refreshToken: 'spice.refreshToken',
   commands: 'commandTracker.items',
+  sidebarExpanded: 'spice.sidebarExpanded',
+  devMode: 'spice.devMode',
 } as const
 
 export type CommandKind =
@@ -63,6 +65,8 @@ type AppState = {
   refreshToken: string
   rememberToken: boolean
   adminMode: boolean
+  devMode: boolean
+  sidebarExpanded: boolean
   settingsOpen: boolean
   inspector: InspectorContext
   commands: Record<string, TrackedCommand>
@@ -77,6 +81,9 @@ type AppState = {
   clearAuth: () => void
   setRememberToken: (remember: boolean) => void
   setAdminMode: (enabled: boolean) => void
+  setDevMode: (enabled: boolean) => void
+  setSidebarExpanded: (expanded: boolean) => void
+  toggleSidebar: () => void
   setSettingsOpen: (open: boolean) => void
   setInspector: (context: InspectorContext) => void
   trackCommand: (command: TrackedCommand) => void
@@ -232,8 +239,12 @@ const getInitialContext = (): AppContext => {
 
 const ensureUrlContext = (context: AppContext) => {
   const current = readUrlContext()
+  // On non-db routes (e.g. /operations/tasks, /connections, /ai),
+  // skip project mismatch check to avoid rewriting the pathname
+  const segments = window.location.pathname.split('/').filter(Boolean)
+  const isDbRoute = segments[0] === 'db'
   if (
-    current.project === context.project &&
+    (isDbRoute ? current.project === context.project : true) &&
     current.branch === context.branch &&
     current.language === context.language
   ) {
@@ -259,6 +270,8 @@ export const useAppStore = create<AppState>((set, get) => {
     refreshToken,
     rememberToken,
     adminMode: false,
+    devMode: safeLocalStorageGet(STORAGE_KEYS.devMode) === 'true',
+    sidebarExpanded: safeLocalStorageGet(STORAGE_KEYS.sidebarExpanded) !== 'false',
     settingsOpen: false,
     inspector: null,
     commands: readCachedCommands(),
@@ -320,6 +333,19 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
     setAdminMode: (enabled) => set({ adminMode: enabled }),
+    setDevMode: (enabled) => {
+      set({ devMode: enabled })
+      safeLocalStorageSet(STORAGE_KEYS.devMode, enabled ? 'true' : 'false')
+    },
+    setSidebarExpanded: (expanded) => {
+      set({ sidebarExpanded: expanded })
+      safeLocalStorageSet(STORAGE_KEYS.sidebarExpanded, expanded ? 'true' : 'false')
+    },
+    toggleSidebar: () => {
+      const next = !get().sidebarExpanded
+      set({ sidebarExpanded: next })
+      safeLocalStorageSet(STORAGE_KEYS.sidebarExpanded, next ? 'true' : 'false')
+    },
     setSettingsOpen: (open) => set({ settingsOpen: open }),
     setInspector: (context) => set({ inspector: context }),
     trackCommand: (command) =>

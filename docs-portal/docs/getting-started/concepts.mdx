@@ -5,13 +5,13 @@ sidebar_position: 3
 
 # Core Concepts
 
-SPICE Harvester is built around a strongly-typed ontology model inspired by Palantir Foundry. This page introduces the foundational concepts you need to understand before working with the platform.
+Spice OS is built around a strongly-typed ontology model inspired by Palantir Foundry. This page introduces the foundational concepts you need to understand before working with the platform.
 
 ## Ontology
 
 The **Ontology** is the top-level container that defines the data model for your organization. It describes what types of objects exist, how they relate to each other, and what properties they carry.
 
-An ontology in SPICE Harvester consists of:
+An ontology in Spice OS consists of:
 - **Object Types** -- blueprints for entities (e.g., Employee, Project, Asset)
 - **Link Types** -- relationships between object types (e.g., Employee *manages* Project)
 - **Properties** -- typed attributes on object types (e.g., `fullName: string`, `startDate: date`)
@@ -112,7 +112,7 @@ Instances are stored in PostgreSQL (source of truth) and indexed in Elasticsearc
 
 ## Actions
 
-**Actions** are the write side of the platform. Instead of direct CRUD mutations, SPICE Harvester uses an action system that provides:
+**Actions** are the write side of the platform. Instead of direct CRUD mutations, Spice OS uses an action system that provides:
 
 - **Validation** -- actions are validated against rules before execution
 - **Audit trail** -- every action is logged as an event in the event store
@@ -160,7 +160,7 @@ Datasets are managed through the **Foundry Datasets v2 API** with 19 endpoints c
 
 ## Connections & Connectors
 
-A **Connection** represents a configured link to an external data source. SPICE Harvester supports 6 connector types:
+A **Connection** represents a configured link to an external data source. Spice OS supports 6 connector types:
 
 | Connector | Library | Use Case |
 |-----------|---------|----------|
@@ -241,7 +241,7 @@ Schedules can be **paused** and **unpaused** without deleting the configuration.
 
 ## Security
 
-SPICE Harvester provides multiple security layers:
+Spice OS provides multiple security layers:
 
 | Layer | Protection |
 |-------|-----------|
@@ -265,7 +265,7 @@ Projections are eventually consistent with the source of truth. The platform pro
 
 ## Lineage
 
-**Lineage** tracks how data flows through the system. SPICE Harvester captures 15 edge types of lineage relationships:
+**Lineage** tracks how data flows through the system. Spice OS captures 15 edge types of lineage relationships:
 
 | Edge Type | Description |
 |-----------|-------------|
@@ -289,7 +289,7 @@ Lineage data is stored in the event store and can be queried through the API to 
 
 ## Event Sourcing
 
-SPICE Harvester uses **Event Sourcing** as its persistence pattern. Every state change is captured as an immutable event:
+Spice OS uses **Event Sourcing** as its persistence pattern. Every state change is captured as an immutable event:
 
 1. An action is submitted through the API
 2. The action is validated and converted to one or more events

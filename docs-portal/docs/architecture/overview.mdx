@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Architecture Overview
 
-SPICE Harvester is a CQRS/Event Sourcing platform designed for enterprise ontology management. This page describes the high-level architecture, service layers, and key design decisions.
+Spice OS is a CQRS/Event Sourcing platform designed for enterprise ontology management. This page describes the high-level architecture, service layers, and key design decisions.
 
 ## High-Level Architecture
 
@@ -68,7 +68,7 @@ graph TB
 
 ### Client Layer
 
-The client layer includes all consumers of the SPICE Harvester API:
+The client layer includes all consumers of the Spice OS API:
 
 - **Web Application** -- browser-based UI for ontology exploration, search, and administration
 - **CLI Tools** -- command-line interface for scripting and automation
@@ -130,7 +130,7 @@ Every state change is captured as an immutable event. The event store (S3/MinIO)
 
 ### Foundry v2 API Compatibility
 
-The v2 API surface follows the Palantir Foundry API contract. This ensures that clients built for Foundry can migrate to SPICE Harvester with minimal changes. Key compatibility points:
+The v2 API surface follows the Palantir Foundry API contract. This ensures that clients built for Foundry can migrate to Spice OS with minimal changes. Key compatibility points:
 
 - Resource identifiers use the `ri.` prefix format
 - Object responses include `__rid`, `__primaryKey`, `__apiName`, and `properties`

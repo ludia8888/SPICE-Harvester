@@ -47,7 +47,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Default data — SPICE Harvester service topology                     */
+/* Default data — Spice OS service topology                     */
 /* ------------------------------------------------------------------ */
 const DEFAULT_NODES: ServiceNode[] = [
   // API services

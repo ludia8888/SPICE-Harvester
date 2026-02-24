@@ -18,6 +18,7 @@ type LoginResponse = {
   refresh_token: string
   token_type: string
   expires_in: number
+  admin_token?: string | null
 }
 
 export const LoginPage = () => {
@@ -28,6 +29,8 @@ export const LoginPage = () => {
 
   const setAccessToken = useAppStore((s) => s.setAccessToken)
   const setRefreshToken = useAppStore((s) => s.setRefreshToken)
+  const setAdminToken = useAppStore((s) => s.setAdminToken)
+  const setRememberToken = useAppStore((s) => s.setRememberToken)
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -54,6 +57,10 @@ export const LoginPage = () => {
         const data = (await res.json()) as LoginResponse
         setAccessToken(data.access_token)
         setRefreshToken(data.refresh_token)
+        if (data.admin_token) {
+          setAdminToken(data.admin_token)
+          setRememberToken(true)
+        }
         navigate('/')
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Network error')
@@ -61,7 +68,7 @@ export const LoginPage = () => {
         setLoading(false)
       }
     },
-    [username, password, setAccessToken, setRefreshToken],
+    [username, password, setAccessToken, setRefreshToken, setAdminToken, setRememberToken],
   )
 
   return (
@@ -76,7 +83,7 @@ export const LoginPage = () => {
     >
       <Card elevation={2} style={{ width: 380, padding: 32 }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <H2 style={{ margin: 0 }}>SPICE Harvester</H2>
+          <H2 style={{ margin: 0 }}>Spice OS</H2>
           <Tag minimal intent={Intent.PRIMARY} style={{ marginTop: 8 }}>
             Sign In
           </Tag>

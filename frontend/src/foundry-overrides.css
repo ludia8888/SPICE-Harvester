@@ -20,7 +20,11 @@ body {
     transition: all 0.1s ease-in-out;
 }
 
-.bp6-button:not([class*="bp6-intent-"]),
+.bp6-button:not([class*="bp6-intent-"]):not(.bp6-minimal) {
+    background-color: var(--foundry-bg-hover) !important;
+    color: var(--foundry-text) !important;
+}
+
 .bp6-button.bp6-minimal {
     color: var(--foundry-text) !important;
 }

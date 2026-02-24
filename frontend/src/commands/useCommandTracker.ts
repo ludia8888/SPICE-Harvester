@@ -58,7 +58,13 @@ export const useCommandTracker = () => {
         return
       }
 
-      patchCommand(command.id, { status })
+      if (command.status === status && !TERMINAL_STATUSES.has(status)) {
+        return
+      }
+
+      if (command.status !== status) {
+        patchCommand(command.id, { status })
+      }
 
       if (!TERMINAL_STATUSES.has(status)) {
         return
@@ -103,7 +109,9 @@ export const useCommandTracker = () => {
           queryKey: qk.databases(context.language),
           queryFn: () => listDatabasesCtx(requestContext),
         })
-        const present = databases.includes(command.target.dbName)
+        const present = databases.some((db) =>
+          (typeof db === 'string' ? db : db.name) === command.target.dbName,
+        )
         return command.kind === 'CREATE_DATABASE' ? present : !present
       },
       enabled: Boolean(adminToken),

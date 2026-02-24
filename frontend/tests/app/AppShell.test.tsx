@@ -48,7 +48,7 @@ describe('AppShell', () => {
     })
     renderWithClient(<AppShell />)
 
-    expect(screen.getByText('SPICE Harvester')).toBeInTheDocument()
+    expect(screen.getByText('Spice OS')).toBeInTheDocument()
     expect(screen.getAllByText('No project selected').length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Databases' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()

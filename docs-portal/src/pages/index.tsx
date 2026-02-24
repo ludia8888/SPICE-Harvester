@@ -77,7 +77,7 @@ const ARCHITECTURE_DIAGRAM = `graph LR
 const STEPS = [
   {
     title: "Install",
-    description: "Add SPICE Harvester to your project with a single command.",
+    description: "Add Spice OS to your project with a single command.",
     code: [
       { type: "comment", text: "# Install the CLI and SDK" },
       { type: "keyword", text: "npm install " },
@@ -212,11 +212,11 @@ export default function Home(): React.ReactElement {
   return (
     <Layout
       title="Enterprise Ontology & Data Platform"
-      description="SPICE Harvester documentation portal — enterprise ontology management, data pipelines, actions, lineage, search, and real-time projections."
+      description="Spice OS documentation portal — enterprise ontology management, data pipelines, actions, lineage, search, and real-time projections."
     >
       <main className={styles.landing}>
         <HeroSection
-          title="SPICE Harvester"
+          title="Spice OS"
           tagline="Enterprise Ontology & Data Platform"
           primaryAction={{
             label: "Quick Start",

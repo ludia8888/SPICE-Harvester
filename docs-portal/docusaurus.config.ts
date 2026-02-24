@@ -3,7 +3,7 @@ import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
 
 const config: Config = {
-  title: "SPICE Harvester",
+  title: "Spice OS",
   tagline: "Enterprise Ontology & Data Platform",
   favicon: "img/favicon.ico",
 
@@ -72,9 +72,9 @@ const config: Config = {
       },
     },
     navbar: {
-      title: "SPICE Harvester",
+      title: "Spice OS",
       logo: {
-        alt: "SPICE Harvester",
+        alt: "Spice OS",
         src: "img/logo.svg",
       },
       items: [
@@ -152,7 +152,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright \u00a9 ${new Date().getFullYear()} SPICE Harvester. Built with Docusaurus.`,
+      copyright: `Copyright \u00a9 ${new Date().getFullYear()} Spice OS. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

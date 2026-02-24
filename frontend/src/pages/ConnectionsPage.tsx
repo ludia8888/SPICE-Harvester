@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import {
   Button,
   Card,
@@ -9,6 +9,7 @@ import {
   FormGroup,
   HTMLSelect,
   HTMLTable,
+  Icon,
   InputGroup,
   Intent,
   Spinner,
@@ -24,14 +25,17 @@ import { StatusBadge } from '../components/ux/StatusBadge'
 import { KeyValueEditor } from '../components/ux/KeyValueEditor'
 import { DangerConfirmDialog } from '../components/DangerConfirmDialog'
 import { useRequestContext } from '../api/useRequestContext'
+import { useAppStore } from '../store/useAppStore'
 import type {
   RequestContext,
   FoundryConnectionRecordV2,
   FoundryConnectivityImportRecordV2,
   FoundryConnectionExportRunRecordV2,
+  DatasetRecord,
 } from '../api/bff'
 import {
   listConnectionsV2,
+  listPipelineDatasets,
   createConnectionV2,
   deleteConnectionV2,
   testConnectionV2,
@@ -51,16 +55,31 @@ import {
   listConnectionExportRunsV2,
   createConnectionExportRunV2,
   updateConnectionSecretsV2,
+  uploadCsvDataset,
+  uploadExcelDataset,
 } from '../api/bff'
 
 /* ── query keys ─────────────────────────────────────── */
 const connKeys = {
   list: () => ['connections'] as const,
+  datasets: (db: string, branch: string) => ['datasets', db, branch] as const,
   config: (rid: string) => ['connections', 'config', rid] as const,
   tableImports: (rid: string) => ['connections', 'table-imports', rid] as const,
   fileImports: (rid: string) => ['connections', 'file-imports', rid] as const,
   virtualTables: (rid: string) => ['connections', 'virtual-tables', rid] as const,
   exportRuns: (rid: string) => ['connections', 'export-runs', rid] as const,
+}
+
+/* ── unified data source item ──────────────────────── */
+type DataSourceItem = {
+  kind: 'connection' | 'dataset'
+  id: string
+  name: string
+  type: string
+  status?: string
+  rowCount?: number
+  updatedAt?: string
+  raw: FoundryConnectionRecordV2 | DatasetRecord
 }
 
 /* ── type helpers ───────────────────────────────────── */
@@ -107,9 +126,12 @@ function connStatusLevel(status?: string): 'success' | 'warning' | 'danger' | 'i
 export const ConnectionsPage = () => {
   const ctx = useRequestContext()
   const queryClient = useQueryClient()
+  const storeProject = useAppStore((s) => s.context.project)
+  const storeBranch = useAppStore((s) => s.context.branch)
 
-  const [selected, setSelected] = useState<FoundryConnectionRecordV2 | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [selected, setSelected] = useState<DataSourceItem | null>(null)
+  const [newOpen, setNewOpen] = useState(false)
+  const [newTab, setNewTab] = useState<'upload' | 'connector'>('upload')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [detailTab, setDetailTab] = useState<string>('table-imports')
 
@@ -123,11 +145,44 @@ export const ConnectionsPage = () => {
     ? listQ.data
     : (listQ.data as { data?: FoundryConnectionRecordV2[] })?.data ?? []
 
+  /* list datasets (only when project is selected) */
+  const datasetsQ = useQuery({
+    queryKey: connKeys.datasets(storeProject ?? '', storeBranch),
+    queryFn: () => listPipelineDatasets(ctx, { db_name: storeProject!, branch: storeBranch }),
+    enabled: !!storeProject,
+  })
+
+  const datasets: DatasetRecord[] = Array.isArray(datasetsQ.data) ? datasetsQ.data : []
+
+  /* unified data source list */
+  const dataSources: DataSourceItem[] = useMemo(() => {
+    const connItems: DataSourceItem[] = connections.map((conn) => ({
+      kind: 'connection' as const,
+      id: conn.rid,
+      name: conn.displayName ?? conn.rid,
+      type: (conn as Record<string, unknown>).connectionType as string ?? 'unknown',
+      status: (conn as Record<string, unknown>).status as string | undefined,
+      updatedAt: conn.updatedTime ?? undefined,
+      raw: conn,
+    }))
+    const dsItems: DataSourceItem[] = datasets.map((ds) => ({
+      kind: 'dataset' as const,
+      id: ds.dataset_id,
+      name: ds.name,
+      type: ds.source_type,
+      rowCount: ds.row_count ?? undefined,
+      updatedAt: ds.updated_at ?? undefined,
+      raw: ds,
+    }))
+    return [...dsItems, ...connItems]
+  }, [connections, datasets])
+
   /* connection config */
+  const selectedConn = selected?.kind === 'connection' ? selected.raw as FoundryConnectionRecordV2 : null
   const configQ = useQuery({
-    queryKey: connKeys.config(selected?.rid ?? ''),
-    queryFn: () => getConnectionConfigurationV2(ctx, selected!.rid),
-    enabled: !!selected,
+    queryKey: connKeys.config(selectedConn?.rid ?? ''),
+    queryFn: () => getConnectionConfigurationV2(ctx, selectedConn!.rid),
+    enabled: !!selectedConn,
   })
 
   /* delete mutation */
@@ -147,14 +202,14 @@ export const ConnectionsPage = () => {
   return (
     <div>
       <PageHeader
-        title="Connections"
-        subtitle={`${connections.length} data source connections`}
+        title="Data Sources"
+        subtitle={`${dataSources.length} items`}
         actions={
           <div className="form-row">
-            <Button icon="plus" intent={Intent.PRIMARY} onClick={() => setCreateOpen(true)}>
-              New Connection
+            <Button icon="plus" intent={Intent.PRIMARY} onClick={() => setNewOpen(true)}>
+              New
             </Button>
-            <Button icon="refresh" minimal loading={listQ.isFetching} onClick={() => listQ.refetch()}>
+            <Button icon="refresh" minimal loading={listQ.isFetching || datasetsQ.isFetching} onClick={() => { listQ.refetch(); datasetsQ.refetch() }}>
               Refresh
             </Button>
           </div>
@@ -162,194 +217,283 @@ export const ConnectionsPage = () => {
       />
 
       <div className="two-col-grid">
-        {/* Left: connection list */}
-        <div className="card-stack">
-          <Card>
-            <div className="card-title">Data Sources</div>
-            {listQ.isLoading && <Spinner size={20} />}
-            {listQ.error && <Callout intent={Intent.DANGER}>Failed to load connections.</Callout>}
-            {connections.length === 0 && !listQ.isLoading && (
-              <Callout intent={Intent.NONE}>
-                No connections configured. Click &quot;New Connection&quot; to connect an external data source.
-              </Callout>
-            )}
-            <HTMLTable striped interactive compact style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {connections.map((conn) => {
-                  const isActive = selected?.rid === conn.rid
-                  const displayName = conn.displayName ?? conn.rid
-                  const connType = (conn as Record<string, unknown>).connectionType as string | undefined
-                  const status = (conn as Record<string, unknown>).status as string | undefined
-                  return (
-                    <tr
-                      key={conn.rid}
-                      onClick={() => { setSelected(conn); setDetailTab('table-imports') }}
-                      style={{ fontWeight: isActive ? 600 : 400, cursor: 'pointer' }}
-                    >
-                      <td>{displayName}</td>
-                      <td><Tag minimal>{connType ?? 'unknown'}</Tag></td>
-                      <td><StatusBadge status={connStatusLevel(status)} label={status ?? '—'} /></td>
+            {/* Left: unified list */}
+            <div className="card-stack">
+              <Card>
+                <div className="card-title">Data Sources</div>
+                {(listQ.isLoading || datasetsQ.isLoading) && <Spinner size={20} />}
+                {listQ.error && <Callout intent={Intent.DANGER}>Failed to load connections.</Callout>}
+                {datasetsQ.error && <Callout intent={Intent.DANGER}>Failed to load datasets.</Callout>}
+                {dataSources.length === 0 && !listQ.isLoading && !datasetsQ.isLoading && (
+                  <Callout intent={Intent.NONE}>
+                    No data sources yet. Upload a file or create a connection.
+                  </Callout>
+                )}
+                <HTMLTable striped interactive compact style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Updated</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </HTMLTable>
-          </Card>
-        </div>
+                  </thead>
+                  <tbody>
+                    {dataSources.map((item) => {
+                      const isActive = selected?.id === item.id
+                      return (
+                        <tr
+                          key={`${item.kind}-${item.id}`}
+                          onClick={() => { setSelected(item); setDetailTab(item.kind === 'connection' ? 'table-imports' : 'schema') }}
+                          style={{ fontWeight: isActive ? 600 : 400, cursor: 'pointer' }}
+                        >
+                          <td>{item.name}</td>
+                          <td><Tag minimal>{item.type}</Tag></td>
+                          <td>
+                            {item.kind === 'connection'
+                              ? <StatusBadge status={connStatusLevel(item.status)} label={item.status ?? '—'} />
+                              : item.rowCount != null
+                                ? <Tag minimal icon="th">{item.rowCount.toLocaleString()} rows</Tag>
+                                : <Tag minimal>—</Tag>
+                            }
+                          </td>
+                          <td className="muted small">
+                            {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—'}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </HTMLTable>
+              </Card>
+            </div>
 
-        {/* Right: detail */}
-        <div className="card-stack">
-          {!selected ? (
-            <Card>
-              <Callout icon="info-sign">Select a connection from the list to view details.</Callout>
-            </Card>
-          ) : (
-            <Card>
-              <div className="card-title">{selected.displayName ?? selected.rid}</div>
-              <div className="form-row" style={{ marginBottom: 12 }}>
-                <Tag icon="data-connection">
-                  {(selected as Record<string, unknown>).connectionType as string ?? 'connection'}
-                </Tag>
-                <StatusBadge
-                  status={connStatusLevel((selected as Record<string, unknown>).status as string)}
-                  label={(selected as Record<string, unknown>).status as string ?? 'unknown'}
+            {/* Right: detail */}
+            <div className="card-stack">
+              {!selected ? (
+                <Card>
+                  <Callout icon="info-sign">Select an item from the list to view details.</Callout>
+                </Card>
+              ) : selected.kind === 'connection' ? (
+                <ConnectionDetailPanel
+                  conn={selected.raw as FoundryConnectionRecordV2}
+                  ctx={ctx}
+                  configQ={configQ}
+                  testMut={testMut}
+                  deleteMut={deleteMut}
+                  detailTab={detailTab}
+                  setDetailTab={setDetailTab}
+                  onDelete={() => setDeleteOpen(true)}
                 />
-                <Button
-                  small
-                  icon="diagnosis"
-                  loading={testMut.isPending}
-                  onClick={() => testMut.mutate(selected.rid)}
-                >
-                  Test
-                </Button>
-                <Button
-                  small
-                  icon="trash"
-                  intent={Intent.DANGER}
-                  minimal
-                  loading={deleteMut.isPending}
-                  onClick={() => setDeleteOpen(true)}
-                >
-                  Delete
-                </Button>
-              </div>
-
-              {testMut.data && (
-                <Callout
-                  intent={
-                    (testMut.data as Record<string, unknown>).success === true
-                      ? Intent.SUCCESS
-                      : Intent.DANGER
-                  }
-                  icon="diagnosis"
-                  style={{ marginBottom: 12 }}
-                >
-                  {(testMut.data as Record<string, unknown>).success === true
-                    ? 'Connection test succeeded.'
-                    : `Connection test failed: ${(testMut.data as Record<string, unknown>).message ?? 'Unknown error'}`}
-                </Callout>
+              ) : (
+                <DatasetDetailPanel
+                  dataset={selected.raw as DatasetRecord}
+                  ctx={ctx}
+                  detailTab={detailTab}
+                  setDetailTab={setDetailTab}
+                />
               )}
+            </div>
+          </div>
 
-              <Tabs selectedTabId={detailTab} onChange={(id) => setDetailTab(id as string)}>
-                <Tab
-                  id="table-imports"
-                  title="Table Imports"
-                  panel={
-                    <ImportPanel
-                      connectionRid={selected.rid}
-                      ctx={ctx}
-                      kind="table"
-                    />
-                  }
-                />
-                <Tab
-                  id="file-imports"
-                  title="File Imports"
-                  panel={
-                    <ImportPanel
-                      connectionRid={selected.rid}
-                      ctx={ctx}
-                      kind="file"
-                    />
-                  }
-                />
-                <Tab
-                  id="virtual-tables"
-                  title="Virtual Tables"
-                  panel={
-                    <ImportPanel
-                      connectionRid={selected.rid}
-                      ctx={ctx}
-                      kind="virtual"
-                    />
-                  }
-                />
-                <Tab
-                  id="export-runs"
-                  title="Export Runs"
-                  panel={
-                    <ExportRunsPanel
-                      connectionRid={selected.rid}
-                      ctx={ctx}
-                    />
-                  }
-                />
-                <Tab
-                  id="config"
-                  title="Configuration"
-                  panel={
-                    <div>
-                      {configQ.isLoading && <Spinner size={20} />}
-                      {configQ.error && <Callout intent={Intent.DANGER}>Failed to load configuration.</Callout>}
-                      {configQ.data && <JsonViewer value={configQ.data} />}
-                    </div>
-                  }
-                />
-                <Tab id="raw" title="Raw JSON" panel={<JsonViewer value={selected} />} />
+          {/* Delete Confirmation */}
+          <DangerConfirmDialog
+            isOpen={deleteOpen}
+            title="Delete Connection"
+            description={`Are you sure you want to delete "${selected?.name}"? This action cannot be undone.`}
+            confirmLabel="Delete"
+            cancelLabel="Cancel"
+            reasonLabel="Reason for deletion"
+            reasonPlaceholder="e.g. No longer needed, migrated to another source"
+            typedLabel="Type connection name to confirm"
+            typedPlaceholder={selected?.name ?? ''}
+            confirmTextToType={selected?.name ?? ''}
+            loading={deleteMut.isPending}
+            onCancel={() => setDeleteOpen(false)}
+            onConfirm={() => {
+              if (selectedConn) deleteMut.mutate(selectedConn.rid)
+              setDeleteOpen(false)
+            }}
+          />
+
+          {/* New Data Source Dialog */}
+          <Dialog
+            isOpen={newOpen}
+            onClose={() => setNewOpen(false)}
+            title="New Data Source"
+            icon="plus"
+            style={{ width: 580 }}
+          >
+            <DialogBody>
+              <Tabs selectedTabId={newTab} onChange={(id) => setNewTab(id as 'upload' | 'connector')}>
+                <Tab id="upload" title="Upload" panel={
+                  <UploadPanel ctx={ctx} onSuccess={() => {
+                    if (storeProject) queryClient.invalidateQueries({ queryKey: connKeys.datasets(storeProject, storeBranch) })
+                    setNewOpen(false)
+                  }} />
+                } />
+                <Tab id="connector" title="Connector" panel={
+                  <CreateConnectionForm ctx={ctx} onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: connKeys.list() })
+                    setNewOpen(false)
+                  }} />
+                } />
               </Tabs>
-            </Card>
-          )}
-        </div>
+            </DialogBody>
+          </Dialog>
+    </div>
+  )
+}
+
+/* ── Connection Detail Panel ────────────────────────── */
+const ConnectionDetailPanel = ({
+  conn,
+  ctx,
+  configQ,
+  testMut,
+  deleteMut,
+  detailTab,
+  setDetailTab,
+  onDelete,
+}: {
+  conn: FoundryConnectionRecordV2
+  ctx: RequestContext
+  configQ: ReturnType<typeof useQuery>
+  testMut: ReturnType<typeof useMutation<unknown, Error, string>>
+  deleteMut: ReturnType<typeof useMutation<unknown, Error, string>>
+  detailTab: string
+  setDetailTab: (tab: string) => void
+  onDelete: () => void
+}) => {
+  const connType = (conn as Record<string, unknown>).connectionType as string | undefined
+  const status = (conn as Record<string, unknown>).status as string | undefined
+
+  return (
+    <Card>
+      <div className="card-title">{conn.displayName ?? conn.rid}</div>
+      <div className="form-row" style={{ marginBottom: 12 }}>
+        <Tag icon="data-connection">{connType ?? 'connection'}</Tag>
+        <StatusBadge status={connStatusLevel(status)} label={status ?? 'unknown'} />
+        <Button small icon="diagnosis" loading={testMut.isPending} onClick={() => testMut.mutate(conn.rid)}>
+          Test
+        </Button>
+        <Button small icon="trash" intent={Intent.DANGER} minimal loading={deleteMut.isPending} onClick={onDelete}>
+          Delete
+        </Button>
       </div>
 
-      {/* Delete Confirmation */}
-      <DangerConfirmDialog
-        isOpen={deleteOpen}
-        title="Delete Connection"
-        description={`Are you sure you want to delete "${selected?.displayName ?? selected?.rid}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        reasonLabel="Reason for deletion"
-        reasonPlaceholder="e.g. No longer needed, migrated to another source"
-        typedLabel="Type connection name to confirm"
-        typedPlaceholder={selected?.displayName ?? ''}
-        confirmTextToType={selected?.displayName ?? ''}
-        loading={deleteMut.isPending}
-        onCancel={() => setDeleteOpen(false)}
-        onConfirm={() => {
-          if (selected) deleteMut.mutate(selected.rid)
-          setDeleteOpen(false)
-        }}
-      />
+      {testMut.data && (
+        <Callout
+          intent={(testMut.data as Record<string, unknown>).success === true ? Intent.SUCCESS : Intent.DANGER}
+          icon="diagnosis"
+          style={{ marginBottom: 12 }}
+        >
+          {(testMut.data as Record<string, unknown>).success === true
+            ? 'Connection test succeeded.'
+            : `Connection test failed: ${(testMut.data as Record<string, unknown>).message ?? 'Unknown error'}`}
+        </Callout>
+      )}
 
-      {/* Create Connection Dialog */}
-      <CreateConnectionDialog
-        isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
-        ctx={ctx}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: connKeys.list() })
-          setCreateOpen(false)
-        }}
-      />
-    </div>
+      <Tabs selectedTabId={detailTab} onChange={(id) => setDetailTab(id as string)}>
+        <Tab id="table-imports" title="Table Imports" panel={<ImportPanel connectionRid={conn.rid} ctx={ctx} kind="table" />} />
+        <Tab id="file-imports" title="File Imports" panel={<ImportPanel connectionRid={conn.rid} ctx={ctx} kind="file" />} />
+        <Tab id="virtual-tables" title="Virtual Tables" panel={<ImportPanel connectionRid={conn.rid} ctx={ctx} kind="virtual" />} />
+        <Tab id="export-runs" title="Export Runs" panel={<ExportRunsPanel connectionRid={conn.rid} ctx={ctx} />} />
+        <Tab id="config" title="Configuration" panel={
+          <div>
+            {configQ.isLoading && <Spinner size={20} />}
+            {configQ.error && <Callout intent={Intent.DANGER}>Failed to load configuration.</Callout>}
+            {configQ.data && <JsonViewer value={configQ.data} />}
+          </div>
+        } />
+        <Tab id="raw" title="Raw JSON" panel={<JsonViewer value={conn} />} />
+      </Tabs>
+    </Card>
+  )
+}
+
+/* ── Dataset Detail Panel ──────────────────────────── */
+const DatasetDetailPanel = ({
+  dataset,
+  ctx,
+  detailTab,
+  setDetailTab,
+}: {
+  dataset: DatasetRecord
+  ctx: RequestContext
+  detailTab: string
+  setDetailTab: (tab: string) => void
+}) => {
+  const rawQ = useQuery({
+    queryKey: ['datasets', 'raw-file', dataset.dataset_id],
+    queryFn: async () => {
+      const { getPipelineDatasetRawFile } = await import('../api/bff')
+      return getPipelineDatasetRawFile(ctx, dataset.dataset_id)
+    },
+  })
+
+  const schema = dataset.schema_json
+  const schemaColumns = (schema?.columns ?? schema?.fields ?? schema?.properties ?? []) as Array<{
+    name?: string; column_name?: string; data_type?: string; type?: string; nullable?: boolean; required?: boolean
+  }>
+
+  return (
+    <Card>
+      <div className="card-title">{dataset.name}</div>
+      <div className="form-row" style={{ marginBottom: 12 }}>
+        <Tag icon="database">{dataset.source_type}</Tag>
+        <Tag icon="git-branch">{dataset.branch}</Tag>
+        {dataset.row_count != null && <Tag icon="th">{dataset.row_count} rows</Tag>}
+        {dataset.stage && <Tag>{dataset.stage}</Tag>}
+      </div>
+
+      <Tabs selectedTabId={detailTab} onChange={(id) => setDetailTab(id as string)}>
+        <Tab id="schema" title="Schema" panel={
+          <div>
+            {Array.isArray(schemaColumns) && schemaColumns.length > 0 ? (
+              <HTMLTable striped compact style={{ width: '100%' }}>
+                <thead><tr><th>Column</th><th>Type</th><th>Nullable</th></tr></thead>
+                <tbody>
+                  {schemaColumns.map((col, i) => (
+                    <tr key={i}>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{col.name ?? col.column_name ?? `col_${i}`}</td>
+                      <td><Tag minimal>{col.data_type ?? col.type ?? 'unknown'}</Tag></td>
+                      <td>{col.nullable !== false && col.required !== true ? 'Yes' : 'No'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </HTMLTable>
+            ) : (
+              <Callout>No schema available.</Callout>
+            )}
+          </div>
+        } />
+        <Tab id="preview" title="Preview" panel={
+          <div>
+            {rawQ.isLoading && <Spinner size={20} />}
+            {rawQ.error && <Callout intent={Intent.DANGER}>Failed to load file.</Callout>}
+            {rawQ.data && (() => {
+              const data = rawQ.data as { content: string; encoding?: string; content_type?: string; filename?: string; size_bytes?: number }
+              if (data.encoding === 'base64') return <Callout>Binary file ({data.content_type}). Download to view.</Callout>
+              const lines = (data.content ?? '').split('\n').slice(0, 50)
+              return (
+                <div>
+                  <div className="form-row" style={{ marginBottom: 8 }}>
+                    {data.filename && <Tag>{data.filename}</Tag>}
+                    {data.size_bytes != null && <Tag minimal>{(data.size_bytes / 1024).toFixed(1)} KB</Tag>}
+                  </div>
+                  <pre style={{ maxHeight: 400, overflow: 'auto', fontSize: 12, padding: 8, borderRadius: 4 }}>
+                    {lines.join('\n')}
+                  </pre>
+                  {lines.length >= 50 && <Callout icon="info-sign">Showing first 50 lines.</Callout>}
+                </div>
+              )
+            })()}
+          </div>
+        } />
+        <Tab id="raw" title="Raw JSON" panel={<JsonViewer value={dataset} />} />
+      </Tabs>
+    </Card>
   )
 }
 
@@ -608,14 +752,10 @@ const ExportRunsPanel = ({
 }
 
 /* ── Create Connection Dialog ────────────────────────── */
-const CreateConnectionDialog = ({
-  isOpen,
-  onClose,
+const CreateConnectionForm = ({
   ctx,
   onSuccess,
 }: {
-  isOpen: boolean
-  onClose: () => void
   ctx: RequestContext
   onSuccess: () => void
 }) => {
@@ -654,88 +794,277 @@ const CreateConnectionDialog = ({
   })
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title="New Connection" icon="data-connection" style={{ width: 520 }}>
-      <DialogBody>
-        <FormGroup label="Connection Name" labelFor="conn-name">
+    <div>
+      <FormGroup label="Connection Name" labelFor="conn-name">
+        <InputGroup
+          id="conn-name"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="e.g. Production PostgreSQL"
+        />
+      </FormGroup>
+      <FormGroup label="Connection Type" labelFor="conn-type">
+        <HTMLSelect
+          id="conn-type"
+          value={connType}
+          onChange={(e) => setConnType(e.target.value)}
+          options={CONNECTION_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+          fill
+        />
+      </FormGroup>
+      <FormGroup label="Host" labelFor="conn-host">
+        <InputGroup
+          id="conn-host"
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          placeholder="e.g. db.example.com"
+        />
+      </FormGroup>
+      <div className="form-row">
+        <FormGroup label="Port" labelFor="conn-port" style={{ flex: 1 }}>
           <InputGroup
-            id="conn-name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="e.g. Production PostgreSQL"
+            id="conn-port"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+            placeholder="e.g. 5432"
+            type="number"
           />
         </FormGroup>
-        <FormGroup label="Connection Type" labelFor="conn-type">
-          <HTMLSelect
-            id="conn-type"
-            value={connType}
-            onChange={(e) => setConnType(e.target.value)}
-            options={CONNECTION_TYPES.map((t) => ({ value: t.value, label: t.label }))}
-            fill
-          />
-        </FormGroup>
-        <FormGroup label="Host" labelFor="conn-host">
+        <FormGroup label="Database" labelFor="conn-db" style={{ flex: 2 }}>
           <InputGroup
-            id="conn-host"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="e.g. db.example.com"
+            id="conn-db"
+            value={database}
+            onChange={(e) => setDatabase(e.target.value)}
+            placeholder="e.g. analytics"
           />
         </FormGroup>
+      </div>
+      <FormGroup label="Username" labelFor="conn-user">
+        <InputGroup
+          id="conn-user"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="e.g. readonly_user"
+        />
+      </FormGroup>
+      <FormGroup label="Password" labelFor="conn-pass">
+        <InputGroup
+          id="conn-pass"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          placeholder="••••••••"
+        />
+      </FormGroup>
+      {createMut.error && <Callout intent={Intent.DANGER} style={{ marginTop: 8 }}>Failed to create connection.</Callout>}
+      <div className="form-row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+        <Button
+          intent={Intent.PRIMARY}
+          icon="plus"
+          loading={createMut.isPending}
+          disabled={!displayName}
+          onClick={() => createMut.mutate()}
+        >
+          Create Connection
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ── Upload Panel (drag-and-drop CSV / Excel) ─────────── */
+const UploadPanel = ({ ctx, onSuccess }: { ctx: RequestContext; onSuccess?: () => void }) => {
+  const storeProject = useAppStore((s) => s.context.project)
+  const storeBranch = useAppStore((s) => s.context.branch)
+
+  const [project, setProject] = useState(storeProject ?? '')
+  const [branch, setBranch] = useState(storeBranch ?? 'main')
+  const [datasetName, setDatasetName] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = useCallback((f: File) => {
+    setFile(f)
+    if (!datasetName) {
+      const base = f.name.replace(/\.(csv|xlsx|xls)$/i, '')
+      setDatasetName(base)
+    }
+  }, [datasetName])
+
+  const onDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }, [])
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }, [])
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    const dropped = e.dataTransfer.files[0]
+    if (dropped) {
+      const ext = dropped.name.split('.').pop()?.toLowerCase()
+      if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+        handleFile(dropped)
+      }
+    }
+  }, [handleFile])
+
+  const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (f) handleFile(f)
+  }, [handleFile])
+
+  const uploadMut = useMutation({
+    mutationFn: async () => {
+      if (!file || !datasetName || !project) throw new Error('All fields required')
+      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
+      if (isExcel) {
+        return uploadExcelDataset(ctx, { db_name: project, name: datasetName, branch, file })
+      }
+      return uploadCsvDataset(ctx, { db_name: project, name: datasetName, branch, file })
+    },
+    onSuccess: () => {
+      setDatasetName('')
+      setFile(null)
+      if (fileRef.current) fileRef.current.value = ''
+      onSuccess?.()
+    },
+  })
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  return (
+    <div>
+        {!storeProject && !project && (
+          <Callout intent={Intent.WARNING} icon="warning-sign" style={{ marginBottom: 16 }}>
+            No project selected. Enter a target project name below or select a project from the sidebar first.
+          </Callout>
+        )}
+
+        <FormGroup label="Target Project" labelFor="up-project">
+          <InputGroup
+            id="up-project"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            placeholder="e.g. my_database"
+          />
+        </FormGroup>
+
         <div className="form-row">
-          <FormGroup label="Port" labelFor="conn-port" style={{ flex: 1 }}>
+          <FormGroup label="Branch" labelFor="up-branch" style={{ flex: 1 }}>
             <InputGroup
-              id="conn-port"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              placeholder="e.g. 5432"
-              type="number"
+              id="up-branch"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="e.g. main"
             />
           </FormGroup>
-          <FormGroup label="Database" labelFor="conn-db" style={{ flex: 2 }}>
+          <FormGroup label="Dataset Name" labelFor="up-ds-name" style={{ flex: 2 }}>
             <InputGroup
-              id="conn-db"
-              value={database}
-              onChange={(e) => setDatabase(e.target.value)}
-              placeholder="e.g. analytics"
+              id="up-ds-name"
+              value={datasetName}
+              onChange={(e) => setDatasetName(e.target.value)}
+              placeholder="e.g. orders_2026q1"
             />
           </FormGroup>
         </div>
-        <FormGroup label="Username" labelFor="conn-user">
-          <InputGroup
-            id="conn-user"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="e.g. readonly_user"
-          />
-        </FormGroup>
-        <FormGroup label="Password" labelFor="conn-pass">
-          <InputGroup
-            id="conn-pass"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            placeholder="••••••••"
-          />
-        </FormGroup>
-        {createMut.error && <Callout intent={Intent.DANGER} style={{ marginTop: 8 }}>Failed to create connection.</Callout>}
-      </DialogBody>
-      <DialogFooter
-        actions={
-          <>
-            <Button onClick={onClose}>Cancel</Button>
-            <Button
-              intent={Intent.PRIMARY}
-              icon="plus"
-              loading={createMut.isPending}
-              disabled={!displayName}
-              onClick={() => createMut.mutate()}
-            >
-              Create Connection
-            </Button>
-          </>
-        }
-      />
-    </Dialog>
+
+        {/* Drag-and-drop zone */}
+        <div
+          className={`upload-dropzone${isDragging ? ' is-dragging' : ''}`}
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          onClick={() => fileRef.current?.click()}
+        >
+          <Icon icon="document" size={32} className="upload-dropzone-icon" />
+          <div className="upload-dropzone-text">
+            Drag &amp; drop a CSV or Excel file here
+          </div>
+          <button type="button" className="upload-dropzone-link">
+            or browse files
+          </button>
+          <div className="upload-dropzone-text" style={{ fontSize: 11 }}>
+            Supported: .csv, .xlsx, .xls
+          </div>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.xlsx,.xls"
+          className="upload-file-input"
+          onChange={onFileChange}
+        />
+
+        {/* File preview */}
+        {file && (
+          <div className="upload-file-list" style={{ marginTop: 12 }}>
+            <div className="upload-file-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon icon="document" />
+                <div>
+                  <div style={{ fontWeight: 500 }}>{file.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--foundry-text-muted)' }}>
+                    {formatSize(file.size)}
+                  </div>
+                </div>
+              </div>
+              <Button
+                small
+                minimal
+                icon="cross"
+                onClick={() => {
+                  setFile(null)
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Upload button */}
+        <div className="form-row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+          <Button
+            intent={Intent.PRIMARY}
+            icon="upload"
+            loading={uploadMut.isPending}
+            disabled={!project || !datasetName || !file}
+            onClick={() => uploadMut.mutate()}
+          >
+            Upload Dataset
+          </Button>
+        </div>
+
+        {/* Status messages */}
+        {uploadMut.error && (
+          <Callout intent={Intent.DANGER} icon="error" style={{ marginTop: 12 }}>
+            Upload failed: {(uploadMut.error as Error).message ?? 'Unknown error'}
+          </Callout>
+        )}
+        {uploadMut.isSuccess && (
+          <Callout intent={Intent.SUCCESS} icon="tick-circle" style={{ marginTop: 12 }}>
+            Successfully uploaded &quot;{datasetName || 'dataset'}&quot; to project &quot;{project}&quot;.
+          </Callout>
+        )}
+    </div>
   )
 }
 

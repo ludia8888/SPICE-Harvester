@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Glossary
 
-A reference of key terms and concepts used throughout the SPICE Harvester platform.
+A reference of key terms and concepts used throughout the Spice OS platform.
 
 ---
 
@@ -16,13 +16,13 @@ A write operation that mutates the ontology. Actions include creating, editing, 
 A reusable, parameterized action definition that uses dynamic expressions (`$ref`, `$now`, `$if`, `$switch`, `$call`) to generate actions at execution time. Templates are evaluated in the context of the current user and target object.
 
 **Aggregate**
-In event sourcing, an aggregate is a cluster of domain objects treated as a single unit for consistency. In SPICE Harvester, each object instance is an aggregate, identified by its RID.
+In event sourcing, an aggregate is a cluster of domain objects treated as a single unit for consistency. In Spice OS, each object instance is an aggregate, identified by its RID.
 
 **BFF (Backend-for-Frontend)**
 The API gateway service that handles all external client traffic. The BFF runs on port 8002 and performs authentication, routing, rate limiting, and response transformation. It is the only service exposed to external networks.
 
 **CQRS (Command Query Responsibility Segregation)**
-An architectural pattern that separates read and write operations into distinct paths. SPICE Harvester uses CQRS to allow independent scaling and optimization of the read side (Elasticsearch, Redis) and write side (PostgreSQL, Kafka).
+An architectural pattern that separates read and write operations into distinct paths. Spice OS uses CQRS to allow independent scaling and optimization of the read side (Elasticsearch, Redis) and write side (PostgreSQL, Kafka).
 
 **Data Type**
 The type of a property value. Supported types include `string`, `integer`, `long`, `double`, `boolean`, `date`, `timestamp`, `geopoint`, `geoshape`, and `array`.
@@ -34,7 +34,7 @@ A Kafka topic (`spice.events.dlq`) where events are sent after exhausting all re
 An immutable record of a state change. Events are the atomic unit of persistence in the event-sourced architecture. Each event has a type, aggregate ID, sequence number, timestamp, payload, and metadata.
 
 **Event Sourcing**
-A persistence pattern where state is derived from a sequence of immutable events rather than stored as a mutable snapshot. SPICE Harvester stores all events in the S3/MinIO event store and derives read models from them.
+A persistence pattern where state is derived from a sequence of immutable events rather than stored as a mutable snapshot. Spice OS stores all events in the S3/MinIO event store and derives read models from them.
 
 **Event Store**
 The durable, append-only log of all events, stored in S3/MinIO. The event store is the canonical source of truth; all other data stores are projections of it.
@@ -70,7 +70,7 @@ The primary backend service for ontology management, object CRUD, search, action
 The top-level container that defines the data model. An ontology contains object types, link types, and their relationships. Each ontology is identified by a unique API name.
 
 **OAuth Scope**
-An access control mechanism used by SPICE Harvester to restrict API operations. Scopes are extracted from the JWT `scope` or `scp` claim. SPICE defines 8 platform API scopes (e.g., `api:datasets-read`, `api:ontologies-write`). See [RBAC Guide](/docs/guides/platform-admin/rbac).
+An access control mechanism used by Spice OS to restrict API operations. Scopes are extracted from the JWT `scope` or `scp` claim. SPICE defines 8 platform API scopes (e.g., `api:datasets-read`, `api:ontologies-write`). See [RBAC Guide](/docs/guides/platform-admin/rbac).
 
 **Outbox Pattern**
 A technique for reliably publishing events to Kafka. Events are written to an outbox table within the same database transaction as the mutation. A relay process reads committed events from the outbox and publishes them to Kafka.
@@ -94,7 +94,7 @@ A precomputed, denormalized view of data optimized for specific query patterns. 
 A named, typed attribute on an object type. Each property has an API name, display name, data type, and flags for required and indexed.
 
 **Read Model**
-A data store optimized for query performance. In CQRS, read models are derived from the write side (events) and can be rebuilt at any time. SPICE Harvester uses PostgreSQL, Elasticsearch, and Redis as read models.
+A data store optimized for query performance. In CQRS, read models are derived from the write side (events) and can be rebuilt at any time. Spice OS uses PostgreSQL, Elasticsearch, and Redis as read models.
 
 **RID (Resource Identifier)**
 A globally unique identifier for any resource in the platform, following the format `ri.{service}.{namespace}.{type}.{id}`. Example: `ri.ontology.main.object.emp-042`.

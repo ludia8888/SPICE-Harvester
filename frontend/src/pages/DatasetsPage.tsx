@@ -1,15 +1,9 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import {
   Button,
   Card,
   Callout,
-  Dialog,
-  DialogBody,
-  DialogFooter,
-  FormGroup,
-  HTMLSelect,
   HTMLTable,
-  InputGroup,
   Intent,
   Spinner,
   Tab,
@@ -26,9 +20,6 @@ import { StatusBadge } from '../components/ux/StatusBadge'
 import type { RequestContext, DatasetRecord, DatasetRawFile, DatasetIngestRequestRecord } from '../api/bff'
 import {
   listPipelineDatasets,
-  createPipelineDataset,
-  uploadCsvDataset,
-  uploadExcelDataset,
   getPipelineDatasetRawFile,
   getPipelineDatasetIngestRequest,
   approvePipelineDatasetSchema,
@@ -49,7 +40,6 @@ export const DatasetsPage = ({ dbName }: { dbName: string }) => {
 
   /* state */
   const [selected, setSelected] = useState<DatasetRecord | null>(null)
-  const [uploadOpen, setUploadOpen] = useState(false)
   const [detailTab, setDetailTab] = useState<string>('schema')
 
   /* list datasets */
@@ -58,9 +48,7 @@ export const DatasetsPage = ({ dbName }: { dbName: string }) => {
     queryFn: () => listPipelineDatasets(ctx, { db_name: dbName, branch }),
   })
 
-  const datasets: DatasetRecord[] = Array.isArray(listQ.data)
-    ? listQ.data
-    : (listQ.data as { data?: DatasetRecord[] })?.data ?? []
+  const datasets: DatasetRecord[] = Array.isArray(listQ.data) ? listQ.data : []
 
   /* raw file preview */
   const rawQ = useQuery({
@@ -83,9 +71,6 @@ export const DatasetsPage = ({ dbName }: { dbName: string }) => {
         subtitle={`${datasets.length} datasets in ${dbName}`}
         actions={
           <div className="form-row">
-            <Button icon="upload" intent={Intent.PRIMARY} onClick={() => setUploadOpen(true)}>
-              Upload CSV / Excel
-            </Button>
             <Button icon="refresh" minimal loading={listQ.isFetching} onClick={() => listQ.refetch()}>
               Refresh
             </Button>
@@ -195,18 +180,6 @@ export const DatasetsPage = ({ dbName }: { dbName: string }) => {
         </div>
       </div>
 
-      {/* Upload Dialog */}
-      <UploadDialog
-        isOpen={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        dbName={dbName}
-        branch={branch}
-        ctx={ctx}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: dsKeys.list(dbName, branch) })
-          setUploadOpen(false)
-        }}
-      />
     </div>
   )
 }
@@ -344,80 +317,3 @@ const IngestRequestPanel = ({
   )
 }
 
-/* ── Upload Dialog ───────────────────────────────────────────── */
-const UploadDialog = ({
-  isOpen,
-  onClose,
-  dbName,
-  branch,
-  ctx,
-  onSuccess,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  dbName: string
-  branch: string
-  ctx: RequestContext
-  onSuccess: () => void
-}) => {
-  const [name, setName] = useState('')
-  const [file, setFile] = useState<File | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const uploadMut = useMutation({
-    mutationFn: async () => {
-      if (!file || !name) throw new Error('Name and file required')
-      const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
-      if (isExcel) {
-        return uploadExcelDataset(ctx, { db_name: dbName, name, branch, file })
-      }
-      return uploadCsvDataset(ctx, { db_name: dbName, name, branch, file })
-    },
-    onSuccess: () => {
-      setName('')
-      setFile(null)
-      onSuccess()
-    },
-  })
-
-  return (
-    <Dialog isOpen={isOpen} onClose={onClose} title="Upload Dataset" icon="upload">
-      <DialogBody>
-        <FormGroup label="Dataset name" labelFor="ds-name">
-          <InputGroup id="ds-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. orders_2026q1" />
-        </FormGroup>
-        <FormGroup label="File (CSV or Excel)" labelFor="ds-file">
-          <input
-            ref={fileRef}
-            id="ds-file"
-            type="file"
-            accept=".csv,.xlsx,.xls"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </FormGroup>
-        {file && (
-          <Callout intent={Intent.NONE} icon="document">
-            {file.name} ({(file.size / 1024).toFixed(1)} KB)
-          </Callout>
-        )}
-        {uploadMut.error && <Callout intent={Intent.DANGER} style={{ marginTop: 8 }}>Upload failed.</Callout>}
-      </DialogBody>
-      <DialogFooter
-        actions={
-          <>
-            <Button onClick={onClose}>Cancel</Button>
-            <Button
-              intent={Intent.PRIMARY}
-              icon="upload"
-              loading={uploadMut.isPending}
-              disabled={!name || !file}
-              onClick={() => uploadMut.mutate()}
-            >
-              Upload
-            </Button>
-          </>
-        }
-      />
-    </Dialog>
-  )
-}

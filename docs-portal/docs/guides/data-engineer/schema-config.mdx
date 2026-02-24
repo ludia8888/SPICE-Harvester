@@ -5,11 +5,11 @@ sidebar_position: 1
 
 # Schema Configuration
 
-This guide walks data engineers through defining and managing ontology schemas in SPICE Harvester. You will learn how to create object types, configure properties, establish link types, and evolve schemas safely over time.
+This guide walks data engineers through defining and managing ontology schemas in Spice OS. You will learn how to create object types, configure properties, establish link types, and evolve schemas safely over time.
 
 ## Overview
 
-In SPICE Harvester, the **ontology** is the central schema definition that describes your data model. Every piece of data flowing through the platform — whether imported from external databases, transformed by pipelines, or created via actions — conforms to an ontology schema.
+In Spice OS, the **ontology** is the central schema definition that describes your data model. Every piece of data flowing through the platform — whether imported from external databases, transformed by pipelines, or created via actions — conforms to an ontology schema.
 
 ```
 Ontology: "acme-corp"
@@ -146,7 +146,7 @@ A **Property** is a named, typed attribute on an object type. Properties define 
 
 ### Supported Data Types
 
-SPICE Harvester supports a comprehensive type system with XSD primitive types, semantic types, and complex types:
+Spice OS supports a comprehensive type system with XSD primitive types, semantic types, and complex types:
 
 #### Primitive Types
 
@@ -397,7 +397,7 @@ For relationships represented by their own object type (association objects with
 
 ## Schema Evolution
 
-Schemas evolve as business requirements change. SPICE Harvester provides tools and safeguards for safe schema evolution.
+Schemas evolve as business requirements change. Spice OS provides tools and safeguards for safe schema evolution.
 
 ### Safe Changes (Non-breaking)
 
@@ -436,7 +436,7 @@ Incompatible type changes are rejected by the validation layer.
 
 ### Schema Hash Tracking
 
-SPICE Harvester computes a stable SHA-256 hash of column definitions to detect schema changes. This hash is used by:
+Spice OS computes a stable SHA-256 hash of column definitions to detect schema changes. This hash is used by:
 
 - **Pipelines** — to detect if source schema has changed between runs
 - **Datasets** — to version schema alongside data

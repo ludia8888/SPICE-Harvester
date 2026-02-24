@@ -47,65 +47,7 @@
   color: var(--text-primary) !important;
 }
 
-.app-body {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 48px 240px minmax(0, 1fr);
-  min-height: 0;
-}
-
-.sidebar-rail {
-  background: var(--rail-bg);
-  border-right: 1px solid var(--rail-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0;
-  gap: 4px;
-}
-
-.rail-button.bp6-button {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px !important;
-  color: var(--rail-button);
-  padding: 0 !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.rail-button.bp6-button.is-active {
-  color: var(--rail-button-active);
-  background: var(--rail-button-active-bg) !important;
-}
-
-.rail-button.bp6-button:hover:not(.is-active) {
-  color: var(--rail-button-hover);
-  background: rgba(255, 255, 255, 0.08) !important;
-}
-
-.rail-spacer {
-  margin-top: auto;
-}
-
-.sidebar-panel {
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  padding: 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.sidebar-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-  color: var(--text-muted);
-}
+/* .app-body grid is defined in styles.css (LNB layout) */
 
 .source-card {
   border: 1px solid var(--border);
@@ -170,57 +112,7 @@
   margin-bottom: 0;
 }
 
-.step-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.step-item {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 0.6rem;
-  align-items: start;
-  padding: 0.45rem 0.4rem;
-  border-radius: 4px;
-}
-
-.step-item.is-active {
-  background: var(--panel-soft);
-  border: 1px solid var(--border);
-}
-
-.step-index {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  display: grid;
-  place-items: center;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--panel);
-}
-
-.step-item.is-active .step-index {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-}
-
-.step-title {
-  font-weight: 600;
-}
-
-.step-desc {
-  margin-top: 0.2rem;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
+/* Step list removed — was part of old sidebar-panel */
 
 .main {
   padding: 24px;
@@ -247,55 +139,7 @@
   flex-wrap: wrap;
 }
 
-.nav-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.nav-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.nav-item {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-primary);
-  padding: 0.4rem 0.5rem;
-  border-radius: 6px;
-  text-align: left;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.nav-item:hover {
-  background: var(--panel-soft);
-}
-
-.nav-item.is-active {
-  background: var(--panel-soft);
-  border-color: var(--border);
-  font-weight: 600;
-}
-
-.context-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  font-size: 0.85rem;
-}
-
-.context-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
+/* Old nav-section/nav-item/context-card removed — replaced by LNB */
 
 .page-grid {
   display: grid;
@@ -344,7 +188,7 @@
   width: 100%;
   border-radius: 4px;
   border: 1px solid var(--border);
-  background: #10161a;
+  background: var(--foundry-canvas-bg);
 }
 
 .command-drawer .bp6-drawer-body {
@@ -776,26 +620,13 @@
 }
 
 @media (max-width: 900px) {
-  .app-body {
+  .app-body,
+  .app-body.is-expanded {
     grid-template-columns: 1fr;
   }
 
-  .sidebar-rail {
-    flex-direction: row;
-    justify-content: flex-start;
-    padding: 0.5rem;
-    border-right: none;
-    border-bottom: 1px solid var(--rail-border);
-  }
-
-  .rail-spacer {
-    margin-top: 0;
-    margin-left: auto;
-  }
-
-  .sidebar-panel {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+  .lnb {
+    display: none;
   }
 
   .main {

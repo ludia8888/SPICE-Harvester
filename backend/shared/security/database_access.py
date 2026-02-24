@@ -67,7 +67,7 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
         try:
             rows = await conn.fetch(
                 """
-                SELECT db_name, principal_type, principal_id, principal_name, role
+                SELECT db_name, principal_type, principal_id, principal_name, role, created_at
                 FROM database_access
                 WHERE db_name = ANY($1)
                 """,
@@ -89,6 +89,7 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
                 "principal_id": str(row["principal_id"]),
                 "principal_name": str(row["principal_name"]) if row["principal_name"] else None,
                 "role": normalized_role,
+                "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
             }
         )
     return dict(grouped)

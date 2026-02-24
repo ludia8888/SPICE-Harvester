@@ -110,6 +110,7 @@ def _enrich_db_entry(
 
     owner_id = owner_row["principal_id"] if owner_row else payload.get("owner_id") or actor_id
     owner_name = owner_row.get("principal_name") if owner_row else payload.get("owner_name") or actor_name
+    created_at = owner_row.get("created_at") if owner_row else None
     role = actor_row["role"] if actor_row else payload.get("role")
 
     shared_with = [row["principal_id"] for row in rows if row.get("role") != "Owner"]
@@ -131,6 +132,7 @@ def _enrich_db_entry(
             "role": role,
             "shared": shared,
             "shared_with": shared_with,
+            "created_at": created_at,
         }
     )
     return payload

@@ -103,7 +103,8 @@ export const AppRouter = () => {
       if (segments[4] === 'analyze') {
         return <DatasetAnalysisPage dbName={dbName} />
       }
-      return <DatasetsPage dbName={dbName} />
+      navigate('/connections')
+      return null
     }
     if (section === 'pipelines') {
       const pipelineId = segments[3] ?? null

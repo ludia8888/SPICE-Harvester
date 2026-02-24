@@ -52,9 +52,7 @@ export const OverviewPage = ({ dbName }: { dbName: string }) => {
     queryKey: ['overview', 'datasets', dbName, branch],
     queryFn: () => listPipelineDatasets(ctx, { db_name: dbName, branch }),
   })
-  const datasets = Array.isArray(datasetsQ.data)
-    ? datasetsQ.data
-    : (datasetsQ.data as { data?: unknown[] })?.data ?? []
+  const datasets = Array.isArray(datasetsQ.data) ? datasetsQ.data : []
 
   const connectionsQ = useQuery({
     queryKey: ['overview', 'connections'],
