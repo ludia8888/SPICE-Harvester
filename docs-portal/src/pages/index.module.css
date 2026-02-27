@@ -119,11 +119,15 @@
   overflow-x: auto;
 }
 
-.architectureDiagram pre {
+.architectureDiagram :global(.mermaid) {
+  display: flex;
+  justify-content: center;
   margin: 0;
-  font-size: 0.85rem;
-  line-height: 1.6;
-  color: var(--ifm-font-color-base);
+}
+
+.architectureDiagram :global(svg) {
+  max-width: 100%;
+  height: auto;
 }
 
 /* ------------------------------------------------------------------ */
