@@ -1,0 +1,304 @@
+---
+title: 설치
+sidebar_position: 2
+---
+
+# 설치
+
+이 가이드는 시스템 요구 사항, 서비스 구성, 데이터베이스 설정, 프로덕션 하드닝까지 포함한 Spice OS 전체 설치 과정을 다룹니다.
+
+## 시스템 요구 사항
+
+### 하드웨어
+
+| 환경 | CPU | RAM | 디스크 | 네트워크 |
+|-------------|-----|-----|------|---------|
+| 개발 | 4 코어 | 16 GB | 20 GB SSD | localhost 전용 |
+| 스테이징 | 8 코어 | 32 GB | 100 GB SSD | 사설 네트워크 |
+| 프로덕션 | 16+ 코어 | 64+ GB | 500+ GB NVMe | 로드밸런싱 |
+
+### 소프트웨어
+
+| 구성 요소 | 요구 버전 | 비고 |
+|-----------|-----------------|-------|
+| Docker Engine | 24.0+ | Docker Desktop 또는 standalone |
+| Docker Compose | 2.20+ | V2 플러그인 형식 |
+| Python | 3.11+ | CLI 도구 및 스크립트용 |
+| Node.js | 20+ LTS | BFF 및 프론트엔드 툴링용 |
+| PostgreSQL client | 15+ | 선택 사항(직접 DB 접근용) |
+
+### 운영체제
+
+- **macOS**: 13 Ventura 이상(Apple Silicon / Intel)
+- **Linux**: Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023
+- **Windows**: WSL2가 포함된 Windows 11 (네이티브 Windows는 지원하지 않습니다)
+
+## Docker Compose 설정
+
+### 전체 스택
+
+기본 Docker Compose 구성은 32개 서비스를 모두 시작합니다:
+
+```bash
+docker compose up -d
+```
+
+### 서비스 프로파일
+
+Docker Compose 프로파일을 사용해 일부 서비스만 선택적으로 시작할 수 있습니다:
+
+```bash
+# Core only: API 서버 + 데이터 스토어(관측성 제외)
+docker compose --profile core up -d
+
+# Core + observability
+docker compose --profile core --profile observability up -d
+
+# Core + workers (이벤트 처리용)
+docker compose --profile core --profile workers up -d
+```
+
+사용 가능한 프로파일:
+
+| 프로파일 | 서비스 | 포트 |
+|---------|----------|-------|
+| `core` | OMS, BFF, Agent, PostgreSQL, Elasticsearch, Redis, Kafka, MinIO | 8000, 8002, 8004, 5432, 9200, 6379, 9092, 9000 |
+| `workers` | Action Worker, Projection Worker, Pipeline Worker, Ontology Worker 등 8개 추가 | 내부 전용 |
+| `observability` | Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Loki | 13000, 19090, 16686 |
+
+## 환경 변수
+
+### 핵심 설정
+
+프로젝트 루트에 `.env` 파일을 생성합니다. 아래 변수는 필수 동작을 제어합니다:
+
+```bash
+# ─── Service Ports ───────────────────────────────────────
+OMS_PORT=8000
+BFF_PORT=8002
+AGENT_PORT=8004
+
+# ─── PostgreSQL ──────────────────────────────────────────
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=spice_harvester
+POSTGRES_USER=spice
+POSTGRES_PASSWORD=changeme_in_production
+
+# ─── Elasticsearch ───────────────────────────────────────
+ELASTICSEARCH_HOST=elasticsearch
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_INDEX_PREFIX=spice_
+
+# ─── Redis ───────────────────────────────────────────────
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
+# ─── Kafka ───────────────────────────────────────────────
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_CONSUMER_GROUP=spice-harvester
+KAFKA_AUTO_OFFSET_RESET=earliest
+
+# ─── MinIO (S3-compatible Event Store) ───────────────────
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=spice-events
+
+# ─── Authentication ─────────────────────────────────────
+AUTH_SECRET_KEY=generate-a-strong-secret-here
+AUTH_TOKEN_EXPIRY=3600
+AUTH_ISSUER=spice-harvester
+
+# ─── Logging ─────────────────────────────────────────────
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+LOG_OUTPUT=stdout
+```
+
+### 프로덕션 오버라이드
+
+프로덕션 배포에서는 다음 항목을 반드시 오버라이드하세요:
+
+```bash
+# Strong secrets (generate with: openssl rand -hex 32)
+POSTGRES_PASSWORD=<generated-secret>
+AUTH_SECRET_KEY=<generated-secret>
+MINIO_SECRET_KEY=<generated-secret>
+
+# External URLs
+BFF_PUBLIC_URL=https://api.your-domain.com
+CORS_ORIGINS=https://app.your-domain.com
+
+# Performance tuning
+OMS_WORKERS=4
+BFF_WORKERS=4
+POSTGRES_MAX_CONNECTIONS=100
+ELASTICSEARCH_SHARDS=3
+ELASTICSEARCH_REPLICAS=1
+KAFKA_PARTITIONS=12
+```
+
+## 데이터베이스 마이그레이션
+
+### 초기 설정
+
+Alembic 마이그레이션을 실행해 DB 스키마를 생성합니다:
+
+```bash
+docker compose exec oms python -m alembic upgrade head
+```
+
+### 시드 데이터
+
+개발/테스트용 데모 데이터를 로드합니다:
+
+```bash
+# 샘플 온톨로지를 포함한 전체 데모 데이터셋
+docker compose exec oms python -m spice.cli seed --demo
+
+# 최소 시드(온톨로지 스키마만, 인스턴스 없음)
+docker compose exec oms python -m spice.cli seed --minimal
+```
+
+### 마이그레이션 관리
+
+```bash
+# 현재 마이그레이션 버전 확인
+docker compose exec oms python -m alembic current
+
+# 마이그레이션 히스토리 보기
+docker compose exec oms python -m alembic history
+
+# 새 마이그레이션 생성
+docker compose exec oms python -m alembic revision --autogenerate -m "description"
+
+# 한 단계 다운그레이드
+docker compose exec oms python -m alembic downgrade -1
+```
+
+### Elasticsearch 인덱스 설정
+
+Elasticsearch 인덱스는 첫 부팅 시 자동 생성됩니다. 수동으로 다시 만들려면:
+
+```bash
+docker compose exec oms python -m spice.cli reindex --all
+```
+
+## 헬스 체크
+
+모든 서비스는 `/health` 엔드포인트를 제공합니다. CLI로 전체 서비스 상태를 확인할 수 있습니다:
+
+```bash
+docker compose exec oms python -m spice.cli health --all
+```
+
+개별 서비스 헬스 체크:
+
+| 서비스 | URL | 기대 상태 |
+|---------|-----|----------------|
+| OMS | `http://localhost:8000/health` | `{"status": "healthy"}` |
+| BFF | `http://localhost:8002/api/v1/health` | `{"status": "healthy"}` |
+| Agent | `http://localhost:8004/health` | `{"status": "healthy"}` |
+| PostgreSQL | `docker compose exec postgres pg_isready` | `accepting connections` |
+| Elasticsearch | `http://localhost:9200/_cluster/health` | `"status": "green"` |
+| Redis | `docker compose exec redis redis-cli ping` | `PONG` |
+| Kafka | `docker compose exec kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092` | Version list |
+
+## 자주 발생하는 문제
+
+### 포트 충돌
+
+이미 사용 중인 포트가 있다면 `.env` 파일에서 오버라이드하세요:
+
+```bash
+# 예: BFF를 8082 포트로 변경
+BFF_PORT=8082
+```
+
+그 다음, 영향을 받는 서비스를 재시작합니다:
+
+```bash
+docker compose up -d bff
+```
+
+### Elasticsearch 시작 실패
+
+Linux에서 Elasticsearch는 `vm.max_map_count` 값이 최소 262144이어야 합니다:
+
+```bash
+# 현재 값 확인
+sysctl vm.max_map_count
+
+# 임시 설정
+sudo sysctl -w vm.max_map_count=262144
+
+# 영구 설정(/etc/sysctl.conf에 추가)
+echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+```
+
+macOS + Docker Desktop에서는 자동으로 처리됩니다.
+
+### Kafka 연결 문제
+
+워커가 Kafka에 연결하지 못한다면 advertised listeners 설정을 확인하세요:
+
+```bash
+docker compose logs kafka | grep "advertised.listeners"
+```
+
+`KAFKA_ADVERTISED_LISTENERS`가 네트워크 구성과 일치하는지 확인합니다.
+
+### 데이터베이스 마이그레이션 실패
+
+마이그레이션이 실패하면 현재 상태를 확인하고 충돌을 해결하세요:
+
+```bash
+# 대기 중인 마이그레이션 확인
+docker compose exec oms python -m alembic current
+
+# DB를 특정 상태로 스탬프(주의해서 사용)
+docker compose exec oms python -m alembic stamp head
+```
+
+### 메모리 압박
+
+서비스가 OOM-kill 된다면 Docker 리소스 제한을 조정하세요:
+
+```yaml
+# docker-compose.override.yml
+services:
+  elasticsearch:
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+```
+
+### 전체 초기화
+
+플랫폼을 완전히 초기화하고 새로 시작하려면:
+
+```bash
+docker compose down -v    # 서비스 중지 + 볼륨 제거
+docker compose up -d      # 새로 시작
+docker compose exec oms python -m alembic upgrade head
+docker compose exec oms python -m spice.cli seed --demo
+```
+
+:::caution
+`-v` 플래그는 데이터베이스 내용, Elasticsearch 인덱스, Kafka 토픽을 포함한 모든 영속 데이터를 삭제합니다. 개발 환경에서만 사용하세요.
+:::
+
+## 다음 단계
+
+- **[핵심 개념](./concepts)** -- 온톨로지 모델 이해
+- **[아키텍처 개요](/docs/architecture/overview)** -- 시스템 설계 이해
+- **[모니터링](/docs/operations/monitoring)** -- 대시보드와 알림 설정

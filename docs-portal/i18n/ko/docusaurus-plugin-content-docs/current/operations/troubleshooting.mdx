@@ -1,0 +1,341 @@
+---
+title: 문제 해결
+sidebar_position: 2
+---
+
+# 문제 해결
+
+이 페이지는 Spice OS 운영 중 자주 마주치는 문제와, 진단 절차 및 해결 방법을 정리합니다.
+
+## 빠른 진단(Quick Diagnostics)
+
+### 전체 헬스 확인
+
+```bash
+# 전체 서비스 헬스 체크
+docker compose exec oms python -m spice.cli health --all
+
+# 개별 서비스 헬스
+curl http://localhost:8000/health   # OMS
+curl http://localhost:8002/api/v1/health   # BFF
+curl http://localhost:8004/health   # Agent
+
+# Docker 서비스 상태
+docker compose ps
+```
+
+### 로그 확인
+
+```bash
+# 전체 서비스 로그(최근 100줄)
+docker compose logs --tail=100
+
+# 특정 서비스 로그
+docker compose logs --tail=100 oms
+docker compose logs --tail=100 bff
+
+# 실시간 로그 팔로우
+docker compose logs -f oms
+
+# 오류만 필터링
+docker compose logs oms 2>&1 | grep "ERROR"
+```
+
+### 리소스 사용량 확인
+
+```bash
+# 컨테이너 리소스 사용량
+docker stats --no-stream
+
+# 볼륨별 디스크 사용량
+docker system df -v
+```
+
+## 자주 발생하는 문제
+
+### 서비스가 시작되지 않음
+
+**증상**: 하나 이상의 서비스가 시작 직후 즉시 종료됩니다.
+
+**진단**:
+```bash
+docker compose ps        # 실행 중이 아닌 서비스 확인
+docker compose logs <service>  # 에러 로그 확인
+```
+
+**흔한 원인**:
+1. **포트 충돌** -- 다른 프로세스가 필요한 포트를 사용 중입니다. `.env`에서 포트를 변경하세요.
+2. **환경 변수 누락** -- 필수 변수가 설정되지 않았습니다. 로그에서 `KeyError` 또는 `ConfigurationError`를 확인하세요.
+3. **의존 서비스 미준비** -- 데이터 스토어가 시작되었지만 아직 커넥션을 받지 못하는 상태일 수 있습니다. 의존 서비스를 재시작하세요.
+4. **메모리 부족** -- 컨테이너가 OOM-kill 되었습니다. Docker 메모리 제한을 늘리세요.
+
+**해결**:
+```bash
+# 특정 서비스 재시작
+docker compose restart <service>
+
+# 새 컨테이너로 재생성하여 재시작
+docker compose up -d --force-recreate <service>
+```
+
+### API가 401 Unauthorized를 반환
+
+**증상**: 모든 API 요청이 `401 Unauthorized` 를 반환합니다.
+
+**진단**:
+1. `Authorization` 헤더에 `Bearer <token>` 형태로 토큰이 포함되어 있는지 확인합니다.
+2. 토큰 만료 여부를 확인합니다(기본 1시간).
+3. Auth 서비스가 동작 중인지 확인합니다: `curl http://localhost:8002/health`.
+
+**해결**:
+```bash
+# 새 토큰 발급
+curl -X POST http://localhost:8002/api/v2/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin"}'
+```
+
+### API가 403(ApiUsageDenied) 반환
+
+**증상**: v2 API 요청이 `403 Forbidden` 및 `ApiUsageDenied` 에러 이름으로 실패합니다.
+
+**진단**:
+인증된 주체(principal)에 필요한 **OAuth scope** 가 없다는 의미입니다. 에러 응답에는 누락된 scope가 포함됩니다:
+
+```json
+{
+  "errorCode": "PERMISSION_DENIED",
+  "errorName": "ApiUsageDenied",
+  "parameters": { "missingScope": "api:datasets-write" }
+}
+```
+
+**해결**:
+1. JWT를 디코드(jwt.io)하고 `scope` 또는 `scp` 클레임을 확인합니다.
+2. JWT에 필요한 플랫폼 API scope(예: `api:datasets-write`)가 포함되어 있는지 확인합니다.
+3. IdP(Okta/Auth0/Azure AD)를 사용한다면, 애플리케이션에 해당 scope를 허용 목록에 추가합니다.
+4. 개발 환경에서는 admin 토큰(`X-Admin-Token`)과 dev master auth가 기본적으로 모든 scope를 포함합니다.
+
+### FoundryAPIError 디버깅
+
+**증상**: v2 엔드포인트가 이해해야 하는 구조화된 에러 응답을 반환합니다.
+
+**진단**:
+모든 `/api/v2/` 에러 응답은 `FoundryAPIError` 엔벨로프를 사용합니다:
+
+```json
+{
+  "errorCode": "...",
+  "errorName": "...",
+  "errorInstanceId": "uuid-...",
+  "parameters": { ... }
+}
+```
+
+**주요 필드**:
+- `errorInstanceId` -- 이 UUID로 BFF 로그에서 정확한 컨텍스트를 검색합니다
+- `errorCode` -- 머신 리더블 코드(예: `NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`)
+- `parameters` -- 에러를 유발한 구체 리소스 정보
+
+```bash
+# 특정 error instance에 대한 BFF 로그 검색
+docker compose logs bff | grep "uuid-from-errorInstanceId"
+```
+
+### 검색 결과가 최신이 아님
+
+**증상**: 최근 생성/업데이트된 객체가 검색 결과에 나타나지 않습니다.
+
+**진단**:
+1. Elasticsearch 인덱스 상태 확인: `curl http://localhost:9200/_cluster/health`.
+2. Grafana 또는 직접 Kafka 컨슈머 lag 확인:
+   ```bash
+   docker compose exec kafka kafka-consumer-groups.sh \
+     --bootstrap-server localhost:9092 \
+     --group spice-index-syncer \
+     --describe
+   ```
+3. Index Syncer 워커 로그 확인:
+   ```bash
+   docker compose logs index-syncer
+   ```
+
+**해결**:
+- lag가 크면 Index Syncer가 뒤처진 상태입니다. 일반적으로 자동으로 따라잡습니다.
+- 즉시 정합성이 필요하면 `X-Consistency: strong` 헤더로 PostgreSQL에서 읽도록 강제할 수 있습니다.
+- 전체 리인덱싱이 필요하면:
+  ```bash
+  docker compose exec oms python -m spice.cli reindex --all
+  ```
+
+### 데이터베이스 연결 오류
+
+**증상**: 서비스 로그에 PostgreSQL 관련 `ConnectionRefusedError` 또는 `OperationalError` 가 나타납니다.
+
+**진단**:
+```bash
+# PostgreSQL 실행 확인
+docker compose ps postgres
+
+# PostgreSQL 연결 가능 여부 확인
+docker compose exec postgres pg_isready
+
+# 커넥션 풀 상태 확인
+docker compose logs oms | grep "pool"
+```
+
+**해결**:
+1. PostgreSQL이 실행 중이 아니면 재시작: `docker compose restart postgres`.
+2. 커넥션 풀이 고갈되었다면 `.env`에서 `POSTGRES_MAX_CONNECTIONS`를 늘립니다.
+3. 장시간 실행 쿼리 확인:
+   ```bash
+   docker compose exec postgres psql -U spice -d spice_harvester -c \
+     "SELECT pid, now() - pg_stat_activity.query_start AS duration, query
+      FROM pg_stat_activity
+      WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes';"
+   ```
+
+### Kafka Consumer Lag 증가
+
+**증상**: Grafana에서 하나 이상의 컨슈머 그룹 lag가 지속적으로 증가합니다.
+
+**진단**:
+```bash
+# 전체 컨슈머 그룹 확인
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --list
+
+# 특정 그룹 lag 확인
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group spice-event-processor \
+  --describe
+```
+
+**흔한 원인**:
+1. 워커가 크래시되어 이벤트를 소비하지 못함
+2. 이벤트 처리 속도가 게시 속도보다 느림
+3. 특정 이벤트가 반복 실패(poison pill)
+
+**해결**:
+1. 워커 실행 여부 확인: `docker compose ps event-processor`.
+2. 워커 재시작: `docker compose restart event-processor`.
+3. 워커 스케일 업: `docker compose up -d --scale event-processor=3`.
+4. DLQ에서 poison pill 이벤트 확인.
+
+### Elasticsearch 클러스터 Yellow/Red
+
+**증상**: Elasticsearch 클러스터 상태가 yellow 또는 red 입니다.
+
+**진단**:
+```bash
+# 클러스터 상태 확인
+curl http://localhost:9200/_cluster/health?pretty
+
+# 할당되지 않은 샤드 확인
+curl http://localhost:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason | grep UNASSIGNED
+```
+
+**해결**:
+- **Yellow**: 레플리카 샤드가 할당되지 않음. 단일 노드 개발 환경에서는 정상일 수 있습니다. 프로덕션에서는 Elasticsearch 노드를 추가하세요.
+- **Red**: 프라이머리 샤드가 누락됨. 디스크 공간 및 Elasticsearch 로그를 확인하세요:
+  ```bash
+  docker compose logs elasticsearch
+  ```
+
+### 파이프라인 실행 실패
+
+**증상**: 파이프라인 실행 상태가 `FAILED` 가 됩니다.
+
+**진단**:
+```bash
+# 파이프라인 상태 확인
+curl http://localhost:8002/api/v2/pipelines/<pipelineId>/executions/<executionId> \
+  -H "Authorization: Bearer <token>"
+
+# Pipeline Runner 로그
+docker compose logs pipeline-runner
+```
+
+**흔한 원인**:
+1. 소스 파일을 찾지 못하거나 접근 불가
+2. 데이터 검증 실패(타입 불일치, 필수 필드 누락)
+3. 대상 객체 유형이 온톨로지에 존재하지 않음
+4. 변환 타임아웃 초과
+
+**해결**: 실행 응답과 runner 로그의 에러 상세를 확인하세요. 소스 데이터 또는 파이프라인 구성을 수정한 뒤 재실행합니다.
+
+### 디스크 공간 부족
+
+**증상**: 서비스가 디스크 관련 오류로 크래시합니다.
+
+**진단**:
+```bash
+# Docker 디스크 사용량 확인
+docker system df
+
+# 볼륨 크기 확인
+docker system df -v
+```
+
+**해결**:
+```bash
+# 사용하지 않는 Docker 리소스 제거
+docker system prune
+
+# 사용하지 않는 볼륨 제거(주의: 데이터 삭제)
+docker volume prune
+
+# Elasticsearch 인덱스 컴팩션
+curl -X POST http://localhost:9200/_forcemerge?max_num_segments=1
+```
+
+## 헬스 체크 엔드포인트
+
+| 서비스 | 엔드포인트 | 기대 응답 |
+|---------|----------|-------------------|
+| OMS | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| BFF | `GET /api/v1/health` | `{"status": "healthy", "checks": {...}}` |
+| Agent | `GET /health` | `{"status": "healthy", "checks": {...}}` |
+| Elasticsearch | `GET /_cluster/health` | `{"status": "green", ...}` |
+| Redis | `redis-cli ping` | `PONG` |
+
+## 서비스 재시작 절차
+
+### 단일 서비스 재시작
+
+```bash
+docker compose restart <service-name>
+```
+
+### 모든 API 서버 재시작
+
+```bash
+docker compose restart oms bff agent
+```
+
+### 모든 워커 재시작
+
+```bash
+docker compose restart event-processor projection-builder pipeline-runner \
+  lineage-worker schema-validator action-executor notification-worker \
+  retry-handler dead-letter-processor metric-aggregator cache-warmer \
+  index-syncer snapshot-worker
+```
+
+### 전체 플랫폼 재시작
+
+```bash
+docker compose down && docker compose up -d
+```
+
+:::caution
+전체 재시작은 일시적인 다운타임을 유발합니다. 프로덕션에서는 서비스를 하나씩 재시작하는 롤링 재시작을 사용하세요.
+:::
+
+## 다음 단계
+
+- **[모니터링](./monitoring)** -- 대시보드 및 알림 설정
+- **[프로젝션 정합성](./projection-consistency)** -- 오래된 프로젝션 복구
+- **[오류 코드](/docs/api/error-codes)** -- 에러 응답 이해

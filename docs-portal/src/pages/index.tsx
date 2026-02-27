@@ -1,5 +1,6 @@
 import React from "react";
 import Layout from "@theme/Layout";
+import Translate, { translate } from "@docusaurus/Translate";
 import HeroSection from "@site/src/components/layout/HeroSection";
 import FeatureGrid from "@site/src/components/layout/FeatureGrid";
 import type { Feature } from "@site/src/components/layout/FeatureGrid";
@@ -10,53 +11,119 @@ import styles from "./index.module.css";
 /* ------------------------------------------------------------------ */
 
 const STATS = [
-  { value: "275+", label: "API Endpoints" },
-  { value: "33+", label: "Services" },
-  { value: "290+", label: "Error Codes" },
-  { value: "6", label: "Runtime Paths" },
+  {
+    value: "275+",
+    label: translate({
+      id: "homepage.stats.apiEndpoints",
+      message: "API Endpoints",
+    }),
+  },
+  {
+    value: "33+",
+    label: translate({
+      id: "homepage.stats.services",
+      message: "Services",
+    }),
+  },
+  {
+    value: "290+",
+    label: translate({
+      id: "homepage.stats.errorCodes",
+      message: "Error Codes",
+    }),
+  },
+  {
+    value: "6",
+    label: translate({
+      id: "homepage.stats.runtimePaths",
+      message: "Runtime Paths",
+    }),
+  },
 ] as const;
 
 const FEATURES: Feature[] = [
   {
     icon: "\u{1F9E9}",
-    title: "Ontology Management",
+    title: translate({
+      id: "homepage.features.ontology.title",
+      message: "Ontology Management",
+    }),
     description:
-      "Define and evolve your data model with type-safe schemas, properties, and relationships.",
+      translate({
+        id: "homepage.features.ontology.description",
+        message:
+          "Define and evolve your data model with type-safe schemas, properties, and relationships.",
+      }),
     link: "/docs/api/overview",
   },
   {
     icon: "\u{1F504}",
-    title: "Pipeline Builder",
+    title: translate({
+      id: "homepage.features.pipeline.title",
+      message: "Pipeline Builder",
+    }),
     description:
-      "Build data transformation pipelines with 22+ transforms and AI-assisted composition.",
+      translate({
+        id: "homepage.features.pipeline.description",
+        message:
+          "Build data transformation pipelines with 22+ transforms and AI-assisted composition.",
+      }),
     link: "/docs/guides/data-engineer/schema-config",
   },
   {
     icon: "\u26A1",
-    title: "Action System",
+    title: translate({
+      id: "homepage.features.action.title",
+      message: "Action System",
+    }),
     description:
-      "Execute business logic through templated actions with undo support and conflict resolution.",
+      translate({
+        id: "homepage.features.action.description",
+        message:
+          "Execute business logic through templated actions with undo support and conflict resolution.",
+      }),
     link: "/docs/api/overview",
   },
   {
     icon: "\u{1F50D}",
-    title: "Data Lineage",
+    title: translate({
+      id: "homepage.features.lineage.title",
+      message: "Data Lineage",
+    }),
     description:
-      "Track data provenance across 15 edge types with SHA256 audit trails.",
+      translate({
+        id: "homepage.features.lineage.description",
+        message:
+          "Track data provenance across 15 edge types with SHA256 audit trails.",
+      }),
     link: "/docs/architecture/overview",
   },
   {
     icon: "\u{1F50E}",
-    title: "Search & Query",
+    title: translate({
+      id: "homepage.features.search.title",
+      message: "Search & Query",
+    }),
     description:
-      "Foundry-compatible search with 13 operators, faceted results, and full-text indexing.",
+      translate({
+        id: "homepage.features.search.description",
+        message:
+          "Foundry-compatible search with 13 operators, faceted results, and full-text indexing.",
+      }),
     link: "/docs/api/overview",
   },
   {
     icon: "\u{1F4CA}",
-    title: "Real-time Projections",
+    title: translate({
+      id: "homepage.features.projections.title",
+      message: "Real-time Projections",
+    }),
     description:
-      "Materialize computed views with eventual consistency and projection replay.",
+      translate({
+        id: "homepage.features.projections.description",
+        message:
+          "Materialize computed views with eventual consistency and projection replay.",
+      }),
     link: "/docs/architecture/overview",
   },
 ];
@@ -76,17 +143,35 @@ const ARCHITECTURE_DIAGRAM = `graph LR
 
 const STEPS = [
   {
-    title: "Install",
-    description: "Add Spice OS to your project with a single command.",
+    title: translate({
+      id: "homepage.steps.install.title",
+      message: "Install",
+    }),
+    description: translate({
+      id: "homepage.steps.install.description",
+      message: "Add Spice OS to your project with a single command.",
+    }),
     code: [
-      { type: "comment", text: "# Install the CLI and SDK" },
+      {
+        type: "comment",
+        text: translate({
+          id: "homepage.steps.install.codeComment",
+          message: "# Install the CLI and SDK",
+        }),
+      },
       { type: "keyword", text: "npm install " },
       { type: "string", text: "@spice/harvester-sdk" },
     ],
   },
   {
-    title: "Configure",
-    description: "Connect to your data sources and define your ontology schema.",
+    title: translate({
+      id: "homepage.steps.configure.title",
+      message: "Configure",
+    }),
+    description: translate({
+      id: "homepage.steps.configure.description",
+      message: "Connect to your data sources and define your ontology schema.",
+    }),
     code: [
       { type: "comment", text: "# spice.config.yaml" },
       { type: "keyword", text: "ontology" },
@@ -96,10 +181,22 @@ const STEPS = [
     ],
   },
   {
-    title: "Deploy",
-    description: "Ship to production with built-in observability and scaling.",
+    title: translate({
+      id: "homepage.steps.deploy.title",
+      message: "Deploy",
+    }),
+    description: translate({
+      id: "homepage.steps.deploy.description",
+      message: "Ship to production with built-in observability and scaling.",
+    }),
     code: [
-      { type: "comment", text: "# Deploy to your cluster" },
+      {
+        type: "comment",
+        text: translate({
+          id: "homepage.steps.deploy.codeComment",
+          message: "# Deploy to your cluster",
+        }),
+      },
       { type: "keyword", text: "spice deploy " },
       { type: "string", text: "--env production" },
       { type: "plain", text: "\n" },
@@ -131,12 +228,16 @@ function ArchitectureSection(): React.ReactElement {
       <div className={styles.sectionInner}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>
-            Built for Enterprise Scale
+            <Translate id="homepage.architecture.title">
+              Built for Enterprise Scale
+            </Translate>
           </h2>
           <p className={styles.sectionSubtitle}>
-            A microservices architecture with 33 independently deployable
-            services, event-driven communication, and built-in observability
-            across every runtime path.
+            <Translate id="homepage.architecture.subtitle">
+              A microservices architecture with 33 independently deployable
+              services, event-driven communication, and built-in observability
+              across every runtime path.
+            </Translate>
           </p>
         </div>
         <div className={styles.architectureContent}>
@@ -155,10 +256,16 @@ function GettingStartedSection(): React.ReactElement {
   return (
     <div className={styles.section}>
       <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>Get Started in Minutes</h2>
+        <h2 className={styles.sectionTitle}>
+          <Translate id="homepage.gettingStarted.title">
+            Get Started in Minutes
+          </Translate>
+        </h2>
         <p className={styles.sectionSubtitle}>
-          From zero to a running platform in three steps. Full documentation
-          covers every configuration option.
+          <Translate id="homepage.gettingStarted.subtitle">
+            From zero to a running platform in three steps. Full documentation
+            covers every configuration option.
+          </Translate>
         </p>
       </div>
       <div className={styles.stepsContainer}>
@@ -211,19 +318,35 @@ function GettingStartedSection(): React.ReactElement {
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="Enterprise Ontology & Data Platform"
-      description="Spice OS documentation portal — enterprise ontology management, data pipelines, actions, lineage, search, and real-time projections."
+      title={translate({
+        id: "homepage.meta.title",
+        message: "Enterprise Ontology & Data Platform",
+      })}
+      description={translate({
+        id: "homepage.meta.description",
+        message:
+          "Spice OS documentation portal — enterprise ontology management, data pipelines, actions, lineage, search, and real-time projections.",
+      })}
     >
       <main className={styles.landing}>
         <HeroSection
           title="Spice OS"
-          tagline="Enterprise Ontology & Data Platform"
+          tagline={translate({
+            id: "homepage.hero.tagline",
+            message: "Enterprise Ontology & Data Platform",
+          })}
           primaryAction={{
-            label: "Quick Start",
+            label: translate({
+              id: "homepage.hero.primaryAction",
+              message: "Quick Start",
+            }),
             href: "/docs/getting-started/quick-start",
           }}
           secondaryAction={{
-            label: "API Reference",
+            label: translate({
+              id: "homepage.hero.secondaryAction",
+              message: "API Reference",
+            }),
             href: "/docs/api/overview",
           }}
         />
@@ -232,10 +355,16 @@ export default function Home(): React.ReactElement {
 
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>Platform Capabilities</h2>
+            <h2 className={styles.sectionTitle}>
+              <Translate id="homepage.capabilities.title">
+                Platform Capabilities
+              </Translate>
+            </h2>
             <p className={styles.sectionSubtitle}>
-              Everything you need to model, transform, query, and operate
-              your enterprise data at scale.
+              <Translate id="homepage.capabilities.subtitle">
+                Everything you need to model, transform, query, and operate
+                your enterprise data at scale.
+              </Translate>
             </p>
           </div>
           <FeatureGrid features={FEATURES} />

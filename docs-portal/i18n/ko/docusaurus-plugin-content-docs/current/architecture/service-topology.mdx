@@ -1,0 +1,160 @@
+---
+title: 서비스 토폴로지
+sidebar_position: 3
+---
+
+# 서비스 토폴로지
+
+Spice OS는 4개 범주로 구성된 33개 이상의 Docker 서비스로 이루어져 있습니다. 이 페이지는 각 서비스의 포트, 의존성, 목적을 정리합니다.
+
+{/* The interactive D3 topology visualization will be embedded here */}
+
+## 핵심 API 서버
+
+외부에서 접근 가능한 서비스로, 클라이언트 요청을 처리합니다.
+
+| 서비스 | 포트 | 프로토콜 | 설명 |
+|---------|------|----------|-------------|
+| **OMS** (Ontology Management Service) | 8000 | HTTP/REST | 온톨로지 CRUD, 객체 관리, 검색, 액션, 라인리지의 핵심 API |
+| **BFF** (Backend-for-Frontend) | 8002 | HTTP/REST | 인증/라우팅/레이트 리미팅/응답 변환을 담당하는 API 게이트웨이 |
+| **Agent** | 8004 | HTTP/REST | 오케스트레이션된 액션과 워크플로 실행을 위한 도구 실행 런타임 |
+
+### 의존성
+
+```
+BFF  ──▶  OMS  ──▶  PostgreSQL, Elasticsearch, Redis, Kafka
+     ──▶  Agent ──▶  PostgreSQL, MinIO
+     ──▶  Auth (internal)
+```
+
+## 워커(Workers)
+
+워커는 Kafka 이벤트를 소비하고 플랫폼의 리드 모델과 처리 파이프라인을 유지하는 백그라운드 서비스입니다.
+
+| 서비스 | Kafka 컨슈머 그룹 | 설명 |
+|---------|---------------------|-------------|
+| **Event Processor** | `spice-event-processor` | 핵심 이벤트 핸들러; PostgreSQL 업데이트 및 하위 워커로 디스패치 |
+| **Projection Builder** | `spice-projection-builder` | 비정규화 프로젝션 뷰 생성/유지 |
+| **Pipeline Runner** | `spice-pipeline-runner` | 데이터 변환 파이프라인 실행 |
+| **Lineage Worker** | `spice-lineage-worker` | 데이터 라인리지 엣지 캡처/저장 |
+| **Schema Validator** | `spice-schema-validator` | 온톨로지 스키마 정의에 대한 입력 데이터 검증 |
+| **Action Executor** | `spice-action-executor` | 지연/스케줄된 액션 처리 |
+| **Notification Worker** | `spice-notification-worker` | 이벤트 기반 알림(웹훅/이메일) 전송 |
+| **Retry Handler** | `spice-retry-handler` | 실패한 이벤트 처리의 재시도 로직 관리 |
+| **Dead Letter Processor** | `spice-dlp` | 재시도 한도를 소진한 이벤트 처리 |
+| **Metric Aggregator** | `spice-metric-aggregator` | 플랫폼 메트릭 계산/게시 |
+| **Cache Warmer** | `spice-cache-warmer` | 자주 조회되는 데이터를 Redis에 사전 적재 |
+| **Index Syncer** | `spice-index-syncer` | PostgreSQL과 Elasticsearch 인덱스 동기화 |
+| **Snapshot Worker** | `spice-snapshot-worker` | 이벤트 스토어 상태의 주기적 스냅샷 생성(리플레이 가속) |
+
+### 워커 스케일링
+
+워커는 수평 확장이 가능합니다. Kafka 컨슈머 그룹 리밸런싱은 파티션을 워커 인스턴스에 균등 분배합니다:
+
+```bash
+# 이벤트 프로세서를 3개 레플리카로 스케일
+docker compose up -d --scale event-processor=3
+```
+
+:::note
+워커를 스케일할 때는 각 토픽의 Kafka 파티션 수가 워커 레플리카 수 이상인지 확인하세요. 기본 파티션 수는 12입니다.
+:::
+
+## 데이터 스토어
+
+| 서비스 | 포트 | 버전 | 목적 |
+|---------|------|---------|---------|
+| **PostgreSQL** | 5432 | 15+ | 온톨로지 스키마/객체 인스턴스/액션 히스토리/사용자 데이터의 source of truth |
+| **Elasticsearch** | 9200 | 8.x | 전체 텍스트 검색, 분석, 객체 인덱싱 |
+| **Redis** | 6379 | 7.x | 캐싱, 세션 저장, 레이트 리미팅, 분산 락 |
+| **Kafka** | 9092 | 3.x | 이벤트 스트리밍, 서비스 간 메시징 |
+| **ZooKeeper** | 2181 | 3.x | Kafka 클러스터 코디네이션(향후 KRaft로 마이그레이션 예정) |
+| **MinIO** | 9000 (API) / 9001 (Console) | Latest | 이벤트 영속성과 파일 저장을 위한 S3 호환 오브젝트 스토어 |
+| **Schema Registry** | 8081 | 7.x | Kafka 토픽용 Avro/JSON 스키마 관리 |
+| **Kafka Connect** | 8083 | 3.x | 외부 데이터 소스 통합을 위한 커넥터 프레임워크 |
+
+### 데이터 스토어 의존성
+
+```
+PostgreSQL    ──  standalone (no external deps)
+Elasticsearch ──  standalone
+Redis         ──  standalone
+Kafka         ──▶ ZooKeeper
+MinIO         ──  standalone
+Schema Registry ──▶ Kafka
+Kafka Connect   ──▶ Kafka, Schema Registry
+```
+
+### 스토리지 볼륨
+
+각 데이터 스토어는 영속성을 위해 이름이 지정된 Docker 볼륨을 사용합니다:
+
+| 서비스 | 볼륨 | 기본 크기 |
+|---------|--------|-------------|
+| PostgreSQL | `spice_postgres_data` | 10 GB |
+| Elasticsearch | `spice_es_data` | 20 GB |
+| Redis | `spice_redis_data` | 1 GB |
+| Kafka | `spice_kafka_data` | 10 GB |
+| ZooKeeper | `spice_zk_data` | 1 GB |
+| MinIO | `spice_minio_data` | 50 GB |
+
+## 관측성(Observability) 스택
+
+| 서비스 | 포트 | 설명 |
+|---------|------|-------------|
+| **Grafana** | 13000 | 대시보드/시각화. Spice OS 대시보드 사전 구성 |
+| **Prometheus** | 19090 | 메트릭 수집 및 알림 룰 |
+| **Jaeger** | 16686 (UI) / 14268 (collector) | 분산 트레이싱(UI로 전체 요청 트레이스 시각화) |
+| **OTEL Collector** | 4317 (gRPC) / 4318 (HTTP) | 트레이스/메트릭/로그를 집계하는 OpenTelemetry collector |
+| **AlertManager** | 9093 | 알림 라우팅 및 통지(email/Slack/PagerDuty) |
+| **Loki** | 3100 | 로그 집계 및 쿼리 |
+
+### 관측성 데이터 흐름
+
+```
+Services ──(OTLP)──▶ OTEL Collector ──▶ Prometheus (metrics)
+                                    ──▶ Jaeger (traces)
+                                    ──▶ Loki (logs)
+
+Grafana ──▶ Prometheus (metrics datasource)
+        ──▶ Jaeger (traces datasource)
+        ──▶ Loki (logs datasource)
+
+Prometheus ──▶ AlertManager ──▶ Slack / PagerDuty / Email
+```
+
+## 네트워크 아키텍처
+
+모든 서비스는 공유 Docker 네트워크(`spice-network`)를 통해 통신합니다. 외부 접근은 포트 8002의 BFF 게이트웨이를 통해서만 가능합니다.
+
+### 포트 요약
+
+| 포트 범위 | 범주 |
+|-----------|----------|
+| 8000-8004 | API 서버 |
+| 5432, 9200, 6379, 9092, 2181, 9000 | 데이터 스토어 |
+| 8081, 8083 | Kafka 생태계 |
+| 13000, 19090, 16686, 4317-4318, 9093, 3100 | 관측성 |
+
+### 보안 경계
+
+- **외부**: 포트 8002(BFF)만 퍼블릭 네트워크에 노출
+- **내부**: 모든 서비스 간 통신은 Docker 브리지 네트워크에서만 수행
+- **데이터 스토어**: 기본적으로 외부에 노출되지 않으며 Docker 네트워크 내부에서만 접근
+
+## 기동 순서(Startup Order)
+
+서비스는 의존성 때문에 특정 순서로 시작되어야 합니다. Docker Compose는 헬스 체크 기반 `depends_on`으로 이를 처리합니다:
+
+1. **데이터 스토어**: PostgreSQL, Elasticsearch, Redis, ZooKeeper, MinIO
+2. **Kafka 생태계**: Kafka(ZooKeeper 의존), Schema Registry, Kafka Connect
+3. **핵심 서비스**: OMS(PostgreSQL/Elasticsearch/Redis/Kafka 의존), Agent
+4. **게이트웨이**: BFF(OMS/Agent 의존)
+5. **워커**: 모든 워커(Kafka 및 관련 데이터 스토어 의존)
+6. **관측성**: OTEL Collector, Prometheus, Jaeger, Loki, AlertManager, Grafana
+
+## 다음 단계
+
+- **[아키텍처 개요](./overview)** -- 상위 수준 시스템 설계
+- **[이벤트 소싱](./event-sourcing)** -- 워커를 통한 이벤트 흐름
+- **[모니터링](/docs/operations/monitoring)** -- Grafana 대시보드와 알림

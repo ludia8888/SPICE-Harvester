@@ -1,0 +1,240 @@
+---
+title: 모니터링
+sidebar_position: 1
+---
+
+# 모니터링
+
+Spice OS는 전체 관측성(Observability) 스택을 함께 제공합니다. 이 페이지에서는 Grafana 대시보드, Prometheus 메트릭, Jaeger 트레이스, 로그 집계, 알림을 다룹니다.
+
+## 관측성 스택
+
+| 서비스 | 포트 | 용도 |
+|---------|------|---------|
+| **Grafana** | 13000 | 대시보드/시각화/알림 UI |
+| **Prometheus** | 19090 | 메트릭 수집/저장/알림 룰 |
+| **Jaeger** | 16686 | 분산 트레이싱 UI |
+| **OTEL Collector** | 4317 (gRPC) / 4318 (HTTP) | 텔레메트리 집계(트레이스/메트릭/로그) |
+| **AlertManager** | 9093 | 알림 라우팅 및 통지 |
+| **Loki** | 3100 | 로그 집계 및 쿼리 |
+
+## 대시보드 접근
+
+observability 프로파일로 플랫폼을 실행한 뒤 Grafana에 접속합니다:
+
+```
+http://localhost:13000
+```
+
+기본 계정: `admin` / `admin` (프로덕션에서는 첫 로그인 후 변경하세요).
+
+## 사전 구성 대시보드
+
+Spice OS는 여러 Grafana 대시보드를 기본 제공(사전 구성)합니다:
+
+### 플랫폼 개요(Platform Overview)
+
+플랫폼 상태를 상위 수준에서 확인할 수 있습니다:
+
+- **Service Status** -- 32개 서비스의 헬스 상태(녹색/빨간색)
+- **Request Rate** -- 모든 API 서버의 초당 요청 수
+- **Error Rate** -- 서비스/상태코드별 오류 비율
+- **Latency** -- API 엔드포인트 지연(P50/P95/P99)
+- **Active Connections** -- DB/Redis/Kafka 연결 수
+
+### API 성능(API Performance)
+
+API 성능 메트릭의 상세 뷰:
+
+- **Endpoint Latency** -- 엔드포인트별 지연 히스토그램
+- **Request Volume** -- 엔드포인트별 트래픽 분포
+- **Error Breakdown** -- 엔드포인트별 오류 코드/비율
+- **Payload Size** -- 요청/응답 페이로드 크기 분포
+- **Rate Limiting** -- 사용자/엔드포인트별 레이트 리미트 히트
+
+### 데이터 파이프라인(Data Pipeline)
+
+파이프라인 실행 모니터링:
+
+- **Active Pipelines** -- 현재 실행 중인 파이프라인
+- **Pipeline Duration** -- 파이프라인별 실행 시간 분포
+- **Transform Throughput** -- 변환별 초당 처리 레코드 수
+- **Pipeline Failures** -- 실패한 파이프라인 및 오류 상세
+- **Source/Sink Metrics** -- 읽기/쓰기 속도
+
+### 이벤트 처리(Event Processing)
+
+이벤트 시스템 상태:
+
+- **Event Rate** -- 토픽별 초당 게시 이벤트 수
+- **Consumer Lag** -- 토픽/파티션별 컨슈머 그룹 지연
+- **Processing Latency** -- 이벤트 생성부터 리드 모델 반영까지 시간
+- **Dead Letter Queue** -- DLQ 이벤트와 원인
+- **Snapshot Status** -- 최근 스냅샷 생성 활동
+
+### 데이터 스토어 상태(Data Store Health)
+
+인프라 레벨 메트릭:
+
+- **PostgreSQL** -- 커넥션 풀 사용률, 쿼리 시간, 트랜잭션 레이트, WAL 크기
+- **Elasticsearch** -- 클러스터 상태, 인덱스 크기, 쿼리 지연, 인덱싱 레이트
+- **Redis** -- 메모리 사용량, 히트율, 연결 수, eviction 레이트
+- **Kafka** -- 브로커 상태, 토픽 파티션 수, under-replicated 파티션
+- **MinIO** -- 스토리지 사용량, 요청 레이트, 오류 레이트
+
+## 주요 Prometheus 메트릭
+
+### API 메트릭
+
+```
+# Request rate by endpoint
+spice_http_requests_total{service, method, path, status}
+
+# Request duration histogram
+spice_http_request_duration_seconds{service, method, path}
+
+# Active connections
+spice_http_connections_active{service}
+```
+
+### 이벤트 메트릭
+
+```
+# Events published per second
+spice_events_published_total{topic, event_type}
+
+# Consumer lag
+spice_kafka_consumer_lag{consumer_group, topic, partition}
+
+# Event processing duration
+spice_event_processing_duration_seconds{worker, event_type}
+
+# Dead letter queue size
+spice_dlq_messages_total{topic, reason}
+```
+
+### 데이터 스토어 메트릭
+
+```
+# PostgreSQL connection pool
+spice_postgres_pool_size{state}  # state: active, idle, waiting
+
+# Elasticsearch cluster health
+spice_elasticsearch_cluster_status  # 0=green, 1=yellow, 2=red
+
+# Redis memory usage
+spice_redis_memory_used_bytes
+
+# Kafka broker count
+spice_kafka_brokers_active
+```
+
+## 분산 트레이싱(Distributed Tracing)
+
+Jaeger 접속:
+
+```
+http://localhost:16686
+```
+
+### 요청 트레이싱하기
+
+1. Jaeger UI를 열고 서비스 선택(예: `bff`, `oms`)
+2. 시간 범위/지속 시간/태그로 트레이스 검색
+3. 트레이스를 클릭해 전체 span 트리 확인
+4. 각 span에는 서비스/오퍼레이션/지속 시간/태그가 표시됨
+
+### 주요 태그
+
+| 태그 | 설명 |
+|-----|-------------|
+| `http.method` | HTTP 메서드(GET, POST) |
+| `http.url` | 요청 URL |
+| `http.status_code` | 응답 상태 코드 |
+| `ontology` | 온톨로지 API 이름 |
+| `object_type` | 객체 유형 API 이름 |
+| `action.type` | 액션 타입(createObject, editObject 등) |
+| `user.id` | 인증된 사용자 ID |
+
+### 트레이스와 로그 상관 분석
+
+각 요청은 trace ID를 생성하며, 이 ID는 로그에도 포함됩니다. `X-Request-Id` 헤더 또는 Jaeger의 trace ID로 Grafana/Loki에서 로그를 검색할 수 있습니다:
+
+```
+{service="oms"} |= "trace_id=abc123def456"
+```
+
+## 로그 집계(Log Aggregation)
+
+로그는 OTEL Collector가 수집해 Loki로 전달합니다. Grafana의 Explore 뷰에서 로그를 조회하세요.
+
+### 로그 쿼리 예시
+
+```logql
+# 지난 1시간 동안의 OMS 오류
+{service="oms"} |= "ERROR"
+
+# 액션 검증 실패
+{service="oms"} |= "ValidationFailed"
+
+# 느린 쿼리(> 1초)
+{service="oms"} | json | duration > 1s
+
+# 특정 사용자 활동
+{service="bff"} |= "user_id=user-admin-001"
+```
+
+### 로그 레벨
+
+| 레벨 | 설명 | 조사 시점 |
+|-------|-------------|-------------------|
+| `DEBUG` | 상세 진단 정보 | 적극적으로 디버깅할 때만 |
+| `INFO` | 정상 운영 이벤트 | 정기 검토 |
+| `WARNING` | 비치명적이지만 비정상 | 일일 점검 시 검토 |
+| `ERROR` | 요청 완료를 방해하는 실패 | 빠르게 조사 |
+| `CRITICAL` | 시스템 레벨 실패 | 즉시 조사 |
+
+## 알림(Alerting)
+
+AlertManager는 Prometheus의 알림을 통지 채널로 라우팅합니다.
+
+### 사전 구성 알림
+
+| 알림 | 조건 | 심각도 |
+|-------|-----------|----------|
+| `ServiceDown` | 1분 이상 헬스 체크 실패 | Critical |
+| `HighErrorRate` | 5분 동안 오류율 > 5% | Warning |
+| `HighLatency` | 5분 동안 P99 지연 > 5s | Warning |
+| `ConsumerLagHigh` | 10분 동안 Kafka lag > 10,000 | Warning |
+| `DiskSpaceLow` | 디스크 사용량 > 85% | Warning |
+| `DiskSpaceCritical` | 디스크 사용량 > 95% | Critical |
+| `PostgresConnectionPoolExhausted` | 1분 동안 idle 커넥션 없음 | Critical |
+| `ElasticsearchClusterRed` | 클러스터 상태가 red | Critical |
+| `DeadLetterQueueGrowing` | 30분 동안 DLQ 크기 증가 | Warning |
+
+### 통지 채널(Notification Channels)
+
+`alertmanager.yml` 에서 통지 채널을 구성합니다:
+
+```yaml
+receivers:
+  - name: slack-critical
+    slack_configs:
+      - api_url: https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+        channel: '#spice-alerts-critical'
+
+  - name: email-warning
+    email_configs:
+      - to: platform-team@your-org.com
+        from: alerts@spice-harvester.local
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - service_key: YOUR_PAGERDUTY_SERVICE_KEY
+```
+
+## 다음 단계
+
+- **[문제 해결](./troubleshooting)** -- 자주 발생하는 문제와 해결 방법
+- **[프로젝션 정합성](./projection-consistency)** -- 프로젝션 지연 모니터링
+- **[서비스 토폴로지](/docs/architecture/service-topology)** -- 서비스 인벤토리 이해

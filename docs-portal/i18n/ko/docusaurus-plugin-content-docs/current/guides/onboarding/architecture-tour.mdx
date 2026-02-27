@@ -1,0 +1,371 @@
+---
+title: 아키텍처 투어
+sidebar_position: 2
+---
+
+# 아키텍처 투어
+
+이 가이드는 Spice OS 아키텍처를 설명하며 따라갈 수 있는 내레이션 형태의 워크스루입니다. 시스템이 어떻게 구성되는지, 데이터가 어떻게 흐르는지, 서비스가 어떻게 상호작용하는지 이해하는 데 도움을 줍니다.
+
+## 큰 그림(The Big Picture)
+
+Spice OS는 4개 레이어로 구성된 **26개의 Docker 서비스**를 가진 분산 시스템입니다:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     API Layer                                │
+│                                                             │
+│  ┌─────────────────────┐    ┌──────────────────────┐       │
+│  │     BFF (8080)       │    │    Agent Service      │       │
+│  │  234+ REST endpoints │    │  AI tool integration  │       │
+│  └──────────┬──────────┘    └──────────────────────┘       │
+└─────────────┼───────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Core Services                               │
+│  ┌──────────▼──────────┐                                    │
+│  │     OMS (8000)       │  Ontology Management Service      │
+│  │  Schema + Search     │  Source of truth for schemas      │
+│  └─────────────────────┘                                    │
+└─────────────────────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Worker Layer (13 workers)                    │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ ontology │ │ instance │ │  action  │ │ pipeline │      │
+│  │ worker   │ │ worker   │ │ worker   │ │ worker   │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │projection│ │objectify │ │connector │ │connector │      │
+│  │ worker   │ │ worker   │ │ trigger  │ │  sync    │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │ pipeline │ │ ingest   │ │ message  │ │writeback │      │
+│  │scheduler │ │reconciler│ │  relay   │ │ worker   │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐                                               │
+│  │ action   │                                               │
+│  │ outbox   │                                               │
+│  └──────────┘                                               │
+└─────────────────────────────────────────────────────────────┘
+              │
+┌─────────────┼───────────────────────────────────────────────┐
+│             │    Infrastructure                              │
+│                                                             │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
+│  │PostgreSQL│ │Elastic-  │ │  Kafka   │ │  Redis   │      │
+│  │ (5433)   │ │search    │ │ (39092)  │ │ (6379)   │      │
+│  │          │ │ (9200)   │ │          │ │          │      │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                    │
+│  │  MinIO   │ │  lakeFS  │ │ZooKeeper │                    │
+│  │(9000/01) │ │ (48080)  │ │ (2181)   │                    │
+│  └──────────┘ └──────────┘ └──────────┘                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 레이어별 책임
+
+| 레이어 | 책임 |
+|-------|---------------|
+| **API Layer** | HTTP 요청 처리, 인증, 라우팅 |
+| **Core Services** | 비즈니스 로직, 스키마 관리, 검색 |
+| **Worker Layer** | 비동기 이벤트 처리, 백그라운드 작업 |
+| **Infrastructure** | 데이터 저장, 메시징, 캐싱, 버저닝 |
+
+## 요청 여정: 객체 읽기
+
+`GET /api/v2/ontologies/acme/objectTypes/Employee/objects/EMP-042` 요청을 따라가 보겠습니다:
+
+```
+1. Client sends HTTP GET
+   │
+2. BFF Auth Middleware
+   ├── Extract Bearer token
+   ├── Validate against expected tokens
+   └── Attach UserPrincipal to request
+   │
+3. BFF Route Handler (foundry_ontology_v2.py)
+   ├── Parse ontology API name → database name
+   ├── Parse object type and primary key
+   └── Forward to OMS
+   │
+4. OMS Route Handler
+   ├── Query Elasticsearch for the object
+   ├── Overlay key specs from PostgreSQL
+   └── Return formatted response
+   │
+5. BFF Response Formatting
+   ├── Convert to Foundry v2 format
+   ├── Add __rid, __primaryKey, __apiName
+   └── Return to client
+```
+
+**접근하는 서비스:** BFF → OMS → Elasticsearch (+ PostgreSQL: key specs)
+
+**일반적인 지연:** 10-50ms
+
+## 쓰기 경로: 객체 생성
+
+`POST /api/v2/ontologies/acme/actions/createObject` 요청을 따라가 보겠습니다:
+
+```
+1. Client sends action request
+   │
+2. BFF Auth + Validation
+   ├── Authenticate user
+   ├── Validate action parameters
+   └── Check permissions
+   │
+3. BFF Action Handler
+   ├── Build action command
+   ├── Generate idempotency key
+   └── Submit to action pipeline
+   │
+4. Action Processing
+   ├── Validate against ontology schema
+   ├── Create immutable event
+   └── Persist to event store (S3/MinIO)
+   │
+5. Event Distribution (Kafka)
+   ├── Publish event to Kafka topic
+   └── Multiple consumers receive event
+   │
+6. Worker Processing (parallel)
+   │
+   ├── Instance Worker
+   │   └── Write object to PostgreSQL
+   │
+   ├── Elasticsearch Indexer
+   │   └── Index object for search
+   │
+   ├── Projection Worker
+   │   └── Update aggregated views
+   │
+   └── Lineage Worker
+       └── Record provenance edges
+```
+
+**접근하는 서비스:** BFF → OMS → Kafka → (Instance Worker → PostgreSQL, ES Indexer → Elasticsearch, Projection Worker → PostgreSQL)
+
+**일반적인 지연:** 응답 승인까지 약 100ms, 모든 리드 모델에 완전히 반영되기까지 1-5s
+
+## 검색 경로: 객체 찾기
+
+`POST /api/v2/ontologies/acme/objectTypes/Employee/objects/search` 요청을 따라가 보겠습니다:
+
+```
+1. Client sends search query
+   │
+2. BFF Route Handler
+   ├── Parse SearchJsonQueryV2 query
+   ├── Validate operators and nesting depth (max 3)
+   └── Forward to OMS
+   │
+3. OMS Search Handler
+   ├── Convert to Elasticsearch DSL
+   ├── Apply tenant scoping
+   ├── Execute against Elasticsearch
+   └── Format results with __rid, __primaryKey
+   │
+4. BFF Response
+   ├── Add pagination token
+   └── Return to client
+```
+
+**접근하는 서비스:** BFF → OMS → Elasticsearch
+
+**일반적인 지연:** 20-100ms
+
+## 데이터 임포트 경로
+
+테이블 임포트 실행을 따라가 보겠습니다:
+
+```
+1. Execute import request
+   │
+2. BFF Connectivity Handler
+   ├── Load connection config
+   ├── Decrypt secrets (AES-GCM)
+   └── Select connector adapter
+   │
+3. Connector Adapter (e.g., PostgreSQL)
+   ├── SQL Query Guard (normalize, inject check)
+   ├── Execute query (300s timeout)
+   └── Return result set
+   │
+4. Sync Mode Processing
+   ├── SNAPSHOT: Replace all data
+   ├── APPEND: Deduplicate and append
+   ├── UPDATE: Upsert by primary key
+   ├── INCREMENTAL: Watermark-based fetch
+   └── CDC: Change token tracking
+   │
+5. Storage
+   ├── Write to lakeFS (versioned commit)
+   ├── Register in Dataset Registry
+   └── Publish completion event to Kafka
+```
+
+**접근하는 서비스:** BFF → External Database → LakeFS → MinIO → PostgreSQL → Kafka
+
+## 파이프라인 실행 경로
+
+파이프라인 빌드를 따라가 보겠습니다:
+
+```
+1. Pipeline build request
+   │
+2. Pipeline Worker receives job (from Kafka)
+   ├── Load pipeline definition
+   ├── Normalize nodes and edges
+   └── Topological sort (DAG order)
+   │
+3. Execute nodes in order
+   │
+   ├── Input Node
+   │   └── Load data from dataset (LakeFS)
+   │
+   ├── Transform Node (22 types)
+   │   ├── filter, compute, join, aggregate...
+   │   ├── UDF (sandboxed Python)
+   │   └── Schema validation at each step
+   │
+   └── Output Node
+       ├── Validate schema contract
+       ├── Check expectations (unique, required, FK)
+       └── Write to dataset / ontology
+   │
+4. Post-processing
+   ├── Record build artifacts in S3
+   ├── Update pipeline registry
+   └── Publish lineage edges
+```
+
+## 이벤트 라이프사이클
+
+모든 상태 변경은 다음 라이프사이클을 따릅니다:
+
+```
+Action Submitted
+      │
+      ▼
+┌─────────────┐
+│  Validated   │  Schema check, permission check
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│ Event Created│  Immutable, timestamped, actor-tagged
+└──────┬──────┘
+       │
+       ├──────────────────┐
+       ▼                  ▼
+┌─────────────┐    ┌─────────────┐
+│  Kafka Topic│    │ Event Store │  S3/MinIO (durable)
+│  (real-time)│    │ (archive)   │
+└──────┬──────┘    └─────────────┘
+       │
+       ├─────────┬──────────┬──────────┐
+       ▼         ▼          ▼          ▼
+  Instance   Projection  Lineage   Action
+  Worker     Worker      Worker    Outbox
+       │         │          │          │
+       ▼         ▼          ▼          ▼
+  PostgreSQL  PostgreSQL  Event     Kafka
+  (objects)   (views)     Store    (downstream)
+       │
+       ▼
+  Elasticsearch
+  (search index)
+```
+
+## 서비스 통신 맵
+
+| From | To | 프로토콜 | 목적 |
+|------|-----|---------|---------|
+| Client | BFF | HTTP | API 요청 |
+| BFF | OMS | HTTP | 스키마/검색 작업 |
+| BFF | Kafka | Kafka | 이벤트 게시 |
+| BFF | Redis | Redis | 캐싱/레이트 리미팅 |
+| BFF | PostgreSQL | SQL | 구성/레지스트리 |
+| BFF | LakeFS | HTTP | 데이터셋 저장 |
+| Workers | Kafka | Kafka | 이벤트 소비 |
+| Workers | PostgreSQL | SQL | 리드 모델 업데이트 |
+| Workers | Elasticsearch | HTTP | 검색 인덱스 업데이트 |
+| Workers | MinIO | S3 | 파일 저장 |
+| OMS | PostgreSQL | SQL | 스키마 저장 |
+| OMS | Elasticsearch | HTTP | 검색 쿼리 |
+
+## 직접 탐색(Hands-On Exploration)
+
+### 모든 서비스가 실행 중인지 확인
+
+```bash
+docker compose ps
+```
+
+모든 서비스가 `Up (healthy)` 로 표시되는지 확인합니다.
+
+### BFF 헬스 확인
+
+```bash
+curl http://localhost:8080/api/health | jq
+```
+
+### API 탐색
+
+```bash
+# 온톨로지 목록
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8080/api/v2/ontologies | jq
+
+# 객체 유형 목록
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8080/api/v2/ontologies/acme/objectTypes | jq
+```
+
+### Kafka 토픽 모니터링
+
+```bash
+docker compose exec kafka kafka-topics \
+  --bootstrap-server localhost:29092 --list
+```
+
+### MinIO 스토리지 보기
+
+브라우저에서 http://localhost:9001 을 열고 MinIO 자격 증명으로 로그인합니다.
+
+### lakeFS 보기
+
+브라우저에서 http://localhost:48080 을 열어 데이터 버저닝 리포지토리를 확인합니다.
+
+### Elasticsearch 인덱스 확인
+
+```bash
+curl http://localhost:9200/_cat/indices?v
+```
+
+## 주요 설계 패턴
+
+| 패턴 | 적용 위치 | 이유 |
+|---------|-----------|-----|
+| **Event Sourcing** | 모든 쓰기 작업 | 감사 추적, undo, 리빌드 |
+| **CQRS** | BFF(write) + OMS(read) | 읽기/쓰기 경로 최적화 |
+| **Outbox Pattern** | Action outbox worker | at-least-once 전달 보장 |
+| **Adapter Pattern** | 커넥터 어댑터 | 플러그형 데이터 소스 지원 |
+| **DAG Execution** | 파이프라인 실행기 | 결정적 변환 순서 |
+| **Sandbox** | UDF 런타임 | 커스텀 코드 보안 격리 |
+
+## 사전 준비
+
+- [빠른 시작](/docs/getting-started/quick-start) -- 로컬에서 플랫폼이 실행 중이어야 합니다
+- [핵심 개념](/docs/getting-started/concepts) -- 기본 용어 이해
+
+## 다음 단계
+
+- **[아키텍처 개요](/docs/architecture/overview)** -- 상세 아키텍처 문서
+- **[데이터 흐름](/docs/architecture/data-flow)** -- 요청 라이프사이클 다이어그램
+- **[서비스 토폴로지](/docs/architecture/service-topology)** -- 전체 서비스 인벤토리
+- **[이벤트 소싱](/docs/architecture/event-sourcing)** -- 이벤트 기반 아키텍처 상세

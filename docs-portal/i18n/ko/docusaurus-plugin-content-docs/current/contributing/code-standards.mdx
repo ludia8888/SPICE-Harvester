@@ -1,0 +1,260 @@
+---
+title: 코드 표준
+sidebar_position: 2
+---
+
+# 코드 표준
+
+이 페이지는 Spice OS에 기여할 때 따르는 코딩 표준과 컨벤션을 문서화합니다. 일관된 코드 스타일은 코드베이스를 더 읽기 쉽고, 리뷰하기 좋으며, 유지보수하기 쉽게 만듭니다.
+
+## Python 스타일 가이드
+
+### 포맷팅
+
+Spice OS는 린팅과 포맷팅 모두에 **Ruff** 를 사용합니다. Ruff는 Black/isort와 유사한 스타일을 강제하며, 큐레이션된 린팅 룰 세트를 적용합니다.
+
+```bash
+# 코드 포맷팅
+ruff format .
+
+# 코드 린트
+ruff check .
+
+# 린트 + 자동 수정
+ruff check --fix .
+```
+
+### 주요 규칙
+
+- **라인 길이**: 최대 100자.
+- **import**: 표준 라이브러리 → 서드파티 → 로컬 순으로 정렬. 한 줄에 한 import 권장.
+- **문자열**: 사용자에게 보여지는 문자열은 큰따옴표 권장, 내부 식별자는 작은따옴표도 허용.
+- **타입 힌트**: 모든 함수 시그니처(파라미터/리턴)에 타입 힌트 필수.
+- **docstring**: 공개 클래스/함수는 Google 스타일 docstring 사용.
+
+### 타입 힌트
+
+모든 함수는 타입 애너테이션을 포함해야 합니다:
+
+```python
+# Good
+def get_object(
+    ontology_api_name: str,
+    object_type_api_name: str,
+    primary_key: str,
+) -> ObjectInstance:
+    ...
+
+# Bad - missing type hints
+def get_object(ontology_api_name, object_type_api_name, primary_key):
+    ...
+```
+
+타입 체크 실행:
+
+```bash
+mypy src/
+```
+
+### 네이밍 컨벤션
+
+| 요소 | 컨벤션 | 예시 |
+|---------|-----------|---------|
+| 모듈 | `snake_case` | `object_type.py` |
+| 클래스 | `PascalCase` | `ObjectTypeService` |
+| 함수 | `snake_case` | `get_object_by_pk` |
+| 상수 | `UPPER_SNAKE_CASE` | `MAX_PAGE_SIZE` |
+| private 멤버 | `_leading_underscore` | `_validate_schema` |
+| 타입 변수 | `PascalCase` | `T`, `ObjectT` |
+
+### Docstring 형식
+
+```python
+def search_objects(
+    ontology_api_name: str,
+    object_type_api_name: str,
+    query: SearchJsonQueryV2,
+    page_size: int = 100,
+) -> PaginatedResponse[ObjectInstance]:
+    """Search for objects matching a query.
+
+    Translates the SearchJsonQueryV2 query into an Elasticsearch
+    DSL query and returns paginated results.
+
+    Args:
+        ontology_api_name: API name of the target ontology.
+        object_type_api_name: API name of the object type to search.
+        query: Search query using the SearchJsonQueryV2 format.
+        page_size: Number of results per page. Defaults to 100.
+
+    Returns:
+        Paginated response containing matching object instances.
+
+    Raises:
+        ObjectTypeNotFoundError: If the object type does not exist.
+        InvalidQueryError: If the query is malformed.
+    """
+```
+
+## TypeScript 컨벤션
+
+### 포맷팅
+
+TypeScript 코드는 **Prettier** 로 포맷팅하고 **ESLint** 로 린팅합니다.
+
+```bash
+# 포맷
+npx prettier --write .
+
+# 린트
+npx eslint .
+
+# 린트 + 자동 수정
+npx eslint --fix .
+```
+
+### 주요 규칙
+
+- **라인 길이**: 최대 100자.
+- **세미콜론**: 항상 세미콜론 사용.
+- **따옴표**: 문자열은 작은따옴표 사용.
+- **타입**: 객체 형태에는 `type` 보다 `interface` 를 선호. 유니온/유틸리티 타입에는 `type` 사용.
+- **null 처리**: strict null checks 사용. `any` 지양.
+
+### 네이밍 컨벤션
+
+| 요소 | 컨벤션 | 예시 |
+|---------|-----------|---------|
+| 파일 | `kebab-case` | `object-type-service.ts` |
+| 클래스 | `PascalCase` | `ObjectTypeService` |
+| 인터페이스 | `PascalCase` | `ObjectTypeResponse` |
+| 함수 | `camelCase` | `getObjectByPk` |
+| 상수 | `UPPER_SNAKE_CASE` | `MAX_PAGE_SIZE` |
+| enum | `PascalCase` 멤버 | `ActionType.CreateObject` |
+
+## 커밋 메시지 형식
+
+커밋 메시지는 **Conventional Commits** 규격을 따릅니다:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### 타입(Types)
+
+| 타입 | 설명 | 예시 |
+|------|-------------|---------|
+| `feat` | 신규 기능 | `feat(search): add containsAllTermsInOrder operator` |
+| `fix` | 버그 수정 | `fix(oms): resolve race condition in action validation` |
+| `refactor` | 동작 변경 없는 리팩터링 | `refactor(bff): extract auth middleware` |
+| `docs` | 문서 변경 | `docs(api): add v2 search examples` |
+| `test` | 테스트 추가/수정 | `test(pipeline): add transform unit tests` |
+| `chore` | 빌드/CI/의존성 | `chore(deps): bump elasticsearch-py to 8.12` |
+| `perf` | 성능 개선 | `perf(search): optimize ES query compilation` |
+| `ci` | CI/CD 변경 | `ci: add integration test pipeline` |
+
+### 스코프(Scopes)
+
+자주 쓰는 스코프: `oms`, `bff`, `funnel`, `admin`, `search`, `actions`, `pipeline`, `lineage`, `events`, `auth`, `config`, `docs`, `ci`, `deps`.
+
+### 규칙
+
+- **제목(Subject)**: 명령형, 소문자, 마침표 없이, 최대 72자.
+- **본문(Body)**: *어떻게* 보다 *무엇/왜*를 설명. 72자 래핑 권장.
+- **브레이킹 변경**: `BREAKING CHANGE:` 푸터 또는 type 뒤에 `!` 사용.
+
+### 예시
+
+```
+feat(search): add startsWith operator for keyword fields
+
+Implements the startsWith operator for SearchJsonQueryV2. This
+operator works on keyword (non-analyzed) fields and is useful for
+prefix matching on identifiers like employeeId.
+
+Closes #1234
+```
+
+```
+fix(oms)!: change primary key type from integer to string
+
+BREAKING CHANGE: Primary keys are now strings instead of integers.
+Update all client code that assumes integer primary keys.
+```
+
+## 테스트 표준
+
+### 테스트 구성
+
+```
+tests/
+├── unit/               # 빠름(외부 의존성 없음)
+│   ├── test_ontology.py
+│   ├── test_actions.py
+│   └── test_search.py
+├── integration/         # 데이터 스토어 실행 필요
+│   ├── test_api_objects.py
+│   ├── test_api_search.py
+│   └── test_event_processing.py
+└── conftest.py          # 공용 fixture
+```
+
+### 테스트 네이밍
+
+```python
+# Good - 시나리오와 기대 결과가 명확함
+def test_search_with_eq_operator_returns_matching_objects():
+    ...
+
+def test_create_object_with_duplicate_pk_raises_conflict():
+    ...
+
+# Bad - 의미가 모호함
+def test_search():
+    ...
+
+def test_error():
+    ...
+```
+
+### 테스트 구조
+
+Arrange-Act-Assert 패턴을 따릅니다:
+
+```python
+def test_edit_object_updates_properties():
+    # Arrange
+    instance = create_test_employee(department="Engineering")
+
+    # Act
+    result = oms.apply_action(EditObject(
+        primary_key=instance.primary_key,
+        properties={"department": "Product"}
+    ))
+
+    # Assert
+    assert result.status == ActionStatus.COMPLETED
+    updated = oms.get_object(instance.primary_key)
+    assert updated.properties["department"] == "Product"
+```
+
+## 코드 리뷰 체크리스트
+
+PR을 제출하거나 리뷰할 때 다음을 확인하세요:
+
+- [ ] 모든 테스트 통과(`pytest` 및 `npm test`)
+- [ ] 타입 오류 없음(`mypy src/`)
+- [ ] 린트 경고 없음(`ruff check .` 및 `npx eslint .`)
+- [ ] 커밋 메시지가 Conventional Commits 형식을 준수
+- [ ] 신규 공개 API에 docstring/타입 힌트 포함
+- [ ] 신규 기능에 대응하는 테스트가 존재
+- [ ] 코드에 시크릿/자격 증명이 포함되지 않음
+- [ ] 브레이킹 변경이 문서화됨
+
+## 다음 단계
+
+- **[개발 환경 설정](./dev-setup)** -- 로컬 개발 환경 구성

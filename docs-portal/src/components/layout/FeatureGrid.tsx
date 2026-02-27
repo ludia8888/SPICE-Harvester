@@ -1,5 +1,6 @@
 import React from "react";
 import Link from "@docusaurus/Link";
+import Translate from "@docusaurus/Translate";
 import styles from "./FeatureGrid.module.css";
 
 export interface Feature {
@@ -26,7 +27,8 @@ export default function FeatureGrid({
           <h3 className={styles.cardTitle}>{feature.title}</h3>
           <p className={styles.cardDescription}>{feature.description}</p>
           <span className={styles.cardArrow}>
-            Learn more <span aria-hidden="true">&rarr;</span>
+            <Translate id="homepage.feature.learnMore">Learn more</Translate>{" "}
+            <span aria-hidden="true">&rarr;</span>
           </span>
         </Link>
       ))}

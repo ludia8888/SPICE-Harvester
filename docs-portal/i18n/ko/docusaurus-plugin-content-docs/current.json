@@ -1,0 +1,62 @@
+{
+  "version.label": {
+    "message": "최신",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.Getting Started": {
+    "message": "시작하기",
+    "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Guides": {
+    "message": "가이드",
+    "description": "The label for category 'Guides' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Data Engineer": {
+    "message": "데이터 엔지니어",
+    "description": "The label for category 'Data Engineer' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Platform Admin": {
+    "message": "플랫폼 관리자",
+    "description": "The label for category 'Platform Admin' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Integration Developer": {
+    "message": "통합 개발자",
+    "description": "The label for category 'Integration Developer' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Business Analyst": {
+    "message": "비즈니스 분석가",
+    "description": "The label for category 'Business Analyst' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Onboarding": {
+    "message": "온보딩",
+    "description": "The label for category 'Onboarding' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Architecture": {
+    "message": "아키텍처",
+    "description": "The label for category 'Architecture' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Auto-Generated Diagrams": {
+    "message": "자동 생성 다이어그램",
+    "description": "The label for category 'Auto-Generated Diagrams' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Reference": {
+    "message": "레퍼런스",
+    "description": "The label for category 'Reference' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Operations": {
+    "message": "운영",
+    "description": "The label for category 'Operations' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Contributing": {
+    "message": "기여하기",
+    "description": "The label for category 'Contributing' in sidebar 'docsSidebar'"
+  },
+  "sidebar.apiSidebar.category.Ontology v2": {
+    "message": "온톨로지 v2",
+    "description": "The label for category 'Ontology v2' in sidebar 'apiSidebar'"
+  },
+  "sidebar.apiSidebar.category.Complete Reference (Auto-Generated)": {
+    "message": "전체 레퍼런스 (자동 생성)",
+    "description": "The label for category 'Complete Reference (Auto-Generated)' in sidebar 'apiSidebar'"
+  }
+}

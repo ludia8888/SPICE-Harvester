@@ -1,0 +1,184 @@
+---
+title: 개발 환경 설정
+sidebar_position: 1
+---
+
+# 개발 환경 설정
+
+이 가이드는 Spice OS에 기여하기 위한 로컬 개발 환경을 설정하는 방법을 설명합니다.
+
+## 사전 준비
+
+아래 도구가 설치되어 있는지 확인하세요:
+
+| 도구 | 버전 | 용도 |
+|------|---------|---------|
+| Python | 3.11+ | 백엔드 서비스, CLI, 테스트 |
+| Node.js | 20+ LTS | BFF, 프론트엔드 툴링, 문서 사이트 |
+| Docker | 24.0+ | 데이터 스토어 및 서비스 실행 |
+| Docker Compose | 2.20+ | 서비스 오케스트레이션 |
+| Git | 2.40+ | 버전 관리 |
+| Make | 4.0+ | 빌드 자동화(선택이지만 권장) |
+
+## 클론 및 초기 설정
+
+```bash
+# 저장소 클론
+git clone https://github.com/your-org/spice-harvester.git
+cd spice-harvester
+
+# Python 가상환경 생성
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
+
+# Python 의존성 설치
+pip install -e ".[dev]"
+
+# Node.js 의존성 설치
+npm install
+
+# 환경 설정 복사
+cp .env.example .env
+```
+
+## 데이터 스토어 시작
+
+개발에서는 애플리케이션 서비스는 직접 실행하고, 데이터 스토어만 Docker로 실행하는 편이 빠릅니다:
+
+```bash
+docker compose --profile datastores up -d
+```
+
+이 명령은 PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO를 실행합니다.
+
+## 데이터베이스 마이그레이션 실행
+
+```bash
+python -m alembic upgrade head
+python -m spice.cli seed --demo
+```
+
+## 로컬에서 서비스 실행
+
+개발 루프를 빠르게 하기 위해 서비스는 Docker 밖에서 직접 실행할 수 있습니다:
+
+```bash
+# Terminal 1: OMS
+python -m uvicorn spice.oms.app:app --reload --port 8000
+
+# Terminal 2: BFF
+python -m uvicorn spice.bff.app:app --reload --port 8002
+
+# Terminal 3: Agent
+python -m uvicorn spice.agent.app:app --reload --port 8004
+```
+
+`--reload` 플래그는 코드 변경 시 자동 재시작을 활성화합니다.
+
+## Pre-Commit 훅
+
+커밋 전 코드 품질을 강제하기 위해 pre-commit 훅을 설치하세요:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+훅은 다음을 실행합니다:
+- **Ruff** -- Python 린팅/포맷팅
+- **mypy** -- Python 타입 체크
+- **ESLint** -- TypeScript/JavaScript 린팅
+- **Prettier** -- TypeScript/JavaScript 포맷팅
+- **Unit tests** -- 빠른 테스트 스위트
+
+수동으로 훅을 실행하려면:
+
+```bash
+pre-commit run --all-files
+```
+
+## 테스트 실행
+
+```bash
+# 전체 Python 테스트
+pytest
+
+# 특정 테스트 모듈
+pytest tests/test_ontology.py
+
+# 커버리지 포함
+pytest --cov=spice --cov-report=html
+
+# 빠른 유닛 테스트만(외부 의존성 없음)
+pytest -m "not integration"
+
+# 통합 테스트(데이터 스토어 실행 필요)
+pytest -m integration
+
+# TypeScript 테스트
+npm test
+```
+
+## IDE 설정
+
+### VS Code
+
+권장 확장:
+- Python (ms-python.python)
+- Pylance (ms-python.vscode-pylance)
+- Ruff (charliermarsh.ruff)
+- ESLint (dbaeumer.vscode-eslint)
+- Prettier (esbenp.prettier-vscode)
+- Docker (ms-azuretools.vscode-docker)
+
+권장 설정(`.vscode/settings.json`):
+
+```json
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "python.analysis.typeCheckingMode": "basic",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}
+```
+
+### PyCharm / IntelliJ
+
+1. 프로젝트 인터프리터를 `.venv/bin/python` 으로 설정합니다.
+2. Ruff 플러그인을 통해 Ruff 연동을 활성화합니다.
+3. 테스트 러너를 pytest로 설정합니다.
+4. `src/` 를 sources root로, `tests/` 를 tests root로 마크합니다.
+
+## Makefile 타깃
+
+가능하다면 Make를 사용해 자주 쓰는 작업을 간단히 수행할 수 있습니다:
+
+```bash
+make install        # 모든 의존성 설치
+make test           # 전체 테스트 실행
+make test-unit      # 유닛 테스트만 실행
+make test-integration  # 통합 테스트 실행
+make lint           # 린터 실행
+make format         # 자동 포맷
+make typecheck      # 타입 체크 실행
+make docs           # 문서 빌드
+make docker-build   # Docker 이미지 빌드
+make clean          # 빌드 산출물 제거
+```
+
+## 다음 단계
+
+- **[코드 표준](./code-standards)** -- 스타일 가이드와 컨벤션
+- **[릴리스 프로세스](./release-process)** -- 릴리스 생성 방법
+- **[아키텍처 개요](/docs/architecture/overview)** -- 시스템 설계 이해

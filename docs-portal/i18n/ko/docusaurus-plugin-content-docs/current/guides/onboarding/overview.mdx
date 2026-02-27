@@ -1,0 +1,188 @@
+---
+title: 온보딩 개요
+sidebar_position: 1
+---
+
+# 온보딩 개요
+
+Spice OS에 오신 것을 환영합니다. 이 가이드는 신규 팀원을 위한 구조화된 온보딩 경로를 제공합니다. 데이터 엔지니어, 플랫폼 관리자, 통합 개발자, 비즈니스 분석가 등 어떤 역할이든, 이 페이지를 통해 빠르게 시작할 수 있습니다.
+
+## Spice OS란?
+
+Spice OS는 Palantir Foundry에서 영감을 받은 **엔터프라이즈 온톨로지 및 데이터 플랫폼**입니다. 다음을 제공합니다:
+
+- **온톨로지 기반 데이터 모델** -- 강타입 스키마로 객체 유형/속성/관계를 정의
+- **데이터 수집(Ingestion)** -- 6개 외부 데이터 소스(PostgreSQL/MySQL/Oracle/Snowflake/SQL Server/Google Sheets)에 대해 5개 동기화 모드 지원
+- **파이프라인 빌더** -- 22개 변환 타입, UDF, 3개 실행 모드(Preview/Build/Deploy)로 데이터 변환
+- **Foundry v2 API** -- Palantir Foundry API 표면과 호환되는 234개 이상의 REST 엔드포인트
+- **이벤트 소싱** -- 모든 변이를 불변 이벤트로 캡처(완전한 감사 추적)
+- **버전 관리 데이터셋** -- LakeFS를 통한 Git 유사 브랜칭/버저닝
+
+## 한눈에 보는 플랫폼 아키텍처
+
+```
+Clients (API / SDK / UI)
+        │
+        ▼
+┌─────────────────────────────────┐
+│       BFF (API Gateway)          │  234+ REST endpoints
+│       Port 8080                  │
+└──────────┬──────────────────────┘
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+┌────────┐  ┌───────────┐
+│  OMS   │  │  Workers  │  13 background worker services
+│Port 8000│  │           │
+└───┬────┘  └─────┬─────┘
+    │             │
+    ▼             ▼
+┌──────────────────────────────────┐
+│         Infrastructure            │
+│  PostgreSQL │ Elasticsearch       │
+│  Kafka      │ Redis               │
+│  LakeFS     │ MinIO               │
+└──────────────────────────────────┘
+```
+
+## 역할별 학습 경로
+
+### 데이터 엔지니어
+
+데이터 모델과 데이터 파이프라인을 구축/운영합니다.
+
+| 단계 | 가이드 | 학습 내용 |
+|------|-------|-------------------|
+| 1 | [핵심 개념](/docs/getting-started/concepts) | 온톨로지, 객체 유형, 속성, 링크 유형, 데이터셋 |
+| 2 | [스키마 구성](../data-engineer/schema-config) | 객체 유형 정의, 속성 구성, 링크 유형 생성 |
+| 3 | [임포트 템플릿](../data-engineer/import-templates) | 외부 데이터 소스 연결, 동기화 모드 구성 |
+| 4 | [파이프라인 빌더](../data-engineer/pipeline-builder) | 변환 파이프라인 구성, UDF 사용, 실행 스케줄링 |
+
+**첫 번째 과제:** 3개 속성을 가진 객체 유형을 정의하고 CSV 파일에서 데이터를 로드해보세요.
+
+### 플랫폼 관리자
+
+플랫폼을 배포/모니터링/보안 설정합니다.
+
+| 단계 | 가이드 | 학습 내용 |
+|------|-------|-------------------|
+| 1 | [설치](/docs/getting-started/installation) | Docker Compose로 26개 서비스 배포 |
+| 2 | [아키텍처 투어](./architecture-tour) | 서비스 상호작용과 데이터 흐름 이해 |
+| 3 | [서비스 모니터링](../platform-admin/service-monitoring) | 헬스 체크, Docker 모니터링, 문제 해결 |
+| 4 | [RBAC](../platform-admin/rbac) | 사용자, 역할, 권한, 멀티 테넌시 |
+
+**첫 번째 과제:** 로컬에 플랫폼을 배포하고 모든 헬스 엔드포인트가 healthy를 반환하는지 확인하세요.
+
+### 통합 개발자
+
+Spice OS API를 소비하는 애플리케이션을 개발합니다.
+
+| 단계 | 가이드 | 학습 내용 |
+|------|-------|-------------------|
+| 1 | [핵심 개념](/docs/getting-started/concepts) | 데이터 모델과 API 개념 |
+| 2 | [REST API](../integration-developer/rest-api) | 엔드포인트, 검색, 페이지네이션, 에러 처리 |
+| 3 | [인증 플로우](../integration-developer/auth-flow) | 인증 전략, JWT, 토큰 |
+| 4 | [SDK 가이드](../integration-developer/sdk-guide) | Python/TypeScript 클라이언트 라이브러리 |
+
+**첫 번째 과제:** bearer 토큰으로 인증한 뒤, 온톨로지 내 모든 객체 유형을 나열해보세요.
+
+### 비즈니스 분석가
+
+데이터를 검색/분석하고 액션을 수행합니다.
+
+| 단계 | 가이드 | 학습 내용 |
+|------|-------|-------------------|
+| 1 | [핵심 개념](/docs/getting-started/concepts) | 객체 유형, 인스턴스, 액션 |
+| 2 | [검색 & 쿼리](../business-analyst/search-query) | 23개 검색 연산자, 필터, 정렬 |
+| 3 | [액션 템플릿](../business-analyst/action-templates) | 표현식을 사용한 재사용 가능한 액션 로직 |
+| 4 | [대시보드](../business-analyst/dashboard) | 데이터 시각화 및 탐색 |
+
+**첫 번째 과제:** `eq` 연산자로 객체를 검색하고 결과를 이름으로 정렬해보세요.
+
+## 핵심 용어
+
+| 용어 | 정의 |
+|------|-----------|
+| **Ontology** | 데이터 모델을 정의하는 최상위 컨테이너 |
+| **Object Type** | 스키마 청사진(데이터베이스 테이블과 유사) |
+| **Property** | 객체 유형의 타입이 있는 속성 |
+| **Instance** | 객체 유형의 실제 레코드 |
+| **Link Type** | 객체 유형 간 방향성 있는 관계 |
+| **Action** | 검증되고 감사되는 쓰기 작업 |
+| **Dataset** | LakeFS에 저장되는 버전 관리 데이터 객체 |
+| **Pipeline** | 데이터 처리를 위한 DAG 변환 노드 |
+| **Connection** | 외부 데이터 소스에 대한 구성된 연결 |
+| **Projection** | 쿼리에 최적화된 사전 계산 뷰 |
+| **RID** | Resource Identifier (`ri.spice.main.{type}.{id}`) |
+| **Event** | 상태 변경의 불변 기록 |
+
+## 대표 워크플로
+
+### 데이터 수집
+
+```
+Create Connection → Configure Import → Choose Sync Mode → Execute → Verify Data
+```
+
+### 스키마 설계
+
+```
+Define Object Types → Add Properties → Create Link Types → Load Sample Data → Iterate
+```
+
+### 통합 개발
+
+```
+Get Token → Explore API → Build Queries → Handle Pagination → Implement Error Handling
+```
+
+### 데이터 변환
+
+```
+Create Pipeline → Add Transforms → Preview → Build → Deploy → Schedule
+```
+
+## 환경 접근
+
+### 로컬 개발
+
+```bash
+# 저장소 클론
+git clone <repository-url>
+cd SPICE-Harvester/backend
+
+# 전체 서비스 시작
+docker compose up -d
+
+# 헬스 확인
+curl http://localhost:8080/api/health
+```
+
+### API 접근
+
+| 서비스 | URL | 용도 |
+|---------|-----|---------|
+| BFF API | `http://localhost:8080/api` | 기본 API 게이트웨이 |
+| OMS API | `http://localhost:8000` | 온톨로지 관리 |
+| MinIO Console | `http://localhost:9001` | 오브젝트 스토리지 UI |
+| lakeFS | `http://localhost:48080` | 데이터 버저닝 UI |
+| Elasticsearch | `http://localhost:9200` | 검색 엔진 |
+
+### 자격 증명 얻기
+
+1. `.env` 또는 `docker-compose.yml`에서 기본 토큰 확인
+2. JWT 인증을 사용한다면 IdP를 구성합니다([인증 플로우](../integration-developer/auth-flow) 참고)
+3. 개발 환경에서는 Dev Master Auth를 활성화할 수 있습니다(개발 전용)
+
+## 도움 받기
+
+- **문서** -- 이 문서 사이트는 플랫폼의 모든 기능을 다룹니다
+- **[용어집](/docs/reference/glossary)** -- 낯선 용어 확인
+- **[문제 해결](/docs/operations/troubleshooting)** -- 흔한 문제와 해결
+- **[오류 코드](/docs/api/error-codes)** -- API 오류 레퍼런스
+
+## 다음 단계
+
+- **[아키텍처 투어](./architecture-tour)** -- 시스템 시각적 안내
+- **[빠른 시작](/docs/getting-started/quick-start)** -- 플랫폼 실행
+- **[핵심 개념](/docs/getting-started/concepts)** -- 핵심 개념 심화
