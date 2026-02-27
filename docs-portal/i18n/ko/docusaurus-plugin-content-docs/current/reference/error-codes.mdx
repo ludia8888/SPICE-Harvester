@@ -1,0 +1,44 @@
+---
+title: 오류 코드
+sidebar_position: 1
+---
+
+# 오류 코드
+
+Spice OS는 서브시스템, 도메인, 클래스 기준으로 정리된 290개 이상의 구조화된 오류 코드를 정의합니다.
+
+오류 형식, 코드 구조, 심각도(severity) 레벨, 재시도(retry) 정책, 그리고 자주 발생하는 오류 코드의 전체 목록을 포함한 완전한 레퍼런스는 **[API 오류 코드 레퍼런스](/docs/api/error-codes)** 를 참고하세요.
+
+## 빠른 참조
+
+### 오류 형식
+
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "err-2024-01-15-a1b2c3d4",
+  "parameters": { ... }
+}
+```
+
+### 오류 코드 패턴
+
+```
+SHV-{SUBSYSTEM}-{DOMAIN}-{CLASS}-{NUMBER}
+```
+
+예: `SHV-ONT-OBJ-NFD-001` (Ontology > Object > Not Found > #001)
+
+### 재시도 가능 vs 재시도 불가
+
+| 재시도 가능 | 재시도 불가 |
+|-----------|---------------|
+| `CON` (Conflict) -- 다시 읽고 재시도 | `VAL` (Validation) -- 입력 수정 |
+| `INT` (Internal) -- 지수 백오프 | `NFD` (Not Found) -- 리소스 ID 확인 |
+| `TMO` (Timeout) -- 백오프로 재시도 | `PRM` (Permission) -- 접근 권한 확인 |
+| `LIM` (Rate Limit) -- `Retry-After` 준수 | `DUP` (Duplicate) -- 리소스가 이미 존재 |
+| `UNV` (Unavailable) -- 대기 후 재시도 | |
+| `DEP` (Dependency) -- 하위 의존성 이슈 | |
+
+자세한 내용은 **[API 오류 코드 레퍼런스](/docs/api/error-codes)** 를 참고하세요.

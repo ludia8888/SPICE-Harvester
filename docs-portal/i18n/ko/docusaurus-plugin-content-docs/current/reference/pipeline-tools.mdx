@@ -1,0 +1,183 @@
+---
+title: 파이프라인 도구 레퍼런스
+sidebar_position: 3
+---
+
+# 파이프라인 도구 레퍼런스
+
+이 페이지는 파이프라인 빌더의 transform 타입, MCP 도구, 그리고 데이터 워크플로 자동화를 위한 에이전트 허용 도구(agent-allowed tools)를 문서화합니다.
+
+## 파이프라인 변환(Transform) 타입
+
+파이프라인 빌더는 4개 카테고리로 구성된 22개 이상의 transform 타입을 지원합니다. 각 transform은 데이터프레임을 입력으로 받아 데이터프레임을 출력으로 생성합니다.
+
+### 구조 변환(Structural Transforms)
+
+개별 값은 바꾸지 않고 데이터의 형태를 재구성합니다.
+
+| Transform | 설명 | 주요 파라미터 |
+|-----------|-------------|----------------|
+| `map` | 각 행에 매핑 함수를 적용 | `expression`: 매핑 표현식 |
+| `filter` | 조건에 맞지 않는 행 제거 | `predicate`: 필터 표현식 |
+| `flatten` | 중첩 배열을 개별 행으로 확장 | `field`: flatten할 배열 필드 |
+| `groupBy` | 하나 이상의 키로 그룹화 | `keys`: 그룹 키, `aggregations`: 집계 표현식 |
+| `sort` | 하나 이상의 필드로 정렬 | `fields`: 정렬 필드, `order`: `asc` 또는 `desc` |
+| `distinct` | 중복 행 제거 | `fields`: 유일성 비교 필드 |
+| `limit` | 앞에서 N개 행만 선택 | `count`: 최대 행 수 |
+| `skip` | 앞에서 N개 행 건너뛰기 | `count`: 건너뛸 행 수 |
+| `union` | 여러 소스의 행 결합 | `sources`: 소스 참조 배열 |
+| `pivot` | 행을 컬럼으로 피벗 | `rowKey`, `columnKey`, `valueField` |
+
+### 보강(Enrichment) 변환
+
+외부 소스를 사용해 데이터를 추가/수정합니다.
+
+| Transform | 설명 | 주요 파라미터 |
+|-----------|-------------|----------------|
+| `lookup` | 객체 유형에서 값을 조회하여 행을 보강 | `objectType`, `lookupKey`, `returnFields` |
+| `join` | 키가 일치하는 두 데이터프레임 조인 | `right`: 두 번째 소스, `joinKey`, `joinType` |
+| `geocode` | 주소를 좌표로 변환 | `addressField`, `provider` |
+| `resolve` | 엔티티 참조를 정본 레코드로 해석 | `entityField`, `strategy` |
+| `compute` | 표현식으로 계산 컬럼 추가 | `columns`: 컬럼명 → 표현식 맵 |
+
+### 검증(Validation) 변환
+
+데이터 품질을 보장합니다.
+
+| Transform | 설명 | 주요 파라미터 |
+|-----------|-------------|----------------|
+| `validate` | 스키마 또는 커스텀 규칙으로 행 검증 | `rules`: 검증 룰 세트 |
+| `deduplicate` | 중복 레코드 제거 또는 병합 | `matchFields`, `strategy` (`keep_first`, `keep_last`, `merge`) |
+| `normalize` | 필드 값 표준화 | `field`, `normalization`: (`trim`, `lowercase`, `titlecase`, `strip_html`) |
+| `typecast` | 필드 데이터 타입 변환 | `conversions`: 필드 → 목표 타입 맵 |
+
+### 출력(Output) 변환
+
+결과를 온톨로지로 기록합니다.
+
+| Transform | 설명 | 주요 파라미터 |
+|-----------|-------------|----------------|
+| `upsertObjects` | 객체 인스턴스 생성/업데이트 | `objectType`, `primaryKeyField`, `propertyMapping` |
+| `createLinks` | 객체 간 링크 인스턴스 생성 | `linkType`, `sourceKeyField`, `targetKeyField` |
+| `publishEvent` | Kafka에 커스텀 이벤트 게시 | `topic`, `eventType`, `payloadMapping` |
+
+## 파이프라인 정의 형식
+
+파이프라인은 JSON 또는 YAML로 정의합니다:
+
+```json
+{
+  "name": "employee-import",
+  "description": "Import employee records from CSV",
+  "source": {
+    "type": "file",
+    "format": "csv",
+    "path": "s3://imports/employees.csv",
+    "options": {
+      "header": true,
+      "delimiter": ","
+    }
+  },
+  "transforms": [
+    {
+      "type": "typecast",
+      "config": {
+        "conversions": {
+          "salary": "double",
+          "startDate": "date",
+          "isActive": "boolean"
+        }
+      }
+    },
+    {
+      "type": "normalize",
+      "config": {
+        "field": "fullName",
+        "normalization": "titlecase"
+      }
+    },
+    {
+      "type": "validate",
+      "config": {
+        "rules": [
+          { "field": "employeeId", "rule": "required" },
+          { "field": "employeeId", "rule": "pattern", "pattern": "^EMP-\\d{3,}$" },
+          { "field": "salary", "rule": "range", "min": 0, "max": 1000000 }
+        ]
+      }
+    },
+    {
+      "type": "deduplicate",
+      "config": {
+        "matchFields": ["employeeId"],
+        "strategy": "keep_last"
+      }
+    },
+    {
+      "type": "upsertObjects",
+      "config": {
+        "objectType": "Employee",
+        "primaryKeyField": "employeeId",
+        "propertyMapping": {
+          "employeeId": "employeeId",
+          "fullName": "fullName",
+          "department": "department",
+          "startDate": "startDate",
+          "salary": "salary",
+          "isActive": "isActive"
+        }
+      }
+    }
+  ]
+}
+```
+
+## MCP 도구
+
+Model Context Protocol(MCP) 도구는 AI 에이전트가 파이프라인 시스템과 상호작용할 수 있는 인터페이스를 제공합니다.
+
+| 도구 | 설명 | 파라미터 |
+|------|-------------|------------|
+| `pipeline.create` | 새 파이프라인 정의 생성 | `name`, `source`, `transforms` |
+| `pipeline.run` | 파이프라인 실행 | `pipelineId`, `dryRun` (optional) |
+| `pipeline.status` | 파이프라인 실행 상태 확인 | `executionId` |
+| `pipeline.list` | 파이프라인 정의 목록 | `pageSize`, `pageToken` |
+| `pipeline.get` | 파이프라인 정의 조회 | `pipelineId` |
+| `pipeline.delete` | 파이프라인 정의 삭제 | `pipelineId` |
+| `pipeline.validate` | 실행 없이 정의 검증 | `pipeline` (definition object) |
+| `pipeline.preview` | 샘플 데이터로 파이프라인 실행 | `pipelineId`, `sampleSize` |
+| `ontology.listObjectTypes` | 매핑을 위한 객체 유형 목록 | `ontologyApiName` |
+| `ontology.getObjectType` | 객체 유형 스키마 조회 | `ontologyApiName`, `objectTypeApiName` |
+| `search.query` | 보강(lookup)용 객체 검색 | `ontologyApiName`, `objectType`, `where` |
+
+## 에이전트 허용 도구(Agent Allowed Tools)
+
+에이전트 모드(AI 보조 파이프라인 빌딩)로 파이프라인을 실행할 때 에이전트가 사용할 수 있는 도구는 다음과 같습니다:
+
+| 도구 카테고리 | 도구 | 설명 |
+|--------------|-------|-------------|
+| **Read** | `ontology.list`, `ontology.get`, `objectType.list`, `objectType.get` | 온톨로지 메타데이터 읽기 |
+| **Search** | `search.query`, `search.aggregate` | 기존 데이터 조회 |
+| **Preview** | `pipeline.preview`, `pipeline.validate` | 파이프라인 정의 테스트 |
+| **Execute** | `pipeline.run` (with approval) | 파이프라인 실행(사용자 확인 필요) |
+| **Monitor** | `pipeline.status`, `pipeline.logs` | 실행 중 파이프라인 모니터링 |
+
+:::note
+에이전트는 온톨로지 스키마를 직접 수정하거나, 객체를 삭제하거나, 관리자 작업을 수행할 수 없습니다. 이러한 작업은 Admin 서비스를 통한 명시적 사용자 상호작용이 필요합니다.
+:::
+
+## 소스 타입(Source Types)
+
+| 소스 타입 | 설명 | 설정 옵션 |
+|-------------|-------------|----------------|
+| `file` | 파일(CSV/JSON/Parquet)에서 읽기 | `path`, `format`, `options` |
+| `api` | 외부 REST API에서 읽기 | `url`, `method`, `headers`, `pagination` |
+| `database` | 외부 데이터베이스에서 읽기 | `connectionString`, `query` |
+| `kafka` | Kafka 토픽에서 읽기 | `topic`, `consumerGroup`, `offsetReset` |
+| `objectType` | 기존 Spice OS 객체에서 읽기 | `ontologyApiName`, `objectTypeApiName`, `where` |
+
+## 다음 단계
+
+- **[파이프라인 빌더 가이드](/docs/guides/data-engineer/pipeline-builder)** -- 파이프라인 구축 단계별 가이드
+- **[설정 레퍼런스](./config)** -- 파이프라인 관련 설정
+- **[API 개요](/docs/api/overview)** -- 파이프라인 관리 API 컨벤션

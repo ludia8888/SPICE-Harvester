@@ -30,7 +30,12 @@ const config: Config = {
 
   i18n: {
     defaultLocale: "en",
-    locales: ["en"],
+    locales: ["en", "ko"],
+    localeConfigs: {
+      ko: {
+        label: "한국어",
+      },
+    },
   },
 
   presets: [
@@ -98,6 +103,10 @@ const config: Config = {
         {
           href: "https://github.com/ludia8888/SPICE-Harvester",
           label: "GitHub",
+          position: "right",
+        },
+        {
+          type: "localeDropdown",
           position: "right",
         },
       ],

@@ -1,0 +1,252 @@
+---
+title: API 개요
+sidebar_position: 1
+---
+
+# API 개요
+
+Spice OS는 `/api/v2/ontologies/*` 아래에 Foundry 정렬(public) API 표면을 제공하며, `/api/v1/*` 아래에 내부 호환성 라우트를 제공합니다. 이 페이지에서는 인증, 기본 URL, 버저닝, 페이지네이션, 에러 처리 컨벤션을 다룹니다.
+
+## 기본 URL(Base URL)
+
+모든 API 요청은 BFF 게이트웨이를 통해 라우팅됩니다:
+
+```
+https://your-domain.com/api/{version}/
+```
+
+로컬 개발 환경:
+
+```
+http://localhost:8002/api/{version}/
+```
+
+## 인증(Authentication)
+
+모든 API 요청은 `Authorization` 헤더에 Bearer 토큰이 필요합니다:
+
+```bash
+curl -H "Authorization: Bearer <access_token>" \
+  https://your-domain.com/api/v2/ontologies
+```
+
+### 토큰 발급
+
+인증 엔드포인트에서 토큰을 요청합니다:
+
+```bash
+curl -X POST https://your-domain.com/api/v2/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "your-username",
+    "password": "your-password"
+  }'
+```
+
+응답:
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+토큰은 기본적으로 1시간 뒤 만료됩니다. 만료 전에 refresh 플로우를 사용하거나 다시 인증하세요.
+
+### 토큰 갱신(Token Refresh)
+
+```bash
+curl -X POST https://your-domain.com/api/v2/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "your-refresh-token"
+  }'
+```
+
+## API 버저닝(API Versioning)
+
+Spice OS API 표면은 계약(Contract) 역할에 따라 분리됩니다:
+
+| 버전 | 계약 역할 | 상태 | 설명 |
+|---------|---------------|--------|-------------|
+| **v2** | 공개 Foundry 정렬 표면 | **Active** | 외부/신규 통합에 권장 |
+| **v1** | 내부 호환/운영 표면 | Restricted | Foundry 공개 온톨로지 계약이 아님 |
+
+### 버전 선택
+
+URL 경로에 버전을 포함합니다:
+
+```
+/api/v2/ontologies/...    # Foundry 정렬 공개 표면(권장)
+/api/v1/...               # 내부 호환/운영 표면
+```
+
+### v1 → v2 마이그레이션
+
+v2 API는 Foundry 정렬의 정식(캐노니컬) 통합 계약입니다. 주요 차이:
+
+| 항목 | v1 | v2 |
+|--------|----|----|
+| URL 구조 | 제품/내부 중심 | `/api/v2/ontologies/{ontology}/...` |
+| 계약 범위 | 혼합된 호환성 라우트 | Foundry 정렬의 공개 온톨로지 리소스 |
+| 검색(Search) | 혼합된 쿼리 형태 | `SearchJsonQueryV2` |
+| 페이지네이션 | offset/token 혼합 | opaque `pageToken` |
+| 에러 포맷 | 혼합된 엔벨로프 | `{errorCode, errorName, errorInstanceId, parameters}` |
+
+단계별 마이그레이션은 [Foundry 마이그레이션 가이드](/docs/guides/platform-admin/foundry-migration)를 참고하세요.
+
+## 페이지네이션(Pagination)
+
+v2 API는 **opaque page token** 기반 페이지네이션을 사용합니다. 이는 기반 데이터가 변경되어도 더 안정적인 페이지네이션을 제공합니다.
+
+### 요청(Request)
+
+```bash
+# 첫 페이지
+curl "https://your-domain.com/api/v2/ontologies/acme/objects/Employee?pageSize=25"
+
+# 다음 페이지
+curl "https://your-domain.com/api/v2/ontologies/acme/objects/Employee?pageSize=25&pageToken=eyJvZmZzZXQi..."
+```
+
+### 응답(Response)
+
+```json
+{
+  "data": [ ... ],
+  "nextPageToken": "eyJvZmZzZXQiOjI1fQ=="
+}
+```
+
+- 더 이상 결과가 없으면 `nextPageToken` 은 `null` 입니다.
+- page token은 opaque 문자열입니다. 파싱하거나 직접 구성하지 마세요.
+- 기본 `pageSize` 는 100, 최대는 1000입니다.
+- token은 비활성 10분 뒤 만료됩니다.
+
+## 요청 형식(Request Format)
+
+### 헤더(Headers)
+
+| 헤더 | 필수 | 설명 |
+|--------|----------|-------------|
+| `Authorization` | Yes | `Bearer <access_token>` |
+| `Content-Type` | POST/PUT에서 필요 | `application/json` |
+| `Accept` | No | `application/json` (기본) |
+| `X-Request-Id` | No | 트레이싱을 위한 클라이언트 제공 request ID |
+| `X-Consistency` | No | read-after-write 정합성을 위해 `strong` |
+
+### 콘텐츠 타입(Content Types)
+
+- 요청 바디는 JSON(`application/json`)이어야 합니다.
+- 파일 업로드는 `multipart/form-data` 를 사용합니다.
+- 응답은 항상 JSON입니다.
+
+## 응답 형식(Response Format)
+
+### 성공 응답(Success Responses)
+
+단일 객체:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe"
+  }
+}
+```
+
+컬렉션:
+
+```json
+{
+  "data": [
+    { "__rid": "...", "__primaryKey": "...", ... },
+    { "__rid": "...", "__primaryKey": "...", ... }
+  ],
+  "nextPageToken": "eyJvZmZzZXQi..."
+}
+```
+
+### 에러 응답(FoundryAPIError)
+
+모든 `/api/v2/` 엔드포인트는 **FoundryAPIError** 엔벨로프를 사용해 에러를 반환합니다. 이 Foundry 호환 포맷은 BFF 서비스에 등록된 전역 `foundry_exception_handler`가 처리합니다. v2 경로에서의 요청 검증 오류와 JSON 디코딩 오류도 자동으로 이 포맷으로 래핑됩니다.
+
+```json
+{
+  "errorCode": "NOT_FOUND",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-999"
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+|-------|------|-------------|
+| `errorCode` | string | 머신 리더블 오류 코드(예: `NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`) |
+| `errorName` | string | 사람이 읽기 좋은 오류 이름(예: `ObjectNotFound`, `ApiUsageDenied`) |
+| `errorInstanceId` | string | 발생마다 생성되는 UUID(트레이싱용) |
+| `parameters` | object | 디버깅을 위한 컨텍스트 파라미터 |
+
+### HTTP 상태 코드
+
+| 코드 | 의미 | 사용 시점 |
+|------|---------|-----------|
+| `200` | OK | 읽기/변이 성공 |
+| `201` | Created | 객체 생성 성공 |
+| `204` | No Content | 삭제 성공 |
+| `400` | Bad Request | 잘못된 바디/파라미터 |
+| `401` | Unauthorized | Bearer 토큰 누락/무효 |
+| `403` | Forbidden | 권한 부족 |
+| `404` | Not Found | 리소스 없음 |
+| `409` | Conflict | 동시 수정 충돌 |
+| `422` | Unprocessable Entity | 검증 실패 |
+| `429` | Too Many Requests | 레이트 리미트 초과 |
+| `500` | Internal Server Error | 예상치 못한 서버 오류 |
+
+## 레이트 리미팅(Rate Limiting)
+
+BFF 게이트웨이는 인증된 사용자 기준으로 레이트 리미트를 적용합니다:
+
+| 티어 | 분당 요청 | 버스트 |
+|------|-----------------|-------|
+| Standard | 600 | 100 |
+| Premium | 3000 | 500 |
+| Admin | Unlimited | Unlimited |
+
+레이트 리미트에 걸리면 응답은 다음과 같은 헤더를 포함합니다:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1705312200
+```
+
+## 엔드포인트 요약(Endpoint Summary)
+
+**총 엔드포인트: 264개** (v2 109개 + v1 155개)
+
+v2 표면은 9개 카테고리로 구성됩니다: Ontologies(12), Object Types(18), Actions(5), Links & Link Types(5), Query Types(2), Interface Types(2), Shared Property Types(2), Value Types(2), 그리고 기타 v2 엔드포인트(61개: datasets/연결성/오케스트레이션 포함).
+
+실시간 엔드포인트 수 및 최신 라우트 인벤토리는 다음을 참고하세요:
+
+- [자동 엔드포인트 요약](./auto-endpoint-summary)
+- [v2 전체 레퍼런스](./auto-v2-reference)
+- [v1 내부 레퍼런스](./auto-v1-reference)
+
+## 다음 단계
+
+- **[v2 Object Types API](./v2-object-types)** -- 온톨로지 스키마 관리
+- **[v2 Objects API](./v2-objects)** -- 객체 인스턴스 작업
+- **[v2 Search API](./v2-search)** -- 13개 연산자로 객체 조회
+- **[오류 코드](./error-codes)** -- 전체 오류 레퍼런스

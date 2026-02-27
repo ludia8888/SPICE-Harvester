@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-25T04:53:27+09:00
+> Generated: 2026-02-25T06:59:17+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -5961,17 +5961,6 @@
   - `ConcurrencyControl` (line 89): Utility class for concurrency control operations.
     - `validate_version_for_update(current_version, provided_version)` (line 96): Validate version for update operation.
     - `get_next_version(current_version)` (line 119): Calculate next version number.
-
-### `backend/shared/models/builder_agent.py`
-- **Classes**
-  - `BuilderClarificationQuestion` (line 10): no docstring
-    - `_accept_key_as_id(cls, data)` (line 20): no docstring
-  - `BuilderAgentRunOptions` (line 36): no docstring
-  - `BuilderAgentRunRequest` (line 42): no docstring
-  - `BuilderAgentApprovalDecisionRequest` (line 52): no docstring
-  - `BuilderBranchExecutionStep` (line 58): no docstring
-  - `BuilderBranchExecutionPlan` (line 67): no docstring
-  - `BuilderExecutionSummary` (line 74): no docstring
 
 ### `backend/shared/models/commands.py`
 - **Classes**

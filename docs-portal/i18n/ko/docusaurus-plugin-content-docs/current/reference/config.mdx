@@ -1,0 +1,158 @@
+---
+title: 설정 레퍼런스
+sidebar_position: 2
+---
+
+# 설정 레퍼런스
+
+Spice OS는 36개 이상의 설정 클래스로 모든 플랫폼 서비스의 동작을 제어합니다. 설정 값은 환경 변수, `.env` 파일, Docker 전용 기본값에서 해석(resolve)됩니다.
+
+{/* The interactive ConfigLandscape visualization will be embedded here */}
+
+## 설정 해석 우선순위
+
+설정 값은 아래 우선순위(위가 더 높음)로 해석됩니다:
+
+1. **환경 변수** -- 셸 또는 Docker Compose `environment` 블록에 설정
+2. **`.env` 파일** -- 프로젝트 레벨 기본값
+3. **Docker 전용 기본값** -- Docker Compose에 최적화된 하드코딩 기본값
+4. **애플리케이션 기본값** -- 설정 클래스에 있는 최종 fallback 값
+
+## 설정 카테고리
+
+### 코어 서비스 설정
+
+| 클래스 | Env Prefix | 설명 |
+|-------|-----------|-------------|
+| `OmsConfig` | `OMS_` | OMS 서버 설정(host, port, workers, timeouts) |
+| `BffConfig` | `BFF_` | BFF 게이트웨이 설정(host, port, CORS, rate limits) |
+| `ServiceSettings (type inference)` | `FUNNEL_` | 내부 타입 추론 런타임 타임아웃(standalone host/port 없음) |
+| `AgentConfig` | `AGENT_` | Agent 서비스 설정 |
+| `AuthConfig` | `AUTH_` | 인증 설정(secret key, token expiry, issuer) |
+
+### 데이터 스토어 설정
+
+| 클래스 | Env Prefix | 설명 |
+|-------|-----------|-------------|
+| `PostgresConfig` | `POSTGRES_` | PostgreSQL 연결(host, port, database, pool size) |
+| `ElasticsearchConfig` | `ELASTICSEARCH_` | Elasticsearch 연결(host, port, index prefix, shards) |
+| `RedisConfig` | `REDIS_` | Redis 연결(host, port, password, database, TTL) |
+| `KafkaConfig` | `KAFKA_` | Kafka 연결(bootstrap servers, consumer group, partitions) |
+| `MinioConfig` | `MINIO_` | MinIO/S3 연결(endpoint, access key, bucket) |
+| `SchemaRegistryConfig` | `SCHEMA_REGISTRY_` | Schema Registry 연결 |
+
+### 워커 설정
+
+| 클래스 | Env Prefix | 설명 |
+|-------|-----------|-------------|
+| `EventProcessorConfig` | `EVENT_PROCESSOR_` | 이벤트 처리 설정(batch size, concurrency) |
+| `ProjectionBuilderConfig` | `PROJECTION_BUILDER_` | 프로젝션 빌드 설정(rebuild interval, batch size) |
+| `PipelineRunnerConfig` | `PIPELINE_RUNNER_` | 파이프라인 실행 설정(max concurrent, timeout) |
+| `LineageWorkerConfig` | `LINEAGE_WORKER_` | 라인리지 캡처 설정 |
+| `RetryConfig` | `RETRY_` | 재시도 정책(max attempts, backoff, dead letter) |
+| `SnapshotConfig` | `SNAPSHOT_` | 스냅샷 생성 설정(interval, retention) |
+| `CacheWarmerConfig` | `CACHE_WARMER_` | 캐시 워밍 설정(schedule, batch size) |
+| `IndexSyncerConfig` | `INDEX_SYNCER_` | 인덱스 동기화 설정(batch size, consistency check interval) |
+
+### 관측성 설정
+
+| 클래스 | Env Prefix | 설명 |
+|-------|-----------|-------------|
+| `OtelConfig` | `OTEL_` | OpenTelemetry 설정(exporter, endpoint, sampling) |
+| `LoggingConfig` | `LOG_` | 로깅 설정(level, format, output) |
+| `MetricsConfig` | `METRICS_` | Prometheus 메트릭 설정(port, namespace) |
+| `TracingConfig` | `TRACING_` | 분산 트레이싱 설정(Jaeger endpoint, sampling rate) |
+| `AlertConfig` | `ALERT_` | AlertManager 설정(webhook, email, Slack) |
+
+### 기능 설정
+
+| 클래스 | Env Prefix | 설명 |
+|-------|-----------|-------------|
+| `SearchConfig` | `SEARCH_` | 검색 동작(default page size, max results, timeout) |
+| `ActionConfig` | `ACTION_` | 액션 동작(max batch size, undo retention, conflict mode) |
+| `PipelineConfig` | `PIPELINE_` | 파이프라인 동작(max transforms, timeout, retry policy) |
+| `LineageConfig` | `LINEAGE_` | 라인리지 동작(edge types, retention, query depth) |
+| `ProjectionConfig` | `PROJECTION_` | 프로젝션 동작(consistency target, rebuild threshold) |
+
+## 주요 환경 변수
+
+### 필수 변수
+
+프로덕션 배포에서는 반드시 설정해야 합니다:
+
+```bash
+# ─── Secrets (generate with: openssl rand -hex 32) ────────
+AUTH_SECRET_KEY=<your-secret-key>
+POSTGRES_PASSWORD=<your-db-password>
+MINIO_SECRET_KEY=<your-minio-secret>
+
+# ─── External URLs ────────────────────────────────────────
+BFF_PUBLIC_URL=https://api.your-domain.com
+CORS_ORIGINS=https://app.your-domain.com
+
+# ─── Performance ──────────────────────────────────────────
+OMS_WORKERS=4
+BFF_WORKERS=4
+POSTGRES_MAX_CONNECTIONS=100
+```
+
+### 자주 튜닝하는 변수
+
+| 변수 | 기본값 | 설명 |
+|----------|---------|-------------|
+| `OMS_WORKERS` | `2` | OMS uvicorn 워커 수 |
+| `BFF_WORKERS` | `2` | BFF uvicorn 워커 수 |
+| `POSTGRES_MAX_CONNECTIONS` | `20` | PostgreSQL 커넥션 풀 크기 |
+| `POSTGRES_POOL_TIMEOUT` | `30` | 풀 acquire 타임아웃(초) |
+| `ELASTICSEARCH_SHARDS` | `1` | 인덱스당 primary 샤드 수 |
+| `ELASTICSEARCH_REPLICAS` | `0` | 인덱스당 replica 샤드 수 |
+| `ELASTICSEARCH_REFRESH_INTERVAL` | `1s` | 인덱스 refresh interval |
+| `KAFKA_PARTITIONS` | `12` | 토픽 기본 파티션 수 |
+| `KAFKA_REPLICATION_FACTOR` | `1` | 토픽 replication factor |
+| `REDIS_MAX_CONNECTIONS` | `10` | Redis 커넥션 풀 크기 |
+| `REDIS_DEFAULT_TTL` | `300` | 기본 캐시 TTL(초) |
+| `SEARCH_DEFAULT_PAGE_SIZE` | `100` | 검색 기본 page size |
+| `SEARCH_MAX_PAGE_SIZE` | `1000` | 검색 최대 page size |
+| `SEARCH_TIMEOUT` | `30` | 검색 쿼리 타임아웃(초) |
+| `ACTION_MAX_BATCH_SIZE` | `100` | 단일 배치의 최대 액션 수 |
+| `ACTION_UNDO_RETENTION_DAYS` | `30` | undo 히스토리 보관 일수 |
+| `PIPELINE_MAX_CONCURRENT` | `5` | 최대 동시 파이프라인 실행 수 |
+| `PIPELINE_TRANSFORM_TIMEOUT` | `300` | transform별 타임아웃(초) |
+| `LOG_LEVEL` | `INFO` | 로그 레벨(DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| `LOG_FORMAT` | `json` | 로그 포맷(`json` 또는 `text`) |
+| `OTEL_SAMPLING_RATE` | `0.1` | 트레이스 샘플링 비율(0.0~1.0) |
+| `SNAPSHOT_INTERVAL` | `100` | aggregate당 스냅샷 사이 이벤트 수 |
+
+### Docker 전용 기본값
+
+Docker Compose로 실행할 때 자동으로 적용되는 기본값:
+
+| 변수 | Docker 기본값 | Standalone 기본값 |
+|----------|---------------|-------------------|
+| `POSTGRES_HOST` | `postgres` | `localhost` |
+| `ELASTICSEARCH_HOST` | `elasticsearch` | `localhost` |
+| `REDIS_HOST` | `redis` | `localhost` |
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:9092` | `localhost:9092` |
+| `MINIO_ENDPOINT` | `minio:9000` | `localhost:9000` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `otel-collector:4317` | `localhost:4317` |
+
+## 설정 검증
+
+서비스는 시작 시 설정을 검증하고 다음에 대한 경고를 로그로 남깁니다:
+
+- 필수 값 누락
+- 허용 범위를 벗어난 값
+- deprecated 설정 키
+- 상충하는 설정
+
+설정 문제 확인:
+
+```bash
+docker compose logs oms | grep "CONFIG"
+```
+
+## 다음 단계
+
+- **[설치 가이드](/docs/getting-started/installation)** -- 환경 설정
+- **[모니터링](/docs/operations/monitoring)** -- 관측성 설정
+- **[문제 해결](/docs/operations/troubleshooting)** -- 흔한 설정 문제

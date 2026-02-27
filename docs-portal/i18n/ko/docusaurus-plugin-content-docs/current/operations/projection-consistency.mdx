@@ -1,0 +1,263 @@
+---
+title: 프로젝션 정합성
+sidebar_position: 3
+---
+
+# 프로젝션 정합성 런북
+
+프로젝션(Projection)은 이벤트 스트림에서 파생된 비정규화된 사전 계산 뷰입니다. 비동기로 생성/갱신되기 때문에, 워커가 뒤처지거나 오류를 만나면 최신 상태에서 벗어날 수 있습니다. 이 런북은 프로젝션 정합성 문제를 **탐지 → 진단 → 해결**하는 방법을 다룹니다.
+
+## 프로젝션 지연(Projection Lag) 이해하기
+
+프로젝션 지연은 이벤트가 게시된 시점과, 해당 이벤트가 프로젝션에 반영된 시점 사이의 지연입니다. 어느 정도의 지연은 정상이나, 과도한 지연은 문제를 의미합니다.
+
+### 허용 가능한 지연
+
+| 환경 | 허용 지연 | 알림 임계값 |
+|-------------|---------------|-----------------|
+| 개발 | < 5초 | 30초 |
+| 스테이징 | < 2초 | 10초 |
+| 프로덕션 | < 500 ms | 5초 |
+
+## 오래된 프로젝션 탐지
+
+### 1. Grafana 대시보드
+
+**Event Processing** 대시보드에는 projection builder 컨슈머 lag 패널이 있습니다. 다음을 확인하세요:
+
+- **Consumer Lag** -- 파티션별 미처리 이벤트 수
+- **Processing Latency** -- 이벤트 생성부터 프로젝션 업데이트까지의 시간
+- **Error Rate** -- 분당 프로젝션 빌드 실패 수
+
+### 2. CLI 확인
+
+```bash
+# 프로젝션 상태 확인
+docker compose exec oms python -m spice.cli projections status
+
+# 출력 예시:
+# Projection           | Status  | Lag (events) | Last Updated
+# ─────────────────────┼─────────┼──────────────┼───────────────────
+# object-counts         | OK      | 3            | 2024-01-15 09:30:00
+# department-summary    | WARNING | 1,247        | 2024-01-15 09:15:00
+# activity-timeline     | ERROR   | 15,892       | 2024-01-15 08:00:00
+```
+
+### 3. Kafka 컨슈머 lag 직접 확인
+
+```bash
+docker compose exec kafka kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group spice-projection-builder \
+  --describe
+```
+
+lag가 큰 파티션이나 활성 컨슈머가 없는 파티션을 확인하세요.
+
+### 4. API 정합성 체크
+
+이벤트 스토어 시퀀스 번호와 프로젝션이 마지막으로 처리한 시퀀스를 비교합니다:
+
+```bash
+curl http://localhost:8002/api/v2/admin/projections/consistency \
+  -H "Authorization: Bearer <token>"
+```
+
+응답:
+
+```json
+{
+  "projections": [
+    {
+      "name": "object-counts",
+      "lastProcessedSequence": 45230,
+      "currentEventSequence": 45233,
+      "lag": 3,
+      "status": "OK"
+    },
+    {
+      "name": "department-summary",
+      "lastProcessedSequence": 44000,
+      "currentEventSequence": 45233,
+      "lag": 1233,
+      "status": "WARNING"
+    }
+  ]
+}
+```
+
+## 근본 원인 진단
+
+### 워커가 실행 중이 아님
+
+```bash
+docker compose ps projection-builder
+```
+
+워커가 실행 중이 아니라면, 중단된 이유를 확인하세요:
+
+```bash
+docker compose logs --tail=200 projection-builder
+```
+
+### 실패 이벤트에서 멈춤(스턱)
+
+동일 이벤트 처리에서 반복적으로 에러가 발생하는지 확인합니다:
+
+```bash
+docker compose logs projection-builder | grep "ERROR" | tail -20
+```
+
+특정 이벤트가 반복 실패를 유발한다면 poison pill일 수 있습니다. 재시도 한도를 넘기면 해당 이벤트는 DLQ로 이동합니다.
+
+### Kafka 파티션 리밸런싱
+
+최근 워커 스케일 업/다운을 했다면, Kafka 컨슈머 그룹 리밸런싱 중일 수 있습니다. 1~2분 기다린 뒤 다시 확인하세요.
+
+### 리소스 고갈
+
+워커의 CPU/메모리가 부족한지 확인합니다:
+
+```bash
+docker stats projection-builder
+```
+
+## 리빌드 절차(Reindex Procedures)
+
+### 단일 프로젝션 리빌드
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild --name object-counts
+```
+
+이 명령은 이벤트 스토어에서 모든 이벤트를 리플레이하고 프로젝션을 처음부터 재구성합니다. 리빌드 중에는 해당 프로젝션을 사용할 수 없습니다.
+
+### 전체 프로젝션 리빌드
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild --all
+```
+
+:::caution
+전체 프로젝션 리빌드는 비용이 큰 작업입니다. 전체 이벤트 히스토리를 리플레이하며, 이벤트 양에 따라 상당한 시간이 걸릴 수 있습니다. 리소스 사용량 증가를 고려해 계획하세요.
+:::
+
+### 스냅샷에서 리빌드
+
+스냅샷이 있다면 스냅샷 기반 리빌드가 더 빠릅니다:
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild \
+  --name object-counts \
+  --from-snapshot
+```
+
+### 부분 리빌드
+
+특정 시점 이후 이벤트만 리빌드합니다:
+
+```bash
+docker compose exec oms python -m spice.cli projections rebuild \
+  --name object-counts \
+  --since 2024-01-15T00:00:00Z
+```
+
+## Elasticsearch 리인덱싱
+
+Elasticsearch 검색 인덱스가 PostgreSQL과 불일치할 때:
+
+### 인덱스 정합성 확인
+
+```bash
+# 카운트 비교
+docker compose exec oms python -m spice.cli reindex --check
+
+# 출력:
+# ObjectType    | PostgreSQL | Elasticsearch | Diff
+# ──────────────┼────────────┼───────────────┼──────
+# Employee      | 1,542      | 1,540         | -2
+# Project       | 387        | 387           | 0
+```
+
+### 전체 리인덱스(Full Reindex)
+
+```bash
+# 모든 object type 리인덱싱
+docker compose exec oms python -m spice.cli reindex --all
+
+# 특정 object type만 리인덱싱
+docker compose exec oms python -m spice.cli reindex --object-type Employee
+```
+
+### 무중단 리인덱스(Zero-Downtime Reindex)
+
+프로덕션에서는 blue-green 리인덱싱 전략을 사용하세요:
+
+```bash
+docker compose exec oms python -m spice.cli reindex --all --strategy blue-green
+```
+
+새 인덱스를 만든 뒤 채우고, 완료되면 alias를 원자적으로 스왑합니다. 이 과정에서도 검색은 계속 가능합니다.
+
+## 정합성 검증
+
+리빌드 후 정합성을 확인합니다:
+
+```bash
+# 프로젝션 정합성 검증
+docker compose exec oms python -m spice.cli projections verify --all
+
+# 검색 인덱스 정합성 검증
+docker compose exec oms python -m spice.cli reindex --check
+
+# 전체 정합성 감사(audit)
+docker compose exec oms python -m spice.cli audit --full
+```
+
+## 예방(Prevention)
+
+### Consumer lag 모니터링
+
+consumer lag에 대한 Prometheus 알림을 설정합니다:
+
+```yaml
+# prometheus/alerts.yml
+- alert: ProjectionLagHigh
+  expr: spice_kafka_consumer_lag{consumer_group="spice-projection-builder"} > 1000
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Projection builder consumer lag is high"
+    description: "Consumer lag for {{ $labels.topic }} partition {{ $labels.partition }} is {{ $value }}"
+```
+
+### 정기 정합성 체크
+
+주기적으로 정합성 체크를 스케줄링합니다:
+
+```bash
+# crontab 또는 CI/CD 파이프라인에 추가
+0 */6 * * * docker compose exec oms python -m spice.cli projections verify --all
+```
+
+### 워커 헬스 모니터링
+
+Docker Compose에서 워커 헬스 체크와 자동 재시작을 구성합니다:
+
+```yaml
+services:
+  projection-builder:
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "spice.cli", "health", "--service", "projection-builder"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+## 다음 단계
+
+- **[모니터링](./monitoring)** -- Grafana 대시보드 및 알림
+- **[문제 해결](./troubleshooting)** -- 일반 문제 해결 가이드
+- **[이벤트 소싱](/docs/architecture/event-sourcing)** -- 이벤트 흐름 이해

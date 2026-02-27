@@ -1,0 +1,332 @@
+---
+title: 클래스 다이어그램
+sidebar_position: 4
+---
+
+# 클래스 다이어그램
+
+이 페이지는 Spice OS의 핵심 도메인 모델 클래스들을 보여줍니다. 다이어그램은 온톨로지 관리 레이어에 구현된 핵심 엔티티와 그 관계를 반영합니다.
+
+## 온톨로지 도메인 모델
+
+아래 클래스 다이어그램은 온톨로지 스키마 레이어와 인스턴스 레이어를 구성하는 주요 엔티티를 나타냅니다.
+
+```mermaid
+classDiagram
+    class Ontology {
+        +String rid
+        +String apiName
+        +String displayName
+        +String description
+        +DateTime createdAt
+        +DateTime updatedAt
+        +listObjectTypes() ObjectType[]
+        +listLinkTypes() LinkType[]
+        +getObjectType(apiName) ObjectType
+    }
+
+    class ObjectType {
+        +String rid
+        +String apiName
+        +String displayName
+        +String pluralDisplayName
+        +String primaryKey
+        +String ontologyApiName
+        +Map~String, Property~ properties
+        +DateTime createdAt
+        +getProperty(apiName) Property
+        +validate(instance) ValidationResult
+    }
+
+    class Property {
+        +String apiName
+        +String displayName
+        +DataType dataType
+        +Boolean required
+        +Boolean indexed
+        +Object defaultValue
+        +String description
+    }
+
+    class DataType {
+        +String type
+        +DataType itemType
+        +Boolean nullable
+    }
+
+    class LinkType {
+        +String rid
+        +String apiName
+        +String displayName
+        +String sourceObjectType
+        +String targetObjectType
+        +Cardinality cardinality
+        +String ontologyApiName
+    }
+
+    class Instance {
+        +String rid
+        +String primaryKey
+        +String objectTypeApiName
+        +String ontologyApiName
+        +Map~String, Any~ properties
+        +DateTime createdAt
+        +DateTime updatedAt
+        +Long version
+        +getProperty(name) Any
+        +toFoundryV2Format() Object
+    }
+
+    Ontology "1" --> "*" ObjectType : contains
+    Ontology "1" --> "*" LinkType : contains
+    ObjectType "1" --> "*" Property : defines
+    Property "1" --> "1" DataType : has type
+    LinkType "1" --> "1" ObjectType : source
+    LinkType "1" --> "1" ObjectType : target
+    ObjectType "1" --> "*" Instance : instantiates
+```
+
+## 액션 시스템 모델
+
+액션은 플랫폼의 모든 쓰기(write) 작업을 나타냅니다. 액션은 검증되고 실행되며, 이벤트로 기록됩니다.
+
+```mermaid
+classDiagram
+    class Action {
+        +String actionId
+        +ActionType type
+        +String ontologyApiName
+        +String objectTypeApiName
+        +Map~String, Any~ parameters
+        +String userId
+        +DateTime submittedAt
+        +ActionStatus status
+        +validate() ValidationResult
+        +execute() ActionResult
+        +undo() Action
+    }
+
+    class ActionType {
+        <<enumeration>>
+        CREATE_OBJECT
+        EDIT_OBJECT
+        DELETE_OBJECT
+        CREATE_LINK
+        DELETE_LINK
+        BULK_ACTION
+    }
+
+    class ActionTemplate {
+        +String templateId
+        +String apiName
+        +String displayName
+        +ActionType type
+        +Map~String, ParameterDef~ parameters
+        +Expression[] rules
+        +Expression[] sideEffects
+        +evaluate(context) Action
+    }
+
+    class ActionResult {
+        +String actionId
+        +Boolean success
+        +String objectRid
+        +Map~String, Any~ modifiedProperties
+        +Event[] emittedEvents
+        +String errorCode
+        +String errorMessage
+    }
+
+    class ValidationResult {
+        +Boolean valid
+        +ValidationError[] errors
+        +ValidationWarning[] warnings
+    }
+
+    class ActionStatus {
+        <<enumeration>>
+        PENDING
+        VALIDATING
+        EXECUTING
+        COMPLETED
+        FAILED
+        UNDONE
+    }
+
+    Action --> ActionType : has type
+    Action --> ActionResult : produces
+    Action --> ActionStatus : has status
+    Action --> ValidationResult : validated by
+    ActionTemplate --> Action : generates
+    ActionTemplate --> ActionType : defines type
+```
+
+## 이벤트 모델
+
+이벤트는 플랫폼에서 발생하는 모든 상태 변경의 불변(immutable) 기록입니다.
+
+```mermaid
+classDiagram
+    class Event {
+        +String eventId
+        +String eventType
+        +String aggregateId
+        +String aggregateType
+        +Long sequenceNumber
+        +DateTime timestamp
+        +String userId
+        +Map~String, Any~ payload
+        +Map~String, String~ metadata
+        +String correlationId
+        +String causationId
+    }
+
+    class EventStore {
+        +append(event) void
+        +getEvents(aggregateId) Event[]
+        +getEventsSince(timestamp) Event[]
+        +getSnapshot(aggregateId) Snapshot
+        +createSnapshot(aggregateId) Snapshot
+    }
+
+    class Snapshot {
+        +String aggregateId
+        +Long sequenceNumber
+        +DateTime timestamp
+        +Map~String, Any~ state
+    }
+
+    class EventConsumer {
+        +String consumerGroup
+        +String[] subscribedTopics
+        +consume(event) void
+        +commit(offset) void
+        +getPosition() Long
+    }
+
+    EventStore "1" --> "*" Event : stores
+    EventStore "1" --> "*" Snapshot : manages
+    EventConsumer --> Event : consumes
+```
+
+## 파이프라인 모델
+
+파이프라인은 데이터 변환 워크플로를 정의합니다.
+
+```mermaid
+classDiagram
+    class Pipeline {
+        +String pipelineId
+        +String name
+        +String description
+        +PipelineStatus status
+        +Source source
+        +Transform[] transforms
+        +Sink sink
+        +DateTime createdAt
+        +DateTime lastRunAt
+        +execute() PipelineResult
+    }
+
+    class Source {
+        +String sourceType
+        +Map~String, Any~ config
+        +read() DataFrame
+    }
+
+    class Transform {
+        +String transformType
+        +Map~String, Any~ config
+        +Integer order
+        +apply(data) DataFrame
+    }
+
+    class Sink {
+        +String sinkType
+        +String objectTypeApiName
+        +Map~String, Any~ config
+        +write(data) WriteResult
+    }
+
+    class PipelineStatus {
+        <<enumeration>>
+        DRAFT
+        SUBMITTED
+        RUNNING
+        COMPLETED
+        FAILED
+        CANCELLED
+    }
+
+    Pipeline --> Source : reads from
+    Pipeline "1" --> "*" Transform : applies
+    Pipeline --> Sink : writes to
+    Pipeline --> PipelineStatus : has status
+```
+
+## 라인리지(Lineage) 모델
+
+라인리지는 시스템 내 데이터 출처(provenance)를 추적합니다.
+
+```mermaid
+classDiagram
+    class LineageNode {
+        +String nodeId
+        +String nodeType
+        +String rid
+        +Map~String, Any~ attributes
+        +DateTime createdAt
+    }
+
+    class LineageEdge {
+        +String edgeId
+        +LineageEdgeType edgeType
+        +String sourceNodeId
+        +String targetNodeId
+        +DateTime timestamp
+        +String pipelineId
+        +String actionId
+        +Map~String, Any~ metadata
+    }
+
+    class LineageEdgeType {
+        <<enumeration>>
+        DERIVED_FROM
+        IMPORTED_BY
+        TRANSFORMED_BY
+        LINKED_TO
+        CREATED_BY
+        MODIFIED_BY
+        DELETED_BY
+        VALIDATED_BY
+        ENRICHED_BY
+        MERGED_FROM
+        SPLIT_INTO
+        AGGREGATED_FROM
+        PUBLISHED_TO
+        CONSUMED_FROM
+        SNAPSHOT_OF
+    }
+
+    LineageEdge --> LineageEdgeType : has type
+    LineageEdge --> LineageNode : source
+    LineageEdge --> LineageNode : target
+```
+
+## 관계 요약
+
+도메인 모델은 다음과 같은 핵심 관계를 가집니다:
+
+- **온톨로지(Ontology)** 는 여러 **ObjectType** 과 **LinkType** 을 포함합니다.
+- 각 **ObjectType** 은 여러 **Property** 를 정의하며, 각 Property는 **DataType** 을 가집니다.
+- **인스턴스(Instances)** 는 ObjectType 스키마를 따르는 실제 레코드입니다.
+- **액션(Actions)** 은 인스턴스를 변경하고 **이벤트(Events)** 를 생성합니다.
+- **이벤트(Events)** 는 **EventStore** 에 저장되고, **EventConsumer**(워커)가 소비합니다.
+- **파이프라인(Pipelines)** 은 **Source** 에서 읽고, **Transform** 을 적용한 뒤 **Sink** 로 기록합니다(이 과정에서 액션을 제출할 수 있음).
+- **라인리지(Lineage)** 는 타입이 있는 **LineageEdge** 로 **LineageNode** 간 출처 관계를 기록합니다.
+
+## 다음 단계
+
+- **[이벤트 소싱](./event-sourcing)** -- 이벤트가 시스템을 통해 흐르는 방식
+- **[핵심 개념](/docs/getting-started/concepts)** -- 위 엔티티에 대한 쉬운 설명
+- **[API 레퍼런스](/docs/api/overview)** -- API에서 이 모델이 어떻게 나타나는지
