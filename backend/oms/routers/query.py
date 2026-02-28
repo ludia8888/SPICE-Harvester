@@ -622,6 +622,46 @@ def _to_es_properties_query(query: Any, *, depth: int = 0) -> Dict[str, Any]:
     property_name_clause = {"term": {"properties.name": field_name}}
     value_clause: Optional[Dict[str, Any]] = None
 
+    if q.type == "isNull":
+        is_null = True if q.value is None else bool(q.value)
+        name_query = {"nested": {"path": "properties", "query": property_name_clause}}
+        if is_null:
+            empty_value = {
+                "nested": {
+                    "path": "properties",
+                    "query": {"bool": {"must": [property_name_clause, {"term": {"properties.value.keyword": ""}}]}},
+                }
+            }
+            none_value = {
+                "nested": {
+                    "path": "properties",
+                    "query": {"bool": {"must": [property_name_clause, {"term": {"properties.value.keyword": "None"}}]}},
+                }
+            }
+            missing_property = {"bool": {"must_not": [name_query]}}
+            return {
+                "bool": {
+                    "should": [missing_property, empty_value, none_value],
+                    "minimum_should_match": 1,
+                }
+            }
+        return {
+            "nested": {
+                "path": "properties",
+                "query": {
+                    "bool": {
+                        "must": [
+                            property_name_clause,
+                        ],
+                        "must_not": [
+                            {"term": {"properties.value.keyword": ""}},
+                            {"term": {"properties.value.keyword": "None"}},
+                        ],
+                    }
+                },
+            }
+        }
+
     if q.type == "eq":
         value_clause = _property_exact_term_clause(q.value)
     elif q.type == "gt":
@@ -1724,7 +1764,7 @@ async def _search_objects_v2_impl(
         )
         offset = _decode_page_token(request.pageToken, scope=page_scope)
 
-        object_query = _to_es_query(request.where or _default_match_all_where())
+        object_query = _to_es_properties_query(request.where or _default_match_all_where())
         sort_clause = _build_sort_clause(request)
         selected_fields = _resolve_select_fields(request)
         query = {
@@ -1757,38 +1797,6 @@ async def _search_objects_v2_impl(
                 from_=offset,
                 sort=_build_properties_sort_clause(request.orderBy),
             )
-
-        # Runtime indices may keep searchable fields in nested ``properties`` while
-        # ``data`` is disabled for indexing. Retry with a properties-based query when
-        # the canonical query returns no hits.
-        first_total = to_int_or_none(result.get("total")) or 0
-        first_hits = result.get("hits")
-        no_hits = not isinstance(first_hits, list) or len(first_hits) == 0
-        if request.where is not None and first_total <= 0 and no_hits:
-            fallback_query = {
-                "bool": {
-                    "must": [
-                        {"term": {"class_id": object_type}},
-                        _to_es_properties_query(request.where),
-                    ]
-                }
-            }
-            fallback_sort = (
-                _build_properties_sort_clause(request.orderBy)
-                if request.orderBy is not None
-                else [{"instance_id": {"order": "asc"}}]
-            )
-            fallback_result = await es.search(
-                index=index_name,
-                query=fallback_query,
-                size=request.pageSize,
-                from_=offset,
-                sort=fallback_sort,
-            )
-            fallback_total = to_int_or_none(fallback_result.get("total")) or 0
-            fallback_hits = fallback_result.get("hits")
-            if fallback_total > 0 or (isinstance(fallback_hits, list) and len(fallback_hits) > 0):
-                result = fallback_result
 
         hits = result.get("hits", [])
         if not isinstance(hits, list):
@@ -1979,9 +1987,9 @@ async def aggregate_objects_v2_oms(
         if where_clause is not None:
             if not isinstance(where_clause, dict):
                 raise ValueError("where must be an object")
-            object_query = _to_es_query(where_clause)
+            object_query = _to_es_properties_query(where_clause)
         else:
-            object_query = _to_es_query(_default_match_all_where())
+            object_query = _to_es_properties_query(_default_match_all_where())
 
         query = {
             "bool": {

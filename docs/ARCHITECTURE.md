@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **638**, functions **6097**, classes **886**, internal cross-imports **1516**
+- Population: files **638**, functions **6099**, classes **886**, internal cross-imports **1518**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1516 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1518 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 3/92 (3.26%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 4/22 (18.18%) | <= 15.00% | **FAIL** | `high_coupling_modules / modules` |
 | 5 | 파일 응집도 저하 | 51/638 (7.99%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
 | 6 | 파일 단일 책임 위반 | 58/638 (9.09%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 329/6097 (5.40%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 7 | 함수 단일 책임 위반 | 329/6099 (5.39%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
 | 8 | 연속 상속 깊이(>=3) | 15/886 (1.69%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 736/6097 (12.07%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 417/6097 (6.84%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 9 | 복잡도 과다(CC>=15) | 736/6099 (12.07%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 418/6099 (6.85%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -62,7 +62,7 @@ python scripts/check_docs.py
 - Dependency cycles: none detected
 - I/O-core direct links (sample): `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
 - Longest functions: `mcp_servers/pipeline_mcp_server.py:202` (1321 lines), `mcp_servers/pipeline_mcp_server.py:204` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:684` (1009 lines)
-- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:684` (CC=296), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1388` (CC=247)
+- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:684` (CC=296), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1437` (CC=247)
 
 ## External Interfaces (Published Ports)
 

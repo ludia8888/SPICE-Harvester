@@ -4,6 +4,7 @@ Handles database creation, deletion, and listing
 """
 
 from typing import Optional
+from uuid import UUID
 from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -19,6 +20,7 @@ from shared.security.database_access import (
     normalize_database_role,
     upsert_database_access_entry,
 )
+from shared.services.registries.action_log_registry import ActionLogRegistry
 
 from bff.dependencies import OMSClientDep
 from bff.routers.registry_deps import get_dataset_registry
@@ -28,6 +30,15 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 
 router = APIRouter(prefix="/databases", tags=["Database Management"])
+
+def _is_platform_admin_request(request: Request) -> bool:
+    principal = getattr(request.state, "user", None)
+    claims = getattr(principal, "claims", None)
+    if isinstance(claims, dict) and bool(claims.get("admin_token")):
+        return True
+    if bool(getattr(request.state, "dev_master_auth", False)):
+        return True
+    return False
 
 
 @router.get("", response_model=ApiResponse)
@@ -116,7 +127,8 @@ async def list_database_access(
     """List database access entries (RBAC)."""
     resolved = validated_db_name(db_name)
     enforce_db_scope_or_403(http_request, db_name=resolved)
-    await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
+    if not _is_platform_admin_request(http_request):
+        await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
     grouped = await fetch_database_access_entries(db_names=[resolved])
     return ApiResponse.success(
         message="Database access entries",
@@ -134,7 +146,8 @@ async def upsert_database_access(
     """Upsert database access entries (RBAC). Requires Owner/Security."""
     resolved = validated_db_name(db_name)
     enforce_db_scope_or_403(http_request, db_name=resolved)
-    await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
+    if not _is_platform_admin_request(http_request):
+        await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
 
     entries = body.entries or []
     if not entries:
@@ -175,3 +188,62 @@ async def upsert_database_access(
         message="Database access updated",
         data={"db_name": resolved, "updated": updated},
     ).to_dict()
+
+
+@router.get("/{db_name}/action-logs/{action_log_id}", response_model=ApiResponse)
+@trace_endpoint("bff.database.get_action_log")
+async def get_action_log(
+    db_name: str,
+    action_log_id: str,
+    http_request: Request,
+) -> ApiResponse:
+    """Get an action log record (writeback status + targets) for observability/debugging."""
+    resolved = validated_db_name(db_name)
+    enforce_db_scope_or_403(http_request, db_name=resolved)
+    if not _is_platform_admin_request(http_request):
+        await enforce_required_database_role(http_request, db_name=resolved, roles=DATABASE_ACCESS_ROLES)
+
+    try:
+        UUID(str(action_log_id))
+    except Exception:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid action_log_id (must be UUID)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+
+    registry = ActionLogRegistry()
+    await registry.connect()
+    try:
+        record = await registry.get_log(action_log_id=str(action_log_id))
+        if not record or str(record.db_name or "").strip() != resolved:
+            raise classified_http_exception(
+                status.HTTP_404_NOT_FOUND,
+                "Action log not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+            )
+
+        submit_ctx = None
+        if isinstance(record.metadata, dict):
+            submit_ctx = record.metadata.get("__submit_context")
+        overlay_branch = None
+        if isinstance(submit_ctx, dict):
+            overlay_branch = str(submit_ctx.get("overlay_branch") or "").strip() or None
+
+        return ApiResponse.success(
+            message="Action log retrieved",
+            data={
+                "action_log_id": record.action_log_id,
+                "db_name": record.db_name,
+                "status": record.status,
+                "action_type_id": record.action_type_id,
+                "ontology_commit_id": record.ontology_commit_id,
+                "overlay_branch": overlay_branch,
+                "writeback_target": record.writeback_target,
+                "writeback_commit_id": record.writeback_commit_id,
+                "submitted_at": record.submitted_at.isoformat() if record.submitted_at else None,
+                "finished_at": record.finished_at.isoformat() if record.finished_at else None,
+            },
+        ).to_dict()
+    finally:
+        await registry.close()

@@ -16,9 +16,9 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 155**
+**Total v1 endpoints: 156**
 
-### Object Types & Schema (24 endpoints)
+### Object Types & Schema (25 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -28,6 +28,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | No |
 | `GET` | `/api/v1/databases/{db_name}/access` | List Database Access | No |
 | `POST` | `/api/v1/databases/{db_name}/access` | Upsert Database Access | No |
+| `GET` | `/api/v1/databases/{db_name}/action-logs/{action_log_id}` | Get Action Log | No |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | No |
 | `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/bulk-create` | Bulk Create Instances Async | No |
 | `POST` | `/api/v1/databases/{db_name}/instances/{class_label}/create` | Create Instance Async | No |

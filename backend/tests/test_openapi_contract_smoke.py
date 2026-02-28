@@ -1087,6 +1087,28 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/databases/{db_name}/versions"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
+    if key == ("GET", "/api/v1/databases/{db_name}/access"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+    if key == ("POST", "/api/v1/databases/{db_name}/access"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {
+            "entries": [
+                {
+                    "principal_type": "user",
+                    "principal_id": "openapi_smoke_user",
+                    "principal_name": "OpenAPI Smoke User",
+                    "role": "Owner",
+                }
+            ]
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body, headers=headers)
+    if key == ("GET", "/api/v1/databases/{db_name}/action-logs/{action_log_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'action_log_id': '00000000-0000-0000-0000-000000000000'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
 
     # ---------- Pipelines ----------
     if key == ("GET", "/api/v1/pipelines"):

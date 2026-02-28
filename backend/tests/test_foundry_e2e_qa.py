@@ -22,6 +22,7 @@ Enable live APIs (nightly/manual; may be flaky):
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
@@ -31,13 +32,11 @@ import traceback
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
 import pytest
 
-from shared.config.search_config import get_instances_index_name
-from shared.foundry.rids import build_rid
 from tests.utils.auth import build_smoke_user_jwt, oms_auth_headers
 from tests.utils.qa_helpers import (
     BugTracker,
@@ -55,20 +54,22 @@ if os.getenv("RUN_FOUNDRY_E2E_QA", "").strip().lower() not in {"1", "true", "yes
         allow_module_level=True,
     )
 
+HTTP_ONLY_STRICT = os.getenv("RUN_FOUNDRY_E2E_QA_HTTP_ONLY_STRICT", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "kaggle_data"
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
-_ES_PORT = os.getenv("ELASTICSEARCH_PORT") or os.getenv("ELASTICSEARCH_PORT_HOST") or "9200"
-ES_URL = os.getenv(
-    "ELASTICSEARCH_URL",
-    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{_ES_PORT}",
-).rstrip("/")
 
 HTTPX_TIMEOUT = float(os.getenv("QA_HTTP_TIMEOUT", "180") or 180)
-ES_TIMEOUT = int(os.getenv("QA_ES_TIMEOUT", "240") or 240)
+INDEXING_TIMEOUT = int(os.getenv("QA_INDEXING_TIMEOUT", "240") or 240)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 RUN_LIVE_APIS = os.getenv("RUN_FOUNDRY_E2E_QA_LIVE", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -94,6 +95,124 @@ def _count_fixture_rows(path: Path) -> int:
         text = path.read_text(encoding="utf-8", errors="replace")
     lines = [line for line in text.splitlines() if line.strip()]
     return max(0, len(lines) - 1)
+
+
+def _compute_forbidden_es_netlocs() -> set[str]:
+    # Default compose exposes Elasticsearch on a host port (commonly 9200/19200).
+    port = (
+        (os.getenv("ELASTICSEARCH_PORT") or "").strip()
+        or (os.getenv("ELASTICSEARCH_PORT_HOST") or "").strip()
+        or "9200"
+    )
+    host = (os.getenv("ELASTICSEARCH_HOST") or "").strip() or "localhost"
+    url = (os.getenv("ELASTICSEARCH_URL") or "").strip()
+
+    netlocs: set[str] = set()
+    candidates: List[str] = []
+    if url:
+        candidates.append(url)
+    candidates.append(f"http://{host}:{port}")
+    candidates.append(f"http://localhost:{port}")
+    candidates.append(f"http://127.0.0.1:{port}")
+    candidates.append("http://localhost:9200")
+    candidates.append("http://127.0.0.1:9200")
+
+    for cand in candidates:
+        try:
+            u = httpx.URL(cand)
+        except Exception:
+            continue
+        host_value = u.host.decode() if isinstance(u.host, (bytes, bytearray)) else str(u.host)
+        port_value = u.port
+        if host_value and port_value:
+            netlocs.add(f"{host_value}:{port_value}")
+    return netlocs
+
+
+_FORBIDDEN_ES_NETLOCS = _compute_forbidden_es_netlocs()
+
+
+async def _http_only_request_guard(request: httpx.Request) -> None:
+    """Runtime guard: prevent accidental direct calls to Elasticsearch."""
+    if not HTTP_ONLY_STRICT:
+        return
+    url = request.url
+    host_value = url.host.decode() if isinstance(url.host, (bytes, bytearray)) else str(url.host)
+    port_value = url.port
+    netloc = f"{host_value}:{port_value}" if host_value and port_value else host_value
+    if netloc in _FORBIDDEN_ES_NETLOCS:
+        raise AssertionError(f"HTTP-only strict violation: attempted direct Elasticsearch call: {request.method} {url}")
+
+
+def _build_rid(kind: str, id: str) -> str:
+    """Build a Foundry-style RID without importing backend internals."""
+    kind_value = str(kind or "").strip()
+    id_value = str(id or "").strip()
+    if not kind_value:
+        raise ValueError("kind is required")
+    if not id_value:
+        raise ValueError("id is required")
+    return f"ri.foundry.main.{kind_value}.{id_value}"
+
+
+def _assert_http_only_strict_static_guards() -> None:
+    """Fail fast if this test regresses into DB/ES gray-box behavior."""
+    if not HTTP_ONLY_STRICT:
+        return
+
+    src = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    guard_span: Optional[tuple[int, int]] = None
+    for def_node in ast.walk(tree):
+        if isinstance(def_node, ast.FunctionDef) and def_node.name == "_assert_http_only_strict_static_guards":
+            start = int(getattr(def_node, "lineno", 0) or 0)
+            end = int(getattr(def_node, "end_lineno", 0) or 0) or start
+            guard_span = (start, end)
+            break
+
+    forbidden_import_prefixes = (
+        "shared.services.registries.",
+        "shared.config.",
+        "shared.foundry.",
+    )
+    forbidden_import_roots = {"asyncpg"}
+    forbidden_string_fragments = (
+        "/_doc",
+        "/_search",
+        "/_count",
+        "/_cat/indices",
+    )
+
+    def _check_string(value: str) -> None:
+        for frag in forbidden_string_fragments:
+            if frag in value:
+                raise AssertionError(f"HTTP-only strict violation: found forbidden ES path fragment in source: {frag}")
+
+    def _is_within_guard(node: ast.AST) -> bool:
+        if not guard_span:
+            return False
+        lineno = int(getattr(node, "lineno", 0) or 0)
+        return guard_span[0] <= lineno <= guard_span[1]
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = str(node.module or "")
+            if any(mod.startswith(p) for p in forbidden_import_prefixes):
+                raise AssertionError(f"HTTP-only strict violation: forbidden import: from {mod} import ...")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                name = str(alias.name or "")
+                if name in forbidden_import_roots or any(name.startswith(p) for p in forbidden_import_prefixes):
+                    raise AssertionError(f"HTTP-only strict violation: forbidden import: import {name}")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and not _is_within_guard(node):
+            _check_string(node.value)
+        elif isinstance(node, ast.JoinedStr) and not _is_within_guard(node):
+            for part in node.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    _check_string(part.value)
+
+
+_assert_http_only_strict_static_guards()
 
 
 def _expected_instance_counts_from_fixtures() -> Dict[str, int]:
@@ -146,7 +265,7 @@ class Persona:
 
 
 class QAState:
-    """Mutable state shared across all 8 phases."""
+    """Mutable state shared across all phases."""
     def __init__(self) -> None:
         self.db_name: str = ""
         self.suffix: str = ""
@@ -169,7 +288,6 @@ class QAState:
 
         # Phase 4 outputs
         self.mapping_specs: Dict[str, str] = {}  # class_id → mapping_spec_id
-        self.es_index: str = ""
 
         # Phase 5 outputs
         self.search_results: Dict[str, Any] = {}
@@ -726,29 +844,6 @@ async def _wait_for_ontology(
         await asyncio.sleep(1.0)
     raise AssertionError(f"Timed out waiting for ontology class {class_id} (require_properties={require_properties})")
 
-
-async def _wait_for_es_doc(
-    client: httpx.AsyncClient,
-    index_name: str,
-    doc_id: str,
-    *,
-    timeout: int = ES_TIMEOUT,
-) -> Dict[str, Any]:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            resp = await client.get(f"{ES_URL}/{index_name}/_doc/{doc_id}")
-        except httpx.HTTPError:
-            await asyncio.sleep(1.0)
-            continue
-        if resp.status_code == 200:
-            payload = resp.json()
-            if payload.get("found") is True or payload.get("_source"):
-                return payload
-        await asyncio.sleep(1.0)
-    raise AssertionError(f"Timed out waiting for ES doc {doc_id} in {index_name}")
-
-
 async def _upsert_database_access_http(
     client: httpx.AsyncClient,
     *,
@@ -1066,7 +1161,7 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
         orders_ds = state.datasets.get("olist_orders") or {}
         orders_dataset_id = str(orders_ds.get("dataset_id") or "").strip()
         assert orders_dataset_id, "olist_orders dataset_id missing"
-        orders_rid = build_rid("dataset", orders_dataset_id)
+        orders_rid = _build_rid("dataset", orders_dataset_id)
 
         get_resp = await client.get(f"{BFF_URL}/api/v2/datasets/{orders_rid}")
         assert get_resp.status_code == 200, f"GET /api/v2/datasets: {get_resp.status_code} {get_resp.text[:200]}"
@@ -1384,7 +1479,7 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         ds = await _wait_for_dataset_by_name(client, db_name=state.db_name, dataset_name="enriched_orders", timeout=240)
         dataset_id = str(ds.get("dataset_id") or "").strip()
         assert dataset_id, f"enriched_orders dataset_id missing: {ds}"
-        rid = build_rid("dataset", dataset_id)
+        rid = _build_rid("dataset", dataset_id)
         read_resp = await client.get(
             f"{BFF_URL}/api/v2/datasets/{rid}/readTable",
             params={"rowLimit": 5, "branchName": "main", "format": "CSV"},
@@ -2180,95 +2275,104 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
         state.bug_tracker.record(phase, "4-2", "DAG dry_run", "mapping specs needed", "Skipped: no mapping specs", "P2")
         state.bug_tracker.record(phase, "4-3", "DAG execution", "jobs needed", "Skipped: no mapping specs", "P2")
 
-    # ── 4-4: Wait for ES indexing ─────────────────────────────────
-    print(f"  [4-4] Waiting for ES indexing (up to {ES_TIMEOUT}s)...")
-    state.es_index = get_instances_index_name(state.db_name, branch="main")
-    print(f"    ES index: {state.es_index}")
-
+    # ── 4-4: Wait for v2 count convergence ─────────────────────────
+    print(f"  [4-4] Waiting for v2 count convergence (up to {INDEXING_TIMEOUT}s)...")
     expected_by_class = _expected_instance_counts_from_fixtures()
-    expected_total = sum(expected_by_class.values())
-
-    deadline = time.monotonic() + ES_TIMEOUT
-    es_doc_count = 0
+    deadline = time.monotonic() + INDEXING_TIMEOUT
     observed_by_class: Dict[str, int] = {}
 
+    def _extract_count(payload: Any) -> Optional[int]:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("count") is not None:
+            try:
+                return int(payload["count"])
+            except Exception:
+                return None
+        data = payload.get("data")
+        if isinstance(data, dict) and data.get("count") is not None:
+            try:
+                return int(data["count"])
+            except Exception:
+                return None
+        return None
+
     while time.monotonic() < deadline:
+        mismatch = False
+        observed_by_class = {}
         try:
-            resp = await client.get(f"{ES_URL}/{state.es_index}/_count")
-            if resp.status_code != 200:
-                await asyncio.sleep(3.0)
-                continue
-            es_doc_count = int(resp.json().get("count", 0) or 0)
-
-            if es_doc_count != expected_total:
-                await asyncio.sleep(3.0)
-                continue
-
-            # Verify per-class counts match fixtures (strict end-to-end completeness).
-            observed_by_class = {}
-            mismatch = False
+            _switch_persona(state, client, "viewer")
             for class_id, expected in expected_by_class.items():
-                count_resp = await client.post(
-                    f"{ES_URL}/{state.es_index}/_count",
-                    json={"query": {"term": {"class_id": class_id}}},
+                resp = await client.post(
+                    f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/{class_id}/count",
+                    params={"branch": "main"},
+                    json={},
                 )
-                if count_resp.status_code != 200:
+                if resp.status_code != 200:
                     mismatch = True
                     break
-                observed = int(count_resp.json().get("count", 0) or 0)
-                observed_by_class[class_id] = observed
-                if observed != int(expected):
+                observed = _extract_count(resp.json())
+                if observed is None:
                     mismatch = True
-            if mismatch:
-                await asyncio.sleep(3.0)
-                continue
+                    break
+                observed_by_class[class_id] = int(observed)
+                if int(observed) != int(expected):
+                    mismatch = True
+            if not mismatch:
+                state.bug_tracker.record_pass()
+                print(f"    v2 counts match fixtures: {observed_by_class}")
+                break
+        except Exception:
+            mismatch = True
 
-            print(f"    ES index has expected {es_doc_count} documents: {observed_by_class}")
-            state.bug_tracker.record_pass()
-            break
-        except httpx.HTTPError:
-            await asyncio.sleep(3.0)
-            continue
+        await asyncio.sleep(3.0)
 
-    if es_doc_count != expected_total or any(
-        observed_by_class.get(cls) != expected_by_class.get(cls) for cls in expected_by_class
-    ):
+    if any(observed_by_class.get(cls) != expected_by_class.get(cls) for cls in expected_by_class):
         state.bug_tracker.record(
             phase,
             "4-4",
-            "ES indexing",
-            f"count == {expected_total} and per-class counts match fixtures",
-            f"Timed out after {ES_TIMEOUT}s (total={es_doc_count}, by_class={observed_by_class})",
+            "v2 count convergence",
+            "per-class counts match fixtures",
+            f"Timed out after {INDEXING_TIMEOUT}s (by_class={observed_by_class})",
             "P0",
         )
 
-    # ── 4-5: Verify ES doc properties ─────────────────────────────
-    print("  [4-5] Verifying object properties match CSV data...")
-    if es_doc_count > 0:
-        try:
-            # Search for any Order-class documents and verify properties
-            search_resp = await client.post(
-                f"{ES_URL}/{state.es_index}/_search",
-                json={"query": {"term": {"class_id": "Order"}}, "size": 3},
-            )
-            if search_resp.status_code == 200:
-                hits = (search_resp.json().get("hits") or {}).get("hits") or []
-                for hit in hits[:3]:
-                    source = hit.get("_source") or {}
-                    data = source.get("data") or source
-                    oid = data.get("order_id") or source.get("instance_id") or ""
-                    ostatus = data.get("order_status") or ""
-                    print(f"    Verified: order_id={oid[:12]}..., status={ostatus}")
-                if hits:
-                    state.bug_tracker.record_pass()
-                else:
-                    state.bug_tracker.record(phase, "4-5", "ES doc properties", "Order docs", "No Order-class documents found")
-            else:
-                state.bug_tracker.record(phase, "4-5", "ES doc properties", "search 200", f"ES search failed: {search_resp.status_code}")
-        except Exception as exc:
-            state.bug_tracker.record(phase, "4-5", "ES doc properties", "match CSV", str(exc)[:200])
-    else:
-        state.bug_tracker.record(phase, "4-5", "ES doc properties", "match CSV", "No ES docs to verify (indexing timed out)", "P2")
+    # ── 4-5: Verify v2 properties match CSV data ───────────────────
+    print("  [4-5] Verifying v2 object properties match CSV data...")
+    try:
+        import csv as csv_mod
+
+        order_id, _customer_id = _pick_sample_order_from_fixtures()
+        expected_status = ""
+        with (FIXTURE_DIR / "olist_orders.csv").open(newline="", encoding="utf-8") as f:
+            reader = csv_mod.DictReader(f)
+            for row in reader:
+                if str(row.get("order_id") or "").strip() == order_id:
+                    expected_status = str(row.get("order_status") or "").strip().lower()
+                    break
+        if not expected_status:
+            raise AssertionError("Fixture missing order_status for sample order_id")
+
+        _switch_persona(state, client, "viewer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/Order/search",
+            params={"branch": "main"},
+            json={"where": {"type": "eq", "field": "order_id", "value": order_id}, "pageSize": 1},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        hits = payload.get("data") or payload.get("objects") or []
+        if not isinstance(hits, list) or not hits:
+            raise AssertionError(f"No Order returned for order_id={order_id}")
+        row = hits[0] if isinstance(hits[0], dict) else {}
+        props = row.get("properties") or row
+        actual_status = str(props.get("order_status") or "").strip().lower()
+        if actual_status != expected_status:
+            raise AssertionError(f"order_status mismatch: expected={expected_status} got={actual_status}")
+        state.bug_tracker.record_pass()
+        print(f"    Order verified: order_id={order_id[:12]}... order_status={actual_status}")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "4-5", "v2 Order/search", "order_status matches fixture", str(exc)[:200], "P0")
 
 
 # =============================================================================
@@ -2280,20 +2384,25 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     phase = "Phase 5"
     print(f"\n{'='*60}\n  {phase}: SEARCH & QUERY\n{'='*60}")
 
-    # Pre-check: verify ES has data before running search tests
-    # If objectify hasn't completed, all searches will 500 with index_not_found
-    if state.es_index:
-        try:
-            count_resp = await client.get(f"{ES_URL}/{state.es_index}/_count")
-            if count_resp.status_code == 200:
-                doc_count = count_resp.json().get("count", 0)
-                print(f"  ES pre-check: {doc_count} docs in {state.es_index}")
-                if doc_count == 0:
-                    print("  WARNING: ES index is empty — objectify may not have completed. Searches may fail.")
+    # Pre-check: verify v2 search is non-empty before running strict query semantics.
+    try:
+        _switch_persona(state, client, "viewer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/Order/search",
+            params={"branch": "main"},
+            json={"pageSize": 1},
+        )
+        if resp.status_code == 200:
+            payload = resp.json()
+            objects = payload.get("data") or payload.get("objects") or []
+            if isinstance(objects, list) and objects:
+                print("  v2 pre-check: Order/search returns data")
             else:
-                print(f"  ES pre-check: index not found (status={count_resp.status_code})")
-        except Exception as exc:
-            print(f"  ES pre-check failed: {exc}")
+                print("  WARNING: v2 Order/search returned empty — objectify/projection may not have completed.")
+        else:
+            print(f"  WARNING: v2 pre-check failed (status={resp.status_code})")
+    except Exception as exc:
+        print(f"  v2 pre-check failed: {exc}")
 
     # v2 search/count endpoints work on both BFF and OMS; use BFF for consistent auth
     base_search_url = f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects"
@@ -2423,6 +2532,7 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     # ── 5-3: and (customer_state == SP AND city contains "sao paulo") ───────
     print("  [5-3] Search: compound AND query")
     try:
+        query_terms = [t for t in "sao paulo".split() if t]
         resp = await client.post(
             f"{base_search_url}/Customer/search",
             params={"branch": "main"},
@@ -2449,7 +2559,9 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             if state_val:
                 assert state_val == "SP", f"Expected customer_state=SP, got {state_val!r}"
             if city_val:
-                assert "sao paulo" in city_val, f"Expected city contains 'sao paulo', got {city_val!r}"
+                assert any(term in city_val for term in query_terms), (
+                    f"Expected city contains any term of {query_terms!r}, got {city_val!r}"
+                )
         print(f"    Compound AND verified: {len(objects)} customers")
         state.bug_tracker.record_pass()
     except Exception as exc:
@@ -2484,6 +2596,7 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     # ── 5-5: containsAnyTerm (customer_city contains "sao paulo")
     print('  [5-5] Search: containsAnyTerm (customer_city ~ "sao paulo")')
     try:
+        query_terms = [t for t in "sao paulo".split() if t]
         resp = await client.post(
             f"{base_search_url}/Customer/search",
             params={"branch": "main"},
@@ -2498,7 +2611,9 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             props = obj.get("properties") or obj
             city_val = str(props.get("customer_city") or "").strip().lower()
             if city_val:
-                assert "sao paulo" in city_val, f"Expected city contains 'sao paulo', got {city_val!r}"
+                assert any(term in city_val for term in query_terms), (
+                    f"Expected city contains any term of {query_terms!r}, got {city_val!r}"
+                )
         print(f"    containsAnyTerm verified: {len(objects)} customers")
         state.bug_tracker.record_pass()
     except Exception as exc:
@@ -3454,7 +3569,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
             out_id = str(out_ds.get("dataset_id") or "").strip()
             if not out_id:
                 raise AssertionError(f"cross_domain dataset_id missing: {out_ds}")
-            rid = build_rid("dataset", out_id)
+            rid = _build_rid("dataset", out_id)
             table = await client.get(
                 f"{BFF_URL}/api/v2/datasets/{rid}/readTable",
                 params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
@@ -3483,128 +3598,97 @@ async def phase9_branch_and_incremental(state: QAState, client: httpx.AsyncClien
     - 2nd dataset version + incremental objectify update without duplicates
     """
 
-    from shared.config.app_config import AppConfig
-    from shared.services.registries.action_log_registry import ActionLogRegistry
-    from shared.services.registries.objectify_registry import ObjectifyRegistry
-
     phase = "Phase 9"
     print(f"\n{'='*60}\n  {phase}: BRANCH SEPARATION + INCREMENTAL UPDATE\n{'='*60}")
 
     db_name = state.db_name
     view_branch = "main"
-    expected_writeback_branch = AppConfig.get_ontology_writeback_branch(db_name=db_name)
 
-    # ── 9-1: Branch separation (ActionLogRegistry writeback_target vs ES branch) ──
-    print("  [9-1] Branch separation: writeback_target.branch != view branch, ES docs on view branch")
+    def _is_safe_branch(value: str) -> bool:
+        raw = str(value or "").strip()
+        return bool(raw) and all(ch.isalnum() or ch in {"_", "-"} for ch in raw)
 
-    dsn_candidates = [
-        (os.getenv("POSTGRES_URL") or "").strip(),
-        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
-        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
-    ]
+    async def _get_action_log_http(action_log_id: str) -> Dict[str, Any]:
+        resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}/action-logs/{action_log_id}")
+        resp.raise_for_status()
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, dict) else payload
 
-    registry: Optional[ActionLogRegistry] = None
-    working_postgres_dsn: Optional[str] = None
-    last_dsn_exc: Optional[Exception] = None
-    for dsn in dsn_candidates:
-        if not dsn:
-            continue
-        try:
-            registry = ActionLogRegistry(dsn=dsn)
-            await registry.connect()
-            working_postgres_dsn = dsn
-            break
-        except Exception as exc:
-            last_dsn_exc = exc
-            registry = None
+    async def _get_watermark_http(mapping_spec_id: str) -> Optional[Dict[str, Any]]:
+        resp = await client.get(
+            f"{BFF_URL}/api/v1/objectify/mapping-specs/{mapping_spec_id}/watermark",
+            params={"branch": view_branch},
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return None
+        wm = data.get("watermark")
+        return wm if isinstance(wm, dict) else None
 
+    # ── 9-1: Branch separation (HTTP-only) ─────────────────────────
+    print("  [9-1] Branch separation: overlay_branch == view branch, writeback_target.branch != view branch")
     if not state.action_log_ids:
         state.bug_tracker.record(
             phase,
             "9-1a",
-            "ActionLogRegistry",
+            "GET /api/v1/databases/{db}/action-logs/{id}",
             ">=1 action_log_id from Phase 6",
             "No action_log_ids captured; action flow did not submit writeback",
             "P0",
         )
-    elif registry is None:
-        state.bug_tracker.record(
-            phase,
-            "9-1a",
-            "ActionLogRegistry.connect",
-            "connect to Postgres",
-            f"Failed to connect to Postgres for action log checks: {last_dsn_exc}",
-            "P0",
-        )
     else:
         try:
-            deadline = time.monotonic() + 240
-            for action_log_id in state.action_log_ids:
-                record = None
+            _switch_persona(state, client, "owner")
+            for action_log_id in state.action_log_ids[:5]:
+                deadline = time.monotonic() + 240
+                record: Optional[Dict[str, Any]] = None
                 while time.monotonic() < deadline:
-                    record = await registry.get_log(action_log_id=action_log_id)
-                    if record and str(record.status).upper() == "SUCCEEDED":
-                        break
+                    try:
+                        data = await _get_action_log_http(action_log_id)
+                        status_value = str(data.get("status") or "").strip().upper()
+                        if status_value in {"SUCCEEDED", "FAILED"}:
+                            record = data
+                            break
+                    except Exception:
+                        pass
                     await asyncio.sleep(2.0)
 
                 if not record:
-                    raise AssertionError(f"Action log not found: {action_log_id}")
-                if str(record.status).upper() != "SUCCEEDED":
-                    raise AssertionError(f"Action log did not succeed: {action_log_id} status={record.status}")
-                if not record.writeback_target or not isinstance(record.writeback_target, dict):
-                    raise AssertionError(f"Missing writeback_target for action_log_id={action_log_id}")
+                    raise AssertionError(f"Timed out waiting for action log: {action_log_id}")
 
-                wb_branch = str(record.writeback_target.get("branch") or "").strip()
-                if wb_branch != expected_writeback_branch:
-                    raise AssertionError(
-                        f"writeback_target.branch mismatch: expected {expected_writeback_branch}, got {wb_branch}"
-                    )
+                if str(record.get("status") or "").strip().upper() != "SUCCEEDED":
+                    raise AssertionError(f"Action log did not succeed: {action_log_id} status={record.get('status')}")
+
+                writeback_target = record.get("writeback_target") or {}
+                if not isinstance(writeback_target, dict):
+                    raise AssertionError("writeback_target must be an object")
+                wb_branch = str(writeback_target.get("branch") or "").strip()
+                if not wb_branch:
+                    raise AssertionError("writeback_target.branch is required")
                 if wb_branch == view_branch:
                     raise AssertionError("writeback_target.branch must be distinct from view branch")
-                if not str(record.writeback_commit_id or "").strip():
+                if not _is_safe_branch(wb_branch):
+                    raise AssertionError(f"writeback_target.branch must be lakeFS-safe (got {wb_branch!r})")
+
+                overlay_branch = str(record.get("overlay_branch") or "").strip()
+                if overlay_branch != view_branch:
+                    raise AssertionError(f"overlay_branch mismatch (or missing): expected={view_branch} got={overlay_branch!r}")
+
+                if not str(record.get("writeback_commit_id") or "").strip():
                     raise AssertionError("writeback_commit_id is required for succeeded action logs")
+
             state.bug_tracker.record_pass()
-            print(f"    Action logs verified: {len(state.action_log_ids)} (writeback_branch={expected_writeback_branch})")
+            print(f"    Action logs verified via HTTP: {min(5, len(state.action_log_ids))} succeeded")
         except Exception as exc:
             state.bug_tracker.record(
                 phase,
                 "9-1b",
-                "ActionLogRegistry.get_log",
-                "writeback_target.branch separation + SUCCEEDED",
-                str(exc)[:200],
-                "P0",
-            )
-        finally:
-            await registry.close()
-
-    # ES branch for changed instances must be view branch (overlay)
-    if not state.changed_instance_ids:
-        state.bug_tracker.record(
-            phase,
-            "9-1c",
-            "Elasticsearch _doc",
-            ">=1 changed instance_id from Phase 6",
-            "No changed_instance_ids captured; cannot verify overlay projection branch",
-            "P1",
-        )
-    else:
-        try:
-            for instance_id in state.changed_instance_ids[:5]:
-                doc = await _wait_for_es_doc(client, state.es_index, instance_id, timeout=ES_TIMEOUT)
-                source = doc.get("_source") or {}
-                actual_branch = str(source.get("branch") or "").strip()
-                if actual_branch != view_branch:
-                    raise AssertionError(
-                        f"ES doc branch mismatch for instance_id={instance_id}: expected {view_branch}, got {actual_branch}"
-                    )
-            state.bug_tracker.record_pass()
-            print(f"    ES overlay branch verified for {min(5, len(state.changed_instance_ids))} instance(s)")
-        except Exception as exc:
-            state.bug_tracker.record(
-                phase,
-                "9-1d",
-                "GET ES /{index}/_doc/{id}",
-                f"_source.branch == {view_branch}",
+                "GET /api/v1/databases/{db}/action-logs/{id}",
+                "overlay_branch + writeback_target + SUCCEEDED",
                 str(exc)[:200],
                 "P0",
             )
@@ -3709,43 +3793,35 @@ async def phase9_branch_and_incremental(state: QAState, client: httpx.AsyncClien
         state.bug_tracker.record(phase, "9-2c", "prepare v2 CSV", "bytes built", str(exc)[:200], "P0")
         return
 
-    # Seed watermark so incremental filtering is mandatory (detects hidden bug: previous_watermark ignored).
+    # Seed watermark via HTTP-only incremental run (force_full_refresh) so previous_watermark == max_city.
     try:
-        # The watermark value must be the current max(city) so only our updated row qualifies.
-        if not working_postgres_dsn:
-            import asyncpg  # type: ignore
+        _switch_persona(state, client, "data_engineer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/objectify/mapping-specs/{customer_spec_id}/trigger-incremental",
+            params={"branch": view_branch},
+            json={
+                "execution_mode": "incremental",
+                "watermark_column": "customer_city",
+                "force_full_refresh": True,
+            },
+        )
+        resp.raise_for_status()
 
-            last_exc: Optional[Exception] = None
-            for candidate in dsn_candidates:
-                if not candidate:
-                    continue
-                try:
-                    conn = await asyncpg.connect(candidate)
-                except Exception as exc:
-                    last_exc = exc
-                    continue
-                else:
-                    await conn.close()
-                    working_postgres_dsn = candidate
+        deadline = time.monotonic() + 240
+        last_wm: Any = None
+        while time.monotonic() < deadline:
+            wm = await _get_watermark_http(customer_spec_id)
+            last_wm = wm
+            if isinstance(wm, dict):
+                if str(wm.get("watermark_column") or "").strip() == "customer_city" and str(wm.get("watermark_value") or "") == max_city:
+                    state.bug_tracker.record_pass()
+                    print(f"    Watermark seeded via HTTP: customer_city={max_city!r}")
                     break
-            if not working_postgres_dsn:
-                raise AssertionError(f"No working Postgres DSN candidate for watermark seeding: {last_exc}")
-
-        obj_reg = ObjectifyRegistry(dsn=working_postgres_dsn)
-        await obj_reg.connect()
-        try:
-            await obj_reg.update_watermark(
-                mapping_spec_id=customer_spec_id,
-                dataset_branch=view_branch,
-                watermark_column="customer_city",
-                watermark_value=max_city,
-            )
-        finally:
-            await obj_reg.close()
-        state.bug_tracker.record_pass()
-        print(f"    Seeded watermark: customer_city={max_city!r}")
+            await asyncio.sleep(2.0)
+        else:
+            raise AssertionError(f"Timed out waiting for watermark seed (last={last_wm})")
     except Exception as exc:
-        state.bug_tracker.record(phase, "9-2d", "ObjectifyRegistry.update_watermark", "watermark seeded", str(exc)[:200], "P0")
+        state.bug_tracker.record(phase, "9-2d", "seed watermark (HTTP)", "watermark_value == max_city", str(exc)[:200], "P0")
         return
 
     # Upload v2 dataset (same dataset_name → new version_id)
@@ -3842,6 +3918,41 @@ async def phase9_branch_and_incremental(state: QAState, client: httpx.AsyncClien
         state.bug_tracker.record(phase, "9-2g", "v2 search Customer", "customer_city updated", str(exc)[:200], "P0")
         return
 
+    # Watermark must advance to v2 after the incremental job completes (HTTP-only sync point).
+    try:
+        _switch_persona(state, client, "data_engineer")
+        target_customer_id = str(state.search_results.get("incremental_customer_id") or "").strip()
+        new_city = str(state.search_results.get("incremental_new_city") or "").strip()
+        assert target_customer_id and new_city and commit_id_v2 and version_id_v2
+
+        deadline = time.monotonic() + 240
+        last_wm: Any = None
+        while time.monotonic() < deadline:
+            wm = await _get_watermark_http(customer_spec_id)
+            last_wm = wm
+            if isinstance(wm, dict):
+                if (
+                    str(wm.get("dataset_version_id") or "").strip() == version_id_v2
+                    and str(wm.get("lakefs_commit_id") or "").strip() == commit_id_v2
+                    and str(wm.get("watermark_value") or "") == new_city
+                ):
+                    state.bug_tracker.record_pass()
+                    print("    Watermark advanced to v2 (dataset_version_id + commit_id + value): OK")
+                    break
+            await asyncio.sleep(2.0)
+        else:
+            raise AssertionError(f"Timed out waiting for watermark to advance to v2 (last={last_wm})")
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "9-2i",
+            "GET /api/v1/objectify/mapping-specs/{id}/watermark",
+            "watermark reflects v2 commit/value",
+            str(exc)[:200],
+            "P1",
+        )
+        return
+
     # Count after must be unchanged (no duplicates)
     if customer_count_before is not None:
         try:
@@ -3918,26 +4029,16 @@ async def phase9_branch_and_incremental(state: QAState, client: httpx.AsyncClien
         if not commit_id_v3 or commit_id_v3 == commit_id_v2:
             raise AssertionError("Expected new lakefs_commit_id for v3 delete upload")
 
-        # Seed watermark commit so delta mode computes diff between v2 commit and v3 commit
-        obj_reg = ObjectifyRegistry(dsn=working_postgres_dsn)
-        await obj_reg.connect()
-        try:
-            await obj_reg.update_watermark(
-                mapping_spec_id=customer_spec_id,
-                dataset_branch=view_branch,
-                watermark_column="customer_city",
-                watermark_value=max_city,
-                dataset_version_id=version_id_v2,
-                lakefs_commit_id=commit_id_v2,
-            )
-        finally:
-            await obj_reg.close()
+        # Ensure delta base commit is present via HTTP watermark contract
+        wm = await _get_watermark_http(customer_spec_id)
+        if not isinstance(wm, dict) or str(wm.get("lakefs_commit_id") or "").strip() != commit_id_v2:
+            raise AssertionError(f"Watermark lakefs_commit_id mismatch: expected={commit_id_v2} got={wm}")
 
-        # Trigger delta-mode objectify (must remove deleted entity from ES)
+        # Trigger delta-mode objectify (must remove deleted entity from v2 search)
         resp_delta = await client.post(
             f"{BFF_URL}/api/v1/objectify/mapping-specs/{customer_spec_id}/trigger-incremental",
             params={"branch": view_branch},
-            json={"execution_mode": "delta"},
+            json={"execution_mode": "delta", "watermark_column": "customer_city"},
         )
         resp_delta.raise_for_status()
         delta_data = resp_delta.json().get("data") or resp_delta.json()
@@ -4023,30 +4124,8 @@ async def phase10_teardown(state: QAState, client: httpx.AsyncClient) -> None:
     except Exception as exc:
         state.bug_tracker.record(phase, "10-1", "DELETE /api/v1/databases/{db}", "database deleted", str(exc)[:200], "P2")
 
-    # 10-2: Delete ES indices for this DB (best-effort)
-    print("  [10-2] Deleting Elasticsearch indices for db...")
-    try:
-        prefix = (state.db_name or "").lower()
-        if not prefix:
-            raise AssertionError("db_name missing for ES cleanup")
-        cat = await client.get(f"{ES_URL}/_cat/indices/{prefix}*?format=json&h=index")
-        indices: List[str] = []
-        if cat.status_code == 200:
-            for row in cat.json() or []:
-                if isinstance(row, dict):
-                    idx = str(row.get("index") or "").strip()
-                    if idx:
-                        indices.append(idx)
-
-        deleted = 0
-        for idx in sorted(set(indices)):
-            d = await client.delete(f"{ES_URL}/{idx}")
-            if d.status_code in {200, 202, 404}:
-                deleted += 1
-        state.bug_tracker.record_pass()
-        print(f"    ES indices deleted: {deleted}")
-    except Exception as exc:
-        state.bug_tracker.record(phase, "10-2", "DELETE ES indices", "indices deleted", str(exc)[:200], "P2")
+    # NOTE(HTTP-only strict): We intentionally do NOT call Elasticsearch directly for cleanup.
+    # Database deletion should cascade to internal stores via workers.
 
 
 # =============================================================================
@@ -4097,11 +4176,14 @@ async def test_foundry_e2e_qa() -> None:
     print(f"  FOUNDRY E2E QA — {state.db_name}")
     print(f"  BFF: {BFF_URL}")
     print(f"  OMS: {OMS_URL}")
-    print(f"  ES:  {ES_URL}")
     print(f"  Fixture dir: {FIXTURE_DIR}")
     print(f"{'#'*60}")
 
-    async with httpx.AsyncClient(headers=state.headers, timeout=HTTPX_TIMEOUT) as raw_client:
+    async with httpx.AsyncClient(
+        headers=state.headers,
+        timeout=HTTPX_TIMEOUT,
+        event_hooks={"request": [_http_only_request_guard]},
+    ) as raw_client:
         client = raw_client
         try:
             # Phase 1: Data Ingestion

@@ -58,6 +58,7 @@ from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
 from shared.utils.s3_uri import parse_s3_uri
+from shared.utils.schema_hash import compute_schema_hash_from_payload
 from shared.utils.blank_utils import is_blank_value
 from shared.utils.string_list_utils import normalize_string_list
 from shared.errors.error_envelope import build_error_envelope
@@ -1382,7 +1383,55 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             if not job.dataset_version_id:
                 await fail_job("backing_datasource_version_required")
             if backing_version.dataset_version_id != job.dataset_version_id:
-                await fail_job("backing_datasource_version_mismatch")
+                resolved_backing_id = (
+                    str(getattr(mapping_spec, "backing_datasource_id", "") or "").strip()
+                    or str(getattr(backing_version, "backing_id", "") or "").strip()
+                )
+                if not resolved_backing_id:
+                    await fail_job("backing_datasource_id_missing")
+
+                # Guardrail: allow dataset version advancement only when schema is compatible.
+                expected_schema_hash = str(getattr(mapping_spec, "schema_hash", "") or "").strip()
+                job_version = await self.dataset_registry.get_version(version_id=job.dataset_version_id)
+                if not job_version:
+                    await fail_job("dataset_version_missing")
+                observed_schema_hash = compute_schema_hash_from_payload(getattr(job_version, "sample_json", None))
+                if expected_schema_hash and observed_schema_hash and expected_schema_hash != observed_schema_hash:
+                    await fail_job(
+                        f"backing_schema_hash_mismatch(expected={expected_schema_hash} observed={observed_schema_hash})"
+                    )
+
+                try:
+                    advanced = await self.dataset_registry.get_or_create_backing_datasource_version(
+                        backing_id=resolved_backing_id,
+                        dataset_version_id=job.dataset_version_id,
+                        schema_hash=expected_schema_hash or observed_schema_hash,
+                        metadata={"artifact_key": job.artifact_key} if job.artifact_key else None,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to auto-advance backing datasource version (mapping_spec_id=%s dataset_version_id=%s): %s",
+                        getattr(mapping_spec, "mapping_spec_id", None),
+                        job.dataset_version_id,
+                        exc,
+                    )
+                    await fail_job("backing_datasource_version_mismatch")
+                    raise  # Unreachable, but keeps type checkers happy.
+
+                backing_version = advanced
+                try:
+                    updated = await self.objectify_registry.update_mapping_spec(
+                        mapping_spec_id=str(mapping_spec.mapping_spec_id),
+                        backing_datasource_version_id=str(advanced.version_id),
+                    )
+                    if updated:
+                        mapping_spec = updated
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to advance mapping spec backing version in objectify-worker (mapping_spec_id=%s): %s",
+                        getattr(mapping_spec, "mapping_spec_id", None),
+                        exc,
+                    )
         return mapping_spec
 
     async def _process_job(self, job: ObjectifyJob) -> None:

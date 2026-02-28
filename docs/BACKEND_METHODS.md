@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-02-28T23:05:50+09:00
+> Generated: 2026-03-01T01:50:36+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -475,13 +475,15 @@
 
 ### `backend/bff/routers/database.py`
 - **Functions**
-  - `async list_databases(request, oms, dataset_registry)` (line 35): 데이터베이스 목록 조회
-  - `async create_database(request, http_request, oms)` (line 55): 데이터베이스 생성
-  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 71): 데이터베이스 삭제
-  - `async get_database(db_name, oms)` (line 92): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 99): Resolve the current `expected_seq` for database (aggregate) operations.
-  - `async list_database_access(db_name, http_request)` (line 112): List database access entries (RBAC).
-  - `async upsert_database_access(db_name, body, http_request)` (line 129): Upsert database access entries (RBAC). Requires Owner/Security.
+  - `_is_platform_admin_request(request)` (line 34): no docstring
+  - `async list_databases(request, oms, dataset_registry)` (line 46): 데이터베이스 목록 조회
+  - `async create_database(request, http_request, oms)` (line 66): 데이터베이스 생성
+  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 82): 데이터베이스 삭제
+  - `async get_database(db_name, oms)` (line 103): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 110): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_database_access(db_name, http_request)` (line 123): List database access entries (RBAC).
+  - `async upsert_database_access(db_name, body, http_request)` (line 141): Upsert database access entries (RBAC). Requires Owner/Security.
+  - `async get_action_log(db_name, action_log_id, http_request)` (line 195): Get an action log record (writeback status + targets) for observability/debugging.
 
 ### `backend/bff/routers/document_bundles.py`
 - **Functions**
@@ -3905,80 +3907,80 @@
 
 ### `backend/objectify_worker/main.py`
 - **Functions**
-  - `_auto_detect_watermark_column(columns, options)` (line 95): Auto-detect a watermark column from dataset schema or options.
-  - `async _compute_lakefs_delta(job, delta_computer, storage)` (line 120): Compute row-level delta between two LakeFS commits using the diff API.
-  - `_extract_instance_relationships(instance, rel_map)` (line 192): Thin wrapper: extract relationships for a single instance using pre-parsed rel_map.
-  - `async main()` (line 4470): no docstring
+  - `_auto_detect_watermark_column(columns, options)` (line 96): Auto-detect a watermark column from dataset schema or options.
+  - `async _compute_lakefs_delta(job, delta_computer, storage)` (line 121): Compute row-level delta between two LakeFS commits using the diff API.
+  - `_extract_instance_relationships(instance, rel_map)` (line 193): Thin wrapper: extract relationships for a single instance using pre-parsed rel_map.
+  - `async main()` (line 4519): no docstring
 - **Classes**
-  - `ObjectifyNonRetryableError` (line 207): Raised for objectify failures that should not be retried.
-  - `ObjectifyWorker` (line 211): no docstring
-    - `__init__(self)` (line 240): no docstring
-    - `_build_error_report(self, error, report, job, message, context)` (line 288): no docstring
-    - `async _record_gate_result(self, job, status, details)` (line 327): no docstring
-    - `async _emit_objectify_completed_event(self, job, total_rows, prepared_instances, indexed_instances, execution_mode, ontology_version)` (line 355): Emit OBJECTIFY_COMPLETED event via pipeline control-plane.
-    - `async _update_object_type_active_version(self, job, mapping_spec)` (line 413): no docstring
-    - `_normalize_ontology_payload(payload)` (line 476): no docstring
-    - `_extract_ontology_fields(cls, payload)` (line 484): no docstring
-    - `_is_blank(value)` (line 511): no docstring
-    - `_normalize_relationship_ref(value, target_class)` (line 515): no docstring
-    - `_normalize_constraints(constraints, raw_type)` (line 539): no docstring
-    - `_resolve_import_type(raw_type)` (line 583): no docstring
-    - `_validate_value_constraints(self, value, constraints, raw_type)` (line 586): no docstring
-    - `_validate_value_constraints_single(self, value, constraints, raw_type)` (line 605): no docstring
-    - `_extract_ontology_pk_targets(self, payload)` (line 669): Extract ontology-declared primaryKey fields in order (best-effort).
-    - `_map_mappings_by_target(mappings)` (line 702): no docstring
-    - `_has_p0_errors(self, errors)` (line 712): no docstring
-    - `async _load_value_type_defs_with_validation(self, job, prop_map, fail_job)` (line 719): no docstring
-    - `_build_property_type_context(self, prop_map, value_type_defs, target_class_id)` (line 748): no docstring
-    - `async _resolve_object_type_key_contract(self, job, ontology_payload, prop_map, fail_job, warnings)` (line 838): no docstring
-    - `async initialize(self)` (line 965): no docstring
-    - `async close(self)` (line 1045): no docstring
-    - `async run(self)` (line 1077): no docstring
-    - `_parse_payload(self, payload)` (line 1088): no docstring
-    - `_registry_key(self, payload)` (line 1091): no docstring
-    - `async _process_payload(self, payload)` (line 1098): no docstring
-    - `_fallback_metadata(self, payload)` (line 1113): no docstring
-    - `_span_name(self, payload)` (line 1127): no docstring
-    - `_span_attributes(self, msg, payload, registry_key)` (line 1130): no docstring
-    - `_metric_event_name(self, payload)` (line 1151): no docstring
-    - `_heartbeat_options(self)` (line 1154): no docstring
-    - `async _on_parse_error(self, msg, raw_payload, error)` (line 1159): no docstring
-    - `_is_retryable_error(self, exc, payload)` (line 1168): no docstring
-    - `async _persist_objectify_failure_status(self, job, status, error, attempt_count, retryable, completed_at)` (line 1177): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 1210): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 1235): no docstring
-    - `async _resolve_job_input_context(self, job, fail_job)` (line 1257): no docstring
-    - `async _resolve_mapping_spec_for_job(self, job, fail_job)` (line 1300): no docstring
-    - `async _process_job(self, job)` (line 1388): no docstring
-    - `async _bulk_update_instances(self, job, updates, ontology_version)` (line 2352): no docstring
-    - `async _iter_class_instance_ids(self, db_name, class_id, branch, limit)` (line 2388): no docstring
-    - `async _resolve_artifact_output(self, job)` (line 2427): no docstring
-    - `async _fetch_target_field_types(self, job)` (line 2472): no docstring
-    - `async _fetch_class_schema(self, job)` (line 2496): no docstring
-    - `async _fetch_object_type_contract(self, job)` (line 2507): no docstring
-    - `async _fetch_value_type_defs(self, job, value_type_refs)` (line 2520): no docstring
-    - `async _fetch_ontology_version(self, job)` (line 2555): no docstring
-    - `_normalize_pk_fields(value)` (line 2561): no docstring
-    - `_hash_payload(payload)` (line 2565): no docstring
-    - `_derive_row_key(self, columns, col_index, row, instance, pk_fields, pk_targets)` (line 2569): no docstring
-    - `_derive_unique_key(self, instance, key_fields)` (line 2599): no docstring
-    - `async _iter_dataset_batches(self, job, options, row_batch_size, max_rows)` (line 2607): no docstring
-    - `async _download_object_to_file(self, bucket, key, dest_path)` (line 2680): no docstring
-    - `async _iter_parquet_object_batches(self, bucket, parquet_keys, row_batch_size, max_rows)` (line 2716): no docstring
-    - `async _iter_csv_batches(self, bucket, key, delimiter, has_header, row_batch_size, max_rows)` (line 2803): no docstring
-    - `async _iter_json_part_batches(self, bucket, prefix, row_batch_size, max_rows)` (line 2896): no docstring
-    - `async _iter_dataset_batches_incremental(self, job, options, row_batch_size, max_rows, mapping_spec)` (line 2953): Iterate dataset batches with incremental filtering.
-    - `async _update_watermark_after_job(self, job, new_watermark)` (line 3060): Update watermark in registry after successful incremental job.
-    - `_build_instances_with_validation(self, columns, rows, row_offset, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys)` (line 3095): no docstring
-    - `async _run_link_index_job(self, job, mapping_spec, options, mappings, mapping_sources, mapping_targets, sources_by_target, prop_map, rel_map, relationship_mappings, stable_seed, row_batch_size, max_rows)` (line 3323): no docstring
-    - `async _validate_batches(self, job, options, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, row_batch_size, max_rows)` (line 3931): no docstring
-    - `async _scan_key_constraints(self, job, options, mappings, relationship_meta, target_field_types, sources_by_target, required_targets, pk_targets, pk_fields, unique_keys, row_batch_size, max_rows)` (line 3999): no docstring
-    - `_ensure_instance_ids(self, instances, class_id, stable_seed, mapping_spec_version, row_keys, instance_id_field)` (line 4121): no docstring
-    - `_build_column_lineage_pairs(mappings, limit)` (line 4156): no docstring
-    - `async _record_lineage_header(self, job, mapping_spec, ontology_version, input_type, artifact_output_name)` (line 4184): no docstring
-    - `async _record_instance_lineage(self, job, job_node_id, instance_ids, mapping_spec_id, mapping_spec_version, column_lineage_pairs, ontology_version, limit_remaining, input_type, artifact_output_name)` (line 4304): no docstring
-    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 4422): no docstring
-    - `_is_retryable_error_impl(exc)` (line 4457): no docstring
+  - `ObjectifyNonRetryableError` (line 208): Raised for objectify failures that should not be retried.
+  - `ObjectifyWorker` (line 212): no docstring
+    - `__init__(self)` (line 241): no docstring
+    - `_build_error_report(self, error, report, job, message, context)` (line 289): no docstring
+    - `async _record_gate_result(self, job, status, details)` (line 328): no docstring
+    - `async _emit_objectify_completed_event(self, job, total_rows, prepared_instances, indexed_instances, execution_mode, ontology_version)` (line 356): Emit OBJECTIFY_COMPLETED event via pipeline control-plane.
+    - `async _update_object_type_active_version(self, job, mapping_spec)` (line 414): no docstring
+    - `_normalize_ontology_payload(payload)` (line 477): no docstring
+    - `_extract_ontology_fields(cls, payload)` (line 485): no docstring
+    - `_is_blank(value)` (line 512): no docstring
+    - `_normalize_relationship_ref(value, target_class)` (line 516): no docstring
+    - `_normalize_constraints(constraints, raw_type)` (line 540): no docstring
+    - `_resolve_import_type(raw_type)` (line 584): no docstring
+    - `_validate_value_constraints(self, value, constraints, raw_type)` (line 587): no docstring
+    - `_validate_value_constraints_single(self, value, constraints, raw_type)` (line 606): no docstring
+    - `_extract_ontology_pk_targets(self, payload)` (line 670): Extract ontology-declared primaryKey fields in order (best-effort).
+    - `_map_mappings_by_target(mappings)` (line 703): no docstring
+    - `_has_p0_errors(self, errors)` (line 713): no docstring
+    - `async _load_value_type_defs_with_validation(self, job, prop_map, fail_job)` (line 720): no docstring
+    - `_build_property_type_context(self, prop_map, value_type_defs, target_class_id)` (line 749): no docstring
+    - `async _resolve_object_type_key_contract(self, job, ontology_payload, prop_map, fail_job, warnings)` (line 839): no docstring
+    - `async initialize(self)` (line 966): no docstring
+    - `async close(self)` (line 1046): no docstring
+    - `async run(self)` (line 1078): no docstring
+    - `_parse_payload(self, payload)` (line 1089): no docstring
+    - `_registry_key(self, payload)` (line 1092): no docstring
+    - `async _process_payload(self, payload)` (line 1099): no docstring
+    - `_fallback_metadata(self, payload)` (line 1114): no docstring
+    - `_span_name(self, payload)` (line 1128): no docstring
+    - `_span_attributes(self, msg, payload, registry_key)` (line 1131): no docstring
+    - `_metric_event_name(self, payload)` (line 1152): no docstring
+    - `_heartbeat_options(self)` (line 1155): no docstring
+    - `async _on_parse_error(self, msg, raw_payload, error)` (line 1160): no docstring
+    - `_is_retryable_error(self, exc, payload)` (line 1169): no docstring
+    - `async _persist_objectify_failure_status(self, job, status, error, attempt_count, retryable, completed_at)` (line 1178): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 1211): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 1236): no docstring
+    - `async _resolve_job_input_context(self, job, fail_job)` (line 1258): no docstring
+    - `async _resolve_mapping_spec_for_job(self, job, fail_job)` (line 1301): no docstring
+    - `async _process_job(self, job)` (line 1437): no docstring
+    - `async _bulk_update_instances(self, job, updates, ontology_version)` (line 2401): no docstring
+    - `async _iter_class_instance_ids(self, db_name, class_id, branch, limit)` (line 2437): no docstring
+    - `async _resolve_artifact_output(self, job)` (line 2476): no docstring
+    - `async _fetch_target_field_types(self, job)` (line 2521): no docstring
+    - `async _fetch_class_schema(self, job)` (line 2545): no docstring
+    - `async _fetch_object_type_contract(self, job)` (line 2556): no docstring
+    - `async _fetch_value_type_defs(self, job, value_type_refs)` (line 2569): no docstring
+    - `async _fetch_ontology_version(self, job)` (line 2604): no docstring
+    - `_normalize_pk_fields(value)` (line 2610): no docstring
+    - `_hash_payload(payload)` (line 2614): no docstring
+    - `_derive_row_key(self, columns, col_index, row, instance, pk_fields, pk_targets)` (line 2618): no docstring
+    - `_derive_unique_key(self, instance, key_fields)` (line 2648): no docstring
+    - `async _iter_dataset_batches(self, job, options, row_batch_size, max_rows)` (line 2656): no docstring
+    - `async _download_object_to_file(self, bucket, key, dest_path)` (line 2729): no docstring
+    - `async _iter_parquet_object_batches(self, bucket, parquet_keys, row_batch_size, max_rows)` (line 2765): no docstring
+    - `async _iter_csv_batches(self, bucket, key, delimiter, has_header, row_batch_size, max_rows)` (line 2852): no docstring
+    - `async _iter_json_part_batches(self, bucket, prefix, row_batch_size, max_rows)` (line 2945): no docstring
+    - `async _iter_dataset_batches_incremental(self, job, options, row_batch_size, max_rows, mapping_spec)` (line 3002): Iterate dataset batches with incremental filtering.
+    - `async _update_watermark_after_job(self, job, new_watermark)` (line 3109): Update watermark in registry after successful incremental job.
+    - `_build_instances_with_validation(self, columns, rows, row_offset, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys)` (line 3144): no docstring
+    - `async _run_link_index_job(self, job, mapping_spec, options, mappings, mapping_sources, mapping_targets, sources_by_target, prop_map, rel_map, relationship_mappings, stable_seed, row_batch_size, max_rows)` (line 3372): no docstring
+    - `async _validate_batches(self, job, options, mappings, relationship_mappings, relationship_meta, target_field_types, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, row_batch_size, max_rows)` (line 3980): no docstring
+    - `async _scan_key_constraints(self, job, options, mappings, relationship_meta, target_field_types, sources_by_target, required_targets, pk_targets, pk_fields, unique_keys, row_batch_size, max_rows)` (line 4048): no docstring
+    - `_ensure_instance_ids(self, instances, class_id, stable_seed, mapping_spec_version, row_keys, instance_id_field)` (line 4170): no docstring
+    - `_build_column_lineage_pairs(mappings, limit)` (line 4205): no docstring
+    - `async _record_lineage_header(self, job, mapping_spec, ontology_version, input_type, artifact_output_name)` (line 4233): no docstring
+    - `async _record_instance_lineage(self, job, job_node_id, instance_ids, mapping_spec_id, mapping_spec_version, column_lineage_pairs, ontology_version, limit_remaining, input_type, artifact_output_name)` (line 4353): no docstring
+    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 4471): no docstring
+    - `_is_retryable_error_impl(exc)` (line 4506): no docstring
 
 ### `backend/objectify_worker/validation_codes.py`
 - **Classes**
@@ -4328,41 +4330,41 @@
   - `_property_exact_term_clause(value)` (line 584): no docstring
   - `_property_range_clause(op, value)` (line 592): no docstring
   - `_to_es_properties_query(query, depth)` (line 598): no docstring
-  - `_build_interval_query(field_path, rule)` (line 670): Convert a Foundry ``interval`` query to an ES intervals query.
-  - `_build_interval_sub_rule(sub)` (line 722): Build a single interval sub-rule for allOf/anyOf compositions.
-  - `_extract_geo_point(raw)` (line 746): Extract a ``{lat, lon}`` pair from various Foundry coordinate formats.
-  - `_extract_distance(raw)` (line 770): Extract an ES distance string from Foundry distance format.
-  - `_wrap_geo_query_nested(field_name, field_path, query_type, value)` (line 799): Wrap a geo query in a nested → filter context for ``properties[]``.
-  - `_build_geo_distance_query(field_path, value)` (line 868): ``withinDistanceOf`` → ES ``geo_distance`` query.
-  - `_build_geo_bounding_box_query(field_path, value)` (line 889): ``withinBoundingBox`` → ES ``geo_bounding_box`` query.
-  - `_build_geo_polygon_query(field_path, value, negate)` (line 913): ``withinPolygon`` → ES ``geo_shape`` query with ``within`` relation.
-  - `_build_geo_shape_bbox_query(field_path, value, relation)` (line 934): ``intersectsBoundingBox`` / ``doesNotIntersectBoundingBox``
-  - `_build_geo_shape_polygon_query(field_path, value, relation)` (line 966): ``intersectsPolygon`` / ``doesNotIntersectPolygon``
-  - `_extract_polygon_geojson(value)` (line 984): Extract GeoJSON polygon from Foundry value.
-  - `_parse_duration_to_timedelta(duration)` (line 1019): Convert a Foundry duration dict {value, unit} to a Python timedelta.
-  - `_build_relative_date_range_query(field_path, value)` (line 1037): Convert a Foundry relativeDateRange query to an ES range query.
-  - `_resolve_property_nested_path(field)` (line 1092): Map a Foundry property field name to the nested properties[] ES path.
-  - `_metric_agg_key(index, clause)` (line 1104): Stable key for an aggregation bucket/metric.
-  - `_build_metric_agg(clause, index)` (line 1112): Build a single ES metric aggregation for a Foundry aggregation clause.
-  - `_wrap_nested_metric(field_name, metric_key, metric_body)` (line 1161): Wrap a metric aggregation in a nested→filter context for the properties[] array.
-  - `_build_es_aggregation(aggregation_clauses, group_by_clauses)` (line 1181): Build the complete ES aggregation dict from Foundry aggregation + groupBy clauses.
-  - `_extract_metric_value(bucket, metric_key, clause, parent_doc_count)` (line 1322): Extract a metric value from an ES aggregation bucket.
-  - `_metric_display_name(clause, index)` (line 1372): no docstring
-  - `_parse_es_aggregation_response(es_aggs, aggregation_clauses, group_by_clauses, total_count, accuracy_request, include_compute_usage)` (line 1380): Convert ES aggregation response to Foundry aggregate response format.
-  - `_parse_grouped_buckets(aggs, group_by_clauses, aggregation_clauses, dim_idx, parent_group)` (line 1423): Recursively parse grouped ES aggregation buckets into Foundry data format.
-  - `_parse_aggregation_clauses(payload)` (line 1488): Validate and extract aggregation + groupBy clauses from payload.
-  - `_flatten_source(source)` (line 1506): no docstring
-  - `_source_instance_key(source)` (line 1537): no docstring
-  - `_source_sort_rank(source)` (line 1554): no docstring
-  - `_collapse_duplicate_sources(sources)` (line 1562): no docstring
-  - `_rid_component(value, fallback)` (line 1597): no docstring
-  - `_default_object_rid(db_name, object_type, primary_key)` (line 1606): no docstring
-  - `_prune_none_values(value)` (line 1615): no docstring
-  - `_normalize_foundry_object_row(row, db_name, object_type, exclude_rid)` (line 1628): no docstring
-  - `async _search_objects_v2_impl(payload, db_name, object_type, branch, es)` (line 1700): Foundry Search Objects API v2-compatible object search.
-  - `async search_objects_v2_foundry(ontology, payload, objectType, branch, es)` (line 1874): no docstring
-  - `async count_objects_v2_oms(ontology, objectType, branch, sdk_package_rid, sdk_version, es)` (line 1896): no docstring
-  - `async aggregate_objects_v2_oms(ontology, payload, objectType, branch, es)` (line 1954): Foundry Aggregate Objects API v2 — ES-native implementation.
+  - `_build_interval_query(field_path, rule)` (line 710): Convert a Foundry ``interval`` query to an ES intervals query.
+  - `_build_interval_sub_rule(sub)` (line 762): Build a single interval sub-rule for allOf/anyOf compositions.
+  - `_extract_geo_point(raw)` (line 786): Extract a ``{lat, lon}`` pair from various Foundry coordinate formats.
+  - `_extract_distance(raw)` (line 810): Extract an ES distance string from Foundry distance format.
+  - `_wrap_geo_query_nested(field_name, field_path, query_type, value)` (line 839): Wrap a geo query in a nested → filter context for ``properties[]``.
+  - `_build_geo_distance_query(field_path, value)` (line 908): ``withinDistanceOf`` → ES ``geo_distance`` query.
+  - `_build_geo_bounding_box_query(field_path, value)` (line 929): ``withinBoundingBox`` → ES ``geo_bounding_box`` query.
+  - `_build_geo_polygon_query(field_path, value, negate)` (line 953): ``withinPolygon`` → ES ``geo_shape`` query with ``within`` relation.
+  - `_build_geo_shape_bbox_query(field_path, value, relation)` (line 974): ``intersectsBoundingBox`` / ``doesNotIntersectBoundingBox``
+  - `_build_geo_shape_polygon_query(field_path, value, relation)` (line 1006): ``intersectsPolygon`` / ``doesNotIntersectPolygon``
+  - `_extract_polygon_geojson(value)` (line 1024): Extract GeoJSON polygon from Foundry value.
+  - `_parse_duration_to_timedelta(duration)` (line 1059): Convert a Foundry duration dict {value, unit} to a Python timedelta.
+  - `_build_relative_date_range_query(field_path, value)` (line 1077): Convert a Foundry relativeDateRange query to an ES range query.
+  - `_resolve_property_nested_path(field)` (line 1132): Map a Foundry property field name to the nested properties[] ES path.
+  - `_metric_agg_key(index, clause)` (line 1144): Stable key for an aggregation bucket/metric.
+  - `_build_metric_agg(clause, index)` (line 1152): Build a single ES metric aggregation for a Foundry aggregation clause.
+  - `_wrap_nested_metric(field_name, metric_key, metric_body)` (line 1201): Wrap a metric aggregation in a nested→filter context for the properties[] array.
+  - `_build_es_aggregation(aggregation_clauses, group_by_clauses)` (line 1221): Build the complete ES aggregation dict from Foundry aggregation + groupBy clauses.
+  - `_extract_metric_value(bucket, metric_key, clause, parent_doc_count)` (line 1362): Extract a metric value from an ES aggregation bucket.
+  - `_metric_display_name(clause, index)` (line 1412): no docstring
+  - `_parse_es_aggregation_response(es_aggs, aggregation_clauses, group_by_clauses, total_count, accuracy_request, include_compute_usage)` (line 1420): Convert ES aggregation response to Foundry aggregate response format.
+  - `_parse_grouped_buckets(aggs, group_by_clauses, aggregation_clauses, dim_idx, parent_group)` (line 1463): Recursively parse grouped ES aggregation buckets into Foundry data format.
+  - `_parse_aggregation_clauses(payload)` (line 1528): Validate and extract aggregation + groupBy clauses from payload.
+  - `_flatten_source(source)` (line 1546): no docstring
+  - `_source_instance_key(source)` (line 1577): no docstring
+  - `_source_sort_rank(source)` (line 1594): no docstring
+  - `_collapse_duplicate_sources(sources)` (line 1602): no docstring
+  - `_rid_component(value, fallback)` (line 1637): no docstring
+  - `_default_object_rid(db_name, object_type, primary_key)` (line 1646): no docstring
+  - `_prune_none_values(value)` (line 1655): no docstring
+  - `_normalize_foundry_object_row(row, db_name, object_type, exclude_rid)` (line 1668): no docstring
+  - `async _search_objects_v2_impl(payload, db_name, object_type, branch, es)` (line 1740): Foundry Search Objects API v2-compatible object search.
+  - `async search_objects_v2_foundry(ontology, payload, objectType, branch, es)` (line 1882): no docstring
+  - `async count_objects_v2_oms(ontology, objectType, branch, sdk_package_rid, sdk_version, es)` (line 1904): no docstring
+  - `async aggregate_objects_v2_oms(ontology, payload, objectType, branch, es)` (line 1962): Foundry Aggregate Objects API v2 — ES-native implementation.
 - **Classes**
   - `SearchJsonQueryV2` (line 74): Foundry SearchJsonQueryV2-compatible DSL (subset used by this service).
     - `_validate_shape(self)` (line 133): no docstring
@@ -10010,40 +10012,43 @@
 
 ### `backend/tests/test_foundry_e2e_qa.py`
 - **Functions**
-  - `_severity_rank(value)` (line 79): no docstring
-  - `_qa_fail_threshold_rank()` (line 83): no docstring
-  - `_count_fixture_rows(path)` (line 89): no docstring
-  - `_expected_instance_counts_from_fixtures()` (line 99): no docstring
-  - `_pick_sample_order_from_fixtures()` (line 109): Return (order_id, customer_id) from fixtures.
-  - `_pick_order_with_items_from_fixtures()` (line 123): Return (order_id, product_id) for an order that has at least 1 item.
-  - `_safe(func)` (line 188): Decorator: catch assertion errors and record as bugs instead of failing.
-  - `_switch_persona(state, client, persona_key)` (line 210): no docstring
-  - `_assert_v2_error_shape(payload)` (line 219): no docstring
-  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 227): no docstring
-  - `async phase0_guardrails(state, client)` (line 254): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
-  - `async _wait_for_command(client, command_id, timeout)` (line 623): no docstring
-  - `async _wait_for_pipeline_run_sample(client, pipeline_id, job_id, timeout)` (line 646): Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows.
-  - `async _wait_for_dataset_by_name(client, db_name, dataset_name, timeout)` (line 678): no docstring
-  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 699): Wait for ontology class to exist (and optionally have properties populated).
-  - `async _wait_for_es_doc(client, index_name, doc_id, timeout)` (line 730): no docstring
-  - `async _upsert_database_access_http(client, db_name, entries)` (line 752): no docstring
-  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 765): Create or update an object type contract (pk_spec + backing source).
-  - `async phase1_data_ingestion(state, client)` (line 861): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
-  - `async phase2_pipeline_transforms(state, client)` (line 1188): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
-  - `async phase3_ontology_creation(state, client)` (line 1659): Create 5 Object Types + 3 Action Types.
-  - `async phase4_objectify(state, client)` (line 1998): Create mapping specs, run DAG objectify, verify ES indexing.
-  - `async phase5_search_and_query(state, client)` (line 2278): 12 search scenarios using Foundry v2 API + graph queries.
-  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2696): Record ontology deployment via HTTP API so actions can execute (required by OMS).
-  - `async phase6_actions(state, client)` (line 2717): Test simulate, apply, batch-apply actions with closed-loop ES verification.
-  - `async phase7_closed_loop(state, client)` (line 2942): Verify action effects are reflected in search results.
-  - `async phase8_live_data_cross_domain(state, client)` (line 3063): Test real-time API data: objectify + search + cross-domain pipeline.
-  - `async phase9_branch_and_incremental(state, client)` (line 3479): Hard gates:
-  - `async phase10_teardown(state, client)` (line 4003): no docstring
-  - `async test_foundry_e2e_qa()` (line 4060): Full Foundry lifecycle QA with real Kaggle data + live APIs.
+  - `_severity_rank(value)` (line 80): no docstring
+  - `_qa_fail_threshold_rank()` (line 84): no docstring
+  - `_count_fixture_rows(path)` (line 90): no docstring
+  - `_compute_forbidden_es_netlocs()` (line 100): no docstring
+  - `async _http_only_request_guard(request)` (line 135): Runtime guard: prevent accidental direct calls to Elasticsearch.
+  - `_build_rid(kind, id)` (line 147): Build a Foundry-style RID without importing backend internals.
+  - `_assert_http_only_strict_static_guards()` (line 158): Fail fast if this test regresses into DB/ES gray-box behavior.
+  - `_expected_instance_counts_from_fixtures()` (line 218): no docstring
+  - `_pick_sample_order_from_fixtures()` (line 228): Return (order_id, customer_id) from fixtures.
+  - `_pick_order_with_items_from_fixtures()` (line 242): Return (order_id, product_id) for an order that has at least 1 item.
+  - `_safe(func)` (line 306): Decorator: catch assertion errors and record as bugs instead of failing.
+  - `_switch_persona(state, client, persona_key)` (line 328): no docstring
+  - `_assert_v2_error_shape(payload)` (line 337): no docstring
+  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 345): no docstring
+  - `async phase0_guardrails(state, client)` (line 372): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
+  - `async _wait_for_command(client, command_id, timeout)` (line 741): no docstring
+  - `async _wait_for_pipeline_run_sample(client, pipeline_id, job_id, timeout)` (line 764): Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows.
+  - `async _wait_for_dataset_by_name(client, db_name, dataset_name, timeout)` (line 796): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 817): Wait for ontology class to exist (and optionally have properties populated).
+  - `async _upsert_database_access_http(client, db_name, entries)` (line 847): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 860): Create or update an object type contract (pk_spec + backing source).
+  - `async phase1_data_ingestion(state, client)` (line 956): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
+  - `async phase2_pipeline_transforms(state, client)` (line 1283): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
+  - `async phase3_ontology_creation(state, client)` (line 1754): Create 5 Object Types + 3 Action Types.
+  - `async phase4_objectify(state, client)` (line 2093): Create mapping specs, run DAG objectify, verify ES indexing.
+  - `async phase5_search_and_query(state, client)` (line 2382): 12 search scenarios using Foundry v2 API + graph queries.
+  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2811): Record ontology deployment via HTTP API so actions can execute (required by OMS).
+  - `async phase6_actions(state, client)` (line 2832): Test simulate, apply, batch-apply actions with closed-loop ES verification.
+  - `async phase7_closed_loop(state, client)` (line 3057): Verify action effects are reflected in search results.
+  - `async phase8_live_data_cross_domain(state, client)` (line 3178): Test real-time API data: objectify + search + cross-domain pipeline.
+  - `async phase9_branch_and_incremental(state, client)` (line 3594): Hard gates:
+  - `async phase10_teardown(state, client)` (line 4104): no docstring
+  - `async test_foundry_e2e_qa()` (line 4139): Full Foundry lifecycle QA with real Kaggle data + live APIs.
 - **Classes**
-  - `Persona` (line 140): no docstring
-  - `QAState` (line 148): Mutable state shared across all 8 phases.
-    - `__init__(self)` (line 150): no docstring
+  - `Persona` (line 259): no docstring
+  - `QAState` (line 267): Mutable state shared across all phases.
+    - `__init__(self)` (line 269): no docstring
 
 ### `backend/tests/test_idempotency_chaos.py`
 - **Functions**
@@ -10107,7 +10112,7 @@
   - `_target_schema_json(ctx)` (line 936): no docstring
   - `_mappings_json(ctx)` (line 945): no docstring
   - `async _build_plan(op, ctx)` (line 953): Return a runnable RequestPlan for every non-WIP/non-ops operation.
-  - `async test_openapi_stable_contract_smoke()` (line 2586): no docstring
+  - `async test_openapi_stable_contract_smoke()` (line 2608): no docstring
 - **Classes**
   - `Operation` (line 416): no docstring
   - `SmokeContext` (line 672): no docstring

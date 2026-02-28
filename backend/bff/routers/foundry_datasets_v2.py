@@ -2369,10 +2369,14 @@ async def read_table_v2(
                 for col in cached_columns
             ]
             headers = [h for h in headers if h]
+            if not headers and isinstance(cached_rows[0], dict):
+                headers = [str(key).strip() for key in cached_rows[0].keys() if str(key).strip()]
             total_count = int(getattr(version, "row_count", None) or len(cached_rows))
             for raw in cached_rows[:requested_limit]:
                 if isinstance(raw, list):
                     rows.append(raw)
+                elif isinstance(raw, dict) and headers:
+                    rows.append([raw.get(name) for name in headers])
 
     if not rows:
         repo = _resolve_lakefs_raw_repository()
