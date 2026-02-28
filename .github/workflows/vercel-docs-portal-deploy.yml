@@ -1,0 +1,54 @@
+name: Deploy Docs Portal (Vercel)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+concurrency:
+  group: vercel-docs-portal-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Required secret:
+      # - VERCEL_TOKEN: Vercel Personal Token with access to the project.
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # Non-secret project identifiers (safe to commit).
+      VERCEL_ORG_ID: team_fJ8opjxenoy2c2rLA8bAT5BP
+      VERCEL_PROJECT_ID: prj_B8WO1c26F4j8GSRFXRWuaHn71Qeb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: docs-portal/package-lock.json
+
+      - name: Validate Vercel token
+        run: |
+          if [ -z "${VERCEL_TOKEN}" ]; then
+            echo "Missing required secret: VERCEL_TOKEN"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: docs-portal
+        run: npm ci
+
+      - name: Vercel build (prod)
+        working-directory: docs-portal
+        run: npx --yes vercel@latest build --prod --yes --token="${VERCEL_TOKEN}"
+
+      - name: Vercel deploy (prebuilt prod)
+        working-directory: docs-portal
+        run: npx --yes vercel@latest deploy --prebuilt --prod --yes --token="${VERCEL_TOKEN}"
+

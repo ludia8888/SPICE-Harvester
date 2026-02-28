@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-02-25T06:59:17+09:00
+> Generated: 2026-02-28T23:05:50+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
