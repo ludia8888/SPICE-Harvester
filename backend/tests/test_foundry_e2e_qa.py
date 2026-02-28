@@ -26,6 +26,7 @@ import sys
 import time
 import traceback
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,16 +34,15 @@ import httpx
 import pytest
 
 from shared.config.search_config import get_instances_index_name
+from shared.foundry.rids import build_rid
 from shared.security.database_access import ensure_database_access_table
-from tests.utils.auth import bff_auth_headers, oms_auth_headers
+from tests.utils.auth import build_smoke_user_jwt, oms_auth_headers
 from tests.utils.qa_helpers import (
     BugTracker,
-    QAClient,
     fetch_frankfurter_csv,
     fetch_open_meteo_csv,
     fetch_usgs_earthquake_csv,
 )
-from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 # ── Gate: opt-in only ─────────────────────────────────────────────────────────
@@ -67,18 +67,90 @@ ES_URL = os.getenv(
 
 HTTPX_TIMEOUT = float(os.getenv("QA_HTTP_TIMEOUT", "180") or 180)
 ES_TIMEOUT = int(os.getenv("QA_ES_TIMEOUT", "240") or 240)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+_SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def _severity_rank(value: str) -> int:
+    return _SEVERITY_RANK.get(str(value or "").strip().upper(), 99)
+
+
+def _qa_fail_threshold_rank() -> int:
+    # Default: fail on P0 + P1 (critical), but allow operators to dial stricter/looser.
+    raw = str(os.getenv("QA_FAIL_SEVERITY") or "P1").strip().upper()
+    return _severity_rank(raw)
+
+
+def _count_fixture_rows(path: Path) -> int:
+    # Line-count minus header. Fixtures are small and stable.
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    lines = [line for line in text.splitlines() if line.strip()]
+    return max(0, len(lines) - 1)
+
+
+def _expected_instance_counts_from_fixtures() -> Dict[str, int]:
+    return {
+        "Customer": _count_fixture_rows(FIXTURE_DIR / "olist_customers.csv"),
+        "Order": _count_fixture_rows(FIXTURE_DIR / "olist_orders.csv"),
+        "Product": _count_fixture_rows(FIXTURE_DIR / "olist_products.csv"),
+        "Seller": _count_fixture_rows(FIXTURE_DIR / "olist_sellers.csv"),
+        "OrderItem": _count_fixture_rows(FIXTURE_DIR / "olist_order_items.csv"),
+    }
+
+
+def _pick_sample_order_from_fixtures() -> tuple[str, str]:
+    """Return (order_id, customer_id) from fixtures."""
+    import csv as csv_mod
+
+    with (FIXTURE_DIR / "olist_orders.csv").open(newline="", encoding="utf-8") as f:
+        reader = csv_mod.DictReader(f)
+        for row in reader:
+            order_id = str(row.get("order_id") or "").strip()
+            customer_id = str(row.get("customer_id") or "").strip()
+            if order_id and customer_id:
+                return order_id, customer_id
+    raise RuntimeError("No order rows found in fixtures")
+
+
+def _pick_order_with_items_from_fixtures() -> tuple[str, str]:
+    """Return (order_id, product_id) for an order that has at least 1 item."""
+    import csv as csv_mod
+
+    with (FIXTURE_DIR / "olist_order_items.csv").open(newline="", encoding="utf-8") as f:
+        reader = csv_mod.DictReader(f)
+        for row in reader:
+            order_id = str(row.get("order_id") or "").strip()
+            product_id = str(row.get("product_id") or "").strip()
+            if order_id and product_id:
+                return order_id, product_id
+    raise RuntimeError("No order_items rows found in fixtures")
 
 
 # ── Shared state between phases ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Persona:
+    name: str
+    subject: str
+    db_role: Optional[str]
+    jwt: str
+    headers: Dict[str, str]
+
 
 class QAState:
     """Mutable state shared across all 8 phases."""
     def __init__(self) -> None:
         self.db_name: str = ""
-        self.user_id: str = ""
         self.suffix: str = ""
         self.headers: Dict[str, str] = {}
         self.oms_headers: Dict[str, str] = {}
+        self.personas: Dict[str, Persona] = {}
+        self.current_persona: str = ""
         self.bug_tracker = BugTracker()
 
         # Phase 1 outputs
@@ -102,6 +174,7 @@ class QAState:
         # Phase 6 outputs
         self.action_log_ids: List[str] = []
         self.changed_instance_ids: List[str] = []
+        self.expected_order_status: Dict[str, str] = {}
 
         # Phase 8 outputs
         self.live_datasets: Dict[str, Dict[str, Any]] = {}
@@ -129,6 +202,419 @@ def _safe(func):
             )
             return None
     return wrapper
+
+
+def _switch_persona(state: QAState, client: httpx.AsyncClient, persona_key: str) -> None:
+    persona = state.personas.get(persona_key)
+    if persona is None:
+        raise RuntimeError(f"Unknown persona: {persona_key}")
+    state.current_persona = persona_key
+    state.headers = dict(persona.headers)
+    client.headers = httpx.Headers(state.headers)
+
+
+def _assert_v2_error_shape(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        raise AssertionError(f"Expected JSON object error, got: {type(payload).__name__}")
+    for key in ("errorCode", "errorName", "errorInstanceId"):
+        if not str(payload.get(key) or "").strip():
+            raise AssertionError(f"Missing v2 error field: {key} (payload={payload})")
+
+
+async def _expect_v2_error(
+    *,
+    resp: httpx.Response,
+    expected_status: int,
+    expected_error_name: Optional[str] = None,
+    expected_error_code: Optional[str] = None,
+) -> None:
+    if resp.status_code != expected_status:
+        raise AssertionError(
+            f"Expected status {expected_status}, got {resp.status_code}: {resp.text[:200]}"
+        )
+    if resp.status_code >= 500:
+        raise AssertionError(
+            f"Server error leaked for client error case: {resp.status_code} {resp.text[:200]}"
+        )
+    payload = resp.json()
+    _assert_v2_error_shape(payload)
+    if expected_error_name and str(payload.get("errorName") or "").strip() != expected_error_name:
+        raise AssertionError(f"Expected errorName={expected_error_name}, got {payload.get('errorName')!r}")
+    if expected_error_code and str(payload.get("errorCode") or "").strip() != expected_error_code:
+        raise AssertionError(f"Expected errorCode={expected_error_code}, got {payload.get('errorCode')!r}")
+
+
+# =============================================================================
+# PHASE 0: Guardrails (Auth/RBAC/Conflicts)
+# =============================================================================
+
+async def phase0_guardrails(state: QAState, client: httpx.AsyncClient) -> None:
+    """Hard-gate negative cases: 401/403/409/400 should be correct and never 500."""
+    phase = "Phase 0"
+    print(f"\n{'='*60}\n  {phase}: GUARDRAILS (REAL-USER NEGATIVE CASES)\n{'='*60}")
+
+    db_name = state.db_name
+
+    # ── 0-1: 401 MissingCredentials (no token) ───────────────────
+    print("  [0-1] 401 MissingCredentials (no token) on v2 search")
+    resp: Optional[httpx.Response] = None
+    try:
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Order/search",
+            params={"branch": "main"},
+            json={"pageSize": 1},
+            headers={"Authorization": "", "X-DB-Name": db_name, "Accept": "application/json"},
+        )
+        await _expect_v2_error(
+            resp=resp,
+            expected_status=401,
+            expected_error_name="MissingCredentials",
+            expected_error_code="UNAUTHORIZED",
+        )
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-1",
+            "POST /api/v2/.../objects/Order/search",
+            "401 MissingCredentials",
+            str(exc)[:200],
+            "P0",
+            persona="anonymous",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-2: 401 Unauthorized (invalid bearer) ───────────────────
+    print("  [0-2] 401 Unauthorized (invalid bearer) on v2 search")
+    resp = None
+    try:
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Order/search",
+            params={"branch": "main"},
+            json={"pageSize": 1},
+            headers={"Authorization": "Bearer not-a-jwt", "X-DB-Name": db_name, "Accept": "application/json"},
+        )
+        await _expect_v2_error(
+            resp=resp,
+            expected_status=401,
+            expected_error_name="Unauthorized",
+            expected_error_code="UNAUTHORIZED",
+        )
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-2",
+            "POST /api/v2/.../objects/Order/search",
+            "401 Unauthorized",
+            str(exc)[:200],
+            "P0",
+            persona="anonymous",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-2b: SRE basic observability endpoints ───────────────────
+    print("  [0-2b] SRE: health/metrics reachable")
+    try:
+        _switch_persona(state, client, "sre")
+        health = await client.get(f"{BFF_URL}/api/v1/health")
+        if health.status_code != 200:
+            raise AssertionError(f"health expected 200, got {health.status_code}: {health.text[:200]}")
+        metrics = await client.get(f"{BFF_URL}/metrics")
+        if metrics.status_code != 200:
+            raise AssertionError(f"metrics expected 200, got {metrics.status_code}: {metrics.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "0-2b", "GET /health,/metrics", "200", str(exc)[:200], "P1", persona="sre")
+
+    # ── 0-3: 403 Intruder (no DB role) read denied ───────────────
+    print("  [0-3] 403 PermissionDenied (intruder has no DB access)")
+    resp = None
+    try:
+        _switch_persona(state, client, "intruder")
+        resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes",
+            params={"branch": "main"},
+        )
+        await _expect_v2_error(resp=resp, expected_status=403, expected_error_code="PERMISSION_DENIED")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-3",
+            "GET /api/v2/.../objectTypes",
+            "403 PermissionDenied",
+            str(exc)[:200],
+            "P0",
+            persona="intruder",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-3b: 200 Viewer read allowed ────────────────────────────
+    print("  [0-3b] 200 Viewer can read v2 objectTypes")
+    resp = None
+    try:
+        _switch_persona(state, client, "viewer")
+        resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes",
+            params={"branch": "main"},
+        )
+        if resp.status_code != 200:
+            raise AssertionError(f"Expected 200, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-3b",
+            "GET /api/v2/.../objectTypes",
+            "200",
+            str(exc)[:200],
+            "P0",
+            persona="viewer",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-4: 403 Viewer ontology write ───────────────────────────
+    print("  [0-4] 403 Viewer cannot write ontology classes (v1)")
+    resp = None
+    try:
+        _switch_persona(state, client, "viewer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
+            params={"branch": "main"},
+            json={
+                "id": f"RBAC_Block_{state.suffix}",
+                "label": {"en": "RBAC Block"},
+                "description": {"en": "RBAC negative test"},
+                "properties": [
+                    {
+                        "name": "id",
+                        "type": "xsd:string",
+                        "label": {"en": "ID"},
+                        "required": True,
+                        "primaryKey": True,
+                        "titleKey": True,
+                    },
+                ],
+                "relationships": [],
+                "metadata": {"source": "foundry_e2e_qa_guardrails"},
+            },
+        )
+        if resp.status_code != 403:
+            raise AssertionError(f"Expected 403, got {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code >= 500:
+            raise AssertionError(f"Expected 4xx, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-4",
+            "POST /api/v1/databases/{db}/ontology",
+            "403",
+            str(exc)[:200],
+            "P0",
+            persona="viewer",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-5: 403 DataEngineer ontology write ─────────────────────
+    print("  [0-5] 403 DataEngineer cannot write ontology classes (v1)")
+    resp = None
+    try:
+        _switch_persona(state, client, "data_engineer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
+            params={"branch": "main"},
+            json={
+                "id": f"RBAC_Block_DE_{state.suffix}",
+                "label": {"en": "RBAC Block DE"},
+                "description": {"en": "RBAC negative test (data engineer)"},
+                "properties": [
+                    {
+                        "name": "id",
+                        "type": "xsd:string",
+                        "label": {"en": "ID"},
+                        "required": True,
+                        "primaryKey": True,
+                        "titleKey": True,
+                    },
+                ],
+                "relationships": [],
+                "metadata": {"source": "foundry_e2e_qa_guardrails"},
+            },
+        )
+        if resp.status_code != 403:
+            raise AssertionError(f"Expected 403, got {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code >= 500:
+            raise AssertionError(f"Expected 4xx, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-5",
+            "POST /api/v1/databases/{db}/ontology",
+            "403",
+            str(exc)[:200],
+            "P0",
+            persona="data_engineer",
+            status_code=resp.status_code if resp is not None else None,
+        )
+
+    # ── 0-6/0-7: 403 dataset upload denied for non-DataEngineer ───
+    csv_a = b"customer_id,customer_city\nc1,alpha\n"
+    print("  [0-6] 403 Viewer cannot upload datasets (csv-upload)")
+    try:
+        _switch_persona(state, client, "viewer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": f"idem-viewer-upload-{state.suffix}"},
+            data={"dataset_name": f"viewer_upload_{state.suffix}", "description": "rbac", "delimiter": ",", "has_header": "true"},
+            files={"file": ("viewer.csv", csv_a, "text/csv")},
+        )
+        if resp.status_code != 403:
+            raise AssertionError(f"Expected 403, got {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code >= 500:
+            raise AssertionError(f"Expected 4xx, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-6",
+            "POST /api/v1/pipelines/datasets/csv-upload",
+            "403",
+            str(exc)[:200],
+            "P0",
+            persona="viewer",
+        )
+
+    print("  [0-7] 403 DomainModeler cannot upload datasets (csv-upload)")
+    try:
+        _switch_persona(state, client, "domain_modeler")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": f"idem-domain-upload-{state.suffix}"},
+            data={"dataset_name": f"domain_upload_{state.suffix}", "description": "rbac", "delimiter": ",", "has_header": "true"},
+            files={"file": ("domain.csv", csv_a, "text/csv")},
+        )
+        if resp.status_code != 403:
+            raise AssertionError(f"Expected 403, got {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code >= 500:
+            raise AssertionError(f"Expected 4xx, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "0-7",
+            "POST /api/v1/pipelines/datasets/csv-upload",
+            "403",
+            str(exc)[:200],
+            "P0",
+            persona="domain_modeler",
+        )
+
+    # ── 0-8: 400 Missing Idempotency-Key ─────────────────────────
+    print("  [0-8] 400 Missing Idempotency-Key on csv-upload")
+    try:
+        _switch_persona(state, client, "data_engineer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            data={"dataset_name": f"missing_idem_{state.suffix}", "description": "rbac", "delimiter": ",", "has_header": "true"},
+            files={"file": ("missing.csv", csv_a, "text/csv")},
+        )
+        if resp.status_code != 400:
+            raise AssertionError(f"Expected 400, got {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code >= 500:
+            raise AssertionError(f"Expected 4xx, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "0-8", "POST /csv-upload", "400", str(exc)[:200], "P0", persona="data_engineer")
+
+    # ── 0-9: 409 Idempotency conflict (same key, different content) ─
+    print("  [0-9] 409 Idempotency conflict (same key, different content)")
+    try:
+        _switch_persona(state, client, "integration")
+        dataset_name = f"idem_conflict_{state.suffix}"
+        idem = f"idem-conflict-{state.suffix}"
+        resp1 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": idem},
+            data={"dataset_name": dataset_name, "description": "idempotency", "delimiter": ",", "has_header": "true"},
+            files={"file": ("a.csv", csv_a, "text/csv")},
+        )
+        resp1.raise_for_status()
+        csv_b = b"customer_id,customer_city\nc1,beta\n"
+        resp2 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": idem},
+            data={"dataset_name": dataset_name, "description": "idempotency", "delimiter": ",", "has_header": "true"},
+            files={"file": ("b.csv", csv_b, "text/csv")},
+        )
+        if resp2.status_code != 409:
+            raise AssertionError(f"Expected 409, got {resp2.status_code}: {resp2.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "0-9", "POST /csv-upload", "409", str(exc)[:200], "P0", persona="integration")
+
+    # ── 0-10: 200 Idempotent retry (same key, same content) ───────
+    print("  [0-10] 200 Idempotent retry (same key, same content)")
+    try:
+        _switch_persona(state, client, "bot")
+        dataset_name = f"idem_retry_{state.suffix}"
+        idem = f"idem-retry-{state.suffix}"
+        resp1 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": idem},
+            data={"dataset_name": dataset_name, "description": "retry", "delimiter": ",", "has_header": "true"},
+            files={"file": ("a.csv", csv_a, "text/csv")},
+        )
+        resp1.raise_for_status()
+        payload1 = resp1.json().get("data") or {}
+        ver1 = (payload1.get("version") or {}).get("version_id")
+        resp2 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={**state.headers, "Idempotency-Key": idem},
+            data={"dataset_name": dataset_name, "description": "retry", "delimiter": ",", "has_header": "true"},
+            files={"file": ("a.csv", csv_a, "text/csv")},
+        )
+        resp2.raise_for_status()
+        payload2 = resp2.json().get("data") or {}
+        ver2 = (payload2.get("version") or {}).get("version_id")
+        if ver1 and ver2 and str(ver1) != str(ver2):
+            raise AssertionError(f"Expected same version_id on retry, got {ver1} vs {ver2}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "0-10", "POST /csv-upload", "200 + same version_id", str(exc)[:200], "P0", persona="bot")
+
+    # ── 0-11: 403 DB scope mismatch (X-DB-Name != db_name) ────────
+    print("  [0-11] 403 Project scope mismatch (X-DB-Name)")
+    try:
+        _switch_persona(state, client, "data_engineer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": "main"},
+            headers={
+                **state.headers,
+                "X-DB-Name": f"{db_name}_other",
+                "Idempotency-Key": f"idem-scope-mismatch-{state.suffix}",
+            },
+            data={"dataset_name": f"scope_mismatch_{state.suffix}", "description": "scope", "delimiter": ",", "has_header": "true"},
+            files={"file": ("scope.csv", csv_a, "text/csv")},
+        )
+        if resp.status_code != 403:
+            raise AssertionError(f"Expected 403, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "0-11", "POST /csv-upload", "403", str(exc)[:200], "P0", persona="data_engineer")
+
+    # Restore default persona for subsequent phases.
+    _switch_persona(state, client, "data_engineer")
 
 
 async def _wait_for_command(
@@ -159,15 +645,18 @@ async def _wait_for_ontology(
     *,
     db_name: str,
     class_id: str,
+    oms_headers: Optional[Dict[str, str]] = None,
     timeout: int = 90,
     require_properties: bool = False,
 ) -> None:
     """Wait for ontology class to exist (and optionally have properties populated)."""
     deadline = time.monotonic() + timeout
+    headers = oms_headers if isinstance(oms_headers, dict) and oms_headers else None
     while time.monotonic() < deadline:
         resp = await client.get(
             f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
             params={"branch": "main"},
+            headers=headers,
         )
         if resp.status_code == 200:
             if not require_properties:
@@ -204,7 +693,14 @@ async def _wait_for_es_doc(
     raise AssertionError(f"Timed out waiting for ES doc {doc_id} in {index_name}")
 
 
-async def _grant_db_role(*, db_name: str, principal_id: str) -> None:
+async def _grant_db_role(
+    *,
+    db_name: str,
+    principal_id: str,
+    role: str,
+    principal_type: str = "user",
+    principal_name: Optional[str] = None,
+) -> None:
     import asyncpg  # type: ignore
 
     dsn_candidates = [
@@ -221,6 +717,7 @@ async def _grant_db_role(*, db_name: str, principal_id: str) -> None:
             continue
         try:
             await ensure_database_access_table(conn)
+            resolved_name = (principal_name or principal_id or "").strip() or principal_id
             await conn.execute(
                 """
                 INSERT INTO database_access (
@@ -229,7 +726,11 @@ async def _grant_db_role(*, db_name: str, principal_id: str) -> None:
                 ON CONFLICT (db_name, principal_type, principal_id)
                 DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
                 """,
-                db_name, "user", principal_id, principal_id, "Owner",
+                db_name,
+                str(principal_type or "user"),
+                principal_id,
+                resolved_name,
+                role,
             )
             return
         finally:
@@ -243,6 +744,7 @@ async def _upsert_object_type_contract(
     class_id: str,
     backing_dataset_id: str,
     pk_spec: Dict[str, Any],
+    oms_headers: Dict[str, str],
 ) -> None:
     """Create or update an object type contract (pk_spec + backing source).
 
@@ -265,6 +767,7 @@ async def _upsert_object_type_contract(
         get_resp = await client.get(
             f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
             params={"branch": "main"},
+            headers=oms_headers,
         )
         if get_resp.status_code == 200:
             onto_data = get_resp.json().get("data") or get_resp.json()
@@ -309,6 +812,7 @@ async def _upsert_object_type_contract(
         f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
         params={"branch": "main", "expected_head_commit": expected_head_commit},
         json=payload,
+        headers=oms_headers,
     )
     if resp.status_code in {200, 201}:
         return
@@ -317,6 +821,7 @@ async def _upsert_object_type_contract(
             f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}",
             params={"branch": "main", "expected_head_commit": expected_head_commit},
             json=payload,
+            headers=oms_headers,
         )
         if resp2.status_code == 200:
             return
@@ -370,14 +875,26 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
     except Exception as exc:
         state.bug_tracker.record(phase, "1-2", "POST /databases", "201/409", str(exc), "P0")
 
-    # ── 1-3: Grant DB role ────────────────────────────────────────
-    print(f"  [1-3] Granting DB role to {state.user_id}")
+    # ── 1-3: Provision DB roles (RBAC) ────────────────────────────
+    print("  [1-3] Provisioning DB roles for personas (RBAC)...")
     try:
-        await _grant_db_role(db_name=state.db_name, principal_id=state.user_id)
+        for persona_key, persona in state.personas.items():
+            if not persona.db_role:
+                continue
+            await _grant_db_role(
+                db_name=state.db_name,
+                principal_id=persona.subject,
+                principal_name=persona.subject,
+                role=persona.db_role,
+            )
         state.bug_tracker.record_pass()
-        print("    Role granted: Owner")
+        print(f"    DB roles provisioned: {', '.join(sorted(k for k,v in state.personas.items() if v.db_role))}")
     except Exception as exc:
-        state.bug_tracker.record(phase, "1-3", "asyncpg grant_db_role", "Owner granted", str(exc))
+        state.bug_tracker.record(phase, "1-3", "asyncpg database_access upsert", "roles provisioned", str(exc)[:200], "P0")
+
+    # Phase 0: Hard guardrails (negative cases must be correct 4xx, never 500).
+    await phase0_guardrails(state, client)
+    print(f"    Persona active → {state.current_persona} ({state.personas[state.current_persona].subject})")
 
     # ── 1-4: Upload Olist CSVs ────────────────────────────────────
     olist_files = {
@@ -454,6 +971,88 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
                     "200 with dataset_id", err_msg, "P0",
                 )
 
+    # ── 1-4c: Governance RBAC (access policies) ───────────────────
+    print("  [1-4c] Governance RBAC: access policy upsert requires Security role")
+    try:
+        orders_ds = state.datasets.get("olist_orders") or {}
+        orders_dataset_id = str(orders_ds.get("dataset_id") or "").strip()
+        assert orders_dataset_id, "olist_orders dataset_id missing (required for access-policy test)"
+
+        body = {
+            "db_name": state.db_name,
+            "scope": "data_access",
+            "subject_type": "dataset",
+            "subject_id": orders_dataset_id,
+            "policy": {
+                "effect": "ALLOW",
+                "principals": [
+                    "role:Owner",
+                    "role:Editor",
+                    "role:Viewer",
+                    "role:DomainModeler",
+                    "role:DataEngineer",
+                    "role:Security",
+                ],
+            },
+            "status": "ACTIVE",
+        }
+
+        # Security: should succeed
+        _switch_persona(state, client, "security")
+        resp = await client.post(f"{BFF_URL}/api/v1/access-policies", json=body)
+        if resp.status_code != 200:
+            raise AssertionError(f"Security upsert expected 200, got {resp.status_code}: {resp.text[:200]}")
+        state.bug_tracker.record_pass()
+
+        # Viewer: must be denied
+        _switch_persona(state, client, "viewer")
+        resp2 = await client.post(f"{BFF_URL}/api/v1/access-policies", json=body)
+        if resp2.status_code != 403:
+            raise AssertionError(f"Viewer upsert expected 403, got {resp2.status_code}: {resp2.text[:200]}")
+        state.bug_tracker.record_pass()
+
+        # Compliance auditor (viewer-like): must be denied
+        _switch_persona(state, client, "compliance")
+        resp3 = await client.post(f"{BFF_URL}/api/v1/access-policies", json=body)
+        if resp3.status_code != 403:
+            raise AssertionError(f"Compliance upsert expected 403, got {resp3.status_code}: {resp3.text[:200]}")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "1-4c",
+            "POST /api/v1/access-policies",
+            "Security=200, Viewer/Compliance=403",
+            str(exc)[:200],
+            "P0",
+        )
+    finally:
+        # Restore persona for subsequent ingest/pipeline steps
+        _switch_persona(state, client, "data_engineer")
+
+    # ── 1-4b: Verify Foundry v2 Datasets API sees uploaded data ───────────
+    print("  [1-4b] Verifying v2 dataset API can read uploaded data...")
+    try:
+        orders_ds = state.datasets.get("olist_orders") or {}
+        orders_dataset_id = str(orders_ds.get("dataset_id") or "").strip()
+        assert orders_dataset_id, "olist_orders dataset_id missing"
+        orders_rid = build_rid("dataset", orders_dataset_id)
+
+        get_resp = await client.get(f"{BFF_URL}/api/v2/datasets/{orders_rid}")
+        assert get_resp.status_code == 200, f"GET /api/v2/datasets: {get_resp.status_code} {get_resp.text[:200]}"
+
+        read_resp = await client.get(
+            f"{BFF_URL}/api/v2/datasets/{orders_rid}/readTable",
+            params={"rowLimit": 5, "branchName": "main", "format": "CSV"},
+        )
+        assert read_resp.status_code == 200, f"readTable: {read_resp.status_code} {read_resp.text[:200]}"
+        header = (read_resp.text.splitlines()[:1] or [""])[0]
+        assert "order_id" in header, f"Unexpected CSV header: {header[:200]}"
+        state.bug_tracker.record_pass()
+        print("    v2 datasets: OK (readTable CSV)")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "1-4b", "GET /api/v2/datasets/*", "200 + CSV readTable", str(exc)[:200], "P0")
+
     # ── 1-5: Upload real-time API data ────────────────────────────
     print("  [1-5] Fetching and uploading real-time API data...")
     live_sources = {
@@ -462,9 +1061,33 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
         "earthquakes_month": ("Monthly earthquakes (USGS)", fetch_usgs_earthquake_csv),
     }
     for name, (description, fetch_fn) in live_sources.items():
+        csv_bytes: Optional[bytes] = None
         try:
             csv_bytes = await fetch_fn()
-            assert len(csv_bytes) > 50, f"API returned too little data for {name}"
+        except Exception as exc:
+            # External API fetch failures are soft-fail (P2) by policy.
+            state.bug_tracker.record(
+                phase,
+                f"1-5:{name}",
+                f"fetch {name}",
+                "200 + csv bytes",
+                f"External fetch failed: {str(exc)[:200]}",
+                "P2",
+            )
+            continue
+
+        if not csv_bytes or len(csv_bytes) <= 50:
+            state.bug_tracker.record(
+                phase,
+                f"1-5:{name}",
+                f"fetch {name}",
+                "csv bytes (>50)",
+                f"External API returned too little data (len={len(csv_bytes or b'')})",
+                "P2",
+            )
+            continue
+
+        try:
             idem_key = f"idem-{name}-{state.suffix}"
             resp = await client.post(
                 f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
@@ -490,13 +1113,17 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
                 "version_id": version_id,
             }
             state.bug_tracker.record_pass()
-            # Count rows from CSV bytes
             row_count = csv_bytes.count(b"\n") - 1
             print(f"    {name}: {row_count} rows, dataset_id={dataset_id[:12]}...")
         except Exception as exc:
+            # Fetch succeeded but ingest failed => hard fail (internal).
             state.bug_tracker.record(
-                phase, f"1-5:{name}", f"fetch+upload {name}",
-                "200 with dataset_id", str(exc)[:200],
+                phase,
+                f"1-5:{name}",
+                f"upload {name}",
+                "200 with dataset_id",
+                str(exc)[:200],
+                "P1",
             )
 
     # ── 1-6: List datasets ────────────────────────────────────────
@@ -546,6 +1173,13 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
             {"id": "join_oi", "type": "transform", "metadata": {
                 "operation": "join", "leftKey": "order_id", "rightKey": "order_id", "joinType": "inner",
             }},
+            {"id": "cast_money", "type": "transform", "metadata": {
+                "operation": "cast",
+                "casts": [
+                    {"column": "price", "type": "xsd:decimal"},
+                    {"column": "freight_value", "type": "xsd:decimal"},
+                ],
+            }},
             {"id": "compute_total", "type": "transform", "metadata": {
                 "operation": "compute", "expression": "total_value = price + freight_value",
             }},
@@ -559,7 +1193,8 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         "edges": [
             {"from": "in_orders", "to": "join_oi"},
             {"from": "in_items", "to": "join_oi"},
-            {"from": "join_oi", "to": "compute_total"},
+            {"from": "join_oi", "to": "cast_money"},
+            {"from": "cast_money", "to": "compute_total"},
             {"from": "compute_total", "to": "filter_delivered"},
             {"from": "filter_delivered", "to": "out_enriched"},
         ],
@@ -654,6 +1289,7 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         deploy_payload: Dict[str, Any] = {
             "promote_build": True,
             "branch": "main",
+            "node_id": "out_enriched",
             "output": {"db_name": state.db_name},
         }
         if build_job_id:
@@ -682,6 +1318,13 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
                 {"id": "join_ip", "type": "transform", "metadata": {
                     "operation": "join", "leftKey": "product_id", "rightKey": "product_id", "joinType": "inner",
                 }},
+                {"id": "cast_money", "type": "transform", "metadata": {
+                    "operation": "cast",
+                    "casts": [
+                        {"column": "price", "type": "xsd:decimal"},
+                        {"column": "freight_value", "type": "xsd:decimal"},
+                    ],
+                }},
                 {"id": "compute_rev", "type": "transform", "metadata": {
                     "operation": "compute", "expression": "revenue = price + freight_value",
                 }},
@@ -692,7 +1335,8 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
             "edges": [
                 {"from": "in_items", "to": "join_ip"},
                 {"from": "in_products", "to": "join_ip"},
-                {"from": "join_ip", "to": "compute_rev"},
+                {"from": "join_ip", "to": "cast_money"},
+                {"from": "cast_money", "to": "compute_rev"},
                 {"from": "compute_rev", "to": "out_revenue"},
             ],
             "parameters": [],
@@ -783,6 +1427,120 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         except Exception as exc:
             state.bug_tracker.record(phase, "2-6", "Pipeline C creation", "pipeline_id", str(exc)[:200])
 
+    # ── 2-7: Pipeline D - OrderItem PK materialization ───────────
+    # Foundry-style: build a stable string primary key for OrderItem so v2 objects can be addressed safely.
+    print("  [2-7] Creating Pipeline D: order_items_with_pk (materialize order_item_pk)")
+    pipeline_d_def = {
+        "nodes": [
+            {"id": "in_items", "type": "input", "metadata": {"datasetId": items_id}},
+            {"id": "compute_pk", "type": "transform", "metadata": {
+                "operation": "compute",
+                # All raw CSV columns are strings (inferSchema=False). Keep this as a string key.
+                "expression": "order_item_pk = concat(order_id, '_', order_item_id)",
+            }},
+            {"id": "out_items_pk", "type": "output", "metadata": {
+                "outputName": "order_items_with_pk", "outputKind": "dataset",
+            }},
+        ],
+        "edges": [
+            {"from": "in_items", "to": "compute_pk"},
+            {"from": "compute_pk", "to": "out_items_pk"},
+        ],
+        "parameters": [],
+        "settings": {"engine": "Batch"},
+    }
+    try:
+        idem_key = f"idem-pipeline-d-{state.suffix}"
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines",
+            headers={**state.headers, "Idempotency-Key": idem_key},
+            json={
+                "db_name": state.db_name,
+                "name": f"order_items_with_pk_{state.suffix}",
+                "description": "Order items with stable primary key (order_item_pk)",
+                "definition_json": pipeline_d_def,
+                "pipeline_type": "batch",
+                "branch": "main",
+                "location": "e2e",
+            },
+        )
+        resp.raise_for_status()
+        pipeline_d_data = resp.json().get("data") or resp.json()
+        pipeline_d_obj = pipeline_d_data.get("pipeline") or pipeline_d_data
+        pipeline_d_id = str(pipeline_d_obj.get("pipeline_id") or pipeline_d_obj.get("id") or pipeline_d_data.get("pipeline_id") or "")
+        assert pipeline_d_id, f"No pipeline_id for Pipeline D: {pipeline_d_data}"
+        state.pipelines["order_items_with_pk"] = pipeline_d_id
+        print(f"    Pipeline D created: {pipeline_d_id[:12]}...")
+
+        # Build + deploy so output dataset exists for object type backing source.
+        build_idem = f"idem-build-d-{state.suffix}"
+        build_resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/{pipeline_d_id}/build",
+            headers={**state.headers, "Idempotency-Key": build_idem},
+            json={"db_name": state.db_name, "branch": "main", "limit": 50},
+        )
+        build_resp.raise_for_status()
+        build_job_id = str((build_resp.json().get("data") or {}).get("job_id") or "")
+        if build_job_id:
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                runs_resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_d_id}/runs", params={"limit": 50})
+                if runs_resp.status_code == 200:
+                    runs = (runs_resp.json().get("data") or {}).get("runs") or []
+                    run = next((r for r in runs if r.get("job_id") == build_job_id), None)
+                    if isinstance(run, dict):
+                        run_status = str(run.get("status") or "").upper()
+                        if run_status in {"SUCCESS", "DEPLOYED", "COMPLETED"}:
+                            break
+                        if run_status == "FAILED":
+                            raise AssertionError(f"Pipeline D build failed: {run}")
+                await asyncio.sleep(2.0)
+
+        deploy_idem = f"idem-deploy-d-{state.suffix}"
+        deploy_payload: Dict[str, Any] = {
+            "promote_build": True,
+            "branch": "main",
+            "node_id": "out_items_pk",
+            "output": {"db_name": state.db_name},
+        }
+        if build_job_id:
+            deploy_payload["build_job_id"] = build_job_id
+        deploy_resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/{pipeline_d_id}/deploy",
+            headers={**state.headers, "Idempotency-Key": deploy_idem},
+            json=deploy_payload,
+        )
+        deploy_resp.raise_for_status()
+
+        # Poll dataset registry via BFF list until output dataset appears.
+        deadline = time.monotonic() + 120
+        output_dataset_id = ""
+        while time.monotonic() < deadline and not output_dataset_id:
+            list_resp = await client.get(
+                f"{BFF_URL}/api/v1/pipelines/datasets",
+                params={"db_name": state.db_name},
+            )
+            if list_resp.status_code == 200:
+                data = list_resp.json().get("data") or list_resp.json()
+                ds_list = data.get("datasets") if isinstance(data, dict) else data
+                if isinstance(ds_list, list):
+                    for row in ds_list:
+                        if not isinstance(row, dict):
+                            continue
+                        name = str(row.get("name") or row.get("dataset_name") or "").strip()
+                        if name == "order_items_with_pk":
+                            output_dataset_id = str(row.get("dataset_id") or row.get("id") or "").strip()
+                            break
+            if not output_dataset_id:
+                await asyncio.sleep(2.0)
+
+        assert output_dataset_id, "Pipeline D output dataset 'order_items_with_pk' not found after deploy"
+        state.datasets["order_items_with_pk"] = {"dataset_id": output_dataset_id, "version_id": None, "payload": {}}
+        state.bug_tracker.record_pass()
+        print(f"    order_items_with_pk: dataset_id={output_dataset_id[:12]}...")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "2-7", "Pipeline D order_items_with_pk", "output dataset id", str(exc)[:200], "P0")
+
 
 # =============================================================================
 # PHASE 3: Ontology Creation
@@ -813,8 +1571,8 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
             "label": {"en": "Product", "ko": "상품"},
             "description": {"en": "Product in catalog", "ko": "상품 카탈로그"},
             "properties": [
-                {"name": "product_id", "type": "xsd:string", "label": {"en": "Product ID"}, "required": True, "primaryKey": True},
-                {"name": "product_category_name", "type": "xsd:string", "label": {"en": "Category"}, "titleKey": True},
+                {"name": "product_id", "type": "xsd:string", "label": {"en": "Product ID"}, "required": True, "primaryKey": True, "titleKey": True},
+                {"name": "product_category_name", "type": "xsd:string", "label": {"en": "Category"}},
                 {"name": "product_weight_g", "type": "xsd:decimal", "label": {"en": "Weight (g)"}},
             ],
             "relationships": [],
@@ -850,12 +1608,14 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
             "label": {"en": "Order Item", "ko": "주문 항목"},
             "description": {"en": "Line item in an order", "ko": "주문 라인 아이템"},
             "properties": [
-                {"name": "order_id", "type": "xsd:string", "label": {"en": "Order ID"}, "required": True, "primaryKey": True, "titleKey": True},
+                {"name": "order_item_pk", "type": "xsd:string", "label": {"en": "Order Item PK"}, "required": True, "primaryKey": True, "titleKey": True},
+                {"name": "order_id", "type": "xsd:string", "label": {"en": "Order ID"}, "required": True},
                 {"name": "order_item_id", "type": "xsd:integer", "label": {"en": "Item ID"}, "required": True},
                 {"name": "price", "type": "xsd:decimal", "label": {"en": "Price"}},
                 {"name": "freight_value", "type": "xsd:decimal", "label": {"en": "Freight"}},
             ],
             "relationships": [
+                {"predicate": "order", "target": "Order", "label": {"en": "Order"}, "cardinality": "n:1"},
                 {"predicate": "product", "target": "Product", "label": {"en": "Product"}, "cardinality": "n:1"},
                 {"predicate": "seller", "target": "Seller", "label": {"en": "Seller"}, "cardinality": "n:1"},
             ],
@@ -881,7 +1641,14 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
                 except Exception:
                     print(f"    {cls['id']}: command wait timed out, falling back to GET poll...")
             # Wait for class to appear with properties fully populated
-            await _wait_for_ontology(client, db_name=state.db_name, class_id=cls["id"], require_properties=True, timeout=120)
+            await _wait_for_ontology(
+                client,
+                db_name=state.db_name,
+                class_id=cls["id"],
+                oms_headers=state.oms_headers,
+                require_properties=True,
+                timeout=120,
+            )
             state.ontology_classes.append(cls["id"])
             state.bug_tracker.record_pass()
             print(f"    {cls['id']}: created and properties verified")
@@ -892,10 +1659,10 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
     print("  [3-2] Creating object type contracts...")
     ot_specs = [
         ("Customer", "olist_customers", {"primary_key": ["customer_id"], "title_key": ["customer_id"]}),
-        ("Product", "olist_products", {"primary_key": ["product_id"], "title_key": ["product_category_name"]}),
+        ("Product", "olist_products", {"primary_key": ["product_id"], "title_key": ["product_id"]}),
         ("Seller", "olist_sellers", {"primary_key": ["seller_id"], "title_key": ["seller_id"]}),
         ("Order", "olist_orders", {"primary_key": ["order_id"], "title_key": ["order_id"]}),
-        ("OrderItem", "olist_order_items", {"primary_key": ["order_id"], "title_key": ["order_id"]}),
+        ("OrderItem", "order_items_with_pk", {"primary_key": ["order_item_pk"], "title_key": ["order_item_pk"]}),
     ]
     for class_id, dataset_name, pk_spec in ot_specs:
         ds = state.datasets.get(dataset_name)
@@ -909,11 +1676,33 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
                 class_id=class_id,
                 backing_dataset_id=ds["dataset_id"],
                 pk_spec=pk_spec,
+                oms_headers=state.oms_headers,
             )
             state.bug_tracker.record_pass()
             print(f"    {class_id}: contract set (backing={ds['dataset_id'][:12]}...)")
         except Exception as exc:
             state.bug_tracker.record(phase, f"3-2:{class_id}", "object type contract", "201/200", str(exc)[:200])
+
+    # ── 3-2b: OCC conflict (expectedHeadCommit mismatch) ──────────
+    print("  [3-2b] OCC conflict: wrong expectedHeadCommit should 409 (v2 objectTypes PATCH)")
+    try:
+        resp = await client.patch(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objectTypes/Customer",
+            params={"branch": "main", "expectedHeadCommit": "branch:does-not-exist"},
+            json={"metadata": {"occ_test": True}},
+        )
+        await _expect_v2_error(resp=resp, expected_status=409)
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "3-2b",
+            "PATCH /api/v2/.../objectTypes/Customer?expectedHeadCommit=wrong",
+            "409",
+            str(exc)[:200],
+            "P0",
+            persona=state.current_persona,
+        )
 
     # ── 3-3: Action Types ─────────────────────────────────────────
     print("  [3-3] Creating action types...")
@@ -1045,6 +1834,39 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
     except Exception as exc:
         state.bug_tracker.record(phase, "3-5", "GET objectTypes/Order (BFF v2)", "Order details", str(exc)[:200])
 
+    print("  [3-5b] Verifying outgoing link types (Order, OrderItem)...")
+    try:
+        resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objectTypes/Order/outgoingLinkTypes",
+            params={"branch": "main", "pageSize": 500},
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        api_names = {str(item.get("apiName") or "").strip() for item in data if isinstance(item, dict)}
+        assert "customer" in api_names, f"Missing linkType apiName=customer (found={sorted(api_names)[:20]})"
+
+        resp2 = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objectTypes/OrderItem/outgoingLinkTypes",
+            params={"branch": "main", "pageSize": 500},
+        )
+        resp2.raise_for_status()
+        data2 = resp2.json().get("data") or []
+        api_names2 = {str(item.get("apiName") or "").strip() for item in data2 if isinstance(item, dict)}
+        for expected in ("order", "product", "seller"):
+            assert expected in api_names2, f"Missing linkType apiName={expected} (found={sorted(api_names2)[:20]})"
+
+        state.bug_tracker.record_pass()
+        print("    outgoingLinkTypes: OK")
+    except Exception as exc:
+        state.bug_tracker.record(
+            phase,
+            "3-5b",
+            "GET outgoingLinkTypes (BFF v2)",
+            "expected linkType apiNames exist",
+            str(exc)[:200],
+            "P0",
+        )
+
     print("  [3-6] Verifying action types...")
     try:
         resp = await client.get(
@@ -1076,6 +1898,7 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
             resp = await client.get(
                 f"{OMS_URL}/api/v1/database/{state.db_name}/ontology/{class_id}",
                 params={"branch": "main"},
+                headers=state.oms_headers,
             )
             if resp.status_code == 200:
                 data = resp.json().get("data") or resp.json()
@@ -1088,6 +1911,8 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
 
     # ── 4-1: Mapping Specs ────────────────────────────────────────
     print("  [4-1] Creating mapping specs...")
+    # RBAC: mapping spec creation is a Domain Modeler responsibility in this stack.
+    _switch_persona(state, client, "domain_modeler")
     mapping_defs = [
         ("Customer", "olist_customers", [
             {"source_field": "customer_id", "target_field": "customer_id"},
@@ -1114,11 +1939,13 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
             {"source_field": "order_estimated_delivery_date", "target_field": "order_estimated_delivery_date"},
             {"source_field": "customer_id", "target_field": "customer"},
         ]),
-        ("OrderItem", "olist_order_items", [
+        ("OrderItem", "order_items_with_pk", [
+            {"source_field": "order_item_pk", "target_field": "order_item_pk"},
             {"source_field": "order_id", "target_field": "order_id"},
             {"source_field": "order_item_id", "target_field": "order_item_id"},
             {"source_field": "price", "target_field": "price"},
             {"source_field": "freight_value", "target_field": "freight_value"},
+            {"source_field": "order_id", "target_field": "order"},
             {"source_field": "product_id", "target_field": "product"},
             {"source_field": "seller_id", "target_field": "seller"},
         ]),
@@ -1181,6 +2008,8 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
 
     # ── 4-2: DAG dry_run ──────────────────────────────────────────
     # Only run DAG if we have mapping specs
+    # RBAC: objectify execution requires Data Engineer privileges.
+    _switch_persona(state, client, "data_engineer")
     has_mapping_specs = len(state.mapping_specs) > 0
     if has_mapping_specs:
         print("  [4-2] DAG dry_run (execution order verification)...")
@@ -1246,43 +2075,62 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
     state.es_index = get_instances_index_name(state.db_name, branch="main")
     print(f"    ES index: {state.es_index}")
 
-    # Wait for the ES index to exist and contain at least some documents
-    # Rather than waiting for a specific doc (which may have a different ID),
-    # poll the index for any documents
+    expected_by_class = _expected_instance_counts_from_fixtures()
+    expected_total = sum(expected_by_class.values())
+
     deadline = time.monotonic() + ES_TIMEOUT
     es_doc_count = 0
-    sample_order_id = ""
+    observed_by_class: Dict[str, int] = {}
 
     while time.monotonic() < deadline:
         try:
             resp = await client.get(f"{ES_URL}/{state.es_index}/_count")
-            if resp.status_code == 200:
-                es_doc_count = resp.json().get("count", 0)
-                if es_doc_count > 0:
-                    print(f"    ES index has {es_doc_count} documents")
-                    break
-        except httpx.HTTPError:
-            pass
-        await asyncio.sleep(3.0)
+            if resp.status_code != 200:
+                await asyncio.sleep(3.0)
+                continue
+            es_doc_count = int(resp.json().get("count", 0) or 0)
 
-    if es_doc_count > 0:
-        state.bug_tracker.record_pass()
-        # Find a sample order by searching
-        try:
-            search_resp = await client.post(
-                f"{ES_URL}/{state.es_index}/_search",
-                json={"query": {"term": {"class_id": "Order"}}, "size": 1},
-            )
-            if search_resp.status_code == 200:
-                hits = (search_resp.json().get("hits") or {}).get("hits") or []
-                if hits:
-                    source = hits[0].get("_source") or {}
-                    sample_order_id = hits[0].get("_id") or source.get("order_id") or ""
-                    print(f"    Sample Order doc: _id={sample_order_id}, status={source.get('order_status', source.get('data', {}).get('order_status'))}")
-        except Exception:
-            pass
-    else:
-        state.bug_tracker.record(phase, "4-4", "ES indexing", "docs in index", f"Timed out: 0 docs in {state.es_index} after {ES_TIMEOUT}s")
+            if es_doc_count != expected_total:
+                await asyncio.sleep(3.0)
+                continue
+
+            # Verify per-class counts match fixtures (strict end-to-end completeness).
+            observed_by_class = {}
+            mismatch = False
+            for class_id, expected in expected_by_class.items():
+                count_resp = await client.post(
+                    f"{ES_URL}/{state.es_index}/_count",
+                    json={"query": {"term": {"class_id": class_id}}},
+                )
+                if count_resp.status_code != 200:
+                    mismatch = True
+                    break
+                observed = int(count_resp.json().get("count", 0) or 0)
+                observed_by_class[class_id] = observed
+                if observed != int(expected):
+                    mismatch = True
+            if mismatch:
+                await asyncio.sleep(3.0)
+                continue
+
+            print(f"    ES index has expected {es_doc_count} documents: {observed_by_class}")
+            state.bug_tracker.record_pass()
+            break
+        except httpx.HTTPError:
+            await asyncio.sleep(3.0)
+            continue
+
+    if es_doc_count != expected_total or any(
+        observed_by_class.get(cls) != expected_by_class.get(cls) for cls in expected_by_class
+    ):
+        state.bug_tracker.record(
+            phase,
+            "4-4",
+            "ES indexing",
+            f"count == {expected_total} and per-class counts match fixtures",
+            f"Timed out after {ES_TIMEOUT}s (total={es_doc_count}, by_class={observed_by_class})",
+            "P0",
+        )
 
     # ── 4-5: Verify ES doc properties ─────────────────────────────
     print("  [4-5] Verifying object properties match CSV data...")
@@ -1340,6 +2188,80 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     # v2 search/count endpoints work on both BFF and OMS; use BFF for consistent auth
     base_search_url = f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects"
 
+    # ── 5-0: Guardrail negative cases on v2 search ───────────────
+    print("  [5-0] Negative cases: invalid branch / deep query / invalid orderBy / unknown objectType")
+    try:
+        # 400 Invalid branch name
+        resp = await client.post(
+            f"{base_search_url}/Order/search",
+            params={"branch": "bad branch"},
+            json={"pageSize": 1},
+        )
+        await _expect_v2_error(resp=resp, expected_status=400, expected_error_code="INVALID_ARGUMENT")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-0a", "invalid branch", "400 InvalidArgument", str(exc)[:200], "P0")
+
+    try:
+        # 400 Query nesting too deep (>3 levels)
+        deep_where = {
+            "type": "and",
+            "value": [
+                {
+                    "type": "and",
+                    "value": [
+                        {
+                            "type": "and",
+                            "value": [
+                                {"type": "eq", "field": "order_status", "value": "delivered"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        resp = await client.post(
+            f"{base_search_url}/Order/search",
+            params={"branch": "main"},
+            json={"where": deep_where, "pageSize": 1},
+        )
+        await _expect_v2_error(resp=resp, expected_status=400, expected_error_code="INVALID_ARGUMENT")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-0b", "query nesting depth", "400 InvalidArgument", str(exc)[:200], "P0")
+
+    try:
+        # 400 Invalid orderBy.direction
+        resp = await client.post(
+            f"{base_search_url}/OrderItem/search",
+            params={"branch": "main"},
+            json={
+                "orderBy": {"orderType": "fields", "fields": [{"field": "price", "direction": "descending"}]},
+                "pageSize": 1,
+            },
+        )
+        await _expect_v2_error(resp=resp, expected_status=400, expected_error_code="INVALID_ARGUMENT")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-0c", "invalid orderBy.direction", "400 InvalidArgument", str(exc)[:200], "P0")
+
+    try:
+        # 404 ObjectTypeNotFound
+        resp = await client.post(
+            f"{base_search_url}/DoesNotExist/search",
+            params={"branch": "main"},
+            json={"pageSize": 1},
+        )
+        await _expect_v2_error(
+            resp=resp,
+            expected_status=404,
+            expected_error_name="ObjectTypeNotFound",
+            expected_error_code="NOT_FOUND",
+        )
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-0d", "ObjectTypeNotFound search", "404 ObjectTypeNotFound", str(exc)[:200], "P0")
+
     # ── 5-1: eq (order_status == "delivered") ─────────────────────
     print('  [5-1] Search: order_status == "delivered"')
     try:
@@ -1351,6 +2273,8 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
         resp.raise_for_status()
         data = resp.json()
         objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 delivered Order")
         if isinstance(objects, list):
             for obj in objects[:3]:
                 props = obj.get("properties") or obj
@@ -1358,7 +2282,7 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
         print(f"    Found {len(objects) if isinstance(objects, list) else '?'} delivered orders")
         state.bug_tracker.record_pass()
     except Exception as exc:
-        state.bug_tracker.record(phase, "5-1", "search eq delivered", "all delivered", str(exc)[:200])
+        state.bug_tracker.record(phase, "5-1", "search eq delivered", ">=1 delivered", str(exc)[:200], "P1")
 
     # ── 5-2: gt (price > 100) ────────────────────────────────────
     print("  [5-2] Search: OrderItem price > 100")
@@ -1370,10 +2294,21 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
         )
         resp.raise_for_status()
         data = resp.json()
-        print(f"    Response: {json.dumps(data)[:200]}")
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 OrderItem with price > 100")
+        for obj in objects[:10]:
+            props = obj.get("properties") or obj
+            raw = props.get("price")
+            try:
+                price = float(raw)
+            except Exception:
+                raise AssertionError(f"OrderItem price is not numeric: {raw!r}") from None
+            assert price > 100, f"Expected price > 100, got {price}"
+        print(f"    Found {len(objects)} OrderItems with price > 100")
         state.bug_tracker.record_pass()
     except Exception as exc:
-        state.bug_tracker.record(phase, "5-2", "search gt price", "results", str(exc)[:200])
+        state.bug_tracker.record(phase, "5-2", "search gt price", ">=1 result and numeric", str(exc)[:200], "P1")
 
     # ── 5-3: and (delivered AND price >= 500) ────────────────────
     print("  [5-3] Search: compound AND query")
@@ -1448,10 +2383,26 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             json={"orderBy": {"orderType": "fields", "fields": [{"field": "price", "direction": "desc"}]}, "pageSize": 10},
         )
         resp.raise_for_status()
-        print(f"    OrderBy: {resp.status_code}")
+        data = resp.json()
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 OrderItem for orderBy test")
+        prices: List[float] = []
+        for obj in objects:
+            props = obj.get("properties") or obj
+            raw = props.get("price")
+            if raw is None:
+                continue
+            try:
+                prices.append(float(raw))
+            except Exception:
+                raise AssertionError(f"OrderBy returned non-numeric price: {raw!r}") from None
+        assert prices, "OrderBy returned no numeric prices"
+        assert all(prices[i] >= prices[i + 1] for i in range(len(prices) - 1)), f"Not sorted DESC: {prices}"
+        print(f"    OrderBy verified (prices desc): {prices[:5]}")
         state.bug_tracker.record_pass()
     except Exception as exc:
-        state.bug_tracker.record(phase, "5-7", "search orderBy", "sorted results", str(exc)[:200])
+        state.bug_tracker.record(phase, "5-7", "search orderBy", "sorted DESC by price", str(exc)[:200], "P0")
 
     # ── 5-8: select (projection) ─────────────────────────────────
     print("  [5-8] Search: select fields")
@@ -1509,98 +2460,104 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     except Exception as exc:
         state.bug_tracker.record(phase, "5-10", "POST Order/count", "count number", str(exc)[:200])
 
-    # ── 5-11: Graph query (1-hop: Order → Customer) ──────────────
-    print("  [5-11] Graph: Order → Customer (1-hop)")
-    orders_csv_path = FIXTURE_DIR / "olist_orders.csv"
-    sample_order_id = ""
-    if orders_csv_path.exists():
-        import csv as csv_mod
-        with open(orders_csv_path) as f:
-            reader = csv_mod.DictReader(f)
-            for row in reader:
-                sample_order_id = row.get("order_id", "")
-                break
-    if sample_order_id:
-        try:
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/graph-query/{state.db_name}",
-                params={"base_branch": "main"},
-                json={
-                    "start_class": "Order",
-                    "filters": {"order_id": sample_order_id},
-                    "hops": [{"predicate": "customer", "target_class": "Customer"}],
-                    "include_paths": True,
-                    "max_paths": 10,
-                    "include_documents": True,
-                    "limit": 50,
-                },
-            )
-            resp.raise_for_status()
-            graph = resp.json()
-            nodes = graph.get("nodes") or []
-            customer_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "Customer"]
-            print(f"    Found {len(customer_nodes)} Customer nodes via graph")
-            state.bug_tracker.record_pass()
-        except Exception as exc:
-            state.bug_tracker.record(phase, "5-11", "graph Order→Customer", "customer node", str(exc)[:200])
+    # ── 5-11: Linked Objects (Foundry v2) Order → Customer ────────
+    print("  [5-11] Linked Objects: Order → Customer (v2 links)")
+    try:
+        sample_order_id, expected_customer_id = _pick_sample_order_from_fixtures()
+        resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/Order/{sample_order_id}/links/customer",
+            params={"branch": "main", "pageSize": 10},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        rows = payload.get("data") or []
+        assert isinstance(rows, list) and rows, f"Expected linked Customer rows, got: {payload}"
+        first = rows[0] if isinstance(rows[0], dict) else {}
+        props = first.get("properties") or first
+        actual_customer_id = str(props.get("customer_id") or "").strip()
+        assert actual_customer_id == expected_customer_id, f"Expected customer_id={expected_customer_id}, got {actual_customer_id}"
+        state.bug_tracker.record_pass()
+        print(f"    Linked Customer verified: {actual_customer_id[:12]}...")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-11", "v2 links Order→Customer", "linked customer resolved", str(exc)[:200], "P0")
 
-    # ── 5-12: Graph query (2-hop: Order → OrderItem → Product) ───
-    print("  [5-12] Graph: Order → OrderItem → Product (2-hop)")
-    if sample_order_id:
-        try:
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/graph-query/{state.db_name}",
-                params={"base_branch": "main"},
-                json={
-                    "start_class": "Order",
-                    "filters": {"order_id": sample_order_id},
-                    "hops": [
-                        {"predicate": "order", "target_class": "OrderItem", "reverse": True},
-                        {"predicate": "product", "target_class": "Product"},
-                    ],
-                    "include_paths": True,
-                    "max_paths": 25,
-                    "include_documents": False,
-                    "limit": 200,
-                },
-            )
-            resp.raise_for_status()
-            graph = resp.json()
-            nodes = graph.get("nodes") or []
-            product_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "Product"]
-            print(f"    Found {len(product_nodes)} Product nodes (2-hop)")
-            state.bug_tracker.record_pass()
-        except Exception as exc:
-            state.bug_tracker.record(phase, "5-12", "graph 2-hop", "product nodes", str(exc)[:200])
+    # ── 5-12: Linked Objects (Foundry v2) OrderItem → Product/Order ─
+    print("  [5-12] Linked Objects: OrderItem → Product (+ Order) (v2 links)")
+    try:
+        order_id, expected_product_id = _pick_order_with_items_from_fixtures()
+
+        items_resp = await client.post(
+            f"{base_search_url}/OrderItem/search",
+            params={"branch": "main"},
+            json={"where": {"type": "eq", "field": "order_id", "value": order_id}, "pageSize": 50},
+        )
+        items_resp.raise_for_status()
+        items_payload = items_resp.json()
+        items = items_payload.get("data") or []
+        assert isinstance(items, list) and items, f"No OrderItems found for order_id={order_id}"
+
+        first_item = items[0] if isinstance(items[0], dict) else {}
+        item_pk = str(first_item.get("__primaryKey") or first_item.get("primaryKey") or "").strip()
+        assert item_pk, f"OrderItem primary key missing: {first_item}"
+
+        prod_resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/OrderItem/{item_pk}/links/product",
+            params={"branch": "main", "pageSize": 50},
+        )
+        prod_resp.raise_for_status()
+        prod_payload = prod_resp.json()
+        products = prod_payload.get("data") or []
+        assert isinstance(products, list) and products, f"No Products linked from OrderItem={item_pk}"
+        product_ids = []
+        for row in products:
+            if not isinstance(row, dict):
+                continue
+            props = row.get("properties") or row
+            product_ids.append(str(props.get("product_id") or "").strip())
+        assert expected_product_id in product_ids, f"Expected product_id={expected_product_id}, got {product_ids[:5]}"
+
+        order_resp = await client.get(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects/OrderItem/{item_pk}/links/order",
+            params={"branch": "main", "pageSize": 10},
+        )
+        order_resp.raise_for_status()
+        order_payload = order_resp.json()
+        linked_orders = order_payload.get("data") or []
+        assert isinstance(linked_orders, list) and linked_orders, f"No Orders linked from OrderItem={item_pk}"
+        linked_order = linked_orders[0] if isinstance(linked_orders[0], dict) else {}
+        linked_props = linked_order.get("properties") or linked_order
+        linked_order_id = str(linked_props.get("order_id") or "").strip()
+        assert linked_order_id == order_id, f"Expected OrderItem.order to resolve order_id={order_id}, got {linked_order_id}"
+
+        state.bug_tracker.record_pass()
+        print(f"    Linked Product verified: {expected_product_id[:12]}... (via OrderItem={item_pk[:12]}...)")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "5-12", "v2 links OrderItem→Product/Order", "product and order resolved", str(exc)[:200], "P0")
 
 
 # =============================================================================
 # PHASE 6: Actions
 # =============================================================================
 
-async def _record_deployed_commit_qa(*, db_name: str, target_branch: str = "main") -> None:
-    """Record ontology deployment so actions can execute (required by OMS)."""
-    try:
-        from oms.database.postgres import db as postgres_db
-        from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
-
-        await postgres_db.connect()
-        try:
-            registry = OntologyDeploymentRegistryV2()
-            ontology_commit_id = f"branch:{target_branch}"
-            await registry.record_deployment(
-                db_name=db_name,
-                target_branch=target_branch,
-                ontology_commit_id=ontology_commit_id,
-                proposal_id=None,
-                status="succeeded",
-                deployed_by="foundry_e2e_qa",
-                metadata={"source": "foundry_e2e_qa"},
-            )
-        finally:
-            await postgres_db.disconnect()
-    except Exception as exc:
-        print(f"    WARNING: Failed to record deployment: {exc}")
+async def _record_deployed_commit_qa(
+    *,
+    client: httpx.AsyncClient,
+    db_name: str,
+    oms_headers: Dict[str, str],
+    target_branch: str = "main",
+) -> None:
+    """Record ontology deployment via HTTP API so actions can execute (required by OMS)."""
+    resp = await client.post(
+        f"{OMS_URL}/api/v1/database/{db_name}/ontology/records/deployments",
+        json={
+            "target_branch": target_branch,
+            "ontology_commit_id": f"branch:{target_branch}",
+            "deployed_by": "foundry_e2e_qa",
+            "metadata": {"source": "foundry_e2e_qa"},
+        },
+        headers=oms_headers,
+    )
+    resp.raise_for_status()
 
 
 async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
@@ -1612,56 +2569,106 @@ async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
         state.bug_tracker.record(phase, "6-0", "prerequisite", "action_type_ids", "No action types from Phase 3", "P0")
         return
 
-    # Record ontology deployment — actions only execute on deployed ontology commits
-    print("  [6-0] Recording ontology deployment...")
+    fulfill_action_id = next((a for a in state.action_type_ids if "fulfill" in a), None)
+    escalate_action_id = next((a for a in state.action_type_ids if "escalate" in a), None)
+    if not fulfill_action_id:
+        state.bug_tracker.record(phase, "6-0", "prerequisite", "fulfill action", "No fulfill action type id", "P0")
+        return
+
+    # Pick orders that will actually change state (avoid "already shipped" so closed-loop is meaningful).
+    orders_csv_path = FIXTURE_DIR / "olist_orders.csv"
+    test_order_ids: List[str] = []
+    order_status_by_id: Dict[str, str] = {}
+    if orders_csv_path.exists():
+        import csv as csv_mod
+        with orders_csv_path.open(newline="", encoding="utf-8") as f:
+            rows = list(csv_mod.DictReader(f))
+        for row in rows:
+            oid = str(row.get("order_id") or "").strip()
+            status0 = str(row.get("order_status") or "").strip().lower()
+            if oid and status0:
+                order_status_by_id[oid] = status0
+
+        preferred = [
+            oid
+            for oid, st in order_status_by_id.items()
+            if st in {"approved", "processing", "created", "invoiced"}
+        ]
+        fallback = [
+            oid
+            for oid, st in order_status_by_id.items()
+            if st not in {"delivered", "shipped", "escalated"}
+        ]
+        candidates = preferred + [oid for oid in fallback if oid not in preferred]
+        test_order_ids = candidates[:5]
+
+    if len(test_order_ids) < 2:
+        state.bug_tracker.record(
+            phase,
+            "6-0",
+            "find test orders",
+            ">=2 actionable order_ids",
+            f"Not enough action candidates (found={len(test_order_ids)})",
+            "P0",
+        )
+        return
+
+    # ── 6-0a: Action before deployment must 409 (hard gate) ──────
+    print("  [6-0a] 409 Action before deployment (apply should be rejected)")
     try:
-        await _record_deployed_commit_qa(db_name=state.db_name, target_branch="main")
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{fulfill_action_id}/apply",
+            params={"branch": "main"},
+            json={
+                "options": {"mode": "VALIDATE_ONLY"},
+                "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[0]}},
+            },
+        )
+        await _expect_v2_error(resp=resp, expected_status=409)
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "6-0a", "apply before deploy", "409", str(exc)[:200], "P0")
+
+    # ── 6-0b: Record deployment so actions can execute ────────────
+    print("  [6-0b] Recording ontology deployment...")
+    try:
+        await _record_deployed_commit_qa(
+            client=client,
+            db_name=state.db_name,
+            oms_headers=state.oms_headers,
+            target_branch="main",
+        )
         state.bug_tracker.record_pass()
         print("    Deployment recorded")
     except Exception as exc:
-        state.bug_tracker.record(phase, "6-0", "record deployment", "deployment recorded", str(exc)[:200])
+        state.bug_tracker.record(phase, "6-0b", "record deployment", "deployment recorded", str(exc)[:200], "P0")
 
-    fulfill_action_id = next((a for a in state.action_type_ids if "fulfill" in a), None)
-    escalate_action_id = next((a for a in state.action_type_ids if "escalate" in a), None)
-
-    # Use OMS v2 directly for action apply (like reference test_action_writeback_e2e_smoke.py)
-    action_base_url = f"{OMS_URL}/api/v2/ontologies/{state.db_name}/actions"
-
-    # Find order IDs with status != delivered for action testing
-    test_order_ids: List[str] = []
-    orders_csv_path = FIXTURE_DIR / "olist_orders.csv"
-    if orders_csv_path.exists():
-        import csv as csv_mod
-        with open(orders_csv_path) as f:
-            reader = csv_mod.DictReader(f)
-            for row in reader:
-                if row.get("order_status") in ("shipped", "invoiced", "processing", "created", "approved"):
-                    test_order_ids.append(row["order_id"])
-                    if len(test_order_ids) >= 5:
-                        break
-
-    if len(test_order_ids) < 4:
-        # Fallback: use any order IDs
-        with open(orders_csv_path) as f:
-            reader = csv_mod.DictReader(f)
-            for row in reader:
-                if row["order_id"] not in test_order_ids:
-                    test_order_ids.append(row["order_id"])
-                    if len(test_order_ids) >= 5:
-                        break
-
-    if not test_order_ids:
-        state.bug_tracker.record(phase, "6-0", "find test orders", "order_ids", "No orders found for action testing", "P0")
-        return
-
-    # ── 6-1: Simulate fulfill_order ──────────────────────────────
     # Allow deployment record to propagate before first action call
     await asyncio.sleep(5)
+
+    # ── 6-0c: Permission policy denies DomainModeler (hard gate) ──
+    print("  [6-0c] 403 Permission policy denies DomainModeler on fulfill_order")
+    try:
+        _switch_persona(state, client, "domain_modeler")
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{fulfill_action_id}/apply",
+            params={"branch": "main"},
+            json={
+                "options": {"mode": "VALIDATE_ONLY"},
+                "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[0]}},
+            },
+        )
+        await _expect_v2_error(resp=resp, expected_status=403, expected_error_code="PERMISSION_DENIED")
+        state.bug_tracker.record_pass()
+    except Exception as exc:
+        state.bug_tracker.record(phase, "6-0c", "permission policy", "403", str(exc)[:200], "P0")
+    finally:
+        # Restore editor persona for happy-path action execution
+        _switch_persona(state, client, "editor")
 
     if fulfill_action_id and test_order_ids:
         print(f"  [6-1] Simulate: {fulfill_action_id}")
         try:
-            # Try BFF v2 first (BFF may handle deployment resolution differently)
             resp = await client.post(
                 f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{fulfill_action_id}/apply",
                 params={"branch": "main"},
@@ -1670,18 +2677,6 @@ async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
                     "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[0]}},
                 },
             )
-            if resp.status_code in (404, 409):
-                # Retry via OMS after additional wait for deployment propagation
-                print(f"    BFF returned {resp.status_code}, retrying via OMS after delay...")
-                await asyncio.sleep(5)
-                resp = await client.post(
-                    f"{action_base_url}/{fulfill_action_id}/apply",
-                    params={"branch": "main"},
-                    json={
-                        "options": {"mode": "VALIDATE_ONLY"},
-                        "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[0]}},
-                    },
-                )
             resp.raise_for_status()
             sim_result = resp.json()
             print(f"    Simulation: {json.dumps(sim_result)[:200]}")
@@ -1691,51 +2686,74 @@ async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
 
     # ── 6-2: Apply fulfill_order (single) ─────────────────────────
     if fulfill_action_id and test_order_ids:
-        print(f"  [6-2] Apply: {fulfill_action_id} on order {test_order_ids[0][:12]}...")
+        target_order_id = test_order_ids[0]
+        print(f"  [6-2] Apply: {fulfill_action_id} on order {target_order_id[:12]}...")
         try:
             corr_id = f"qa-apply-{uuid.uuid4()}"
             resp = await client.post(
-                f"{action_base_url}/{fulfill_action_id}/apply",
+                f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{fulfill_action_id}/apply",
                 params={"branch": "main"},
                 json={
                     "options": {"mode": "VALIDATE_AND_EXECUTE"},
-                    "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[0]}},
+                    "parameters": {"order": {"class_id": "Order", "instance_id": target_order_id}},
                     "correlationId": corr_id,
                     "metadata": {"source": "foundry_e2e_qa"},
                 },
             )
             resp.raise_for_status()
             apply_result = resp.json()
-            action_log_id = str(apply_result.get("action_log_id") or apply_result.get("data", {}).get("action_log_id") or "")
+            action_log_id = str(
+                apply_result.get("auditLogId")
+                or apply_result.get("action_log_id")
+                or (apply_result.get("data") or {}).get("auditLogId")
+                or (apply_result.get("data") or {}).get("action_log_id")
+                or ""
+            )
             print(f"    Applied: action_log_id={action_log_id}")
             if action_log_id:
                 state.action_log_ids.append(action_log_id)
-            state.changed_instance_ids.append(test_order_ids[0])
+            state.changed_instance_ids.append(target_order_id)
+            state.expected_order_status[target_order_id] = "shipped"
             state.bug_tracker.record_pass()
         except Exception as exc:
             state.bug_tracker.record(phase, "6-2", "apply fulfill_order", "action_log_id", str(exc)[:200])
 
     # ── 6-5: Apply escalate_order ─────────────────────────────────
     if escalate_action_id and len(test_order_ids) > 1:
-        print(f"  [6-5] Apply: {escalate_action_id} on order {test_order_ids[1][:12]}...")
+        target_order_id = test_order_ids[1]
+        print(f"  [6-5] Apply: {escalate_action_id} on order {target_order_id[:12]}...")
         try:
+            _switch_persona(state, client, "owner")
             corr_id = f"qa-escalate-{uuid.uuid4()}"
             resp = await client.post(
-                f"{action_base_url}/{escalate_action_id}/apply",
+                f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{escalate_action_id}/apply",
                 params={"branch": "main"},
                 json={
                     "options": {"mode": "VALIDATE_AND_EXECUTE"},
-                    "parameters": {"order": {"class_id": "Order", "instance_id": test_order_ids[1]}},
+                    "parameters": {"order": {"class_id": "Order", "instance_id": target_order_id}},
                     "correlationId": corr_id,
                     "metadata": {"source": "foundry_e2e_qa"},
                 },
             )
             resp.raise_for_status()
-            state.changed_instance_ids.append(test_order_ids[1])
+            apply_result = resp.json()
+            action_log_id = str(
+                apply_result.get("auditLogId")
+                or apply_result.get("action_log_id")
+                or (apply_result.get("data") or {}).get("auditLogId")
+                or (apply_result.get("data") or {}).get("action_log_id")
+                or ""
+            )
+            if action_log_id:
+                state.action_log_ids.append(action_log_id)
+            state.changed_instance_ids.append(target_order_id)
+            state.expected_order_status[target_order_id] = "escalated"
             state.bug_tracker.record_pass()
             print("    Escalated successfully")
         except Exception as exc:
             state.bug_tracker.record(phase, "6-5", "apply escalate_order", "escalated", str(exc)[:200])
+        finally:
+            _switch_persona(state, client, "editor")
 
     # ── 6-7: Batch apply fulfill_order × 3 ────────────────────────
     if fulfill_action_id and len(test_order_ids) >= 5:
@@ -1745,7 +2763,7 @@ async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
             try:
                 corr_id = f"qa-batch-{uuid.uuid4()}"
                 resp = await client.post(
-                    f"{action_base_url}/{fulfill_action_id}/apply",
+                    f"{BFF_URL}/api/v2/ontologies/{state.db_name}/actions/{fulfill_action_id}/apply",
                     params={"branch": "main"},
                     json={
                         "options": {"mode": "VALIDATE_AND_EXECUTE"},
@@ -1756,6 +2774,7 @@ async def phase6_actions(state: QAState, client: httpx.AsyncClient) -> None:
                 )
                 resp.raise_for_status()
                 state.changed_instance_ids.append(oid)
+                state.expected_order_status[oid] = "shipped"
                 state.bug_tracker.record_pass()
                 print(f"    Batch applied: {oid[:12]}...")
             except Exception as exc:
@@ -1773,9 +2792,40 @@ async def phase7_closed_loop(state: QAState, client: httpx.AsyncClient) -> None:
 
     base_search_url = f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects"
 
-    # Allow time for action worker + ES to propagate
-    print("  Waiting 10s for action propagation...")
-    await asyncio.sleep(10)
+    # Verify per-order closed loop (strict): each applied action must be searchable with updated state.
+    if state.expected_order_status:
+        print(f"  [7-0] Verifying {len(state.expected_order_status)} Orders reflect action writeback...")
+        try:
+            deadline = time.monotonic() + 180
+            pending = dict(state.expected_order_status)
+            last_seen: Dict[str, str] = {}
+            while time.monotonic() < deadline and pending:
+                for oid, expected in list(pending.items()):
+                    resp = await client.post(
+                        f"{base_search_url}/Order/search",
+                        params={"branch": "main"},
+                        json={"where": {"type": "eq", "field": "order_id", "value": oid}, "pageSize": 1},
+                    )
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    objects = data.get("data") or data.get("objects") or []
+                    if not isinstance(objects, list) or not objects:
+                        continue
+                    row = objects[0] if isinstance(objects[0], dict) else {}
+                    props = row.get("properties") or row
+                    current = str(props.get("order_status") or "").strip().lower()
+                    last_seen[oid] = current
+                    if current == expected:
+                        pending.pop(oid, None)
+                if pending:
+                    await asyncio.sleep(2.0)
+            assert not pending, f"Orders did not converge to expected status: pending={pending}, last_seen={last_seen}"
+            state.bug_tracker.record_pass()
+        except Exception as exc:
+            state.bug_tracker.record(phase, "7-0", "closed loop per-order", "orders searchable with updated status", str(exc)[:200], "P0")
+    else:
+        state.bug_tracker.record(phase, "7-0", "closed loop per-order", "expected_order_status populated", "No expected orders recorded in Phase 6", "P1")
 
     # ── 7-1: Count shipped orders ─────────────────────────────────
     print('  [7-1] Count: order_status == "shipped"')
@@ -1792,7 +2842,7 @@ async def phase7_closed_loop(state: QAState, client: httpx.AsyncClient) -> None:
         print(f"    Shipped orders: {shipped_count}")
         state.bug_tracker.record_pass()
     except Exception as exc:
-        state.bug_tracker.record(phase, "7-1", "search shipped", "count > 0", str(exc)[:200])
+        state.bug_tracker.record(phase, "7-1", "search shipped", "query succeeds", str(exc)[:200], "P2")
 
     # ── 7-2: Count escalated orders ──────────────────────────────
     print('  [7-2] Count: order_status == "escalated"')
@@ -1809,7 +2859,7 @@ async def phase7_closed_loop(state: QAState, client: httpx.AsyncClient) -> None:
         print(f"    Escalated orders: {escalated_count}")
         state.bug_tracker.record_pass()
     except Exception as exc:
-        state.bug_tracker.record(phase, "7-2", "search escalated", "count >= 1", str(exc)[:200])
+        state.bug_tracker.record(phase, "7-2", "search escalated", "query succeeds", str(exc)[:200], "P2")
 
     # ── 7-3: Graph query on changed order ─────────────────────────
     if state.changed_instance_ids:
@@ -1866,6 +2916,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if weather_ds:
         print("  [8-1] WeatherData: ontology + objectify")
         try:
+            _switch_persona(state, client, "domain_modeler")
             weather_cls = {
                 "id": "WeatherData",
                 "label": {"en": "Weather Data", "ko": "날씨 데이터"},
@@ -1891,7 +2942,14 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                     await _wait_for_command(client, cmd_id, timeout=120)
                 except Exception:
                     pass
-            await _wait_for_ontology(client, db_name=state.db_name, class_id="WeatherData", require_properties=True, timeout=120)
+            await _wait_for_ontology(
+                client,
+                db_name=state.db_name,
+                class_id="WeatherData",
+                oms_headers=state.oms_headers,
+                require_properties=True,
+                timeout=120,
+            )
             print("    WeatherData class created")
             state.bug_tracker.record_pass()
         except Exception as exc:
@@ -1902,6 +2960,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if rates_ds:
         print("  [8-2] ExchangeRate: ontology + objectify")
         try:
+            _switch_persona(state, client, "domain_modeler")
             rate_cls = {
                 "id": "ExchangeRate",
                 "label": {"en": "Exchange Rate", "ko": "환율"},
@@ -1928,7 +2987,14 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                     await _wait_for_command(client, cmd_id, timeout=120)
                 except Exception:
                     pass
-            await _wait_for_ontology(client, db_name=state.db_name, class_id="ExchangeRate", require_properties=True, timeout=120)
+            await _wait_for_ontology(
+                client,
+                db_name=state.db_name,
+                class_id="ExchangeRate",
+                oms_headers=state.oms_headers,
+                require_properties=True,
+                timeout=120,
+            )
             print("    ExchangeRate class created")
             state.bug_tracker.record_pass()
         except Exception as exc:
@@ -1939,6 +3005,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if eq_ds:
         print("  [8-3] Earthquake: ontology + objectify")
         try:
+            _switch_persona(state, client, "domain_modeler")
             eq_cls = {
                 "id": "Earthquake",
                 "label": {"en": "Earthquake", "ko": "지진"},
@@ -1967,7 +3034,14 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                     await _wait_for_command(client, cmd_id, timeout=120)
                 except Exception:
                     pass
-            await _wait_for_ontology(client, db_name=state.db_name, class_id="Earthquake", require_properties=True, timeout=120)
+            await _wait_for_ontology(
+                client,
+                db_name=state.db_name,
+                class_id="Earthquake",
+                oms_headers=state.oms_headers,
+                require_properties=True,
+                timeout=120,
+            )
             print("    Earthquake class created")
             state.bug_tracker.record_pass()
         except Exception as exc:
@@ -1978,6 +3052,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if weather_ds:
         print("  [8-4] Search: WeatherData temperature_2m > 20")
         try:
+            _switch_persona(state, client, "viewer")
             resp = await client.post(
                 f"{base_search_url}/WeatherData/search",
                 params={"branch": "main"},
@@ -1994,6 +3069,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if eq_ds:
         print("  [8-5] Search: Earthquake magnitude >= 4.0")
         try:
+            _switch_persona(state, client, "viewer")
             resp = await client.post(
                 f"{base_search_url}/Earthquake/search",
                 params={"branch": "main"},
@@ -2012,6 +3088,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     if orders_id and rates_id:
         print("  [8-6] Cross-domain pipeline: orders + exchange_rates")
         try:
+            _switch_persona(state, client, "data_engineer")
             cross_def = {
                 "nodes": [
                     {"id": "in_orders", "type": "input", "metadata": {"datasetId": orders_id}},
@@ -2053,6 +3130,583 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
 
 
 # =============================================================================
+# PHASE 9: Branch Separation + Incremental Update (Real Foundry User)
+# =============================================================================
+
+async def phase9_branch_and_incremental(state: QAState, client: httpx.AsyncClient) -> None:
+    """
+    Hard gates:
+    - Action overlay(view branch) vs writeback target branch separation
+    - 2nd dataset version + incremental objectify update without duplicates
+    """
+
+    from shared.config.app_config import AppConfig
+    from shared.services.registries.action_log_registry import ActionLogRegistry
+    from shared.services.registries.objectify_registry import ObjectifyRegistry
+
+    phase = "Phase 9"
+    print(f"\n{'='*60}\n  {phase}: BRANCH SEPARATION + INCREMENTAL UPDATE\n{'='*60}")
+
+    db_name = state.db_name
+    view_branch = "main"
+    expected_writeback_branch = AppConfig.get_ontology_writeback_branch(db_name=db_name)
+
+    # ── 9-1: Branch separation (ActionLogRegistry writeback_target vs ES branch) ──
+    print("  [9-1] Branch separation: writeback_target.branch != view branch, ES docs on view branch")
+
+    dsn_candidates = [
+        (os.getenv("POSTGRES_URL") or "").strip(),
+        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
+    ]
+
+    registry: Optional[ActionLogRegistry] = None
+    working_postgres_dsn: Optional[str] = None
+    last_dsn_exc: Optional[Exception] = None
+    for dsn in dsn_candidates:
+        if not dsn:
+            continue
+        try:
+            registry = ActionLogRegistry(dsn=dsn)
+            await registry.connect()
+            working_postgres_dsn = dsn
+            break
+        except Exception as exc:
+            last_dsn_exc = exc
+            registry = None
+
+    if not state.action_log_ids:
+        state.bug_tracker.record(
+            phase,
+            "9-1a",
+            "ActionLogRegistry",
+            ">=1 action_log_id from Phase 6",
+            "No action_log_ids captured; action flow did not submit writeback",
+            "P0",
+        )
+    elif registry is None:
+        state.bug_tracker.record(
+            phase,
+            "9-1a",
+            "ActionLogRegistry.connect",
+            "connect to Postgres",
+            f"Failed to connect to Postgres for action log checks: {last_dsn_exc}",
+            "P0",
+        )
+    else:
+        try:
+            deadline = time.monotonic() + 240
+            for action_log_id in state.action_log_ids:
+                record = None
+                while time.monotonic() < deadline:
+                    record = await registry.get_log(action_log_id=action_log_id)
+                    if record and str(record.status).upper() == "SUCCEEDED":
+                        break
+                    await asyncio.sleep(2.0)
+
+                if not record:
+                    raise AssertionError(f"Action log not found: {action_log_id}")
+                if str(record.status).upper() != "SUCCEEDED":
+                    raise AssertionError(f"Action log did not succeed: {action_log_id} status={record.status}")
+                if not record.writeback_target or not isinstance(record.writeback_target, dict):
+                    raise AssertionError(f"Missing writeback_target for action_log_id={action_log_id}")
+
+                wb_branch = str(record.writeback_target.get("branch") or "").strip()
+                if wb_branch != expected_writeback_branch:
+                    raise AssertionError(
+                        f"writeback_target.branch mismatch: expected {expected_writeback_branch}, got {wb_branch}"
+                    )
+                if wb_branch == view_branch:
+                    raise AssertionError("writeback_target.branch must be distinct from view branch")
+                if not str(record.writeback_commit_id or "").strip():
+                    raise AssertionError("writeback_commit_id is required for succeeded action logs")
+            state.bug_tracker.record_pass()
+            print(f"    Action logs verified: {len(state.action_log_ids)} (writeback_branch={expected_writeback_branch})")
+        except Exception as exc:
+            state.bug_tracker.record(
+                phase,
+                "9-1b",
+                "ActionLogRegistry.get_log",
+                "writeback_target.branch separation + SUCCEEDED",
+                str(exc)[:200],
+                "P0",
+            )
+        finally:
+            await registry.close()
+
+    # ES branch for changed instances must be view branch (overlay)
+    if not state.changed_instance_ids:
+        state.bug_tracker.record(
+            phase,
+            "9-1c",
+            "Elasticsearch _doc",
+            ">=1 changed instance_id from Phase 6",
+            "No changed_instance_ids captured; cannot verify overlay projection branch",
+            "P1",
+        )
+    else:
+        try:
+            for instance_id in state.changed_instance_ids[:5]:
+                doc = await _wait_for_es_doc(client, state.es_index, instance_id, timeout=ES_TIMEOUT)
+                source = doc.get("_source") or {}
+                actual_branch = str(source.get("branch") or "").strip()
+                if actual_branch != view_branch:
+                    raise AssertionError(
+                        f"ES doc branch mismatch for instance_id={instance_id}: expected {view_branch}, got {actual_branch}"
+                    )
+            state.bug_tracker.record_pass()
+            print(f"    ES overlay branch verified for {min(5, len(state.changed_instance_ids))} instance(s)")
+        except Exception as exc:
+            state.bug_tracker.record(
+                phase,
+                "9-1d",
+                "GET ES /{index}/_doc/{id}",
+                f"_source.branch == {view_branch}",
+                str(exc)[:200],
+                "P0",
+            )
+
+    # ── 9-2: Incremental update (2nd version) ─────────────────────
+    print("  [9-2] Incremental update: 2nd version + trigger-incremental updates exactly one entity")
+    customer_spec_id = str(state.mapping_specs.get("Customer") or "").strip()
+    customer_ds = state.datasets.get("olist_customers") or {}
+    dataset_id_v1 = str(customer_ds.get("dataset_id") or "").strip()
+    version_id_v1 = str(customer_ds.get("version_id") or "").strip()
+
+    if not customer_spec_id or not dataset_id_v1 or not version_id_v1:
+        state.bug_tracker.record(
+            phase,
+            "9-2a",
+            "preconditions",
+            "Customer mapping_spec + dataset v1 present",
+            f"mapping_spec_id={bool(customer_spec_id)} dataset_id={bool(dataset_id_v1)} version_id={bool(version_id_v1)}",
+            "P0",
+        )
+        return
+
+    # Count before (no duplicates allowed)
+    customer_count_before: Optional[int] = None
+    try:
+        _switch_persona(state, client, "viewer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Customer/count",
+            params={"branch": view_branch},
+            json={},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        raw = payload.get("count") if isinstance(payload, dict) else None
+        if raw is None and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            raw = payload["data"].get("count")
+        customer_count_before = int(raw) if raw is not None else None
+        if customer_count_before is None:
+            raise AssertionError(f"count missing from payload: {payload}")
+        state.bug_tracker.record_pass()
+        print(f"    Customer count before: {customer_count_before}")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2b", "POST Customer/count", "count int", str(exc)[:200], "P1")
+
+    # Build v2 CSV: change 1 customer's city to a value that is > max(city) in v1
+    try:
+        import csv as csv_mod
+        import io
+
+        rows: List[Dict[str, Any]] = []
+        header: List[str] = []
+        max_city = ""
+        target_customer_id = ""
+
+        with (FIXTURE_DIR / "olist_customers.csv").open(newline="", encoding="utf-8") as f:
+            reader = csv_mod.DictReader(f)
+            header = list(reader.fieldnames or [])
+            if not header:
+                raise AssertionError("olist_customers.csv missing header")
+            for row in reader:
+                rows.append(row)
+                city = str(row.get("customer_city") or "")
+                if city and city > max_city:
+                    max_city = city
+
+        if not rows:
+            raise AssertionError("No customer rows loaded from fixtures")
+        if not max_city:
+            raise AssertionError("Could not determine max customer_city from fixtures")
+
+        # Pick a stable row (avoid first row so max_rows=1 catches bugs where filtering is ignored)
+        for row in reversed(rows[:5000] if len(rows) > 5000 else rows):
+            cid = str(row.get("customer_id") or "").strip()
+            if cid:
+                target_customer_id = cid
+                break
+        if not target_customer_id:
+            raise AssertionError("Could not pick a target customer_id for incremental update")
+
+        new_city = f"{max_city}-qa-{state.suffix}"
+        updated = False
+        for row in rows:
+            if str(row.get("customer_id") or "").strip() == target_customer_id:
+                row["customer_city"] = new_city
+                updated = True
+                break
+        if not updated:
+            raise AssertionError(f"Target customer_id not found in fixtures: {target_customer_id}")
+
+        buf = io.StringIO()
+        writer = csv_mod.DictWriter(buf, fieldnames=header, lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in header})
+        csv_bytes_v2 = buf.getvalue().encode("utf-8")
+
+        state.search_results["incremental_customer_id"] = target_customer_id
+        state.search_results["incremental_new_city"] = new_city
+        state.bug_tracker.record_pass()
+        print(f"    Prepared v2 CSV: customer_id={target_customer_id[:12]}... city={new_city[:32]}...")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2c", "prepare v2 CSV", "bytes built", str(exc)[:200], "P0")
+        return
+
+    # Seed watermark so incremental filtering is mandatory (detects hidden bug: previous_watermark ignored).
+    try:
+        # The watermark value must be the current max(city) so only our updated row qualifies.
+        if not working_postgres_dsn:
+            import asyncpg  # type: ignore
+
+            last_exc: Optional[Exception] = None
+            for candidate in dsn_candidates:
+                if not candidate:
+                    continue
+                try:
+                    conn = await asyncpg.connect(candidate)
+                except Exception as exc:
+                    last_exc = exc
+                    continue
+                else:
+                    await conn.close()
+                    working_postgres_dsn = candidate
+                    break
+            if not working_postgres_dsn:
+                raise AssertionError(f"No working Postgres DSN candidate for watermark seeding: {last_exc}")
+
+        obj_reg = ObjectifyRegistry(dsn=working_postgres_dsn)
+        await obj_reg.connect()
+        try:
+            await obj_reg.update_watermark(
+                mapping_spec_id=customer_spec_id,
+                dataset_branch=view_branch,
+                watermark_column="customer_city",
+                watermark_value=max_city,
+            )
+        finally:
+            await obj_reg.close()
+        state.bug_tracker.record_pass()
+        print(f"    Seeded watermark: customer_city={max_city!r}")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2d", "ObjectifyRegistry.update_watermark", "watermark seeded", str(exc)[:200], "P0")
+        return
+
+    # Upload v2 dataset (same dataset_name → new version_id)
+    dataset_id_v2 = ""
+    version_id_v2 = ""
+    commit_id_v2 = ""
+    try:
+        _switch_persona(state, client, "data_engineer")
+        idem_key = f"idem-olist_customers-v2-{state.suffix}"
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": view_branch},
+            headers={**state.headers, "Idempotency-Key": idem_key},
+            data={
+                "dataset_name": "olist_customers",
+                "description": "Olist customers dataset (v2 incremental update)",
+                "delimiter": ",",
+                "has_header": "true",
+            },
+            files={"file": ("olist_customers.csv", csv_bytes_v2, "text/csv")},
+        )
+        resp.raise_for_status()
+        payload = resp.json().get("data") or {}
+        ds = payload.get("dataset") or {}
+        ver = payload.get("version") or {}
+        dataset_id_v2 = str(ds.get("dataset_id") or "").strip()
+        version_id_v2 = str(ver.get("version_id") or "").strip()
+        commit_id_v2 = str(ver.get("lakefs_commit_id") or "").strip()
+        if not dataset_id_v2 or not version_id_v2:
+            raise AssertionError(f"Missing dataset_id/version_id: {payload}")
+        if dataset_id_v2 != dataset_id_v1:
+            raise AssertionError(f"Expected same dataset_id on re-upload; v1={dataset_id_v1} v2={dataset_id_v2}")
+        if version_id_v2 == version_id_v1:
+            raise AssertionError("Expected new version_id for v2 upload")
+        state.bug_tracker.record_pass()
+        print(f"    Uploaded v2 version: dataset_id={dataset_id_v2[:12]}... version_id={version_id_v2[:12]}...")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2e", "POST /csv-upload (v2)", "new version_id", str(exc)[:200], "P0")
+        return
+
+    # Trigger incremental objectify with max_rows=1 (must still update the changed row)
+    try:
+        _switch_persona(state, client, "data_engineer")
+        resp = await client.post(
+            f"{BFF_URL}/api/v1/objectify/mapping-specs/{customer_spec_id}/trigger-incremental",
+            params={"branch": view_branch},
+            json={"execution_mode": "incremental", "watermark_column": "customer_city", "max_rows": 1},
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or resp.json()
+        job_id = str(data.get("job_id") or "").strip()
+        if not job_id:
+            raise AssertionError(f"Missing job_id in incremental trigger response: {data}")
+        state.bug_tracker.record_pass()
+        print(f"    Incremental objectify queued: job_id={job_id[:12]}...")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2f", "POST trigger-incremental", "QUEUED", str(exc)[:200], "P0")
+        return
+
+    # Poll until the updated city is visible via v2 search
+    try:
+        _switch_persona(state, client, "viewer")
+        target_customer_id = str(state.search_results.get("incremental_customer_id") or "").strip()
+        new_city = str(state.search_results.get("incremental_new_city") or "").strip()
+        assert target_customer_id and new_city
+
+        deadline = time.monotonic() + 240
+        while time.monotonic() < deadline:
+            resp = await client.post(
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Customer/search",
+                params={"branch": view_branch},
+                json={
+                    "where": {"type": "eq", "field": "customer_id", "value": target_customer_id},
+                    "pageSize": 5,
+                },
+            )
+            if resp.status_code != 200:
+                await asyncio.sleep(2.0)
+                continue
+            payload = resp.json()
+            hits = payload.get("data") or []
+            if isinstance(hits, list) and hits:
+                first = hits[0] if isinstance(hits[0], dict) else {}
+                props = first.get("properties") or first
+                city = str(props.get("customer_city") or "").strip()
+                if city == new_city:
+                    state.bug_tracker.record_pass()
+                    print("    Incremental update visible in v2 search")
+                    break
+            await asyncio.sleep(2.0)
+        else:
+            raise AssertionError("Timed out waiting for incremental update to appear in v2 search")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-2g", "v2 search Customer", "customer_city updated", str(exc)[:200], "P0")
+        return
+
+    # Count after must be unchanged (no duplicates)
+    if customer_count_before is not None:
+        try:
+            resp = await client.post(
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Customer/count",
+                params={"branch": view_branch},
+                json={},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            raw = payload.get("count") if isinstance(payload, dict) else None
+            if raw is None and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                raw = payload["data"].get("count")
+            customer_count_after = int(raw) if raw is not None else None
+            if customer_count_after != customer_count_before:
+                raise AssertionError(f"Customer count changed: before={customer_count_before} after={customer_count_after}")
+            state.bug_tracker.record_pass()
+            print(f"    Customer count unchanged: {customer_count_after}")
+        except Exception as exc:
+            state.bug_tracker.record(phase, "9-2h", "POST Customer/count", "count unchanged", str(exc)[:200], "P1")
+
+    # ── 9-3: Delete handling (delta mode; tombstone/row missing) ───────────────
+    print("  [9-3] Deletion: 3rd version + delta-mode removes missing entity")
+    try:
+        if not commit_id_v2:
+            raise AssertionError("v2 lakefs_commit_id missing; delta deletion cannot be tested")
+
+        delete_customer_id = ""
+        for row in rows:
+            cid = str(row.get("customer_id") or "").strip()
+            if cid and cid != str(state.search_results.get("incremental_customer_id") or "").strip():
+                delete_customer_id = cid
+                break
+        if not delete_customer_id:
+            raise AssertionError("Could not pick a customer_id for deletion scenario")
+
+        # Build v3 CSV by removing one customer row (hardest case: row simply missing)
+        import io
+        import csv as csv_mod
+
+        rows_v3 = [r for r in rows if str(r.get("customer_id") or "").strip() != delete_customer_id]
+        if len(rows_v3) >= len(rows):
+            raise AssertionError("Expected v3 to have 1 fewer row than v2")
+
+        buf3 = io.StringIO()
+        writer3 = csv_mod.DictWriter(buf3, fieldnames=header, lineterminator="\n")
+        writer3.writeheader()
+        for row in rows_v3:
+            writer3.writerow({k: row.get(k, "") for k in header})
+        csv_bytes_v3 = buf3.getvalue().encode("utf-8")
+
+        # Upload v3 dataset version
+        _switch_persona(state, client, "data_engineer")
+        idem_key_v3 = f"idem-olist_customers-v3-delete-{state.suffix}"
+        resp3 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+            params={"db_name": db_name, "branch": view_branch},
+            headers={**state.headers, "Idempotency-Key": idem_key_v3},
+            data={
+                "dataset_name": "olist_customers",
+                "description": "Olist customers dataset (v3 delete case)",
+                "delimiter": ",",
+                "has_header": "true",
+            },
+            files={"file": ("olist_customers.csv", csv_bytes_v3, "text/csv")},
+        )
+        resp3.raise_for_status()
+        payload3 = resp3.json().get("data") or {}
+        ver3 = payload3.get("version") or {}
+        version_id_v3 = str(ver3.get("version_id") or "").strip()
+        commit_id_v3 = str(ver3.get("lakefs_commit_id") or "").strip()
+        if not version_id_v3 or version_id_v3 == version_id_v2:
+            raise AssertionError("Expected new version_id for v3 delete upload")
+        if not commit_id_v3 or commit_id_v3 == commit_id_v2:
+            raise AssertionError("Expected new lakefs_commit_id for v3 delete upload")
+
+        # Seed watermark commit so delta mode computes diff between v2 commit and v3 commit
+        obj_reg = ObjectifyRegistry(dsn=working_postgres_dsn)
+        await obj_reg.connect()
+        try:
+            await obj_reg.update_watermark(
+                mapping_spec_id=customer_spec_id,
+                dataset_branch=view_branch,
+                watermark_column="customer_city",
+                watermark_value=max_city,
+                dataset_version_id=version_id_v2,
+                lakefs_commit_id=commit_id_v2,
+            )
+        finally:
+            await obj_reg.close()
+
+        # Trigger delta-mode objectify (must remove deleted entity from ES)
+        resp_delta = await client.post(
+            f"{BFF_URL}/api/v1/objectify/mapping-specs/{customer_spec_id}/trigger-incremental",
+            params={"branch": view_branch},
+            json={"execution_mode": "delta"},
+        )
+        resp_delta.raise_for_status()
+        delta_data = resp_delta.json().get("data") or resp_delta.json()
+        delta_job_id = str(delta_data.get("job_id") or "").strip()
+        if not delta_job_id:
+            raise AssertionError(f"Missing job_id in delta trigger response: {delta_data}")
+        print(f"    Delta objectify queued: job_id={delta_job_id[:12]}... deleted_customer_id={delete_customer_id[:12]}...")
+
+        # Poll until the deleted customer is no longer returned by search
+        _switch_persona(state, client, "viewer")
+        deadline = time.monotonic() + 240
+        while time.monotonic() < deadline:
+            s = await client.post(
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Customer/search",
+                params={"branch": view_branch},
+                json={
+                    "where": {"type": "eq", "field": "customer_id", "value": delete_customer_id},
+                    "pageSize": 5,
+                },
+            )
+            if s.status_code != 200:
+                await asyncio.sleep(2.0)
+                continue
+            payload = s.json()
+            hits = payload.get("data") or []
+            if isinstance(hits, list) and not hits:
+                state.bug_tracker.record_pass()
+                print("    Deleted customer absent in v2 search")
+                break
+            await asyncio.sleep(2.0)
+        else:
+            raise AssertionError("Timed out waiting for deleted customer to disappear from v2 search")
+
+        # Count after must decrease by 1
+        if customer_count_before is not None:
+            count_after_delete = None
+            c = await client.post(
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objects/Customer/count",
+                params={"branch": view_branch},
+                json={},
+            )
+            c.raise_for_status()
+            payload = c.json()
+            raw = payload.get("count") if isinstance(payload, dict) else None
+            if raw is None and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                raw = payload["data"].get("count")
+            count_after_delete = int(raw) if raw is not None else None
+            expected = int(customer_count_before) - 1
+            if count_after_delete != expected:
+                raise AssertionError(f"Customer count after delete mismatch: expected={expected} got={count_after_delete}")
+            state.bug_tracker.record_pass()
+            print(f"    Customer count after delete: {count_after_delete}")
+
+    except Exception as exc:
+        state.bug_tracker.record(phase, "9-3", "delta delete Customer", "deleted customer removed", str(exc)[:200], "P1")
+        return
+
+
+# =============================================================================
+# PHASE 10: Teardown / Cleanup
+# =============================================================================
+
+async def phase10_teardown(state: QAState, client: httpx.AsyncClient) -> None:
+    phase = "Phase 10"
+    print(f"\n{'='*60}\n  {phase}: TEARDOWN / CLEANUP\n{'='*60}")
+
+    # 10-1: Delete database (best-effort; should keep the environment clean for frequent runs)
+    print(f"  [10-1] Deleting database: {state.db_name}")
+    try:
+        if not state.db_name:
+            raise AssertionError("db_name missing")
+        _switch_persona(state, client, "owner")
+        resp = await client.delete(f"{BFF_URL}/api/v1/databases/{state.db_name}")
+        if resp.status_code in {200, 202, 404}:
+            if resp.status_code == 202:
+                cmd_id = str(((resp.json().get("data") or {}) or {}).get("command_id") or "").strip()
+                if cmd_id:
+                    await _wait_for_command(client, cmd_id, timeout=240)
+            state.bug_tracker.record_pass()
+            print("    Database deleted")
+        else:
+            raise AssertionError(f"Unexpected status: {resp.status_code} {resp.text[:200]}")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "10-1", "DELETE /api/v1/databases/{db}", "database deleted", str(exc)[:200], "P2")
+
+    # 10-2: Delete ES indices for this DB (best-effort)
+    print("  [10-2] Deleting Elasticsearch indices for db...")
+    try:
+        prefix = (state.db_name or "").lower()
+        if not prefix:
+            raise AssertionError("db_name missing for ES cleanup")
+        cat = await client.get(f"{ES_URL}/_cat/indices/{prefix}*?format=json&h=index")
+        indices: List[str] = []
+        if cat.status_code == 200:
+            for row in cat.json() or []:
+                if isinstance(row, dict):
+                    idx = str(row.get("index") or "").strip()
+                    if idx:
+                        indices.append(idx)
+
+        deleted = 0
+        for idx in sorted(set(indices)):
+            d = await client.delete(f"{ES_URL}/{idx}")
+            if d.status_code in {200, 202, 404}:
+                deleted += 1
+        state.bug_tracker.record_pass()
+        print(f"    ES indices deleted: {deleted}")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "10-2", "DELETE ES indices", "indices deleted", str(exc)[:200], "P2")
+
+
+# =============================================================================
 # MAIN TEST
 # =============================================================================
 
@@ -2066,16 +3720,34 @@ async def test_foundry_e2e_qa() -> None:
     state = QAState()
     state.suffix = uuid.uuid4().hex[:10]
     state.db_name = f"qa_{state.suffix}"
-    state.user_id = f"qa-user-{state.suffix}"
 
-    _base = bff_auth_headers()
-    state.headers = {
-        **_base,
-        "X-DB-Name": state.db_name,
-        "X-User-ID": state.user_id,
-        "X-User-Type": "user",
-        "X-User-Name": state.user_id,
+    def _make_persona(*, name: str, db_role: Optional[str]) -> Persona:
+        subject = f"qa-{name}-{state.suffix}"
+        jwt = build_smoke_user_jwt(subject=subject, roles=("user",))
+        headers: Dict[str, str] = {
+            "Authorization": f"Bearer {jwt}",
+            "X-DB-Name": state.db_name,
+            "X-User-Name": subject,
+            "Accept": "application/json",
+        }
+        return Persona(name=name, subject=subject, db_role=db_role, jwt=jwt, headers=headers)
+
+    # 10+ real-user personas (distinct JWT sub) + DB roles provisioned in Postgres.
+    state.personas = {
+        "owner": _make_persona(name="owner", db_role="Owner"),
+        "data_engineer": _make_persona(name="data-engineer", db_role="DataEngineer"),
+        "domain_modeler": _make_persona(name="domain-modeler", db_role="DomainModeler"),
+        "editor": _make_persona(name="editor", db_role="Editor"),
+        "viewer": _make_persona(name="viewer", db_role="Viewer"),
+        "security": _make_persona(name="security", db_role="Security"),
+        "compliance": _make_persona(name="compliance-auditor", db_role="Viewer"),
+        "integration": _make_persona(name="integration-dev", db_role="Editor"),
+        "bot": _make_persona(name="automation-bot", db_role="DataEngineer"),
+        "intruder": _make_persona(name="intruder", db_role=None),
+        "sre": _make_persona(name="sre", db_role="Viewer"),
     }
+    state.current_persona = "owner"
+    state.headers = dict(state.personas[state.current_persona].headers)
     state.oms_headers = oms_auth_headers()
 
     print(f"\n{'#'*60}")
@@ -2087,38 +3759,56 @@ async def test_foundry_e2e_qa() -> None:
     print(f"{'#'*60}")
 
     async with httpx.AsyncClient(headers=state.headers, timeout=HTTPX_TIMEOUT) as raw_client:
-        client = PipelinesV2AdapterClient(raw_client)
-        # Phase 1: Data Ingestion
-        await phase1_data_ingestion(state, client)
+        client = raw_client
+        try:
+            # Phase 1: Data Ingestion
+            await phase1_data_ingestion(state, client)
 
-        # Phase 2: Pipeline Transforms
-        await phase2_pipeline_transforms(state, client)
+            # Phase 2: Pipeline Transforms
+            _switch_persona(state, client, "data_engineer")
+            await phase2_pipeline_transforms(state, client)
 
-        # Phase 3: Ontology Creation
-        await phase3_ontology_creation(state, client)
+            # Phase 3: Ontology Creation
+            _switch_persona(state, client, "domain_modeler")
+            await phase3_ontology_creation(state, client)
 
-        # Phase 4: Objectify
-        await phase4_objectify(state, client)
+            # Phase 4: Objectify
+            _switch_persona(state, client, "data_engineer")
+            await phase4_objectify(state, client)
 
-        # Phase 5: Search & Query
-        await phase5_search_and_query(state, client)
+            # Phase 5: Search & Query
+            _switch_persona(state, client, "viewer")
+            await phase5_search_and_query(state, client)
 
-        # Phase 6: Actions
-        await phase6_actions(state, client)
+            # Phase 6: Actions
+            _switch_persona(state, client, "editor")
+            await phase6_actions(state, client)
 
-        # Phase 7: Closed Loop Verification
-        await phase7_closed_loop(state, client)
+            # Phase 7: Closed Loop Verification
+            _switch_persona(state, client, "viewer")
+            await phase7_closed_loop(state, client)
 
-        # Phase 8: Live Data Cross-Domain
-        await phase8_live_data_cross_domain(state, client)
+            # Phase 9: Real-user hard gates (branch separation + incremental update)
+            await phase9_branch_and_incremental(state, client)
+
+            # Phase 8: Live Data Cross-Domain
+            _switch_persona(state, client, "data_engineer")
+            await phase8_live_data_cross_domain(state, client)
+        finally:
+            await phase10_teardown(state, client)
 
     # ── Final Report ──────────────────────────────────────────────
     print(state.bug_tracker.summary())
-    state.bug_tracker.dump_json("qa_bugs.json")
-    print(f"  Bug report: qa_bugs.json ({len(state.bug_tracker.bugs)} bugs)")
+    bugs_path = Path(os.getenv("QA_BUGS_PATH") or (REPO_ROOT / "qa_bugs.json"))
+    bugs_path.parent.mkdir(parents=True, exist_ok=True)
+    state.bug_tracker.dump_json(str(bugs_path))
+    print(f"  Bug report: {bugs_path} ({len(state.bug_tracker.bugs)} bugs)")
 
-    # Fail only on P0 blockers
-    p0_bugs = [b for b in state.bug_tracker.bugs if b.severity == "P0"]
-    if p0_bugs:
-        p0_summary = "\n".join(f"  [{b.phase}:{b.step}] {b.endpoint} — {b.actual[:100]}" for b in p0_bugs)
-        pytest.fail(f"{len(p0_bugs)} P0 BLOCKER(S) found:\n{p0_summary}")
+    threshold_rank = _qa_fail_threshold_rank()
+    blocking = [b for b in state.bug_tracker.bugs if _severity_rank(b.severity) <= threshold_rank]
+    if blocking:
+        summary = "\n".join(f"  [{b.severity}] [{b.phase}:{b.step}] {b.endpoint} — {b.actual[:100]}" for b in blocking)
+        pytest.fail(
+            f"{len(blocking)} bug(s) at/above QA_FAIL_SEVERITY threshold "
+            f"(QA_FAIL_SEVERITY={os.getenv('QA_FAIL_SEVERITY') or 'P1'}):\n{summary}"
+        )

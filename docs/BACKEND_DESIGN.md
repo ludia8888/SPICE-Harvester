@@ -6,26 +6,26 @@
 
 ## Coverage Summary
 
-- Modules scanned: **1010**
-- Modules with module docstring: **542/1010**
+- Modules scanned: **1011**
+- Modules with module docstring: **542/1011**
 - Modules with broad `except Exception`: **280**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **250559**
+- Total code lines (non-empty, non-comment): **252843**
 
 ## Package Scoreboard
 
 | Package | Modules | Module Doc Coverage | Broad-Except Modules | Broad Except Count | Async Functions | Public API | Code Lines |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `action_outbox_worker` | 2 | 2/2 (100%) | 1 | 7 | 9 | 2 | 384 |
-| `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2430 |
+| `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2431 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2846 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 222 | 167/222 (75%) | 77 | 361 | 1146 | 791 | 59974 |
+| `bff` | 222 | 167/222 (75%) | 77 | 363 | 1147 | 791 | 60264 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
-| `data_connector` | 23 | 7/23 (30%) | 7 | 14 | 61 | 46 | 2479 |
+| `data_connector` | 23 | 7/23 (30%) | 7 | 14 | 61 | 46 | 2481 |
 | `examples` | 1 | 1/1 (100%) | 1 | 2 | 0 | 2 | 115 |
 | `funnel` | 14 | 12/14 (85%) | 4 | 32 | 15 | 23 | 3588 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
@@ -33,34 +33,34 @@
 | `mcp_servers` | 18 | 6/18 (33%) | 10 | 50 | 125 | 31 | 6815 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
-| `objectify_worker` | 4 | 4/4 (100%) | 2 | 26 | 49 | 7 | 4382 |
-| `oms` | 51 | 38/51 (74%) | 18 | 91 | 161 | 195 | 15814 |
+| `objectify_worker` | 4 | 4/4 (100%) | 2 | 31 | 51 | 7 | 4576 |
+| `oms` | 51 | 38/51 (74%) | 18 | 93 | 162 | 195 | 15933 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1192 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
 | `pipeline_worker` | 10 | 5/10 (50%) | 5 | 50 | 90 | 12 | 8110 |
-| `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1868 |
+| `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
-| `shared` | 305 | 205/305 (67%) | 106 | 386 | 870 | 1143 | 80524 |
-| `tests` | 307 | 53/307 (17%) | 23 | 116 | 1646 | 1499 | 52550 |
+| `shared` | 306 | 205/306 (66%) | 106 | 386 | 872 | 1143 | 80604 |
+| `tests` | 307 | 53/307 (17%) | 23 | 156 | 1650 | 1503 | 54150 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
 
 | Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend/tests/test_foundry_e2e_qa.py` | 363 | 61 | 0 | 0 | 65 | 7 | 1828 |
+| `backend/tests/test_foundry_e2e_qa.py` | 541 | 101 | 0 | 0 | 108 | 72 | 3330 |
 | `backend/pipeline_worker/main.py` | 221 | 42 | 0 | 0 | 57 | 46 | 5592 |
 | `backend/bff/main.py` | 208 | 39 | 0 | 0 | 41 | 28 | 816 |
 | `backend/instance_worker/main.py` | 190 | 38 | 0 | 0 | 46 | 73 | 2381 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 521 |
+| `backend/objectify_worker/main.py` | 145 | 29 | 0 | 0 | 41 | 41 | 4131 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2642 |
 | `backend/ontology_worker/main.py` | 142 | 28 | 0 | 0 | 30 | 28 | 1192 |
 | `backend/shared/observability/metrics.py` | 140 | 23 | 0 | 0 | 26 | 1 | 884 |
-| `backend/projection_worker/main.py` | 130 | 26 | 0 | 0 | 29 | 30 | 1868 |
+| `backend/projection_worker/main.py` | 130 | 26 | 0 | 0 | 29 | 30 | 1866 |
 | `backend/bff/services/oms_client.py` | 130 | 26 | 0 | 0 | 27 | 28 | 671 |
 | `backend/shared/services/kafka/processed_event_worker.py` | 123 | 22 | 0 | 0 | 29 | 16 | 1391 |
-| `backend/objectify_worker/main.py` | 120 | 24 | 0 | 0 | 32 | 36 | 3946 |
 | `backend/shared/services/storage/event_store.py` | 108 | 20 | 0 | 0 | 24 | 16 | 1062 |
 | `backend/bff/services/ai_service.py` | 105 | 21 | 0 | 0 | 25 | 25 | 1571 |
 | `backend/bff/services/graph_query_service.py` | 86 | 17 | 0 | 0 | 18 | 17 | 957 |
@@ -70,7 +70,7 @@
 | Entrypoint | Async Functions | Broad Except | Try | Raise | Code Lines |
 | --- | --- | --- | --- | --- | --- |
 | `backend/action_outbox_worker/main.py` | 9 | 7 | 9 | 9 | 383 |
-| `backend/action_worker/main.py` | 41 | 8 | 26 | 47 | 2429 |
+| `backend/action_worker/main.py` | 41 | 8 | 26 | 47 | 2430 |
 | `backend/agent/main.py` | 1 | 5 | 5 | 1 | 80 |
 | `backend/bff/main.py` | 32 | 39 | 41 | 28 | 816 |
 | `backend/connector_sync_worker/main.py` | 11 | 4 | 4 | 7 | 414 |
@@ -79,12 +79,12 @@
 | `backend/ingest_reconciler_worker/main.py` | 5 | 3 | 5 | 1 | 215 |
 | `backend/instance_worker/main.py` | 28 | 38 | 46 | 73 | 2381 |
 | `backend/message_relay/main.py` | 10 | 13 | 22 | 10 | 664 |
-| `backend/objectify_worker/main.py` | 42 | 24 | 32 | 36 | 3946 |
+| `backend/objectify_worker/main.py` | 44 | 29 | 41 | 41 | 4131 |
 | `backend/oms/main.py` | 15 | 13 | 13 | 5 | 457 |
 | `backend/ontology_worker/main.py` | 15 | 28 | 30 | 28 | 1192 |
 | `backend/pipeline_scheduler/main.py` | 1 | 0 | 0 | 0 | 26 |
 | `backend/pipeline_worker/main.py` | 78 | 42 | 57 | 46 | 5592 |
-| `backend/projection_worker/main.py` | 27 | 26 | 29 | 30 | 1868 |
+| `backend/projection_worker/main.py` | 27 | 26 | 29 | 30 | 1866 |
 | `backend/writeback_materializer_worker/main.py` | 8 | 4 | 6 | 4 | 298 |
 
 ## New Developer Read Order (First 60-90 Minutes)
@@ -102,8 +102,8 @@
 | 6 | `backend/oms/routers/ontology.py` | API contract surface, ontology model contract, high-impact module size |
 | 7 | `backend/pipeline_worker/main.py` | entrypoint lifecycle, high-impact module size |
 | 8 | `backend/instance_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 9 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
-| 10 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 9 | `backend/objectify_worker/main.py` | entrypoint lifecycle, high-impact module size |
+| 10 | `backend/projection_worker/main.py` | entrypoint lifecycle, high-impact module size |
 | 11 | `backend/action_worker/main.py` | entrypoint lifecycle, high-impact module size |
 | 12 | `backend/oms/routers/query.py` | API contract surface, query/search behavior, high-impact module size |
 | 13 | `backend/shared/services/registries/ontology_key_spec_registry.py` | domain/service orchestration, storage adapter, ontology model contract |
@@ -175,7 +175,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=2615 | code_lines=2429 | risk_score=40
+- Source footprint: total_lines=2616 | code_lines=2430 | risk_score=40
 - API surface: public=2 | top-level functions=1 | classes=4 | methods=57
 - Runtime signals: async_functions=41 | try=26 | raise=47 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=1/4 (25%) | methods=1/57 (1%)
@@ -437,11 +437,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1538 | code_lines=1378 | risk_score=65
+- Source footprint: total_lines=1567 | code_lines=1407 | risk_score=65
 - API surface: public=3 | top-level functions=38 | classes=1 | methods=0
 - Runtime signals: async_functions=18 | try=29 | raise=4 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/38 (2%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (10): shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.observability.request_context; shared.security.auth_utils; shared.security.user_context; shared.services.registries.agent_tool_registry; shared.utils.llm_safety (+2 more)
+- Internal imports (11): shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.foundry.errors; shared.observability.request_context; shared.security.auth_utils; shared.security.user_context; shared.services.registries.agent_tool_registry (+3 more)
 - External imports (13): __future__; asyncio; dataclasses; datetime; fastapi; hmac; json; logging (+5 more)
 - Public API names: enforce_bff_websocket_auth; ensure_bff_auth_configured; install_bff_auth_middleware
 
@@ -821,10 +821,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=7685 | code_lines=7018 | risk_score=33
-- API surface: public=60 | top-level functions=183 | classes=12 | methods=0
-- Runtime signals: async_functions=70 | try=110 | raise=77 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=12/183 (6%) | classes=0/12 (0%) | methods=0/0 (n/a)
+- Source footprint: total_lines=7828 | code_lines=7146 | risk_score=35
+- API surface: public=60 | top-level functions=187 | classes=12 | methods=0
+- Runtime signals: async_functions=71 | try=116 | raise=81 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=13/187 (6%) | classes=0/12 (0%) | methods=0/0 (n/a)
 - Internal imports (22): bff.dependencies; bff.routers.link_types_read; bff.routers.object_types; bff.routers.object_types_deps; bff.schemas.object_types_requests; bff.services; bff.services.oms_client; shared.config.settings (+14 more)
 - External imports (8): asyncio; fastapi; httpx; logging; pydantic; time; typing; uuid
 - Public API names: ApiFeaturePreviewUsageOnlyError; ApplyActionRequestOptionsV2; ApplyActionRequestV2; BatchApplyActionRequestItemV2; BatchApplyActionRequestOptionsV2; BatchApplyActionRequestV2; ExecuteQueryRequestV2; ObjectSetNotFoundError; ObjectTypeContractCreateRequestV2; ObjectTypeContractUpdateRequestV2; OntologyNotFoundError; PermissionDeniedError (+48 more)
@@ -1061,11 +1061,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=160 | code_lines=135 | risk_score=10
+- Source footprint: total_lines=210 | code_lines=182 | risk_score=15
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=2 | raise=6 | broad_except=2 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=2 | try=3 | raise=6 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (11): bff.routers.objectify_deps; bff.schemas.objectify_requests; shared.errors.error_types; shared.models.objectify_job; shared.models.requests; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer (+3 more)
+- Internal imports (10): bff.routers.objectify_deps; bff.schemas.objectify_requests; shared.errors.error_types; shared.models.objectify_job; shared.models.requests; shared.observability.tracing; shared.security.database_access; shared.security.input_sanitizer (+2 more)
 - External imports (4): fastapi; logging; typing; uuid
 - Public API names: get_mapping_spec_watermark; trigger_incremental_objectify
 
@@ -1173,11 +1173,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=45 | code_lines=37 | risk_score=0
+- Source footprint: total_lines=49 | code_lines=41 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (6): bff.dependencies; bff.services; bff.services.oms_client; shared.models.ontology; shared.models.responses; shared.observability.tracing
+- Internal imports (8): bff.dependencies; bff.routers.role_deps; bff.services; bff.services.oms_client; shared.models.ontology; shared.models.responses; shared.observability.tracing; shared.security.database_access
 - External imports (1): fastapi
 - Public API names: create_ontology
 
@@ -1397,9 +1397,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=110 | code_lines=103 | risk_score=6
+- Source footprint: total_lines=137 | code_lines=125 | risk_score=12
 - API surface: public=0 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=2 | raise=0 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (5): shared.models.objectify_job; shared.services.events.objectify_job_queue; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry; shared.utils.schema_hash
 - External imports (3): logging; typing; uuid
@@ -2821,11 +2821,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=280 | code_lines=263 | risk_score=25
+- Source footprint: total_lines=292 | code_lines=275 | risk_score=25
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=5 | raise=12 | broad_except=5 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=2 | try=6 | raise=13 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (11): bff.routers.pipeline_ops; bff.routers.pipeline_ops_preflight; bff.routers.pipeline_shared; shared.config.app_config; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.input_sanitizer (+3 more)
+- Internal imports (13): bff.routers.pipeline_ops; bff.routers.pipeline_ops_preflight; bff.routers.pipeline_shared; bff.services.input_validation_service; shared.config.app_config; shared.errors.error_types; shared.models.requests; shared.observability.tracing (+5 more)
 - External imports (4): fastapi; logging; typing; uuid
 - Public API names: create_pipeline; list_pipelines
 
@@ -2869,11 +2869,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=94 | code_lines=78 | risk_score=0
+- Source footprint: total_lines=100 | code_lines=83 | risk_score=0
 - API surface: public=0 | top-level functions=2 | classes=1 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=2 | broad_except=0 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=1 | try=2 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (6): bff.services.http_idempotency; shared.errors.error_types; shared.security.auth_utils; shared.security.input_sanitizer; shared.services.registries.pipeline_registry; shared.utils.path_utils
+- Internal imports (7): bff.services.http_idempotency; shared.errors.error_types; shared.security.auth_utils; shared.security.database_access; shared.security.input_sanitizer; shared.services.registries.pipeline_registry; shared.utils.path_utils
 - External imports (4): __future__; dataclasses; fastapi; typing
 - Public API names: not documented
 
@@ -2933,11 +2933,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=3452 | code_lines=3249 | risk_score=50
+- Source footprint: total_lines=3495 | code_lines=3292 | risk_score=50
 - API surface: public=3 | top-level functions=80 | classes=13 | methods=0
-- Runtime signals: async_functions=45 | try=14 | raise=67 | broad_except=10 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=45 | try=17 | raise=70 | broad_except=10 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/80 (0%) | classes=0/13 (0%) | methods=0/0 (n/a)
-- Internal imports (27): bff.routers.pipeline_ops; bff.routers.pipeline_shared; bff.services.oms_client; bff.services.ontology_occ_guard_service; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types; shared.models.lineage_edge_types (+19 more)
+- Internal imports (29): bff.routers.pipeline_ops; bff.routers.pipeline_shared; bff.services.input_validation_service; bff.services.oms_client; bff.services.ontology_occ_guard_service; shared.dependencies.providers; shared.errors.error_envelope; shared.errors.error_types (+21 more)
 - External imports (6): dataclasses; fastapi; httpx; logging; typing; uuid
 - Public API names: build_pipeline; deploy_pipeline; preview_pipeline
 
@@ -4093,11 +4093,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=92 | code_lines=75 | risk_score=0
+- Source footprint: total_lines=94 | code_lines=77 | risk_score=0
 - API surface: public=5 | top-level functions=5 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=9 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): data_connector.adapters.sql_query_guard
+- Internal imports (2): data_connector.adapters.sql_query_guard; shared.models.import_modes
 - External imports (2): __future__; typing
 - Public API names: is_jdbc_connector_kind; normalize_import_mode; normalized_query; validate_jdbc_mode_requirements; validate_resource_import_config
 
@@ -5053,12 +5053,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=4271 | code_lines=3946 | risk_score=120
-- API surface: public=3 | top-level functions=4 | classes=2 | methods=65
-- Runtime signals: async_functions=42 | try=32 | raise=36 | broad_except=24 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=4/65 (6%)
+- Source footprint: total_lines=4477 | code_lines=4131 | risk_score=145
+- API surface: public=3 | top-level functions=4 | classes=2 | methods=67
+- Runtime signals: async_functions=44 | try=41 | raise=41 | broad_except=29 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=4/67 (5%)
 - Internal imports (43): objectify_worker.validation_codes; objectify_worker.write_paths; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.errors.runtime_exception_policy (+35 more)
-- External imports (13): __future__; asyncio; confluent_kafka; csv; datetime; hashlib; httpx; io (+5 more)
+- External imports (15): __future__; asyncio; confluent_kafka; csv; datetime; hashlib; httpx; io (+7 more)
 - Public API names: ObjectifyNonRetryableError; ObjectifyWorker; main
 
 ### `backend/objectify_worker/validation_codes.py`
@@ -5085,7 +5085,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: asynchronous background processing
-- Source footprint: total_lines=449 | code_lines=385 | risk_score=10
+- Source footprint: total_lines=459 | code_lines=394 | risk_score=10
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=9
 - Runtime signals: async_functions=7 | try=2 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=1/9 (11%)
@@ -5343,11 +5343,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=1276 | code_lines=1134 | risk_score=5
+- Source footprint: total_lines=1286 | code_lines=1143 | risk_score=5
 - API surface: public=23 | top-level functions=21 | classes=18 | methods=1
 - Runtime signals: async_functions=9 | try=6 | raise=24 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/21 (9%) | classes=2/18 (11%) | methods=0/1 (0%)
-- Internal imports (27): oms.dependencies; oms.services.action_simulation_service; oms.services.action_submit_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types (+19 more)
+- Internal imports (28): oms.dependencies; oms.services.action_simulation_service; oms.services.action_submit_service; oms.services.ontology_deployment_registry_v2; oms.services.ontology_resources; shared.config.app_config; shared.config.settings; shared.errors.error_types (+20 more)
 - External imports (6): datetime; fastapi; logging; pydantic; typing; uuid
 - Public API names: ActionSimulateAssumptions; ActionSimulateObservedBaseOverrides; ActionSimulateRequest; ActionSimulateScenarioRequest; ActionSimulateStatePatch; ActionSimulateTargetAssumption; ActionSubmitBatchDependencyRequest; ActionSubmitBatchItemRequest; ActionSubmitBatchItemResponse; ActionSubmitBatchRequest; ActionSubmitBatchResponse; ActionSubmitRequest (+11 more)
 
@@ -5471,11 +5471,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=1911 | code_lines=1549 | risk_score=15
-- API surface: public=7 | top-level functions=50 | classes=4 | methods=3
-- Runtime signals: async_functions=4 | try=6 | raise=61 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=24/50 (48%) | classes=1/4 (25%) | methods=0/3 (0%)
-- Internal imports (6): shared.config.search_config; shared.dependencies.providers; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.foundry_page_token; shared.utils.number_utils
+- Source footprint: total_lines=2038 | code_lines=1656 | risk_score=25
+- API surface: public=7 | top-level functions=52 | classes=4 | methods=3
+- Runtime signals: async_functions=5 | try=8 | raise=66 | broad_except=5 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=26/52 (50%) | classes=1/4 (25%) | methods=0/3 (0%)
+- Internal imports (7): oms.services.ontology_resources; shared.config.search_config; shared.dependencies.providers; shared.observability.tracing; shared.security.input_sanitizer; shared.utils.foundry_page_token; shared.utils.number_utils
 - External imports (10): datetime; fastapi; hashlib; json; logging; math; pydantic; re (+2 more)
 - Public API names: CountObjectsResponseV2; SearchJsonQueryV2; SearchObjectsRequestV2; SearchObjectsResponseV2; aggregate_objects_v2_oms; count_objects_v2_oms; search_objects_v2_foundry
 
@@ -5535,7 +5535,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=1631 | code_lines=1514 | risk_score=40
+- Source footprint: total_lines=1632 | code_lines=1515 | risk_score=40
 - API surface: public=8 | top-level functions=16 | classes=4 | methods=1
 - Runtime signals: async_functions=5 | try=16 | raise=69 | broad_except=8 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/16 (0%) | classes=0/4 (0%) | methods=0/1 (0%)
@@ -5551,7 +5551,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=441 | code_lines=409 | risk_score=0
+- Source footprint: total_lines=442 | code_lines=411 | risk_score=0
 - API surface: public=1 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=4 | raise=20 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -6169,11 +6169,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=2157 | code_lines=1868 | risk_score=130
+- Source footprint: total_lines=2155 | code_lines=1866 | risk_score=130
 - API surface: public=1 | top-level functions=0 | classes=1 | methods=45
 - Runtime signals: async_functions=27 | try=29 | raise=30 | broad_except=26 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/1 (100%) | methods=21/45 (46%)
-- Internal imports (30): shared.config.app_config; shared.config.search_config; shared.config.settings; shared.models.event_envelope; shared.models.events; shared.models.lineage_edge_types; shared.observability.metrics; shared.observability.tracing (+22 more)
+- Internal imports (29): shared.config.app_config; shared.config.search_config; shared.config.settings; shared.models.event_envelope; shared.models.events; shared.models.lineage_edge_types; shared.observability.metrics; shared.observability.tracing (+21 more)
 - External imports (7): asyncio; confluent_kafka; datetime; json; logging; os; typing
 - Public API names: ProjectionWorker
 
@@ -7237,6 +7237,22 @@
 - External imports (2): __future__; typing
 - Public API names: not documented
 
+### `backend/shared/models/import_modes.py`
+- Module summary: no docstring
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: domain/request-response schema definitions
+- Source footprint: total_lines=6 | code_lines=5 | risk_score=0
+- API surface: public=0 | top-level functions=0 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (0): not documented
+- External imports (1): __future__
+- Public API names: not documented
+
 ### `backend/shared/models/lineage.py`
 - Module summary: Lineage (provenance) models.
 - Responsibilities: not documented
@@ -8033,7 +8049,7 @@
 - API surface: public=1 | top-level functions=9 | classes=1 | methods=6
 - Runtime signals: async_functions=5 | try=2 | raise=3 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/9 (0%) | classes=0/1 (0%) | methods=0/6 (0%)
-- Internal imports (11): data_connector.adapters.import_config_validators; shared.config.settings; shared.models.objectify_job; shared.services.events.objectify_job_queue; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry; shared.services.registries.pipeline_registry; shared.services.storage.lakefs_client (+3 more)
+- Internal imports (11): shared.config.settings; shared.models.import_modes; shared.models.objectify_job; shared.services.events.objectify_job_queue; shared.services.registries.dataset_registry; shared.services.registries.objectify_registry; shared.services.registries.pipeline_registry; shared.services.storage.lakefs_client (+3 more)
 - External imports (7): __future__; csv; hashlib; io; logging; typing; uuid
 - Public API names: ConnectorIngestService
 
@@ -9565,10 +9581,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=1524 | code_lines=1459 | risk_score=5
-- API surface: public=5 | top-level functions=0 | classes=5 | methods=30
-- Runtime signals: async_functions=24 | try=3 | raise=31 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/5 (20%) | methods=5/30 (16%)
+- Source footprint: total_lines=1583 | code_lines=1509 | risk_score=5
+- API surface: public=5 | top-level functions=0 | classes=5 | methods=31
+- Runtime signals: async_functions=25 | try=3 | raise=33 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=1/5 (20%) | methods=5/31 (16%)
 - Internal imports (5): shared.config.settings; shared.models.objectify_job; shared.observability.context_propagation; shared.services.registries.postgres_schema_registry; shared.utils.json_utils
 - External imports (7): __future__; asyncpg; dataclasses; datetime; logging; typing; uuid
 - Public API names: OCCConflictError; ObjectifyJobRecord; ObjectifyOutboxItem; ObjectifyRegistry; OntologyMappingSpecRecord
@@ -9773,10 +9789,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=439 | code_lines=401 | risk_score=5
-- API surface: public=6 | top-level functions=2 | classes=6 | methods=11
-- Runtime signals: async_functions=8 | try=1 | raise=49 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/6 (16%) | methods=2/11 (18%)
+- Source footprint: total_lines=465 | code_lines=425 | risk_score=5
+- API surface: public=6 | top-level functions=2 | classes=6 | methods=12
+- Runtime signals: async_functions=9 | try=1 | raise=49 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/2 (50%) | classes=1/6 (16%) | methods=3/12 (25%)
 - Internal imports (2): shared.config.settings; shared.observability.tracing
 - External imports (6): __future__; dataclasses; httpx; json; logging; typing
 - Public API names: LakeFSAuthError; LakeFSClient; LakeFSConfig; LakeFSConflictError; LakeFSError; LakeFSNotFoundError
@@ -9853,7 +9869,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=98 | code_lines=64 | risk_score=0
+- Source footprint: total_lines=99 | code_lines=65 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11647,7 +11663,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=733 | code_lines=667 | risk_score=10
+- Source footprint: total_lines=737 | code_lines=669 | risk_score=10
 - API surface: public=1 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=4 | raise=11 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11663,13 +11679,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=2124 | code_lines=1828 | risk_score=363
-- API surface: public=10 | top-level functions=16 | classes=1 | methods=1
-- Runtime signals: async_functions=16 | try=65 | raise=7 | broad_except=61 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=13/16 (81%) | classes=1/1 (100%) | methods=0/1 (0%)
-- Internal imports (5): shared.config.search_config; shared.security.database_access; tests.utils.auth; tests.utils.pipelines_v2_adapter; tests.utils.qa_helpers
-- External imports (12): __future__; asyncio; httpx; json; os; pathlib; pytest; sys (+4 more)
-- Public API names: QAState; phase1_data_ingestion; phase2_pipeline_transforms; phase3_ontology_creation; phase4_objectify; phase5_search_and_query; phase6_actions; phase7_closed_loop; phase8_live_data_cross_domain; test_foundry_e2e_qa
+- Source footprint: total_lines=3814 | code_lines=3330 | risk_score=541
+- API surface: public=14 | top-level functions=28 | classes=2 | methods=1
+- Runtime signals: async_functions=20 | try=108 | raise=72 | broad_except=101 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=17/28 (60%) | classes=1/2 (50%) | methods=0/1 (0%)
+- Internal imports (5): shared.config.search_config; shared.foundry.rids; shared.security.database_access; tests.utils.auth; tests.utils.qa_helpers
+- External imports (13): __future__; asyncio; dataclasses; httpx; json; os; pathlib; pytest (+5 more)
+- Public API names: Persona; QAState; phase0_guardrails; phase10_teardown; phase1_data_ingestion; phase2_pipeline_transforms; phase3_ontology_creation; phase4_objectify; phase5_search_and_query; phase6_actions; phase7_closed_loop; phase8_live_data_cross_domain (+2 more)
 
 ### `backend/tests/test_idempotency_chaos.py`
 - Module summary: Chaos tests for the idempotency contract.
@@ -11711,7 +11727,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=3338 | code_lines=2838 | risk_score=60
+- Source footprint: total_lines=3414 | code_lines=2896 | risk_score=60
 - API surface: public=4 | top-level functions=28 | classes=3 | methods=3
 - Runtime signals: async_functions=9 | try=16 | raise=37 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/28 (25%) | classes=0/3 (0%) | methods=0/3 (0%)
@@ -16255,7 +16271,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=95 | code_lines=76 | risk_score=0
+- Source footprint: total_lines=112 | code_lines=90 | risk_score=0
 - API surface: public=5 | top-level functions=6 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=1/6 (16%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -16271,7 +16287,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1050 | code_lines=951 | risk_score=22
+- Source footprint: total_lines=1065 | code_lines=965 | risk_score=22
 - API surface: public=1 | top-level functions=11 | classes=1 | methods=19
 - Runtime signals: async_functions=15 | try=9 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/11 (0%) | classes=1/1 (100%) | methods=0/19 (0%)
@@ -16287,7 +16303,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=417 | code_lines=357 | risk_score=5
+- Source footprint: total_lines=427 | code_lines=367 | risk_score=5
 - API surface: public=6 | top-level functions=3 | classes=3 | methods=16
 - Runtime signals: async_functions=12 | try=4 | raise=5 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/3 (100%) | classes=2/3 (66%) | methods=0/16 (0%)

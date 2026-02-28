@@ -1,0 +1,42 @@
+[
+  {
+    "phase": "Phase 4",
+    "step": "4-4",
+    "endpoint": "ES indexing",
+    "expected": "count == 2378 and per-class counts match fixtures",
+    "actual": "Timed out after 240s (total=1810, by_class={})",
+    "severity": "P0",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-27T19:35:39.503266"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-2",
+    "endpoint": "search gt price",
+    "expected": ">=1 result and numeric",
+    "actual": "Expected at least 1 OrderItem with price > 100",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1650, in phase5_search_and_query\n    raise AssertionError(\"Expected at least 1 OrderItem with price > 100\")\nAssertionError: Expected at least 1 OrderItem with price > 100\n",
+    "timestamp": "2026-02-27T19:35:41.424539"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-7",
+    "endpoint": "search orderBy",
+    "expected": "sorted DESC by price",
+    "actual": "Expected at least 1 OrderItem for orderBy test",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1740, in phase5_search_and_query\n    raise AssertionError(\"Expected at least 1 OrderItem for orderBy test\")\nAssertionError: Expected at least 1 OrderItem for orderBy test\n",
+    "timestamp": "2026-02-27T19:35:42.970481"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-12",
+    "endpoint": "v2 links OrderItem→Product/Order",
+    "expected": "product and order resolved",
+    "actual": "No OrderItems found for order_id=00275bce676303c3bfd7292aefdfa223\nassert (True and [])\n +  where True = isinstance([], list)",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1848, in phase5_search_and_query\n    assert isinstance(items, list) and items, f\"No OrderItems found for order_id={order_id}\"\nAssertionError: No OrderItems found for order_id=00275bce676303c3bfd7292aefdfa223\nassert (True and [])\n +  where True = isinstance([], list)\n",
+    "timestamp": "2026-02-27T19:35:43.492143"
+  }
+]

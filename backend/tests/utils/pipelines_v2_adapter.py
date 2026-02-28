@@ -964,7 +964,19 @@ class PipelinesV2AdapterClient:
 
         # NOTE: no Foundry v2 deploy endpoint is implemented yet; keep legacy deploy path for parity checks.
         if re.fullmatch(r"/api/v1/pipelines/([^/]+)/deploy", path):
-            return await self._client.post(url, *args, **kwargs)
+            fixed_payload = dict(json_payload)
+            branch = _normalize_branch(
+                fixed_payload.get("branch")
+                or fixed_payload.get("branchName")
+                or params.get("branch")
+                or "master"
+            )
+            fixed_payload["branch"] = branch
+            if "branchName" in fixed_payload:
+                fixed_payload["branchName"] = branch
+            fixed_kwargs = dict(kwargs)
+            fixed_kwargs["json"] = fixed_payload
+            return await self._client.post(url, *args, **fixed_kwargs)
 
         return await self._client.post(url, *args, **kwargs)
 
@@ -972,6 +984,9 @@ class PipelinesV2AdapterClient:
         parsed = urlsplit(url)
         path = parsed.path
         params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else {}
+
+        if path.startswith(_PIPELINE_DATASETS_PREFIX):
+            return await self._client.get(url, *args, **kwargs)
 
         runs_match = re.fullmatch(r"/api/v1/pipelines/([^/]+)/runs", path)
         if runs_match:

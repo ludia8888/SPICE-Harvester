@@ -22,20 +22,20 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **264**
+- Total documented endpoints: **262**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 155 |
+| `v1` | 153 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 48 |
-| `pipelines` | 32 |
 | `connectivity` | 31 |
+| `pipelines` | 30 |
 | `databases` | 22 |
 | `datasets` | 19 |
 | `admin` | 13 |
@@ -426,8 +426,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/pipelines` | List Pipelines | `v1` | no | no | `list_pipelines_api_v1_pipelines_get` |
 | `POST` | `/api/v1/pipelines` | Create Pipeline | `v1` | no | no | `create_pipeline_api_v1_pipelines_post` |
-| `GET` | `/api/v1/pipelines/branches` | List Pipeline Branches | `v1` | no | no | `list_pipeline_branches_api_v1_pipelines_branches_get` |
-| `POST` | `/api/v1/pipelines/branches` | Create Pipeline Branch | `v1` | no | no | `create_pipeline_branch_api_v1_pipelines_branches_post` |
 | `GET` | `/api/v1/pipelines/datasets` | List Datasets | `v1` | no | no | `list_datasets_api_v1_pipelines_datasets_get` |
 | `POST` | `/api/v1/pipelines/datasets` | Create Dataset | `v1` | no | no | `create_dataset_api_v1_pipelines_datasets_post` |
 | `POST` | `/api/v1/pipelines/datasets/csv-upload` | Upload Csv Dataset | `v1` | no | no | `upload_csv_dataset_api_v1_pipelines_datasets_csv_upload_post` |

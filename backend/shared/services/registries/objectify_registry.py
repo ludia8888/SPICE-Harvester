@@ -617,6 +617,62 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 )
             return records
 
+    async def update_mapping_spec(
+        self,
+        *,
+        mapping_spec_id: str,
+        backing_datasource_version_id: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Optional[OntologyMappingSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        mapping_spec_id = self._normalize_optional(mapping_spec_id) or ""
+        if not mapping_spec_id:
+            raise ValueError("mapping_spec_id is required")
+
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    UPDATE {self._schema}.ontology_mapping_specs
+                    SET backing_datasource_version_id = COALESCE($2::uuid, backing_datasource_version_id),
+                        options = COALESCE($3::jsonb, options),
+                        updated_at = NOW()
+                    WHERE mapping_spec_id = $1::uuid
+                    RETURNING mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                           backing_datasource_id, backing_datasource_version_id,
+                           target_class_id, mappings, target_field_types, status, version, auto_sync, options,
+                           created_at, updated_at
+                    """,
+                    mapping_spec_id,
+                    backing_datasource_version_id,
+                    normalize_json_payload(options) if options is not None else None,
+                )
+
+            if not row:
+                return None
+
+            return OntologyMappingSpecRecord(
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                dataset_id=str(row["dataset_id"]),
+                dataset_branch=str(row["dataset_branch"]),
+                artifact_output_name=row["artifact_output_name"],
+                schema_hash=row["schema_hash"],
+                backing_datasource_id=str(row["backing_datasource_id"]) if row["backing_datasource_id"] else None,
+                backing_datasource_version_id=(
+                    str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
+                ),
+                target_class_id=str(row["target_class_id"]),
+                mappings=coerce_json_list(row["mappings"], wrap_dict=True),
+                target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
+                status=str(row["status"]),
+                version=int(row["version"]),
+                auto_sync=bool(row["auto_sync"]),
+                options=coerce_json_dataset(row["options"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+
     async def get_active_mapping_spec(
         self,
         *,
@@ -720,29 +776,32 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             async with conn.transaction():
                 row = None
                 try:
-                    row = await conn.fetchrow(
-                        f"""
-                        INSERT INTO {self._schema}.objectify_jobs (
-                            job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
-                            artifact_id, artifact_output_name, dataset_branch, target_class_id, status
-                        ) VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10, $11)
-                        RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
-                                  artifact_id, artifact_output_name,
-                                  dataset_branch, target_class_id, status, command_id, error, report,
-                                  created_at, updated_at, completed_at
-                        """,
-                        job_id,
-                        mapping_spec_id,
-                        int(mapping_spec_version) if mapping_spec_version is not None else None,
-                        dedupe_key,
-                        dataset_id,
-                        dataset_version_id,
-                        artifact_id,
-                        artifact_output_name,
-                        dataset_branch,
-                        target_class_id,
-                        status,
-                    )
+                    # Use a nested transaction (savepoint) so a conflict on the unique dedupe_key index
+                    # doesn't poison the outer transaction (needed for outbox writes).
+                    async with conn.transaction():
+                        row = await conn.fetchrow(
+                            f"""
+                            INSERT INTO {self._schema}.objectify_jobs (
+                                job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                                artifact_id, artifact_output_name, dataset_branch, target_class_id, status
+                            ) VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10, $11)
+                            RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                                      artifact_id, artifact_output_name,
+                                      dataset_branch, target_class_id, status, command_id, error, report,
+                                      created_at, updated_at, completed_at
+                            """,
+                            job_id,
+                            mapping_spec_id,
+                            int(mapping_spec_version) if mapping_spec_version is not None else None,
+                            dedupe_key,
+                            dataset_id,
+                            dataset_version_id,
+                            artifact_id,
+                            artifact_output_name,
+                            dataset_branch,
+                            target_class_id,
+                            status,
+                        )
                 except UniqueViolationError:
                     row = await conn.fetchrow(
                         f"""
@@ -758,6 +817,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                         dedupe_key,
                     )
                 if outbox_payload is not None:
+                    resolved_job_id = str(row["job_id"]) if row is not None else job_id
                     await conn.execute(
                         f"""
                         INSERT INTO {self._schema}.objectify_job_outbox (
@@ -765,7 +825,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                         ) VALUES ($1::uuid, $2::uuid, $3::jsonb, 'pending', NOW(), NOW())
                         """,
                         str(uuid4()),
-                        job_id,
+                        resolved_job_id,
                         normalize_json_payload(outbox_payload),
                     )
             if not row:
@@ -1329,29 +1389,28 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         async with self._pool.acquire() as conn:
             try:
                 if target_class_id and not mapping_spec_id:
-                    row = await conn.fetchrow(
-                        """
+                    query = """
                         SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
                                watermark_column, watermark_value, dataset_version_id,
                                lakefs_commit_id, rows_processed, created_at, updated_at
                         FROM objectify_watermarks
                         WHERE target_class_id = $1 AND dataset_branch = $2
-                        """,
-                        target_class_id,
-                        dataset_branch,
-                    )
-                else:
-                    row = await conn.fetchrow(
                         """
+                    args = (target_class_id, dataset_branch)
+                else:
+                    query = """
                         SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
                                watermark_column, watermark_value, dataset_version_id,
                                lakefs_commit_id, rows_processed, created_at, updated_at
                         FROM objectify_watermarks
                         WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
-                        """,
-                        mapping_spec_id,
-                        dataset_branch,
-                    )
+                        """
+                    args = (mapping_spec_id, dataset_branch)
+
+                # Some legacy deployments may lack columns referenced in the query. Run in a
+                # nested transaction so a schema error doesn't poison the outer transaction.
+                async with conn.transaction():
+                    row = await conn.fetchrow(query, *args)
             except UndefinedColumnError:
                 # Backward-compatible fallback for DBs where legacy objectify_watermarks
                 # was created before target_class_id column rollout.

@@ -12,13 +12,12 @@ from shared.observability.tracing import trace_endpoint
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.routers.objectify_deps import get_dataset_registry, get_objectify_job_queue, get_objectify_registry, _require_db_role
+from bff.routers.objectify_deps import get_dataset_registry, get_objectify_registry, _require_db_role
 from bff.schemas.objectify_requests import TriggerIncrementalRequest
 from shared.models.objectify_job import ObjectifyJob
 from shared.models.requests import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input
-from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 
@@ -40,7 +39,6 @@ async def trigger_incremental_objectify(
     branch: str = Query(default="master"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
-    job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
 ) -> Dict[str, Any]:
     """Trigger objectify with incremental execution mode."""
     mapping_spec_id = sanitize_input(mapping_spec_id)
@@ -59,20 +57,66 @@ async def trigger_incremental_objectify(
         if body.force_full_refresh:
             await objectify_registry.delete_watermark(mapping_spec_id=mapping_spec_id, dataset_branch=branch)
             previous_watermark = None
+            watermark_column = body.watermark_column.strip() if body.watermark_column else None
+            base_commit_id = None
         else:
             watermark = await objectify_registry.get_watermark(mapping_spec_id=mapping_spec_id, dataset_branch=branch)
             previous_watermark = watermark.get("watermark_value") if watermark else None
+            watermark_column = (
+                body.watermark_column.strip()
+                if body.watermark_column
+                else (str(watermark.get("watermark_column") or "").strip() if isinstance(watermark, dict) else None)
+            ) or None
+            base_commit_id = (
+                str(watermark.get("lakefs_commit_id") or "").strip()
+                if isinstance(watermark, dict)
+                else None
+            ) or None
 
         version = await dataset_registry.get_latest_version(dataset_id=str(mapping_spec.dataset_id))
         if not version:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "No dataset version available", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
+        # Ensure mapping spec backing version advances to the latest dataset version (same schema_hash),
+        # otherwise objectify-worker will reject the job as a backing_datasource_version_mismatch.
+        base_options = dict(mapping_spec.options or {})
+        try:
+            if mapping_spec.backing_datasource_id:
+                backing_version = await dataset_registry.get_or_create_backing_datasource_version(
+                    backing_id=mapping_spec.backing_datasource_id,
+                    dataset_version_id=version.version_id,
+                    schema_hash=mapping_spec.schema_hash,
+                    metadata={"artifact_key": getattr(version, "artifact_key", None)},
+                )
+                if backing_version and mapping_spec.backing_datasource_version_id != backing_version.version_id:
+                    impact_scope = base_options.get("impact_scope") if isinstance(base_options.get("impact_scope"), dict) else {}
+                    impact_scope = dict(impact_scope or {})
+                    impact_scope["dataset_version_id"] = version.version_id
+                    impact_scope.setdefault("schema_hash", mapping_spec.schema_hash)
+                    impact_scope.setdefault("artifact_output_name", mapping_spec.artifact_output_name)
+                    base_options["impact_scope"] = impact_scope
+                    updated = await objectify_registry.update_mapping_spec(
+                        mapping_spec_id=mapping_spec.mapping_spec_id,
+                        backing_datasource_version_id=backing_version.version_id,
+                        options=base_options,
+                    )
+                    if updated:
+                        mapping_spec = updated
+                        base_options = dict(mapping_spec.options or base_options)
+        except Exception as exc:
+            logger.warning(
+                "Failed to advance mapping spec backing version (mapping_spec_id=%s dataset_version_id=%s): %s",
+                mapping_spec.mapping_spec_id,
+                getattr(version, "version_id", None),
+                exc,
+            )
+
         job_id = str(uuid4())
-        options = dict(mapping_spec.options or {})
+        options = dict(base_options)
         options["execution_mode"] = body.execution_mode
-        if body.watermark_column:
-            options["watermark_column"] = body.watermark_column
-        if previous_watermark:
+        if watermark_column:
+            options["watermark_column"] = watermark_column
+        if previous_watermark is not None:
             options["previous_watermark"] = previous_watermark
 
         dedupe_key = objectify_registry.build_dedupe_key(
@@ -81,7 +125,10 @@ async def trigger_incremental_objectify(
             mapping_spec_id=mapping_spec.mapping_spec_id,
             mapping_spec_version=mapping_spec.version,
             dataset_version_id=version.version_id,
+            artifact_id=None,
+            artifact_output_name=mapping_spec.artifact_output_name,
         )
+        dedupe_key = f"{dedupe_key}|mode:{body.execution_mode}"
 
         job = ObjectifyJob(
             job_id=job_id,
@@ -95,17 +142,20 @@ async def trigger_incremental_objectify(
             mapping_spec_version=mapping_spec.version,
             target_class_id=mapping_spec.target_class_id,
             execution_mode=body.execution_mode,
+            watermark_column=watermark_column,
+            previous_watermark=str(previous_watermark) if previous_watermark is not None else None,
+            base_commit_id=base_commit_id if body.execution_mode == "delta" else None,
             max_rows=body.max_rows or options.get("max_rows"),
             batch_size=body.batch_size or options.get("batch_size"),
             options=options,
         )
 
-        await job_queue.publish(job, require_delivery=False)
+        record = await objectify_registry.enqueue_objectify_job(job=job)
 
         return ApiResponse.success(
             message=f"Incremental objectify job queued ({body.execution_mode} mode)",
             data={
-                "job_id": job_id,
+                "job_id": record.job_id,
                 "mapping_spec_id": mapping_spec_id,
                 "execution_mode": body.execution_mode,
                 "watermark_column": body.watermark_column,

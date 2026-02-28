@@ -31,12 +31,14 @@ from bff.services.oms_client import OMSClient
 from bff.services.ontology_occ_guard_service import (
     resolve_branch_head_commit_with_bootstrap,
 )
+from bff.services.input_validation_service import enforce_db_scope_or_403
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.models.pipeline_job import PipelineJob
 from shared.models.requests import ApiResponse
+from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
@@ -1627,6 +1629,20 @@ async def preview_pipeline(
             pipeline_registry=pipeline_registry,
             dataset_registry=dataset_registry,
         )
+        if request is not None:
+            enforce_db_scope_or_403(request, db_name=prepared.run_context.db_name)
+            try:
+                await enforce_database_role(
+                    headers=request.headers,
+                    db_name=prepared.run_context.db_name,
+                    required_roles=DATA_ENGINEER_ROLES,
+                )
+            except ValueError as exc:
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    str(exc),
+                    code=ErrorCode.PERMISSION_DENIED,
+                ) from exc
         node_id = prepared.run_context.node_id
         response = await _dispatch_preview_execution(
             pipeline_id=pipeline_id,
@@ -1705,6 +1721,20 @@ async def build_pipeline(
             dataset_registry=dataset_registry,
             oms_client=oms_client,
         )
+        if request is not None:
+            enforce_db_scope_or_403(request, db_name=prepared.run_context.db_name)
+            try:
+                await enforce_database_role(
+                    headers=request.headers,
+                    db_name=prepared.run_context.db_name,
+                    required_roles=DATA_ENGINEER_ROLES,
+                )
+            except ValueError as exc:
+                raise classified_http_exception(
+                    status.HTTP_403_FORBIDDEN,
+                    str(exc),
+                    code=ErrorCode.PERMISSION_DENIED,
+                ) from exc
         response = await _dispatch_build_execution(
             pipeline_id=pipeline_id,
             prepared=prepared,
@@ -3412,6 +3442,19 @@ async def deploy_pipeline(
             sanitized=sanitize_input(payload),
             pipeline_registry=pipeline_registry,
         )
+        enforce_db_scope_or_403(request, db_name=prepared.db_name)
+        try:
+            await enforce_database_role(
+                headers=request.headers,
+                db_name=prepared.db_name,
+                required_roles=DATA_ENGINEER_ROLES,
+            )
+        except ValueError as exc:
+            raise classified_http_exception(
+                status.HTTP_403_FORBIDDEN,
+                str(exc),
+                code=ErrorCode.PERMISSION_DENIED,
+            ) from exc
         result = await _dispatch_deploy_execution(
             prepared=prepared,
             pipeline_id=pipeline_id,

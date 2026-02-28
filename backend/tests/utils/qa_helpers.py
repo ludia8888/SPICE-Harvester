@@ -37,6 +37,8 @@ class BugRecord:
     expected: str
     actual: str
     severity: str = "P1"  # P0=blocker, P1=critical, P2=major, P3=minor
+    persona: Optional[str] = None
+    status_code: Optional[int] = None
     traceback_str: str = ""
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
@@ -57,6 +59,8 @@ class BugTracker:
         expected: str,
         actual: str,
         severity: str = "P1",
+        persona: Optional[str] = None,
+        status_code: Optional[int] = None,
     ) -> None:
         self.bugs.append(
             BugRecord(
@@ -66,6 +70,8 @@ class BugTracker:
                 expected=expected,
                 actual=actual,
                 severity=severity,
+                persona=persona,
+                status_code=status_code,
                 traceback_str=traceback.format_exc(),
             )
         )
@@ -83,6 +89,8 @@ class BugTracker:
                 "expected": b.expected,
                 "actual": b.actual,
                 "severity": b.severity,
+                "persona": b.persona,
+                "status_code": b.status_code,
                 "traceback": b.traceback_str,
                 "timestamp": b.timestamp,
             }
@@ -106,7 +114,9 @@ class BugTracker:
             sev_str = ", ".join(f"{k}:{v}" for k, v in sorted(sev_counts.items()))
             lines.append(f"  {phase}: {len(bugs)} bug(s) [{sev_str}]")
             for b in bugs:
-                lines.append(f"    [{b.severity}] {b.step} {b.endpoint}: {b.actual[:100]}")
+                who = f" persona={b.persona}" if b.persona else ""
+                code = f" status={b.status_code}" if b.status_code is not None else ""
+                lines.append(f"    [{b.severity}]{who}{code} {b.step} {b.endpoint}: {b.actual[:100]}")
         if not self.bugs:
             lines.append("  No bugs found!")
         lines.append(f"{'=' * 60}\n")

@@ -1,0 +1,102 @@
+[
+  {
+    "phase": "Phase 2",
+    "step": "2-4",
+    "endpoint": "POST /pipelines/f808f176-f26f-41a1-b68a-745b9ef4b1eb/deploy",
+    "expected": "deploy success",
+    "actual": "Client error '400 Bad Request' for url 'http://localhost:8002/api/v1/pipelines/f808f176-f26f-41a1-b68a-745b9ef4b1eb/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTT",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 739, in phase2_pipeline_transforms\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '400 Bad Request' for url 'http://localhost:8002/api/v1/pipelines/f808f176-f26f-41a1-b68a-745b9ef4b1eb/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400\n",
+    "timestamp": "2026-02-27T18:01:31.855688"
+  },
+  {
+    "phase": "Phase 2",
+    "step": "2-7",
+    "endpoint": "Pipeline D order_items_with_pk",
+    "expected": "output dataset id",
+    "actual": "Client error '400 Bad Request' for url 'http://localhost:8002/api/v1/pipelines/cfebb081-6d5d-4ded-9967-4a962bc6b476/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTT",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 947, in phase2_pipeline_transforms\n    deploy_resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '400 Bad Request' for url 'http://localhost:8002/api/v1/pipelines/cfebb081-6d5d-4ded-9967-4a962bc6b476/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400\n",
+    "timestamp": "2026-02-27T18:01:36.606713"
+  },
+  {
+    "phase": "Phase 3",
+    "step": "3-2:OrderItem",
+    "endpoint": "object type contract",
+    "expected": "dataset_id",
+    "actual": "Missing dataset order_items_with_pk",
+    "severity": "P0",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-27T18:01:45.284644"
+  },
+  {
+    "phase": "Phase 4",
+    "step": "4-1:OrderItem",
+    "endpoint": "mapping-spec",
+    "expected": "dataset_id",
+    "actual": "Missing order_items_with_pk",
+    "severity": "P0",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-27T18:01:46.546264"
+  },
+  {
+    "phase": "Phase 4",
+    "step": "4-4",
+    "endpoint": "ES indexing",
+    "expected": "count == 2378 and per-class counts match fixtures",
+    "actual": "Timed out after 240s (total=1810, by_class={})",
+    "severity": "P0",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-27T18:05:48.134298"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-2",
+    "endpoint": "search gt price",
+    "expected": ">=1 result and numeric",
+    "actual": "Expected at least 1 OrderItem with price > 100",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1592, in phase5_search_and_query\n    raise AssertionError(\"Expected at least 1 OrderItem with price > 100\")\nAssertionError: Expected at least 1 OrderItem with price > 100\n",
+    "timestamp": "2026-02-27T18:05:48.533624"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-7",
+    "endpoint": "search orderBy",
+    "expected": "sorted DESC by price",
+    "actual": "Expected at least 1 OrderItem for orderBy test",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1682, in phase5_search_and_query\n    raise AssertionError(\"Expected at least 1 OrderItem for orderBy test\")\nAssertionError: Expected at least 1 OrderItem for orderBy test\n",
+    "timestamp": "2026-02-27T18:05:48.957845"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-11",
+    "endpoint": "v2 links Order→Customer",
+    "expected": "linked customer resolved",
+    "actual": "Client error '404 Not Found' for url 'http://localhost:8002/api/v2/ontologies/qa_5a416eefaf/objects/Order/b9a6c5f5df52c7226ac85aee7524c27f/links/customer?branch=main&pageSize=10'\nFor more information ",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1764, in phase5_search_and_query\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'http://localhost:8002/api/v2/ontologies/qa_5a416eefaf/objects/Order/b9a6c5f5df52c7226ac85aee7524c27f/links/customer?branch=main&pageSize=10'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
+    "timestamp": "2026-02-27T18:05:49.446377"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-12",
+    "endpoint": "v2 links OrderItem→Product/Order",
+    "expected": "product and order resolved",
+    "actual": "No OrderItems found for order_id=00275bce676303c3bfd7292aefdfa223\nassert (True and [])\n +  where True = isinstance([], list)",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1790, in phase5_search_and_query\n    assert isinstance(items, list) and items, f\"No OrderItems found for order_id={order_id}\"\nAssertionError: No OrderItems found for order_id=00275bce676303c3bfd7292aefdfa223\nassert (True and [])\n +  where True = isinstance([], list)\n",
+    "timestamp": "2026-02-27T18:05:49.502075"
+  },
+  {
+    "phase": "Phase 7",
+    "step": "7-0",
+    "endpoint": "closed loop per-order",
+    "expected": "orders searchable with updated status",
+    "actual": "Orders did not converge to expected status: pending={'f0cb299a9702d7db4e501895d61d2baf': 'shipped', '2e823fe077401bf3d30b8a47e324571f': 'escalated', '93d8685fec4218f06bf202723dc1da52': 'shipped', '569",
+    "severity": "P0",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 2074, in phase7_closed_loop\n    assert not pending, f\"Orders did not converge to expected status: pending={pending}, last_seen={last_seen}\"\nAssertionError: Orders did not converge to expected status: pending={'f0cb299a9702d7db4e501895d61d2baf': 'shipped', '2e823fe077401bf3d30b8a47e324571f': 'escalated', '93d8685fec4218f06bf202723dc1da52': 'shipped', '569d43a54c364df5b367ab33e96eacf0': 'shipped', 'ca7296a83aa279afb28c2388a4f48891': 'shipped'}, last_seen={'f0cb299a9702d7db4e501895d61d2baf': 'invoiced', '2e823fe077401bf3d30b8a47e324571f': 'invoiced', '93d8685fec4218f06bf202723dc1da52': 'invoiced', '569d43a54c364df5b367ab33e96eacf0': 'unavailable', 'ca7296a83aa279afb28c2388a4f48891': 'canceled'}\nassert not {'f0cb299a9702d7db4e501895d61d2baf': 'shipped', '2e823fe077401bf3d30b8a47e324571f': 'escalated', '93d8685fec4218f06bf202723dc1da52': 'shipped', '569d43a54c364df5b367ab33e96eacf0': 'shipped', 'ca7296a83aa279afb28c2388a4f48891': 'shipped'}\n",
+    "timestamp": "2026-02-27T18:08:57.552514"
+  }
+]

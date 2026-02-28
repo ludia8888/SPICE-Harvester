@@ -48,7 +48,6 @@ from shared.utils.language import coerce_localized_text, select_localized_text, 
 from shared.utils.number_utils import to_int_or_none
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import ref_key, writeback_patchset_key
-from shared.utils.writeback_lifecycle import overlay_doc_id
 from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.worker_runner import run_worker_until_stopped
 
@@ -1008,8 +1007,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             if not instance_id:
                 continue
 
-            overlay_id = overlay_doc_id(instance_id=instance_id, lifecycle_id=lifecycle_id)
-            overlay_doc = await self.elasticsearch_service.get_document(overlay_index, overlay_id)
+            overlay_doc = await self.elasticsearch_service.get_document(overlay_index, instance_id)
             base_doc = None
             if not overlay_doc:
                 base_doc = await self.elasticsearch_service.get_document(base_index, instance_id)
@@ -1062,7 +1060,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                 await self.elasticsearch_service.index_document(
                     overlay_index,
                     effective,
-                    doc_id=overlay_id,
+                    doc_id=instance_id,
                     refresh=False,
                     version=incoming_seq,
                     version_type="external_gte",
@@ -1074,7 +1072,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                         event_data=event_data,
                         db_name=db_name,
                         index_name=overlay_index,
-                        doc_id=str(overlay_id),
+                        doc_id=str(instance_id),
                         operation="index",
                         incoming_seq=incoming_seq,
                         skip_reason="stale_version_conflict",

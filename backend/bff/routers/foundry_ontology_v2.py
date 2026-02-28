@@ -38,7 +38,7 @@ from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid
 from shared.observability.tracing import trace_endpoint
-from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role, resolve_database_actor
+from shared.security.database_access import DOMAIN_MODEL_ROLES, READ_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_branch_name,
@@ -1729,6 +1729,25 @@ def _linked_object_parameters(
     )
 
 
+def _strip_typed_ref(value: str) -> str:
+    """Convert typed refs like ``Customer/cust-1`` → ``cust-1``.
+
+    Our instance payloads store relationship refs as ``<TargetClass>/<instance_id>``.
+    Foundry v2 linked-object APIs operate on primary key values only, so we
+    normalize here before building search filters.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # Avoid stripping URLs or other multi-segment strings.
+    if text.count("/") == 1 and not text.startswith("http://") and not text.startswith("https://"):
+        _, right = text.split("/", 1)
+        right = right.strip()
+        if right:
+            return right
+    return text
+
+
 def _iter_primary_key_values(value: Any):
     if value is None:
         return
@@ -1741,17 +1760,44 @@ def _iter_primary_key_values(value: Any):
             candidate = value.get(key)
             if candidate is None:
                 continue
-            text = str(candidate).strip()
+            text = _strip_typed_ref(str(candidate))
             if text:
                 yield text
         return
-    text = str(value).strip()
+    text = _strip_typed_ref(str(value))
     if text:
         yield text
 
 
 def _coerce_primary_key_values(value: Any) -> list[str]:
     return list(_iter_primary_key_values(value))
+
+
+def _extract_object_type_relationships(resource: dict[str, Any]) -> list[dict[str, Any]]:
+    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+    rels = spec.get("relationships") if isinstance(spec.get("relationships"), list) else resource.get("relationships")
+    if not isinstance(rels, list):
+        return []
+    return [entry for entry in rels if isinstance(entry, dict)]
+
+
+def _derive_outgoing_link_types_from_relationships(
+    relationships: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    derived: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for rel in relationships:
+        predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
+        target = str(rel.get("target") or rel.get("objectTypeApiName") or rel.get("target_object_type") or "").strip()
+        if not predicate or not target:
+            continue
+        key = (predicate, target)
+        if key in seen:
+            continue
+        seen.add(key)
+        derived.append({"apiName": predicate, "objectTypeApiName": target})
+    derived.sort(key=lambda item: str(item.get("apiName") or ""))
+    return derived
 
 
 def _extract_linked_primary_keys(
@@ -1908,6 +1954,15 @@ async def _resolve_object_primary_key_field(
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
     try:
         await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        if str(exc).strip().lower() == "permission denied":
+            raise PermissionDeniedError("Permission denied") from exc
+        raise
+
+
+async def _require_read_role(request: Request, *, db_name: str) -> None:
+    try:
+        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=READ_ROLES)
     except ValueError as exc:
         if str(exc).strip().lower() == "permission denied":
             raise PermissionDeniedError("Permission denied") from exc
@@ -2587,6 +2642,13 @@ def _normalize_non_foundry_upstream_error(
             error_name="NotFound",
             parameters=merged_parameters,
         )
+    if status_code == status.HTTP_409_CONFLICT:
+        return _foundry_error(
+            status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+            error_name="Conflict",
+            parameters=merged_parameters,
+        )
     return None
 
 
@@ -3164,7 +3226,7 @@ async def get_ontology_v2(
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
@@ -3219,7 +3281,7 @@ async def get_full_metadata_v2(
             strict_compat=strict_compat,
             endpoint="GET /api/v2/ontologies/{ontologyRid}/fullMetadata",
         )
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3396,7 +3458,7 @@ async def list_action_types_v2(
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/actionTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -3465,7 +3527,7 @@ async def get_action_type_v2(
         action_type = str(actionType or "").strip()
         if not action_type:
             raise ValueError("actionType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3551,7 +3613,7 @@ async def get_action_type_by_rid_v2(
         action_type_rid = str(actionTypeRid or "").strip()
         if not action_type_rid:
             raise ValueError("actionTypeRid is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3915,7 +3977,7 @@ async def list_query_types_v2(
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/queryTypes", db_name, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -3978,7 +4040,7 @@ async def get_query_type_v2(
         query_api_name = str(queryApiName or "").strip()
         if not query_api_name:
             raise ValueError("queryApiName is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4072,7 +4134,7 @@ async def execute_query_v2(
         query_api_name = str(queryApiName or "").strip()
         if not query_api_name:
             raise ValueError("queryApiName is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4213,7 +4275,7 @@ async def list_interface_types_v2(
             strict_compat=strict_compat,
             endpoint="ontologies/{ontologyRid}/interfaceTypes",
         )
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -4283,7 +4345,7 @@ async def get_interface_type_v2(
         interface_type = str(interfaceType or "").strip()
         if not interface_type:
             raise ValueError("interfaceType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4360,7 +4422,7 @@ async def list_shared_property_types_v2(
             strict_compat=strict_compat,
             endpoint="ontologies/{ontologyRid}/sharedPropertyTypes",
         )
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -4427,7 +4489,7 @@ async def get_shared_property_type_v2(
         shared_property_type = str(sharedPropertyType or "").strip()
         if not shared_property_type:
             raise ValueError("sharedPropertyType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4500,7 +4562,7 @@ async def list_value_types_v2(
             strict_compat=strict_compat,
             endpoint="ontologies/{ontologyRid}/valueTypes",
         )
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4560,7 +4622,7 @@ async def get_value_type_v2(
         value_type = str(valueType or "").strip()
         if not value_type:
             raise ValueError("valueType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4631,7 +4693,7 @@ async def list_object_types_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/objectTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -4922,7 +4984,7 @@ async def get_object_type_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5005,7 +5067,7 @@ async def get_object_type_full_metadata_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5116,7 +5178,7 @@ async def list_outgoing_link_types_v2(
         source_object_type = str(objectType or "").strip()
         if not source_object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/outgoingLinkTypes", db_name, branch, source_object_type, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -5172,6 +5234,40 @@ async def list_outgoing_link_types_v2(
             scan_offset += len(resources)
             if len(resources) < scan_limit:
                 break
+
+        if not data:
+            try:
+                object_payload = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="object_type",
+                    resource_id=source_object_type,
+                    branch=branch,
+                )
+                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                if isinstance(object_resource, dict):
+                    derived_all = _derive_outgoing_link_types_from_relationships(
+                        _extract_object_type_relationships(object_resource)
+                    )
+                    strict_all: list[dict[str, Any]] = []
+                    for mapped in derived_all:
+                        if not isinstance(mapped, dict):
+                            continue
+                        if strict_compat:
+                            mapped, fixes, is_resolved = _strictify_outgoing_link_type(
+                                dict(mapped),
+                                db_name=db_name,
+                                source_object_type=source_object_type,
+                            )
+                            strict_fix_count += fixes
+                            if not is_resolved:
+                                strict_dropped_count += 1
+                                continue
+                        strict_all.append(mapped)
+                    start = max(0, int(offset))
+                    data = strict_all[start : start + int(page_size)]
+                    has_more = (start + len(data)) < len(strict_all)
+            except httpx.HTTPStatusError:
+                pass
 
         if strict_compat:
             _log_strict_compat_summary(
@@ -5236,7 +5332,7 @@ async def get_outgoing_link_type_v2(
             raise ValueError("objectType is required")
         if not link_type:
             raise ValueError("linkType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5245,21 +5341,49 @@ async def get_outgoing_link_type_v2(
         )
 
     try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="link_type",
-            resource_id=link_type,
-            branch=branch,
-        )
-        resource = payload.get("data") if isinstance(payload, dict) else payload
-        if not isinstance(resource, dict):
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=source_object_type,
-                link_type=link_type,
+        mapped: dict[str, Any] | None = None
+        try:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="link_type",
+                resource_id=link_type,
+                branch=branch,
             )
-        mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
+            resource = payload.get("data") if isinstance(payload, dict) else payload
+            if isinstance(resource, dict):
+                mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+            if status_code != status.HTTP_404_NOT_FOUND:
+                raise
+
+        if mapped is None:
+            try:
+                object_payload = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="object_type",
+                    resource_id=source_object_type,
+                    branch=branch,
+                )
+                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                if isinstance(object_resource, dict):
+                    for rel in _extract_object_type_relationships(object_resource):
+                        predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
+                        if predicate != link_type:
+                            continue
+                        target = str(
+                            rel.get("target")
+                            or rel.get("objectTypeApiName")
+                            or rel.get("target_object_type")
+                            or ""
+                        ).strip()
+                        if not target:
+                            continue
+                        mapped = {"apiName": predicate, "objectTypeApiName": target}
+                        break
+            except httpx.HTTPStatusError:
+                mapped = None
+
         if mapped is None:
             return _not_found_error(
                 "LinkTypeNotFound",
@@ -5339,7 +5463,7 @@ async def list_incoming_link_types_v2(
         target_object_type = str(objectType or "").strip()
         if not target_object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/incomingLinkTypes", db_name, branch, target_object_type, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -5459,7 +5583,7 @@ async def get_incoming_link_type_v2(
             raise ValueError("objectType is required")
         if not link_type:
             raise ValueError("linkType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5557,7 +5681,7 @@ async def search_objects_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5622,7 +5746,7 @@ async def count_objects_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5688,7 +5812,7 @@ async def aggregate_objects_v2(
         _ = transaction_id, sdk_package_rid, sdk_version
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5756,7 +5880,7 @@ async def load_object_set_objects_v2(
             object_type = _resolve_object_set_object_type(object_set)
             if not object_type:
                 raise ValueError("objectSet.objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
@@ -5859,7 +5983,7 @@ async def load_object_set_links_v2(
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         search_payload = _build_object_set_search_payload(
             object_set=object_set,
             payload={
@@ -6077,7 +6201,7 @@ async def load_object_set_multiple_object_types_v2(
             object_types = _collect_object_set_object_types(object_set)
             if not object_types:
                 raise ValueError("objectSet.objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
@@ -6211,7 +6335,7 @@ async def load_object_set_objects_or_interfaces_v2(
             object_types = _collect_object_set_object_types(object_set)
             if not object_types:
                 raise ValueError("objectSet.objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         _, actor = resolve_database_actor(request.headers)
         if not search_around:
             search_payload = _build_object_set_search_payload(
@@ -6326,7 +6450,7 @@ async def aggregate_object_set_v2(
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -6400,7 +6524,7 @@ async def create_temporary_object_set_v2(
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         object_set = await _resolve_object_set_definition(payload.get("objectSet"))
         object_set_rid = await _store_temporary_object_set(object_set)
         return {"objectSetRid": object_set_rid}
@@ -6423,7 +6547,7 @@ async def get_object_set_v2(
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         return await _load_temporary_object_set(objectSetRid)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
@@ -6459,7 +6583,7 @@ async def list_objects_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
 
         payload: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
@@ -6543,7 +6667,7 @@ async def get_object_v2(
             raise ValueError("objectType is required")
         if not primary_key_value:
             raise ValueError("primaryKey is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -6709,7 +6833,7 @@ async def list_linked_objects_v2(
             "" if snapshot is None else ("1" if snapshot else "0"),
         )
         offset = _decode_page_token(page_token, scope=page_scope)
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -6784,31 +6908,50 @@ async def list_linked_objects_v2(
         )
 
     try:
-        link_payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="link_type",
-            resource_id=link_type,
-            branch=branch,
-        )
-        link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
-        if not isinstance(link_resource, dict):
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                link_type=link_type,
-                parameters={"primaryKey": primary_key_value},
+        link_type_side: dict[str, Any] | None = None
+        try:
+            link_payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="link_type",
+                resource_id=link_type,
+                branch=branch,
             )
-        link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
+            link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+            if isinstance(link_resource, dict):
+                link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+            if status_code != status.HTTP_404_NOT_FOUND:
+                raise
+
         if not link_type_side:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                link_type=link_type,
-                parameters={"primaryKey": primary_key_value},
-            )
-        linked_object_type = str(link_type_side.get("objectTypeApiName") or "").strip()
+            try:
+                object_payload = await oms_client.get_ontology_resource(
+                    db_name,
+                    resource_type="object_type",
+                    resource_id=object_type,
+                    branch=branch,
+                )
+                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                if isinstance(object_resource, dict):
+                    for rel in _extract_object_type_relationships(object_resource):
+                        predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
+                        if predicate != link_type:
+                            continue
+                        target = str(
+                            rel.get("target")
+                            or rel.get("objectTypeApiName")
+                            or rel.get("target_object_type")
+                            or ""
+                        ).strip()
+                        if not target:
+                            continue
+                        link_type_side = {"apiName": predicate, "objectTypeApiName": target}
+                        break
+            except httpx.HTTPStatusError:
+                link_type_side = None
+
+        linked_object_type = str((link_type_side or {}).get("objectTypeApiName") or "").strip()
         if not linked_object_type:
             return _not_found_error(
                 "LinkTypeNotFound",
@@ -6959,7 +7102,7 @@ async def get_linked_object_v2(
             raise ValueError("linkType is required")
         if not linked_primary_key_value:
             raise ValueError("linkedObjectPrimaryKey is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -7249,7 +7392,7 @@ async def get_timeseries_first_point_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_first_point(
             db_name,
@@ -7307,7 +7450,7 @@ async def get_timeseries_last_point_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_last_point(
             db_name,
@@ -7366,7 +7509,7 @@ async def stream_timeseries_points_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         body = await request.json() if await request.body() else {}
         response = await oms_client.stream_timeseries_points(
@@ -7467,7 +7610,7 @@ async def list_attachment_property_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.list_property_attachments(
             db_name,
@@ -7527,7 +7670,7 @@ async def get_attachment_by_rid_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_attachment_by_rid(
             db_name,
@@ -7587,7 +7730,7 @@ async def get_attachment_content_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content(
             db_name,
@@ -7651,7 +7794,7 @@ async def get_attachment_content_by_rid_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
+        await _require_read_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content_by_rid(
             db_name,

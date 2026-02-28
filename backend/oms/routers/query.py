@@ -29,6 +29,7 @@ from shared.security.input_sanitizer import (
 )
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 from shared.utils.number_utils import to_int_or_none
+from oms.services.ontology_resources import OntologyResourceService
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,53 @@ def _foundry_error(
     return JSONResponse(status_code=status_code, content=payload)
 
 
+async def _ensure_object_type_exists(
+    *,
+    db_name: str,
+    branch: str,
+    object_type: str,
+) -> Optional[JSONResponse]:
+    """
+    Foundry parity: unknown object types should return 404 (not empty 200).
+
+    We validate existence via the canonical ontology resource registry (Postgres).
+    """
+
+    try:
+        resources = OntologyResourceService()
+        resource = await resources.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="object_type",
+            resource_id=object_type,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to resolve ontology objectType existence (%s/%s@%s): %s",
+            db_name,
+            object_type,
+            branch,
+            exc,
+            exc_info=True,
+        )
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="InternalServerError",
+            parameters={"message": "Failed to resolve ontology object type"},
+        )
+
+    if not resource:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name="ObjectTypeNotFound",
+            parameters={"ontology": db_name, "objectType": object_type, "branch": branch},
+        )
+
+    return None
+
+
 def _validate_field_name(field: str) -> str:
     normalized = str(field or "").strip()
     if not normalized or not _FIELD_NAME_RE.match(normalized):
@@ -384,6 +432,63 @@ def _build_sort_clause(request: SearchObjectsRequestV2) -> List[Dict[str, Any]]:
         if field_path == "instance_id":
             has_instance_id_sort = True
         sort.append({field_path: {"order": direction}})
+
+    if not has_instance_id_sort:
+        sort.append({"instance_id": {"order": "asc"}})
+
+    return sort
+
+
+def _build_properties_sort_clause(order_by: Any) -> List[Dict[str, Any]]:
+    """Fallback sort for indices where ``data`` is not indexed.
+
+    Our instances index uses ``properties`` (nested) for indexed fields and has
+    ``data.enabled=false``. Sorting on ``data.<field>`` therefore errors or is
+    ignored by Elasticsearch. When that happens, we retry with nested sorts that
+    target ``properties.value.numeric``.
+
+    Note: This is a best-effort fallback. It preserves numeric ordering (e.g. price)
+    but does not attempt to infer type per property.
+    """
+    if not isinstance(order_by, dict):
+        return [{"instance_id": {"order": "asc"}}]
+
+    order_type = str(order_by.get("orderType") or "fields").strip()
+    if order_type != "fields":
+        raise ValueError("orderBy.orderType must be 'fields'")
+
+    raw_fields = order_by.get("fields")
+    if not isinstance(raw_fields, list) or not raw_fields:
+        raise ValueError("orderBy.fields must be a non-empty list")
+
+    sort: List[Dict[str, Any]] = []
+    has_instance_id_sort = False
+
+    for item in raw_fields:
+        if not isinstance(item, dict):
+            raise ValueError("orderBy.fields entries must be objects")
+        field = str(item.get("field") or "").strip()
+        if not field:
+            raise ValueError("orderBy.fields[].field is required")
+        direction = _normalize_sort_direction(item.get("direction"))
+        field_path = _resolve_field_path(field)
+
+        if field_path in _TOP_LEVEL_FIELDS:
+            if field_path == "instance_id":
+                has_instance_id_sort = True
+            sort.append({field_path: {"order": direction}})
+            continue
+
+        nested = {"path": "properties", "filter": {"term": {"properties.name": field}}}
+        sort.append(
+            {
+                "properties.value.numeric": {
+                    "order": direction,
+                    "nested": nested,
+                    "missing": "_last",
+                }
+            }
+        )
 
     if not has_instance_id_sort:
         sort.append({"instance_id": {"order": "asc"}})
@@ -1608,6 +1713,9 @@ async def _search_objects_v2_impl(
         request = SearchObjectsRequestV2.model_validate(payload)
         object_type = validate_class_id(object_type)
         branch = validate_branch_name(branch)
+        missing = await _ensure_object_type_exists(db_name=db_name, branch=branch, object_type=object_type)
+        if missing is not None:
+            return missing
         page_scope = _pagination_scope_for_search(
             db_name=db_name,
             object_type=object_type,
@@ -1629,13 +1737,26 @@ async def _search_objects_v2_impl(
         }
 
         index_name = get_instances_index_name(db_name, branch=branch)
-        result = await es.search(
-            index=index_name,
-            query=query,
-            size=request.pageSize,
-            from_=offset,
-            sort=sort_clause,
-        )
+        try:
+            result = await es.search(
+                index=index_name,
+                query=query,
+                size=request.pageSize,
+                from_=offset,
+                sort=sort_clause,
+            )
+        except Exception:
+            # Sort errors are common when callers request orderBy on fields that live under nested ``properties``.
+            # Retry with nested properties-based sorting.
+            if request.orderBy is None:
+                raise
+            result = await es.search(
+                index=index_name,
+                query=query,
+                size=request.pageSize,
+                from_=offset,
+                sort=_build_properties_sort_clause(request.orderBy),
+            )
 
         # Runtime indices may keep searchable fields in nested ``properties`` while
         # ``data`` is disabled for indexing. Retry with a properties-based query when
@@ -1652,11 +1773,11 @@ async def _search_objects_v2_impl(
                     ]
                 }
             }
-            fallback_sort = [
-                sort_item
-                for sort_item in sort_clause
-                if not any(str(field).startswith("data.") for field in sort_item.keys())
-            ] or [{"instance_id": {"order": "asc"}}]
+            fallback_sort = (
+                _build_properties_sort_clause(request.orderBy)
+                if request.orderBy is not None
+                else [{"instance_id": {"order": "asc"}}]
+            )
             fallback_result = await es.search(
                 index=index_name,
                 query=fallback_query,
@@ -1785,6 +1906,9 @@ async def count_objects_v2_oms(
         db_name = validate_db_name(ontology)
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
+        missing = await _ensure_object_type_exists(db_name=db_name, branch=branch, object_type=object_type)
+        if missing is not None:
+            return missing
 
         query = {
             "bool": {
@@ -1844,6 +1968,9 @@ async def aggregate_objects_v2_oms(
         db_name = validate_db_name(ontology)
         object_type = validate_class_id(objectType)
         branch = validate_branch_name(branch)
+        missing = await _ensure_object_type_exists(db_name=db_name, branch=branch, object_type=object_type)
+        if missing is not None:
+            return missing
 
         aggregation_clauses, group_by_clauses = _parse_aggregation_clauses(payload)
 

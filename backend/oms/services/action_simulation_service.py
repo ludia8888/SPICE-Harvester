@@ -1197,6 +1197,7 @@ async def preflight_action_writeback(
             enforce_object_edit_policy=enforce_edit_access,
             enforce_attachment_edit_policy=enforce_edit_access,
             enforce_object_set_edit_policy=enforce_edit_access,
+            fail_on_missing_edit_policy=False,
         )
         if enforce_data_access and access_report.unverifiable:
             raise ActionSimulationRejected(

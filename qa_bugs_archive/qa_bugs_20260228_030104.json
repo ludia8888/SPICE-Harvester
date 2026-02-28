@@ -1,0 +1,1062 @@
+[
+  {
+    "phase": "Phase 1",
+    "step": "1-6",
+    "endpoint": "GET /datasets",
+    "expected": "list of datasets",
+    "actual": "invalid input for query argument $1: 'datasets' (invalid UUID 'datasets': length must be between 32..36 characters, got 8)",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"asyncpg/protocol/prepared_stmt.pyx\", line 175, in asyncpg.protocol.protocol.PreparedStatementState._encode_bind_msg\n  File \"asyncpg/protocol/codecs/base.pyx\", line 227, in asyncpg.protocol.protocol.Codec.encode\n  File \"asyncpg/protocol/codecs/base.pyx\", line 129, in asyncpg.protocol.protocol.Codec.encode_scalar\n  File \"asyncpg/pgproto/./codecs/uuid.pyx\", line 16, in asyncpg.pgproto.pgproto.uuid_encode\n  File \"asyncpg/pgproto/./uuid.pyx\", line 88, in asyncpg.pgproto.pgproto.pg_uuid_bytes_from_str\nValueError: invalid UUID 'datasets': length must be between 32..36 characters, got 8\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 505, in phase1_data_ingestion\n    resp = await client.get(\n           ^^^^^^^^^^^^^^^^^\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/utils/pipelines_v2_adapter.py\", line 995, in get\n    return await self._legacy_pipeline_detail_response(url=url, pipeline_id=detail_match.group(1))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/utils/pipelines_v2_adapter.py\", line 860, in _legacy_pipeline_detail_response\n    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/shared/services/registries/pipeline_registry.py\", line 1745, in get_pipeline\n    row = await conn.fetchrow(\n          ^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/lib/python3.12/site-packages/asyncpg/connection.py\", line 749, in fetchrow\n    data = await self._execute(\n           ^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/lib/python3.12/site-packages/asyncpg/connection.py\", line 1794, in _execute\n    result, _ = await self.__execute(\n                ^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/lib/python3.12/site-packages/asyncpg/connection.py\", line 1892, in __execute\n    result, stmt = await self._do_execute(\n                   ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/lib/python3.12/site-packages/asyncpg/connection.py\", line 1948, in _do_execute\n    result = await executor(stmt, timeout)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"asyncpg/protocol/protocol.pyx\", line 186, in bind_execute\n  File \"asyncpg/protocol/prepared_stmt.pyx\", line 204, in asyncpg.protocol.protocol.PreparedStatementState._encode_bind_msg\nasyncpg.exceptions.DataError: invalid input for query argument $1: 'datasets' (invalid UUID 'datasets': length must be between 32..36 characters, got 8)\n",
+    "timestamp": "2026-02-23T19:43:14.639460"
+  },
+  {
+    "phase": "Phase 2",
+    "step": "2-3",
+    "endpoint": "POST /pipelines/0a19dc74-a23e-4067-b23e-d05622e8b4da/build",
+    "expected": "build success",
+    "actual": "Build failed: {'run_id': 'd32efcec-e25b-4cfe-ba59-1ac5c83b3f18', 'pipeline_id': '0a19dc74-a23e-4067-b23e-d05622e8b4da', 'job_id': 'build-0a19dc74-a23e-4067-b23e-d05622e8b4da-703ba385-0e67-48db-aa8b-1c",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 644, in phase2_pipeline_transforms\n    raise AssertionError(f\"Build failed: {run}\")\nAssertionError: Build failed: {'run_id': 'd32efcec-e25b-4cfe-ba59-1ac5c83b3f18', 'pipeline_id': '0a19dc74-a23e-4067-b23e-d05622e8b4da', 'job_id': 'build-0a19dc74-a23e-4067-b23e-d05622e8b4da-703ba385-0e67-48db-aa8b-1ca47609a842', 'mode': 'build', 'status': 'FAILED', 'node_id': None, 'row_count': None, 'sample_json': {}, 'output_json': {'code': 'INTERNAL_ERROR', 'detail': 'Pipeline execution failed', 'errors': ['[DATATYPE_MISMATCH.BINARY_OP_WRONG_TYPE] Cannot resolve \"(price + freight_value)\" due to data type mismatch: the binary operator requires the input type (\"NUMERIC\" or \"INTERVAL DAY TO SECOND\" or \"INTERVAL YEAR TO MONTH\" or \"INTERVAL\"), not \"STRING\".; line 1 pos 0;\\n\\'Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, order_approved_at#1115, order_delivered_carrier_date#1124, order_delivered_customer_date#1133, order_estimated_delivery_date#1142, order_item_id#1191, product_id#1199, seller_id#1207, shipping_limit_date#1215, price#1223, freight_value#1231, (price#1223 + freight_value#1231) AS total_value#1253]\\n+- Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, order_approved_at#1115, order_delivered_carrier_date#1124, order_delivered_customer_date#1133, order_estimated_delivery_date#1142, order_item_id#1191, product_id#1199, seller_id#1207, shipping_limit_date#1215, price#1223, freight_value#1231]\\n   +- Join Inner, (order_id#1078 = order_id#1182)\\n      :- Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, order_approved_at#1115, order_delivered_carrier_date#1124, order_delivered_customer_date#1133, CASE WHEN (isnull(trim(cast(order_estimated_delivery_date#1069 as string), None)) OR (length(trim(cast(order_estimated_delivery_date#1069 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_estimated_delivery_date#1069 as string), None) END AS order_estimated_delivery_date#1142]\\n      :  +- Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, order_approved_at#1115, order_delivered_carrier_date#1124, CASE WHEN (isnull(trim(cast(order_delivered_customer_date#1068 as string), None)) OR (length(trim(cast(order_delivered_customer_date#1068 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_customer_date#1068 as string), None) END AS order_delivered_customer_date#1133, order_estimated_delivery_date#1069]\\n      :     +- Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, order_approved_at#1115, CASE WHEN (isnull(trim(cast(order_delivered_carrier_date#1067 as string), None)) OR (length(trim(cast(order_delivered_carrier_date#1067 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_delivered_carrier_date#1067 as string), None) END AS order_delivered_carrier_date#1124, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :        +- Project [order_id#1078, customer_id#1088, order_status#1097, order_purchase_timestamp#1106, CASE WHEN (isnull(trim(cast(order_approved_at#1066 as string), None)) OR (length(trim(cast(order_approved_at#1066 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_approved_at#1066 as string), None) END AS order_approved_at#1115, order_delivered_carrier_date#1067, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :           +- Project [order_id#1078, customer_id#1088, order_status#1097, CASE WHEN (isnull(trim(cast(order_purchase_timestamp#1065 as string), None)) OR (length(trim(cast(order_purchase_timestamp#1065 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_purchase_timestamp#1065 as string), None) END AS order_purchase_timestamp#1106, order_approved_at#1066, order_delivered_carrier_date#1067, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :              +- Project [order_id#1078, customer_id#1088, CASE WHEN (isnull(trim(cast(order_status#1064 as string), None)) OR (length(trim(cast(order_status#1064 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_status#1064 as string), None) END AS order_status#1097, order_purchase_timestamp#1065, order_approved_at#1066, order_delivered_carrier_date#1067, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :                 +- Project [order_id#1078, CASE WHEN (isnull(trim(cast(customer_id#1063 as string), None)) OR (length(trim(cast(customer_id#1063 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(customer_id#1063 as string), None) END AS customer_id#1088, order_status#1064, order_purchase_timestamp#1065, order_approved_at#1066, order_delivered_carrier_date#1067, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :                    +- Project [CASE WHEN (isnull(trim(cast(order_id#1062 as string), None)) OR (length(trim(cast(order_id#1062 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1062 as string), None) END AS order_id#1078, customer_id#1063, order_status#1064, order_purchase_timestamp#1065, order_approved_at#1066, order_delivered_carrier_date#1067, order_delivered_customer_date#1068, order_estimated_delivery_date#1069]\\n      :                       +- Relation [order_id#1062,customer_id#1063,order_status#1064,order_purchase_timestamp#1065,order_approved_at#1066,order_delivered_carrier_date#1067,order_delivered_customer_date#1068,order_estimated_delivery_date#1069] csv\\n      +- Project [order_id#1182, order_item_id#1191, product_id#1199, seller_id#1207, shipping_limit_date#1215, price#1223, CASE WHEN (isnull(trim(cast(freight_value#1174 as string), None)) OR (length(trim(cast(freight_value#1174 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(freight_value#1174 as string), None) END AS freight_value#1231]\\n         +- Project [order_id#1182, order_item_id#1191, product_id#1199, seller_id#1207, shipping_limit_date#1215, CASE WHEN (isnull(trim(cast(price#1173 as string), None)) OR (length(trim(cast(price#1173 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(price#1173 as string), None) END AS price#1223, freight_value#1174]\\n            +- Project [order_id#1182, order_item_id#1191, product_id#1199, seller_id#1207, CASE WHEN (isnull(trim(cast(shipping_limit_date#1172 as string), None)) OR (length(trim(cast(shipping_limit_date#1172 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(shipping_limit_date#1172 as string), None) END AS shipping_limit_date#1215, price#1173, freight_value#1174]\\n               +- Project [order_id#1182, order_item_id#1191, product_id#1199, CASE WHEN (isnull(trim(cast(seller_id#1171 as string), None)) OR (length(trim(cast(seller_id#1171 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(seller_id#1171 as string), None) END AS seller_id#1207, shipping_limit_date#1172, price#1173, freight_value#1174]\\n                  +- Project [order_id#1182, order_item_id#1191, CASE WHEN (isnull(trim(cast(product_id#1170 as string), None)) OR (length(trim(cast(product_id#1170 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(product_id#1170 as string), None) END AS product_id#1199, seller_id#1171, shipping_limit_date#1172, price#1173, freight_value#1174]\\n                     +- Project [order_id#1182, CASE WHEN (isnull(trim(cast(order_item_id#1169 as string), None)) OR (length(trim(cast(order_item_id#1169 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_item_id#1169 as string), None) END AS order_item_id#1191, product_id#1170, seller_id#1171, shipping_limit_date#1172, price#1173, freight_value#1174]\\n                        +- Project [CASE WHEN (isnull(trim(cast(order_id#1168 as string), None)) OR (length(trim(cast(order_id#1168 as string), None)) = 0)) THEN cast(null as string) ELSE trim(cast(order_id#1168 as string), None) END AS order_id#1182, order_item_id#1169, product_id#1170, seller_id#1171, shipping_limit_date#1172, price#1173, freight_value#1174]\\n                           +- Relation [order_id#1168,order_item_id#1169,product_id#1170,seller_id#1171,shipping_limit_date#1172,price#1173,freight_value#1174] csv\\n'], 'origin': {'path': None, 'method': None, 'service': 'pipeline_worker', 'endpoint': None}, 'status': 'error', 'context': {'mode': 'build', 'stage': 'execution', 'branch': 'master', 'job_id': 'build-0a19dc74-a23e-4067-b23e-d05622e8b4da-703ba385-0e67-48db-aa8b-1ca47609a842', 'db_name': 'qa_0a0a7f4e07', 'node_id': None, 'pipeline_id': '0a19dc74-a23e-4067-b23e-d05622e8b4da', 'exception_type': 'AnalysisException'}, 'message': 'Pipeline execution failed', 'span_id': 'bb90139fd3a24c8d', 'category': 'internal', 'trace_id': 'd7fec0b1df2c06b811110ccf2679fc5d', 'retryable': False, 'enterprise': {'code': 'SHV-PIP-PIP-INT-2001', 'class': 'internal', 'owner': 'operator', 'title': 'Pipeline execution failed', 'action': 'investigate', 'domain': 'pipeline', 'schema': '1.1', 'severity': 'error', 'retryable': False, 'subsystem': 'PIP', 'catalog_ref': '1.0.0', 'http_status': 500, 'runbook_ref': 'PIPELINE_EXECUTION_FAILED', 'max_attempts': 1, 'max_delay_ms': 0, 'base_delay_ms': 0, 'external_code': 'PIPELINE_EXECUTION_FAILED', 'human_required': True, 'jitter_strategy': 'none', 'http_status_hint': 500, 'external_category': 'internal', 'safe_next_actions': ['request_human'], 'catalog_fingerprint': 'sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631', 'default_retry_policy': 'none', 'retry_after_header_respect': False}, 'request_id': None, 'diagnostics': {'lookup': {'span_id': 'bb90139fd3a24c8d', 'trace_id': 'd7fec0b1df2c06b811110ccf2679fc5d', 'request_id': None, 'correlation_id': None, 'enterprise_code': 'SHV-PIP-PIP-INT-2001', 'catalog_fingerprint': 'sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631'}, 'schema': 'error_diagnostics.v1', 'runbook_ref': 'PIPELINE_EXECUTION_FAILED', 'runbook_uri': 'spice://runbook/PIPELINE_EXECUTION_FAILED', 'group_fingerprint': 'sha256:34f18ff4f324b57bd7b02cba0bece6eafb346707a44fe4f32efcbdb70ab5201a', 'instance_fingerprint': 'sha256:81b95dec324ef9506825f9325926d914f25bcd1e86711f7160d8176ecc6646da'}, 'http_status': 500, 'correlation_id': None}, 'pipeline_spec_commit_id': 'ad2334834c4103aee9c3964fa36311ba2d119885b685b4194fb84b5c520e1ef3', 'pipeline_spec_hash': '70f672568871864db428103a40fb780fff0a3fcb6d3cd38dd7b14fed676d4051', 'input_lakefs_commits': {}, 'output_lakefs_commit_id': None, 'spark_conf': {'spark.app.id': 'local-1771875729624', 'spark.master': 'local[*]', 'spark.version': '3.5.1', 'spark.app.name': 'spice-pipeline-worker', 'spark.driver.host': 'e7d168abab18', 'spark.driver.port': '35145', 'spark.executor.id': 'driver', 'spark.rdd.compress': 'True', 'spark.app.startTime': '1771875728921', 'spark.app.submitTime': '1771875728756', 'spark.submit.pyFiles': '', 'spark.sql.ansi.enabled': 'true', 'spark.sql.warehouse.dir': 'file:/app/spark-warehouse', 'spark.submit.deployMode': 'client', 'spark.default.parallelism': '16', 'spark.sql.adaptive.enabled': 'true', 'spark.sql.session.timeZone': 'UTC', 'spark.sql.shuffle.partitions': '16', 'spark.ui.showConsoleProgress': 'false', 'spark.driver.extraJavaOptions': '-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false', 'spark.executor.extraJavaOptions': '-Djava.net.preferIPv6Addresses=false -XX:+IgnoreUnrecognizedVMOptions --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.invoke=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/jdk.internal.ref=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.nio.cs=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/sun.util.calendar=ALL-UNNAMED --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED -Djdk.reflect.useDirectMethodHandle=false', 'spark.serializer.objectStreamReset': '100', 'spark.sql.adaptive.skewJoin.enabled': 'true', 'spark.sql.adaptive.coalescePartitions.enabled': 'true'}, 'code_version': None, 'started_at': '2026-02-23T19:43:15.830267+00:00', 'finished_at': '2026-02-23T19:43:59.116057+00:00'}\n",
+    "timestamp": "2026-02-23T19:43:59.220203"
+  },
+  {
+    "phase": "Phase 2",
+    "step": "2-4",
+    "endpoint": "POST /pipelines/0a19dc74-a23e-4067-b23e-d05622e8b4da/deploy",
+    "expected": "deploy success",
+    "actual": "Client error '409 Conflict' for url 'http://localhost:8002/api/v1/pipelines/0a19dc74-a23e-4067-b23e-d05622e8b4da/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/S",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 668, in phase2_pipeline_transforms\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '409 Conflict' for url 'http://localhost:8002/api/v1/pipelines/0a19dc74-a23e-4067-b23e-d05622e8b4da/deploy'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/409\n",
+    "timestamp": "2026-02-23T19:43:59.282026"
+  },
+  {
+    "phase": "Phase 4",
+    "step": "4-5",
+    "endpoint": "ES doc properties",
+    "expected": "Order docs",
+    "actual": "No Order-class documents found",
+    "severity": "P1",
+    "traceback": "NoneType: None\n",
+    "timestamp": "2026-02-23T19:44:16.080700"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-7",
+    "endpoint": "search orderBy",
+    "expected": "sorted results",
+    "actual": "Server error '500 Internal Server Error' for url 'http://localhost:8002/api/v2/ontologies/qa_0a0a7f4e07/objects/OrderItem/search?branch=main'\nFor more information check: https://developer.mozilla.org/",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1450, in phase5_search_and_query\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Server error '500 Internal Server Error' for url 'http://localhost:8002/api/v2/ontologies/qa_0a0a7f4e07/objects/OrderItem/search?branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500\n",
+    "timestamp": "2026-02-23T19:44:16.992972"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-11",
+    "endpoint": "graph Order→Customer",
+    "expected": "customer node",
+    "actual": "Server error '503 Service Unavailable' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/S",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1538, in phase5_search_and_query\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Server error '503 Service Unavailable' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\n",
+    "timestamp": "2026-02-23T19:44:17.179495"
+  },
+  {
+    "phase": "Phase 5",
+    "step": "5-12",
+    "endpoint": "graph 2-hop",
+    "expected": "product nodes",
+    "actual": "Client error '404 Not Found' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1567, in phase5_search_and_query\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
+    "timestamp": "2026-02-23T19:44:17.193226"
+  },
+  {
+    "phase": "Phase 6",
+    "step": "6-1",
+    "endpoint": "simulate fulfill_order",
+    "expected": "VALIDATE_ONLY success",
+    "actual": "Client error '404 Not Found' for url 'http://localhost:8000/api/v2/ontologies/qa_0a0a7f4e07/actions/fulfill_order_0a0a7f4e07/apply?branch=main'\nFor more information check: https://developer.mozilla.or",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1685, in phase6_actions\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Client error '404 Not Found' for url 'http://localhost:8000/api/v2/ontologies/qa_0a0a7f4e07/actions/fulfill_order_0a0a7f4e07/apply?branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\n",
+    "timestamp": "2026-02-23T19:44:28.268002"
+  },
+  {
+    "phase": "Phase 7",
+    "step": "7-3",
+    "endpoint": "graph on changed order",
+    "expected": "traversable",
+    "actual": "Server error '503 Service Unavailable' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/S",
+    "severity": "P1",
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 1831, in phase7_closed_loop\n    resp.raise_for_status()\n  File \"/opt/homebrew/lib/python3.12/site-packages/httpx/_models.py\", line 758, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Server error '503 Service Unavailable' for url 'http://localhost:8002/api/v1/graph-query/qa_0a0a7f4e07?base_branch=main'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\n",
+    "timestamp": "2026-02-23T19:44:39.677895"
+  },
+  {
+    "id": "frontend-qa-def5d8c0-ae30-414c-9e98-3821acc7d01b",
+    "timestamp": "2026-02-24T19:33:33.911Z",
+    "source": "frontend_e2e",
+    "severity": "P0",
+    "phase": "Frontend surface",
+    "repro_steps": [
+      "Open mandatory QA screens in sequence",
+      "Observe API call outside allowlist (GET /api/v1/admin/system-health)"
+    ],
+    "expected": "Frontend screens must call only allowlisted BFF/public API paths.",
+    "actual": "allowlist_violation=GET /api/v1/admin/system-health",
+    "endpoint": "GET /api/v1/admin/system-health",
+    "ui_path": "http://127.0.0.1:5173/db/qa_live_mm106st6_lbtef/overview?lang=en&branch=main",
+    "evidence": {
+      "method": "GET",
+      "path": "/api/v1/admin/system-health",
+      "url": "http://127.0.0.1:5173/api/v1/admin/system-health?lang=en",
+      "pageUrl": "http://127.0.0.1:5173/db/qa_live_mm106st6_lbtef/overview?lang=en&branch=main"
+    },
+    "hypothesis": "Legacy or undocumented frontend API call is still wired in UI."
+  },
+  {
+    "id": "frontend-qa-a792628d-95f7-4881-bb66-9d82e16128ef",
+    "timestamp": "2026-02-24T19:33:55.217Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Connectivity",
+    "repro_steps": [
+      "Create export run",
+      "Poll export run status until terminal"
+    ],
+    "expected": "Connectivity export run reaches SUCCEEDED state",
+    "actual": "status=FAILED",
+    "endpoint": "GET /api/v2/connectivity/connections/{connectionRid}/exportRuns/{exportRunRid}",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/overview",
+    "evidence": {
+      "connection_rid": "ri.foundry.main.connection.31ba1e5b-5648-4361-9bca-baab634356e8",
+      "export_run_rid": "ri.foundry.main.export-run.4aa87fc5-d740-41e6-8ff5-89ba280202dd",
+      "response": {
+        "rid": "ri.foundry.main.export-run.4aa87fc5-d740-41e6-8ff5-89ba280202dd",
+        "connectionRid": "ri.foundry.main.connection.31ba1e5b-5648-4361-9bca-baab634356e8",
+        "status": "FAILED",
+        "taskId": "4aa87fc5-d740-41e6-8ff5-89ba280202dd",
+        "createdTime": "2026-02-24T19:33:39.733299+00:00",
+        "startedTime": "2026-02-24T19:33:54.804236+00:00",
+        "completedTime": "2026-02-24T19:33:54.841587+00:00",
+        "error": "All connection attempts failed (auditLogId=525e60b1-3d09-426f-8a13-6e57832e5284)"
+      }
+    },
+    "hypothesis": "Export side-effect execution failed or task state transition is stuck."
+  },
+  {
+    "id": "frontend-qa-d80545d8-79c2-4ddd-b631-d260b553ec9f",
+    "timestamp": "2026-02-24T19:34:07.610Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Objectify",
+    "repro_steps": [
+      "Create mapping spec for Order"
+    ],
+    "expected": "Mapping spec is created",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Client error '404 Not Found' for url 'http://oms:8000/api/v1/database/qa_live_mm106st6_lbtef/ontology/Order?branch=master'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\",\"detail\":{\"message\":\"Client error '404 Not Found' for url 'http://oms:8000/api/v1/database/qa_live_mm106st6_lbtef/ontology/Order?branch=master'\\nFor more inf",
+    "endpoint": "POST /api/v1/objectify/mapping-specs",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/ontology",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Client error '404 Not Found' for url 'http://oms:8000/api/v1/database/qa_live_mm106st6_lbtef/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+        "detail": {
+          "message": "Client error '404 Not Found' for url 'http://oms:8000/api/v1/database/qa_live_mm106st6_lbtef/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+          "code": "INTERNAL_ERROR"
+        },
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/objectify/mapping-specs",
+          "endpoint": "bff.routers.objectify_mapping_specs.create_mapping_spec"
+        },
+        "trace_id": "dc289c90aed02c950c6d19a7c0f26a37",
+        "span_id": "23565829841275aa",
+        "request_id": "a7be978281474520aef791bcaf73666e",
+        "correlation_id": "a7be978281474520aef791bcaf73666e",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:1002f24ff349a0582894184e9169f7106bcbca41ddf79a3b81d8f567f787ce07",
+          "instance_fingerprint": "sha256:62ef595c56ed65de7dfcea3bb5e6a05495a654df867c6935d8db17fb68db0f39",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "a7be978281474520aef791bcaf73666e",
+            "correlation_id": "a7be978281474520aef791bcaf73666e",
+            "trace_id": "dc289c90aed02c950c6d19a7c0f26a37",
+            "span_id": "23565829841275aa"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Client error '404 Not Found' for url 'http://oms:8000/api/v1/database/qa_live_mm106st6_lbtef/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+            "code": "INTERNAL_ERROR"
+          }
+        }
+      }
+    },
+    "hypothesis": "Mapping spec validation failed or dataset/class linkage is invalid."
+  },
+  {
+    "id": "frontend-qa-7d8ba421-c569-4d21-9164-79d34797d974",
+    "timestamp": "2026-02-24T19:34:28.569Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Graph/Multihop",
+    "repro_steps": [
+      "Run graph query from Order object type"
+    ],
+    "expected": "Graph query succeeds and returns nodes/edges",
+    "actual": "status=503; body={\"status\":\"error\",\"message\":\"Overlay index unavailable; cannot serve authoritative view.\",\"detail\":{\"message\":\"Overlay index unavailable; cannot serve authoritative view.\",\"code\":\"UPSTREAM_UNAVAILABLE\",\"error\":\"overlay_degraded\",\"base_branch\":\"main\",\"overlay_branch\":\"main\",\"overlay_status\":\"DEGRADED\",\"writeback_enabled\":false,\"writeback_edits_present\":null,\"branch_virtualization_active\":true,\"read",
+    "endpoint": "POST /api/v1/graph-query/{db}",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/explore/graph",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Overlay index unavailable; cannot serve authoritative view.",
+        "detail": {
+          "message": "Overlay index unavailable; cannot serve authoritative view.",
+          "code": "UPSTREAM_UNAVAILABLE",
+          "error": "overlay_degraded",
+          "base_branch": "main",
+          "overlay_branch": "main",
+          "overlay_status": "DEGRADED",
+          "writeback_enabled": false,
+          "writeback_edits_present": null,
+          "branch_virtualization_active": true,
+          "read_model_base_branch": "master"
+        },
+        "code": "UPSTREAM_UNAVAILABLE",
+        "category": "internal",
+        "http_status": 503,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-UNA-3001",
+          "domain": "system",
+          "class": "unavailable",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Overlay degraded",
+          "http_status": 503,
+          "http_status_hint": 503,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "overlay_degraded",
+          "safe_next_actions": [
+            "safe_mode",
+            "request_human"
+          ],
+          "action": "retry",
+          "owner": "system",
+          "external_code": "overlay_degraded",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/graph-query/qa_live_mm106st6_lbtef",
+          "endpoint": "bff.routers.graph.execute_graph_query"
+        },
+        "trace_id": "7d678cd0b7d5d7c852386770f932dbe7",
+        "span_id": "8e45c956a20ea7f6",
+        "request_id": "ae47fe6f8c154cb199c9dc7230afead2",
+        "correlation_id": "ae47fe6f8c154cb199c9dc7230afead2",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:ecc44949980f76490b81c1dd1e38dd4ede4febefd5d03bdd1b0edae5f55aa941",
+          "instance_fingerprint": "sha256:3bdcdd249f836e5be59f347c4da65e73f98110cbad2ee9af39f89d068c76f7d8",
+          "runbook_ref": "overlay_degraded",
+          "runbook_uri": "spice://runbook/overlay_degraded",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-UNA-3001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "ae47fe6f8c154cb199c9dc7230afead2",
+            "correlation_id": "ae47fe6f8c154cb199c9dc7230afead2",
+            "trace_id": "7d678cd0b7d5d7c852386770f932dbe7",
+            "span_id": "8e45c956a20ea7f6"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Overlay index unavailable; cannot serve authoritative view.",
+            "code": "UPSTREAM_UNAVAILABLE",
+            "error": "overlay_degraded",
+            "base_branch": "main",
+            "overlay_branch": "main",
+            "overlay_status": "DEGRADED",
+            "writeback_enabled": false,
+            "writeback_edits_present": null,
+            "branch_virtualization_active": true,
+            "read_model_base_branch": "master"
+          }
+        }
+      }
+    },
+    "hypothesis": "Graph federation index is missing or ontology-to-index mapping is incomplete."
+  },
+  {
+    "id": "frontend-qa-2ccbe9c1-4faf-492f-8c1b-07ab9aae08fc",
+    "timestamp": "2026-02-24T19:35:00.587Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Graph/Multihop",
+    "repro_steps": [
+      "Create deterministic seed instances for Order -> Order -> Order chain",
+      "Run dedicated 2-hop graph query with start_class=Order"
+    ],
+    "expected": "Graph query returns seeded nodes, required predicates, and at least one 2-hop path.",
+    "actual": "dedicated_multihop_verified=false",
+    "endpoint": "POST /api/v1/graph-query/{db}",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/explore/graph",
+    "evidence": {
+      "seed": {
+        "orderHeadId": "-qa_multihop_order_head_mm1085w9",
+        "orderMidId": "-qa_multihop_order_mid_mm1085w9",
+        "orderTailId": "-qa_multihop_order_tail_mm1085w9"
+      },
+      "tail_ready": true,
+      "mid_ready": true,
+      "head_ready": true,
+      "attempt": 25,
+      "response_status": 503,
+      "node_count": 0,
+      "edge_count": 0,
+      "path_count": 0,
+      "node_ids_sample": [],
+      "predicates_sample": [],
+      "has_required_nodes": false,
+      "has_required_predicates": false,
+      "has_two_hop_path": false,
+      "response": {
+        "status": "error",
+        "message": "Overlay index unavailable; cannot serve authoritative view.",
+        "detail": {
+          "message": "Overlay index unavailable; cannot serve authoritative view.",
+          "code": "UPSTREAM_UNAVAILABLE",
+          "error": "overlay_degraded",
+          "base_branch": "main",
+          "overlay_branch": "main",
+          "overlay_status": "DEGRADED",
+          "writeback_enabled": false,
+          "writeback_edits_present": null,
+          "branch_virtualization_active": true,
+          "read_model_base_branch": "master"
+        },
+        "code": "UPSTREAM_UNAVAILABLE",
+        "category": "internal",
+        "http_status": 503,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-UNA-3001",
+          "domain": "system",
+          "class": "unavailable",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Overlay degraded",
+          "http_status": 503,
+          "http_status_hint": 503,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "overlay_degraded",
+          "safe_next_actions": [
+            "safe_mode",
+            "request_human"
+          ],
+          "action": "retry",
+          "owner": "system",
+          "external_code": "overlay_degraded",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/graph-query/qa_live_mm106st6_lbtef",
+          "endpoint": "bff.routers.graph.execute_graph_query"
+        },
+        "trace_id": "46018de1b1ae4e7dd5989cbbcd3b0446",
+        "span_id": "0fabe610a8a39f41",
+        "request_id": "72476018367e4632bfb6f34c25e5ef40",
+        "correlation_id": "72476018367e4632bfb6f34c25e5ef40",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:ecc44949980f76490b81c1dd1e38dd4ede4febefd5d03bdd1b0edae5f55aa941",
+          "instance_fingerprint": "sha256:a238ff83327ec23fa65fcd41ff6e0e72334b80822c4932931da3af8301e1ccd0",
+          "runbook_ref": "overlay_degraded",
+          "runbook_uri": "spice://runbook/overlay_degraded",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-UNA-3001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "72476018367e4632bfb6f34c25e5ef40",
+            "correlation_id": "72476018367e4632bfb6f34c25e5ef40",
+            "trace_id": "46018de1b1ae4e7dd5989cbbcd3b0446",
+            "span_id": "0fabe610a8a39f41"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Overlay index unavailable; cannot serve authoritative view.",
+            "code": "UPSTREAM_UNAVAILABLE",
+            "error": "overlay_degraded",
+            "base_branch": "main",
+            "overlay_branch": "main",
+            "overlay_status": "DEGRADED",
+            "writeback_enabled": false,
+            "writeback_edits_present": null,
+            "branch_virtualization_active": true,
+            "read_model_base_branch": "master"
+          }
+        }
+      }
+    },
+    "hypothesis": "Relationships were not materialized into graph index or query traversal contract drifted."
+  },
+  {
+    "id": "frontend-qa-6b171bc8-f03b-4bb0-9ecc-46cafd45caf3",
+    "timestamp": "2026-02-24T19:35:24.918Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "List query types from v2 ontology surface"
+    ],
+    "expected": "Query type QaOrderSearch appears in queryTypes list",
+    "actual": "query_type_missing=QaOrderSearch",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/queryTypes",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "v2 query type listing does not reflect ontology function resources consistently."
+  },
+  {
+    "id": "frontend-qa-f838f94f-3775-404d-a937-e271603ce0d3",
+    "timestamp": "2026-02-24T19:35:24.918Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "Get query type by api name from v2 ontology surface"
+    ],
+    "expected": "Query type QaOrderSearch is retrievable",
+    "actual": "status=404; body={\"errorCode\":\"NOT_FOUND\",\"errorName\":\"QueryTypeNotFound\",\"errorInstanceId\":\"44776b45-5f45-4b16-9fb4-a1a5d274b4dd\",\"parameters\":{\"ontology\":\"qa_live_mm106st6_lbtef\",\"queryApiName\":\"QaOrderSearch\"}}",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/ontology",
+    "evidence": {
+      "response": {
+        "errorCode": "NOT_FOUND",
+        "errorName": "QueryTypeNotFound",
+        "errorInstanceId": "44776b45-5f45-4b16-9fb4-a1a5d274b4dd",
+        "parameters": {
+          "ontology": "qa_live_mm106st6_lbtef",
+          "queryApiName": "QaOrderSearch"
+        }
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "Query type retrieval projection is stale or version metadata did not materialize."
+  },
+  {
+    "id": "frontend-qa-83be5b8a-fc7a-4167-a8fc-7d0a1541d3e1",
+    "timestamp": "2026-02-24T19:35:25.014Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "Execute query type via v2 query execution endpoint"
+    ],
+    "expected": "Query execute responds successfully",
+    "actual": "status=404; body={\"status\":\"error\",\"message\":\"Resource not found\",\"detail\":{\"message\":\"Resource not found\",\"code\":\"RESOURCE_NOT_FOUND\"},\"code\":\"RESOURCE_NOT_FOUND\",\"category\":\"resource\",\"http_status\":404,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631\",\"code\":\"SHV-OMS-RES-NOT-0001\",\"domain\":\"resource",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute",
+    "ui_path": "/db/qa_live_mm106st6_lbtef/explore/query",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Resource not found",
+        "detail": {
+          "message": "Resource not found",
+          "code": "RESOURCE_NOT_FOUND"
+        },
+        "code": "RESOURCE_NOT_FOUND",
+        "category": "resource",
+        "http_status": 404,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-OMS-RES-NOT-0001",
+          "domain": "resource",
+          "class": "not_found",
+          "subsystem": "OMS",
+          "severity": "error",
+          "title": "Resource not found",
+          "http_status": 404,
+          "http_status_hint": 404,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "RESOURCE_NOT_FOUND",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "check_resource",
+          "owner": "user",
+          "external_code": "RESOURCE_NOT_FOUND",
+          "external_category": "resource"
+        },
+        "origin": {
+          "service": "OMS",
+          "method": "GET",
+          "path": "/api/v1/database/qa_live_mm106st6_lbtef/ontology/resources/function/QaOrderSearch",
+          "endpoint": "oms.routers.ontology_extensions.get_resource"
+        },
+        "trace_id": "461916465f556e43b5f6bb9a3149dceb",
+        "span_id": "70d9a7d07a2439fd",
+        "request_id": "0be76465f0794a4ea1d73364a1adcf21",
+        "correlation_id": "0be76465f0794a4ea1d73364a1adcf21",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:01c423ec8a8b33994cd7b5560c361b2c3dcab928f6b2b889ccce66cf8e63f0c9",
+          "instance_fingerprint": "sha256:f0d7649e269c2a04f9a1ebbcdd77b385960c234bc09da85117f06b2ec12dfb9c",
+          "runbook_ref": "RESOURCE_NOT_FOUND",
+          "runbook_uri": "spice://runbook/RESOURCE_NOT_FOUND",
+          "lookup": {
+            "enterprise_code": "SHV-OMS-RES-NOT-0001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "0be76465f0794a4ea1d73364a1adcf21",
+            "correlation_id": "0be76465f0794a4ea1d73364a1adcf21",
+            "trace_id": "461916465f556e43b5f6bb9a3149dceb",
+            "span_id": "70d9a7d07a2439fd"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Resource not found",
+            "code": "RESOURCE_NOT_FOUND"
+          }
+        }
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "Kinetic query execution bridge from function resource to object search failed."
+  },
+  {
+    "id": "frontend-qa-7b68d83c-ac21-47c7-9d13-a7654ba4d58f",
+    "timestamp": "2026-02-24T19:37:59.572Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Objectify",
+    "repro_steps": [
+      "Create mapping spec for Order"
+    ],
+    "expected": "Mapping spec is created",
+    "actual": "status=500; body={\"status\":\"error\",\"message\":\"Client error '404 Not Found' for url 'http://127.0.0.1:8000/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/Order?branch=master'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404\",\"detail\":{\"message\":\"Client error '404 Not Found' for url 'http://127.0.0.1:8000/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/Order?branch=master'\\n",
+    "endpoint": "POST /api/v1/objectify/mapping-specs",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/ontology",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Client error '404 Not Found' for url 'http://127.0.0.1:8000/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+        "detail": {
+          "message": "Client error '404 Not Found' for url 'http://127.0.0.1:8000/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+          "code": "INTERNAL_ERROR"
+        },
+        "code": "INTERNAL_ERROR",
+        "category": "internal",
+        "http_status": 500,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-INT-0001",
+          "domain": "system",
+          "class": "internal",
+          "subsystem": "BFF",
+          "severity": "critical",
+          "title": "Internal server error",
+          "http_status": 500,
+          "http_status_hint": 500,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "INTERNAL_ERROR",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "investigate",
+          "owner": "operator",
+          "external_code": "INTERNAL_ERROR",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/objectify/mapping-specs",
+          "endpoint": "bff.routers.objectify_mapping_specs.create_mapping_spec"
+        },
+        "trace_id": "86dd552cae5663a2e272c6f0a2282d88",
+        "span_id": "7329fe7d554a49eb",
+        "request_id": "44cafe961ed346c6a0de9c4dab36674e",
+        "correlation_id": "44cafe961ed346c6a0de9c4dab36674e",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:1002f24ff349a0582894184e9169f7106bcbca41ddf79a3b81d8f567f787ce07",
+          "instance_fingerprint": "sha256:a3e5283f015b4a838f161d6c04529c098c4280018ecc7d9751dcde6c5ba6f4ec",
+          "runbook_ref": "INTERNAL_ERROR",
+          "runbook_uri": "spice://runbook/INTERNAL_ERROR",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-INT-0001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "44cafe961ed346c6a0de9c4dab36674e",
+            "correlation_id": "44cafe961ed346c6a0de9c4dab36674e",
+            "trace_id": "86dd552cae5663a2e272c6f0a2282d88",
+            "span_id": "7329fe7d554a49eb"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Client error '404 Not Found' for url 'http://127.0.0.1:8000/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/Order?branch=master'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+            "code": "INTERNAL_ERROR"
+          }
+        }
+      }
+    },
+    "hypothesis": "Mapping spec validation failed or dataset/class linkage is invalid."
+  },
+  {
+    "id": "frontend-qa-165f23ce-43b5-4849-9124-ac41836bfc38",
+    "timestamp": "2026-02-24T19:38:20.825Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Graph/Multihop",
+    "repro_steps": [
+      "Run graph query from Order object type"
+    ],
+    "expected": "Graph query succeeds and returns nodes/edges",
+    "actual": "status=503; body={\"status\":\"error\",\"message\":\"Overlay index unavailable; cannot serve authoritative view.\",\"detail\":{\"message\":\"Overlay index unavailable; cannot serve authoritative view.\",\"code\":\"UPSTREAM_UNAVAILABLE\",\"error\":\"overlay_degraded\",\"base_branch\":\"main\",\"overlay_branch\":\"main\",\"overlay_status\":\"DEGRADED\",\"writeback_enabled\":false,\"writeback_edits_present\":null,\"branch_virtualization_active\":true,\"read",
+    "endpoint": "POST /api/v1/graph-query/{db}",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/explore/graph",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Overlay index unavailable; cannot serve authoritative view.",
+        "detail": {
+          "message": "Overlay index unavailable; cannot serve authoritative view.",
+          "code": "UPSTREAM_UNAVAILABLE",
+          "error": "overlay_degraded",
+          "base_branch": "main",
+          "overlay_branch": "main",
+          "overlay_status": "DEGRADED",
+          "writeback_enabled": false,
+          "writeback_edits_present": null,
+          "branch_virtualization_active": true,
+          "read_model_base_branch": "master"
+        },
+        "code": "UPSTREAM_UNAVAILABLE",
+        "category": "internal",
+        "http_status": 503,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-UNA-3001",
+          "domain": "system",
+          "class": "unavailable",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Overlay degraded",
+          "http_status": 503,
+          "http_status_hint": 503,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "overlay_degraded",
+          "safe_next_actions": [
+            "safe_mode",
+            "request_human"
+          ],
+          "action": "retry",
+          "owner": "system",
+          "external_code": "overlay_degraded",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/graph-query/qa_live_mm10c5uv_3uru7",
+          "endpoint": "bff.routers.graph.execute_graph_query"
+        },
+        "trace_id": "e175e557fa621cae1797ec2842b588e9",
+        "span_id": "0096c231753900cc",
+        "request_id": "41c1ec2838094653bdcdbd48eab9ad9b",
+        "correlation_id": "41c1ec2838094653bdcdbd48eab9ad9b",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:ecc44949980f76490b81c1dd1e38dd4ede4febefd5d03bdd1b0edae5f55aa941",
+          "instance_fingerprint": "sha256:110882800476fac1555bdabc142539b3c21a3ca715accaa3f6aaad679169f479",
+          "runbook_ref": "overlay_degraded",
+          "runbook_uri": "spice://runbook/overlay_degraded",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-UNA-3001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "41c1ec2838094653bdcdbd48eab9ad9b",
+            "correlation_id": "41c1ec2838094653bdcdbd48eab9ad9b",
+            "trace_id": "e175e557fa621cae1797ec2842b588e9",
+            "span_id": "0096c231753900cc"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Overlay index unavailable; cannot serve authoritative view.",
+            "code": "UPSTREAM_UNAVAILABLE",
+            "error": "overlay_degraded",
+            "base_branch": "main",
+            "overlay_branch": "main",
+            "overlay_status": "DEGRADED",
+            "writeback_enabled": false,
+            "writeback_edits_present": null,
+            "branch_virtualization_active": true,
+            "read_model_base_branch": "master"
+          }
+        }
+      }
+    },
+    "hypothesis": "Graph federation index is missing or ontology-to-index mapping is incomplete."
+  },
+  {
+    "id": "frontend-qa-6043acca-875e-4679-92e3-6889dee1f8ae",
+    "timestamp": "2026-02-24T19:38:52.114Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Graph/Multihop",
+    "repro_steps": [
+      "Create deterministic seed instances for Order -> Order -> Order chain",
+      "Run dedicated 2-hop graph query with start_class=Order"
+    ],
+    "expected": "Graph query returns seeded nodes, required predicates, and at least one 2-hop path.",
+    "actual": "dedicated_multihop_verified=false",
+    "endpoint": "POST /api/v1/graph-query/{db}",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/explore/graph",
+    "evidence": {
+      "seed": {
+        "orderHeadId": "-qa_multihop_order_head_mm10d53t",
+        "orderMidId": "-qa_multihop_order_mid_mm10d53t",
+        "orderTailId": "-qa_multihop_order_tail_mm10d53t"
+      },
+      "tail_ready": true,
+      "mid_ready": true,
+      "head_ready": true,
+      "attempt": 25,
+      "response_status": 503,
+      "node_count": 0,
+      "edge_count": 0,
+      "path_count": 0,
+      "node_ids_sample": [],
+      "predicates_sample": [],
+      "has_required_nodes": false,
+      "has_required_predicates": false,
+      "has_two_hop_path": false,
+      "response": {
+        "status": "error",
+        "message": "Overlay index unavailable; cannot serve authoritative view.",
+        "detail": {
+          "message": "Overlay index unavailable; cannot serve authoritative view.",
+          "code": "UPSTREAM_UNAVAILABLE",
+          "error": "overlay_degraded",
+          "base_branch": "main",
+          "overlay_branch": "main",
+          "overlay_status": "DEGRADED",
+          "writeback_enabled": false,
+          "writeback_edits_present": null,
+          "branch_virtualization_active": true,
+          "read_model_base_branch": "master"
+        },
+        "code": "UPSTREAM_UNAVAILABLE",
+        "category": "internal",
+        "http_status": 503,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-BFF-SYS-UNA-3001",
+          "domain": "system",
+          "class": "unavailable",
+          "subsystem": "BFF",
+          "severity": "error",
+          "title": "Overlay degraded",
+          "http_status": 503,
+          "http_status_hint": 503,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "overlay_degraded",
+          "safe_next_actions": [
+            "safe_mode",
+            "request_human"
+          ],
+          "action": "retry",
+          "owner": "system",
+          "external_code": "overlay_degraded",
+          "external_category": "internal"
+        },
+        "origin": {
+          "service": "BFF",
+          "method": "POST",
+          "path": "/api/v1/graph-query/qa_live_mm10c5uv_3uru7",
+          "endpoint": "bff.routers.graph.execute_graph_query"
+        },
+        "trace_id": "1ad829a2df1129da844ab11305829c92",
+        "span_id": "91bb742185c7716d",
+        "request_id": "1a6dc9d7093e47608426b80274f102b4",
+        "correlation_id": "1a6dc9d7093e47608426b80274f102b4",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:ecc44949980f76490b81c1dd1e38dd4ede4febefd5d03bdd1b0edae5f55aa941",
+          "instance_fingerprint": "sha256:d6e0bcbcdb1364e3cfcdf4a63b4403292ba006dae3d8a2d0f7f09227e4a9fb83",
+          "runbook_ref": "overlay_degraded",
+          "runbook_uri": "spice://runbook/overlay_degraded",
+          "lookup": {
+            "enterprise_code": "SHV-BFF-SYS-UNA-3001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "1a6dc9d7093e47608426b80274f102b4",
+            "correlation_id": "1a6dc9d7093e47608426b80274f102b4",
+            "trace_id": "1ad829a2df1129da844ab11305829c92",
+            "span_id": "91bb742185c7716d"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Overlay index unavailable; cannot serve authoritative view.",
+            "code": "UPSTREAM_UNAVAILABLE",
+            "error": "overlay_degraded",
+            "base_branch": "main",
+            "overlay_branch": "main",
+            "overlay_status": "DEGRADED",
+            "writeback_enabled": false,
+            "writeback_edits_present": null,
+            "branch_virtualization_active": true,
+            "read_model_base_branch": "master"
+          }
+        }
+      }
+    },
+    "hypothesis": "Relationships were not materialized into graph index or query traversal contract drifted."
+  },
+  {
+    "id": "frontend-qa-406dc73e-49a0-4cb6-99e1-fb973fba3ce1",
+    "timestamp": "2026-02-24T19:39:12.048Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "List query types from v2 ontology surface"
+    ],
+    "expected": "Query type QaOrderSearch appears in queryTypes list",
+    "actual": "query_type_missing=QaOrderSearch",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/queryTypes",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/ontology",
+    "evidence": {
+      "response": {
+        "data": [],
+        "nextPageToken": null
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "v2 query type listing does not reflect ontology function resources consistently."
+  },
+  {
+    "id": "frontend-qa-d1b120e8-8cc7-48fb-a25a-ecc237b63e3b",
+    "timestamp": "2026-02-24T19:39:12.049Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "Get query type by api name from v2 ontology surface"
+    ],
+    "expected": "Query type QaOrderSearch is retrievable",
+    "actual": "status=404; body={\"errorCode\":\"NOT_FOUND\",\"errorName\":\"QueryTypeNotFound\",\"errorInstanceId\":\"383cd45e-21f0-4277-bf5e-cd4fb432cf96\",\"parameters\":{\"ontology\":\"qa_live_mm10c5uv_3uru7\",\"queryApiName\":\"QaOrderSearch\"}}",
+    "endpoint": "GET /api/v2/ontologies/{ontology}/queryTypes/{queryApiName}",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/ontology",
+    "evidence": {
+      "response": {
+        "errorCode": "NOT_FOUND",
+        "errorName": "QueryTypeNotFound",
+        "errorInstanceId": "383cd45e-21f0-4277-bf5e-cd4fb432cf96",
+        "parameters": {
+          "ontology": "qa_live_mm10c5uv_3uru7",
+          "queryApiName": "QaOrderSearch"
+        }
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "Query type retrieval projection is stale or version metadata did not materialize."
+  },
+  {
+    "id": "frontend-qa-1e42257a-efea-4999-82f9-80bf2e6a957e",
+    "timestamp": "2026-02-24T19:39:12.138Z",
+    "source": "frontend_e2e",
+    "severity": "P1",
+    "phase": "Kinetic query",
+    "repro_steps": [
+      "Execute query type via v2 query execution endpoint"
+    ],
+    "expected": "Query execute responds successfully",
+    "actual": "status=404; body={\"status\":\"error\",\"message\":\"Resource not found\",\"detail\":{\"message\":\"Resource not found\",\"code\":\"RESOURCE_NOT_FOUND\"},\"code\":\"RESOURCE_NOT_FOUND\",\"category\":\"resource\",\"http_status\":404,\"retryable\":false,\"enterprise\":{\"schema\":\"1.1\",\"catalog_ref\":\"1.0.0\",\"catalog_fingerprint\":\"sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631\",\"code\":\"SHV-OMS-RES-NOT-0001\",\"domain\":\"resource",
+    "endpoint": "POST /api/v2/ontologies/{ontology}/queries/{queryApiName}/execute",
+    "ui_path": "/db/qa_live_mm10c5uv_3uru7/explore/query",
+    "evidence": {
+      "response": {
+        "status": "error",
+        "message": "Resource not found",
+        "detail": {
+          "message": "Resource not found",
+          "code": "RESOURCE_NOT_FOUND"
+        },
+        "code": "RESOURCE_NOT_FOUND",
+        "category": "resource",
+        "http_status": 404,
+        "retryable": false,
+        "enterprise": {
+          "schema": "1.1",
+          "catalog_ref": "1.0.0",
+          "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+          "code": "SHV-OMS-RES-NOT-0001",
+          "domain": "resource",
+          "class": "not_found",
+          "subsystem": "OMS",
+          "severity": "error",
+          "title": "Resource not found",
+          "http_status": 404,
+          "http_status_hint": 404,
+          "retryable": false,
+          "default_retry_policy": "none",
+          "max_attempts": 1,
+          "base_delay_ms": 0,
+          "max_delay_ms": 0,
+          "jitter_strategy": "none",
+          "retry_after_header_respect": false,
+          "human_required": true,
+          "runbook_ref": "RESOURCE_NOT_FOUND",
+          "safe_next_actions": [
+            "request_human"
+          ],
+          "action": "check_resource",
+          "owner": "user",
+          "external_code": "RESOURCE_NOT_FOUND",
+          "external_category": "resource"
+        },
+        "origin": {
+          "service": "OMS",
+          "method": "GET",
+          "path": "/api/v1/database/qa_live_mm10c5uv_3uru7/ontology/resources/function/QaOrderSearch",
+          "endpoint": "oms.routers.ontology_extensions.get_resource"
+        },
+        "trace_id": "940f068869038743d07ff4f0747b431f",
+        "span_id": "b42e17e970ca14ee",
+        "request_id": "ed2ad0d8028745b2988dfb01492ce89b",
+        "correlation_id": "ed2ad0d8028745b2988dfb01492ce89b",
+        "diagnostics": {
+          "schema": "error_diagnostics.v1",
+          "group_fingerprint": "sha256:01c423ec8a8b33994cd7b5560c361b2c3dcab928f6b2b889ccce66cf8e63f0c9",
+          "instance_fingerprint": "sha256:804e43b27c69542c3d329742a948bc1795ddde5a86d869518c11f85c2a49073f",
+          "runbook_ref": "RESOURCE_NOT_FOUND",
+          "runbook_uri": "spice://runbook/RESOURCE_NOT_FOUND",
+          "lookup": {
+            "enterprise_code": "SHV-OMS-RES-NOT-0001",
+            "catalog_fingerprint": "sha256:a5b6499776a5b9f7086a2f6ab897f2b088f65ffa0bf08d6d4b36a9131b3f4631",
+            "request_id": "ed2ad0d8028745b2988dfb01492ce89b",
+            "correlation_id": "ed2ad0d8028745b2988dfb01492ce89b",
+            "trace_id": "940f068869038743d07ff4f0747b431f",
+            "span_id": "b42e17e970ca14ee"
+          }
+        },
+        "context": {
+          "detail": {
+            "message": "Resource not found",
+            "code": "RESOURCE_NOT_FOUND"
+          }
+        }
+      },
+      "query_type_id": "QaOrderSearch"
+    },
+    "hypothesis": "Kinetic query execution bridge from function resource to object search failed."
+  }
+]
