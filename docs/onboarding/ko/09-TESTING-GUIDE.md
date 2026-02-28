@@ -28,7 +28,7 @@
 
 > 💡 한 줄 요약: 가장 자주 쓰는 명령어는 `make backend-unit`이에요. Docker 없이도 실행 가능합니다.
 
-### 실행
+### 실행 (단위 테스트)
 
 ```bash
 # 전체 단위 테스트 실행 (가장 많이 사용)
@@ -118,7 +118,7 @@ E2E 테스트를 실행하기 전에 전체 스택이 실행 중이어야 해요
 docker compose -f docker-compose.full.yml up -d
 ```
 
-### 실행
+### 실행 (백엔드 E2E)
 
 ```bash
 # 전체 E2E 테스트

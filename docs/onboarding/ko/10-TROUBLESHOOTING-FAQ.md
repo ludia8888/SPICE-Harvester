@@ -265,7 +265,7 @@ ERROR: relation "xxx" does not exist
 - `ALTER TABLE IF EXISTS` 패턴 사용
 - 예외 처리에 `EXCEPTION WHEN undefined_table` 블록 포함
 
-```sql
+```text
 -- 올바른 마이그레이션 패턴
 DO $$
 BEGIN

@@ -243,14 +243,14 @@ Import Mode 종류:
 
 > 💡 빠르게 코드를 이해하고 싶다면, 이 순서로 파일을 읽어보세요.
 
-#### BFF/OMS 서비스 구조
+### BFF/OMS 서비스 구조
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
 | 1 | `backend/bff/main.py` | BFF 서비스 전체 구조 |
 | 2 | `backend/oms/main.py` | OMS 서비스 전체 구조 |
 
-#### 핵심 모델/설정
+### 핵심 모델/설정
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
@@ -259,14 +259,14 @@ Import Mode 종류:
 | 7 | `backend/shared/config/settings.py` | 환경 설정 |
 | 8 | `backend/shared/models/event_envelope.py` | 이벤트 구조 |
 
-#### 라우터/검색
+### 라우터/검색
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
 | 5 | `backend/bff/routers/foundry_ontology_v2.py` (처음 300줄) | Foundry v2 API 패턴 |
 | 6 | `backend/oms/routers/query.py` (처음 200줄) | 검색 로직 |
 
-#### 워커/레지스트리
+### 워커/레지스트리
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
@@ -274,7 +274,7 @@ Import Mode 종류:
 | 10 | `backend/objectify_worker/main.py` | 데이터 변환 |
 | 11 | `backend/shared/services/registries/dataset_registry.py` | 레지스트리 패턴 |
 
-#### 프론트엔드
+### 프론트엔드 (코드)
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
@@ -282,7 +282,7 @@ Import Mode 종류:
 | 13 | `frontend/src/app/AppRouter.tsx` | 프론트엔드 라우팅 |
 | 14 | `frontend/src/pages/OntologyPage.tsx` | 핵심 UI 페이지 |
 
-#### 인프라
+### 인프라 (Docker Compose)
 
 | 순서 | 파일 | 이유 |
 |------|------|------|
@@ -304,11 +304,11 @@ Import Mode 종류:
 - [FastAPI 공식 문서](https://fastapi.tiangolo.com/) — 백엔드 프레임워크
 - [Pydantic v2 문서](https://docs.pydantic.dev/) — 데이터 검증
 
-#### 프론트엔드
+#### 프론트엔드 (외부 문서)
 - [React 공식 문서](https://react.dev/) — 프론트엔드 프레임워크
 - [BlueprintJS 문서](https://blueprintjs.com/) — UI 컴포넌트
 - [Zustand 문서](https://zustand-demo.pmnd.rs/) — 상태 관리
 
-#### 인프라
+#### 인프라 (외부 문서)
 - [Apache Kafka 문서](https://kafka.apache.org/documentation/) — 메시징
 - [Elasticsearch 문서](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html) — 검색 엔진

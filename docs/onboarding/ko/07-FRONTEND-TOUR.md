@@ -8,7 +8,7 @@
 
 > 💡 익숙한 기술이 많을 거예요. React + TypeScript 기반이고, 상태 관리는 Zustand로 가볍게 가져갑니다.
 
-#### 코어
+### 코어
 
 | 기술 | 버전 | 역할 |
 |:---|:---|:---|
@@ -16,7 +16,7 @@
 | TypeScript | - | 타입 안전성 |
 | Vite | 5.x | 빠른 빌드 + HMR (Hot Module Replacement) |
 
-#### UI와 상태 관리
+### UI와 상태 관리
 
 | 기술 | 버전 | 역할 |
 |:---|:---|:---|
@@ -24,7 +24,7 @@
 | Zustand | 5.x | 경량 전역 상태 |
 | TanStack React Query | 5.x | API 요청 캐싱 + 갱신 |
 
-#### 시각화와 도구
+### 시각화와 도구
 
 | 기술 | 버전 | 역할 |
 |:---|:---|:---|
@@ -180,7 +180,7 @@ async function getDatabases(): Promise<ApiResponse<DatabaseRecord[]>> {
 
 전역 상태를 **심플하게** 관리해요.
 
-```typescript
+```tsx
 // Zustand 스토어 사용 예시
 const useAppStore = create((set) => ({
   selectedDatabase: null,
