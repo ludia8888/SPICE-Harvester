@@ -39,3 +39,20 @@ reference/_generated/ONTOLOGY_AGENT_ALLOWED_TOOLS
 reference/_generated/API_VERSION_OVERLAP
 reference/_generated/REPO_FILE_INVENTORY
 ```
+
+```{toctree}
+:maxdepth: 2
+:caption: Onboarding (한국어)
+
+onboarding/ko/01-WHAT-IS-SPICE
+onboarding/ko/02-MENTAL-MODEL
+onboarding/ko/03-LOCAL-SETUP
+onboarding/ko/04-FIRST-API-CALL
+onboarding/ko/05-ARCHITECTURE-EXPLAINED
+onboarding/ko/06-DATA-FLOW-WALKTHROUGH
+onboarding/ko/07-FRONTEND-TOUR
+onboarding/ko/08-DEVELOPMENT-WORKFLOW
+onboarding/ko/09-TESTING-GUIDE
+onboarding/ko/10-TROUBLESHOOTING-FAQ
+onboarding/ko/LEARNING-ROADMAP
+```

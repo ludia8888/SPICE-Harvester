@@ -28,6 +28,20 @@ REFERENCE_DOCS = [
     "reference/_generated/REPO_FILE_INVENTORY",
 ]
 
+ONBOARDING_KO_DOCS = [
+    "onboarding/ko/01-WHAT-IS-SPICE",
+    "onboarding/ko/02-MENTAL-MODEL",
+    "onboarding/ko/03-LOCAL-SETUP",
+    "onboarding/ko/04-FIRST-API-CALL",
+    "onboarding/ko/05-ARCHITECTURE-EXPLAINED",
+    "onboarding/ko/06-DATA-FLOW-WALKTHROUGH",
+    "onboarding/ko/07-FRONTEND-TOUR",
+    "onboarding/ko/08-DEVELOPMENT-WORKFLOW",
+    "onboarding/ko/09-TESTING-GUIDE",
+    "onboarding/ko/10-TROUBLESHOOTING-FAQ",
+    "onboarding/ko/LEARNING-ROADMAP",
+]
+
 
 def _render() -> str:
     lines: list[str] = []
@@ -62,6 +76,14 @@ def _render() -> str:
     lines.append(":caption: Reference")
     lines.append("")
     lines.extend(REFERENCE_DOCS)
+    lines.append("```")
+    lines.append("")
+
+    lines.append("```{toctree}")
+    lines.append(":maxdepth: 2")
+    lines.append(":caption: Onboarding (한국어)")
+    lines.append("")
+    lines.extend(ONBOARDING_KO_DOCS)
     lines.append("```")
     lines.append("")
 
