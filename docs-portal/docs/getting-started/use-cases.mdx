@@ -1,0 +1,91 @@
+---
+title: Real-World Use Cases
+sidebar_position: 4
+---
+
+# Real-World Use Cases
+
+This page explains what Spice OS can do through practical business scenarios. Each example uses the actual API and architecture of the platform.
+
+## Multi-Hop Graph Queries
+
+Navigate connected data across multiple relationship types — like following a trail of breadcrumbs.
+
+**Example: Fraud Investigation**
+
+```json
+{
+  "start_class": "Person",
+  "filters": { "phone": "010-1234-5678" },
+  "hops": [
+    { "predicate": "owner", "target_class": "BankAccount", "reverse": true },
+    { "predicate": "from_account", "target_class": "Transaction", "reverse": true },
+    { "predicate": "to_account", "target_class": "BankAccount" },
+    { "predicate": "owner", "target_class": "Person" }
+  ],
+  "include_paths": true,
+  "max_paths": 25
+}
+```
+
+This single query traverses `Person → BankAccount → Transaction → BankAccount → Person` in milliseconds, replacing what would take multiple SQL JOINs.
+
+**Use cases:** Financial fraud detection, epidemiological contact tracing, supply chain tracking, product recommendations.
+
+## 23 Search Operators
+
+The Search API provides 23 operators for precise data filtering:
+
+| Category | Operators | Count |
+|----------|-----------|-------|
+| **Comparison** | `eq`, `gt`, `lt`, `gte`, `lte` | 5 |
+| **Text** | `containsAnyTerm`, `containsAllTerms`, `containsAllTermsInOrder`, `containsAllTermsInOrderPrefixLastTerm`, `startsWith`, `wildcard`, `regex` | 7 |
+| **Geospatial** | `withinDistanceOf`, `withinBoundingBox`, `withinPolygon`, `intersectsBoundingBox`, `intersectsPolygon`, `doesNotIntersectBoundingBox`, `doesNotIntersectPolygon` | 7 |
+| **Logical** | `and`, `or`, `not` | 3 |
+| **Other** | `isNull` | 1 |
+
+## Real-Time Aggregations
+
+Compute metrics across large datasets without loading all rows:
+
+- 8 metric types: `count`, `sum`, `avg`, `min`, `max`, `exactDistinct`, `approximateDistinct`, `approximatePercentile`
+- Group by one or more fields
+- Millisecond-latency results powered by Elasticsearch
+
+## Event Sourcing & Audit Trail
+
+Every data change is recorded as an immutable event in S3/MinIO:
+
+- **Who** performed the action (actor)
+- **When** it happened (timestamp)
+- **What** changed (before/after values)
+- **Why** it happened (correlation ID)
+
+Events are immutable — once recorded, they can never be modified or deleted.
+
+## Dataset Version Control
+
+Git-like versioning for datasets with branches and transactions:
+
+- **Branches**: Experiment without affecting production data
+- **Transactions**: Atomic commits with rollback support
+- **History**: Full version history with point-in-time access
+
+## Data Connectors
+
+Import data from 6 external sources: Google Sheets, Snowflake, PostgreSQL, MySQL, SQL Server, Oracle.
+
+## Data Pipeline (Objectify)
+
+Transform raw CSV/spreadsheet data into typed, searchable objects with 38+ transform rules.
+
+## Prerequisites
+
+- [Concepts](/docs/getting-started/concepts) — Core platform concepts
+- [Quick Start](/docs/getting-started/quick-start) — Get the platform running
+
+## Next Steps
+
+- **[Search & Query Guide](/docs/guides/business-analyst/search-query)** — Detailed search operator reference
+- **[Dashboard & Visualization](/docs/guides/business-analyst/dashboard)** — Build dashboards from aggregation data
+- **[REST API Integration](/docs/guides/integration-developer/rest-api)** — Integrate via REST API

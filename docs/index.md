@@ -54,5 +54,6 @@ onboarding/ko/07-FRONTEND-TOUR
 onboarding/ko/08-DEVELOPMENT-WORKFLOW
 onboarding/ko/09-TESTING-GUIDE
 onboarding/ko/10-TROUBLESHOOTING-FAQ
+onboarding/ko/11-REAL-WORLD-SCENARIOS
 onboarding/ko/LEARNING-ROADMAP
 ```

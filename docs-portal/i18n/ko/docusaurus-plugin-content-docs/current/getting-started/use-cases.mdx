@@ -1,0 +1,378 @@
+---
+title: 실전 시나리오
+sidebar_position: 4
+---
+
+# 실전 시나리오 — 우리 플랫폼으로 이런 것까지 된다고?
+
+비개발자도 "아, 이게 이렇게 되는 거구나!"라고 무릎을 탁 칠 수 있도록, 실제 비즈니스 상황에 빗대어 Spice OS의 핵심 기능을 풀어볼게요. 모든 예시는 **우리 아키텍처에서 실제로 동작하는 코드**입니다.
+
+---
+
+## 🕵️ 보이스피싱 자금 추적 (멀티홉 그래프 쿼리)
+
+수사관이 전화번호 `010-1234-5678`을 쓰는 용의자가 **누구에게 최종적으로 돈을 보냈는지** 추적해야 해요. 일반 데이터베이스라면 SQL JOIN을 4~5번 중첩해서 몇 분씩 기다려야 하지만, 우리 플랫폼의 **멀티홉 그래프 쿼리**는 징검다리를 건너듯 한 번에 찾아냅니다.
+
+### 수사 명령서 (실제 코드)
+
+```json
+{
+  "start_class": "Person",
+  "filters": { "phone": "010-1234-5678" },
+  "hops": [
+    { "predicate": "owner", "target_class": "BankAccount", "reverse": true },
+    { "predicate": "from_account", "target_class": "Transaction", "reverse": true },
+    { "predicate": "to_account", "target_class": "BankAccount" },
+    { "predicate": "owner", "target_class": "Person" }
+  ],
+  "include_paths": true,
+  "max_paths": 25
+}
+```
+
+### 한 줄씩 해부하기
+
+| 단계 | 코드 | 수사관의 말로 풀면 |
+|------|------|--------------------|
+| 📍 출발 | `start_class: "Person"` + `filters` | "전화번호가 010-1234-5678인 **사람**을 찾아라!" |
+| 🦘 1홉 | `owner`, `reverse: true` → `BankAccount` | "그 용의자가 소유한 **은행 계좌**를 전부 찾아라!" |
+| 🦘 2홉 | `from_account`, `reverse: true` → `Transaction` | "그 계좌에서 돈이 빠져나간 **거래 내역**을 싹 다 긁어와라!" |
+| 🦘 3홉 | `to_account` → `BankAccount` | "그 돈이 최종적으로 입금된 **도착지 계좌**가 어디냐!" |
+| 🦘 4홉 | `owner` → `Person` | "그 계좌의 명의자, **최종 수취인**이 누구냐!" |
+| 📸 보고서 | `include_paths: true` | "돈이 어떻게 흘러갔는지 **경로를 전부** 보고해라!" |
+
+:::tip reverse: true가 뭔가요?
+데이터의 화살표는 보통 `[계좌] → (주인이 누구?) → [사람]` 방향이에요. 우리는 사람에서 출발해서 계좌를 찾아야 하니까, 화살표를 **역방향**으로 거슬러 올라가라는 뜻이에요.
+:::
+
+### 우리 아키텍처에서 이걸 처리하는 흐름
+
+```
+클라이언트 요청
+  → BFF (:8002, graph.py 라우터)
+    → OMS (:8000, 그래프 엔진)
+      → Elasticsearch (노드/엣지 탐색)
+        → 결과: 노드 + 엣지 + 전체 경로 반환
+```
+
+`include_paths: true` 덕분에 프론트엔드에서 **수사 드라마의 실타래 보드**처럼 점과 선으로 시각화할 수 있어요.
+
+### 멀티홉으로 할 수 있는 것들
+
+| 분야 | 활용 예시 | 홉 수 |
+|------|-----------|-------|
+| 🏦 금융 사기 탐지 | 용의자 → 계좌 → 거래 → 도착 계좌 → 수취인 | 4홉 |
+| 🦠 역학 조사 | 확진자 → 방문 장소 → 동시간대 방문자 | 3홉 |
+| 🛒 이커머스 추천 | 나 → 내가 산 상품 → 그 상품을 산 다른 사람 → 그 사람이 산 다른 상품 | 3홉 |
+| 🏭 공급망 리콜 | 불량 부품 → 엔진 → 차량 → 소유주 | 3홉 |
+| 👥 조직 분석 | 직원 → 부서 → 부서장 → 부서장의 프로젝트 | 3홉 |
+
+---
+
+## 🔍 23개 무기로 뭐든 찾는 검색 API
+
+마케팅팀이 이런 조건의 고객을 찾아야 해요:
+
+> "서울에서 반경 5km 이내에 살고, 지난 30일 이내에 가입했고, 이름에 '김'이 들어가며, VIP 등급인 활성 고객"
+
+일반 데이터베이스로는 복잡한 SQL을 짜야 하지만, 우리 검색 API는 **레고 블록 쌓듯이** 조건을 조합하면 돼요.
+
+### 검색 명령서 (실제 코드)
+
+```json
+{
+  "where": {
+    "type": "and",
+    "value": [
+      {
+        "type": "withinDistanceOf",
+        "field": "location",
+        "value": {
+          "center": { "latitude": 37.5665, "longitude": 126.9780 },
+          "distance": { "value": 5, "unit": "km" }
+        }
+      },
+      { "type": "relativeDateRange", "field": "joinDate", "startDuration": "P30D" },
+      { "type": "containsAnyTerm", "field": "fullName", "value": "김" },
+      { "type": "eq", "field": "tier", "value": "VIP" },
+      { "type": "eq", "field": "status", "value": "ACTIVE" }
+    ]
+  },
+  "orderBy": { "fields": [{ "field": "joinDate", "direction": "desc" }] },
+  "pageSize": 50
+}
+```
+
+### 23개 검색 무기 총정리
+
+#### 🎯 비교 연산자 (5개)
+
+| 연산자 | 뜻 | 예시 |
+|--------|------|------|
+| `eq` | 똑같은 거 | 부서 = "Engineering" |
+| `gt` / `lt` | 크거나 / 작거나 | 연봉 > 5000만 |
+| `gte` / `lte` | 이상 / 이하 | 평점 ≥ 4.0 |
+
+#### 📝 텍스트 검색 (7개)
+
+| 연산자 | 뜻 | 예시 |
+|--------|------|------|
+| `containsAnyTerm` | 단어 중 **하나라도** | "서울 OR 부산" |
+| `containsAllTerms` | 단어가 **전부** | "클라우드 AND 보안" |
+| `containsAllTermsInOrder` | **정확한 문구** | "인공지능 플랫폼" |
+| `containsAllTermsInOrderPrefixLastTerm` | **자동완성** | "김철" → 김철수, 김철민 |
+| `startsWith` | 이걸로 **시작** | 주문번호 "ORD-2024..." |
+| `wildcard` | **패턴** 검색 | "customer_*" |
+| `regex` | **정규식** | 이메일 형식 확인 |
+
+#### 🗺️ 지리공간 검색 (7개)
+
+| 연산자 | 뜻 |
+|--------|------|
+| `withinDistanceOf` | 반경 N km 이내 (📍→원) |
+| `withinBoundingBox` | 사각형 영역 안 (📦) |
+| `withinPolygon` | 다각형 영역 안 (🔷) |
+| `intersectsBoundingBox` | 사각형과 겹치는 영역 |
+| `intersectsPolygon` | 다각형과 겹치는 영역 |
+| `doesNotIntersectBoundingBox` | 사각형 밖 영역 |
+| `doesNotIntersectPolygon` | 다각형 밖 영역 |
+
+#### 🔗 논리 + 기타 (4개)
+
+| 연산자 | 뜻 |
+|--------|------|
+| `and` | 모든 조건 만족 |
+| `or` | 하나라도 만족 |
+| `not` | 이건 아닌 것 |
+| `isNull` | 값이 있는지/없는지 |
+
+---
+
+## 📊 CEO의 실시간 경영 대시보드 (집계 쿼리)
+
+CEO가 이사회에서 발표할 자료가 필요해요:
+
+> "지역별 매출 합계, 고객 평균 생애가치, 상위 5% 고객의 평점은?"
+
+엑셀로 10만 건을 돌리면 컴퓨터가 뻗지만, 우리 집계 API는 **서버에서 계산해서 결과만 딱** 보내줘요.
+
+```json
+{
+  "aggregation": [
+    { "type": "sum", "field": "revenue", "name": "총매출" },
+    { "type": "avg", "field": "customerLifetimeValue", "name": "평균생애가치" },
+    { "type": "approximatePercentile", "field": "rating", "approximatePercentile": 0.95 }
+  ],
+  "groupBy": [
+    { "field": "region" },
+    { "field": "productCategory" }
+  ]
+}
+```
+
+### 지원하는 집계 유형 8가지
+
+| 집계 | 뜻 | 용도 |
+|------|------|------|
+| `count` | 몇 개? | 부서별 직원 수 |
+| `sum` | 전부 더하면? | 지역별 총 매출 |
+| `avg` | 평균은? | 평균 고객 만족도 |
+| `min` / `max` | 최솟값 / 최댓값 | 최저·최고 주문 금액 |
+| `exactDistinct` | 종류가 몇 가지? | 고유 고객 수 (정확) |
+| `approximateDistinct` | 대략 몇 종류? | 방문 IP 수 (빠른 추정) |
+| `approximatePercentile` | 상위 몇 %선은? | P95 응답시간 |
+
+---
+
+## 🏦 절대 지워지지 않는 장부 (이벤트 소싱)
+
+금융감독원 감사가 나왔어요:
+
+> "6개월 전에 고객 정보를 누가, 언제, 왜 변경했는지 전부 보여주세요."
+
+일반 시스템은 "현재 상태"만 저장하니까 과거 기록이 없지만, 우리 플랫폼은 **모든 변경을 이벤트로 기록**해요. 은행 장부처럼 입금/출금 내역을 계속 쌓아나가는 거죠.
+
+```
+[일반 시스템]                    [우리 시스템 — 이벤트 소싱]
+┌──────────────────┐            ┌──────────────────────────┐
+│ 고객: 김철수      │            │ 이벤트 #1: 고객 생성      │
+│ 부서: 영업팀      │ ← 최신값만 │ 이벤트 #2: 부서 변경      │
+│ 등급: VIP        │   덮어씀   │   변경자: 박대리, 3월 15일 │
+└──────────────────┘            │ 이벤트 #3: 등급 변경      │
+                                │   변경자: 최팀장, 9월 10일 │
+                                └──────────────────────────┘
+```
+
+### 이벤트 봉투 (EventEnvelope) 실제 구조
+
+모든 변경은 이 **"봉투"**에 담겨서 기록돼요:
+
+```json
+{
+  "event_id": "evt-20240601-001",
+  "event_type": "EXECUTE_ACTION_REQUESTED",
+  "aggregate_id": "EMP-042",
+  "occurred_at": "2024-06-01T09:30:00Z",
+  "actor": "이과장",
+  "data": {
+    "changes": {
+      "department": { "before": "마케팅팀", "after": "영업팀" }
+    }
+  },
+  "sequence_number": 3
+}
+```
+
+| 필드 | 뜻 |
+|------|------|
+| `actor` | **누가** 했나 |
+| `occurred_at` | **언제** 했나 |
+| `data.changes` | **뭘** 바꿨나 (이전값 → 이후값) |
+| `sequence_number` | 이 객체의 **몇 번째 변경**인가 |
+
+:::info 핵심 — 불변(Immutable) 저장
+S3에 저장된 이벤트는 한번 기록되면 **수정도, 삭제도 불가능**해요. 그래서 완벽한 감사 추적이 가능한 거예요.
+:::
+
+### 이걸 처리하는 우리 아키텍처
+
+```
+사용자 액션 → BFF → Kafka (이벤트 큐)
+  → Action Worker (비동기 실행)
+    → S3/MinIO (이벤트 영구 저장)
+    → Postgres (현재 상태 업데이트)
+    → Elasticsearch (검색 인덱스)
+```
+
+---
+
+## 🗺️ "내 주변 맛집" — 지리공간 검색
+
+배달 앱에서 사용자 위치 기반으로 가게를 찾아야 해요:
+
+> "강남역에서 반경 2km 이내, 평점 4.0 이상, 현재 영업 중인 음식점"
+
+```json
+{
+  "where": {
+    "type": "and",
+    "value": [
+      {
+        "type": "withinDistanceOf",
+        "field": "location",
+        "value": {
+          "center": { "latitude": 37.4979, "longitude": 127.0276 },
+          "distance": { "value": 2, "unit": "km" }
+        }
+      },
+      { "type": "gte", "field": "rating", "value": 4.0 },
+      { "type": "eq", "field": "isOpen", "value": true }
+    ]
+  },
+  "orderBy": { "fields": [{ "field": "rating", "direction": "desc" }] },
+  "pageSize": 20
+}
+```
+
+지리공간 검색은 **반경 원, 사각형, 다각형** 세 가지 영역으로 검색할 수 있어요. 배달 구역 관리, 매장 찾기, 리스크 지역 분석 등에 활용됩니다.
+
+---
+
+## 🔄 엑셀을 지식 그래프로 변환 (데이터 파이프라인)
+
+고객팀이 3만 건짜리 CSV 파일을 들고 왔어요:
+
+> "이 고객 데이터를 시스템에 넣어서 검색하고 분석하고 싶어요."
+
+```
+📄 customers.csv
+│  customer_id, name, company_rid, revenue
+│  CUST-001, 김영희, COMP-100, 5000000
+│
+▼ 매핑 (Map) → 검증 (Validate) → 객체화 (Objectify) → 인덱싱 (Index)
+│
+▼ 결과: 즉시 검색 가능한 객체!
+   { "class_id": "Customer", "properties": { "displayName": "김영희", ... } }
+```
+
+### 이걸 처리하는 우리 아키텍처
+
+```
+CSV 업로드 → BFF → LakeFSClient (버전 관리)
+  → Kafka → Objectify Worker (매핑 + 검증 + 변환)
+    → OMS (객체 생성) → Projection Worker → Elasticsearch (검색 가능!)
+```
+
+한 번 파이프라인을 설정하면, 같은 형식의 CSV를 넣을 때마다 **자동으로 동일한 변환**이 적용돼요. **38개 이상의 변환 규칙**을 조합할 수 있어요.
+
+---
+
+## 🔀 데이터의 "되돌리기" — 데이터셋 버전 관리
+
+구글 독스에 "버전 기록"이 있듯이, 우리 데이터셋에도 **브랜치와 트랜잭션**이 있어요!
+
+```
+main 브랜치 (정식 데이터)
+├── v1: 초기 데이터 (1월)
+├── v2: 100명 추가 (2월) ← 여기로 되돌리기!
+├── v3: 잘못된 업로드 (3월) ❌
+│
+└── feature 브랜치 (실험용)
+    └── 새 필드 추가 테스트
+```
+
+```bash
+# 트랜잭션 시작 (원자적 작업 보장)
+POST /api/v2/datasets/{datasetRid}/transactions
+
+# 데이터 업로드 후...
+# 문제 없으면 → 커밋
+POST /api/v2/datasets/{rid}/transactions/{txnRid}/commit
+# 문제 있으면 → 롤백!
+POST /api/v2/datasets/{rid}/transactions/{txnRid}/abort
+```
+
+**LakeFSClient**가 데이터를 Git처럼 관리하고, **브랜치**로 실험하고, **트랜잭션**으로 원자성을 보장해요.
+
+---
+
+## 🔌 어디서든 데이터 가져오기 (데이터 커넥터)
+
+지원하는 6가지 데이터 소스:
+
+| 소스 | 설명 |
+|------|------|
+| 📊 Google Sheets | 스프레드시트 실시간 연동 |
+| ❄️ Snowflake | 클라우드 데이터 웨어하우스 |
+| 🐘 PostgreSQL | 오픈소스 관계형 DB |
+| 🐬 MySQL | 오픈소스 관계형 DB |
+| 🔷 SQL Server | Microsoft 데이터베이스 |
+| 🔶 Oracle | 엔터프라이즈 데이터베이스 |
+
+연결 → 임포트 설정 → 미리보기 → 실행 → 온톨로지 매핑 → 검색 가능!
+
+---
+
+## 🎯 한눈에 보는 요약
+
+| 기능 | 비유 | 핵심 서비스 | 활용 시나리오 |
+|------|------|-------------|--------------|
+| **멀티홉 그래프** | 징검다리 건너기 | OMS + ES | 자금 추적, 역학 조사, 추천 |
+| **23개 검색 연산자** | 형사의 수사 도구 | OMS + ES | 고객 세그먼트, 재고 검색 |
+| **지리공간 검색** | 배달앱 "내 주변" | Elasticsearch | 매장 찾기, 배달 구역 |
+| **집계 쿼리** | CEO 대시보드 | Elasticsearch | 매출 분석, KPI |
+| **이벤트 소싱** | 은행 장부 | Kafka + S3 | 감사 추적, 규정 준수 |
+| **데이터 파이프라인** | 요리 레시피 | Objectify Worker | CSV→객체 변환 |
+| **버전 관리** | 구글 독스 히스토리 | LakeFSClient | 데이터 롤백, 실험 |
+| **데이터 커넥터** | 만능 어댑터 | Data Connector | 외부 DB 연동 |
+
+## 사전 요구 사항
+
+- [핵심 개념](/docs/getting-started/concepts) — 플랫폼 기본 개념
+- [빠른 시작](/docs/getting-started/quick-start) — 플랫폼 실행하기
+
+## 다음 단계
+
+- **[검색 및 쿼리 가이드](/docs/guides/business-analyst/search-query)** — 23개 연산자 상세 사용법
+- **[대시보드 및 시각화](/docs/guides/business-analyst/dashboard)** — 집계 결과를 차트로 만들기
+- **[REST API 통합](/docs/guides/integration-developer/rest-api)** — API로 직접 연동하기
