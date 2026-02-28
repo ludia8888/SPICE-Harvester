@@ -89,7 +89,7 @@ Pipelines are defined as JSON documents with `nodes`, `edges`, and metadata:
 |------|-------------|-------------|
 | `input` | Data source node | Reads from datasets, JDBC, Kafka, S3 |
 | `read_dataset` | Dataset reader | Reads a specific dataset version |
-| `transform` | Data transformation | Apply one of 22 transform operations |
+| `transform` | Data transformation | Apply one of 38 transform operations |
 | `output` | Data sink | Writes to dataset, ontology, or geotemporal store |
 
 ### Edge Structure
@@ -104,7 +104,7 @@ Edges must form a valid DAG — cycles are rejected during validation.
 
 ## Transform Operations
 
-Spice OS supports **22 transform types** organized into four categories:
+Spice OS supports **38 transform types** organized into four categories:
 
 ### Data Manipulation
 

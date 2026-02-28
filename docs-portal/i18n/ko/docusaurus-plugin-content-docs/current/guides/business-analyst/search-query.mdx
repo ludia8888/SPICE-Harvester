@@ -1,0 +1,420 @@
+---
+title: 검색 및 쿼리
+sidebar_position: 2
+---
+
+# 검색 및 쿼리 가이드
+
+이 가이드는 비즈니스 분석가가 `SearchJsonQueryV2` 쿼리 언어를 사용하여 Spice OS에서 데이터를 검색하고 쿼리하는 방법을 안내합니다. 필터 작성, 조건 결합, 텍스트 및 지리공간 검색(Geospatial Search) 수행, 쿼리 성능 최적화 방법을 배울 수 있습니다.
+
+## 검색 기본 사항
+
+검색 API(Search API)는 객체의 속성에 필터를 적용하여 객체를 찾습니다. 검색은 **Elasticsearch**로 구동되며, 빠른 전문 검색(Full-text Search)과 구조화된 쿼리를 제공합니다.
+
+### 검색 엔드포인트(Search Endpoint)
+
+```bash
+POST /api/v2/ontologies/{ontology}/objectTypes/{objectType}/objects/search
+Content-Type: application/json
+
+{
+  "where": {
+    "type": "eq",
+    "field": "department",
+    "value": "Engineering"
+  },
+  "pageSize": 25
+}
+```
+
+### 검색 요청 구조
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `where` | 아니오 | 필터 조건 (생략 시 모든 객체 반환) |
+| `pageSize` | 아니오 | 페이지당 결과 수 (기본값: 25, 최대: 1000) |
+| `pageToken` | 아니오 | 다음 페이지를 위한 커서(Cursor) |
+| `orderBy` | 아니오 | 정렬 설정 |
+| `select` | 아니오 | 응답에 포함할 속성 |
+
+## 연산자 레퍼런스(Operator Reference)
+
+Spice OS는 카테고리별로 구성된 **23개의 검색 연산자(Search Operators)**를 지원합니다.
+
+### 비교 연산자(Comparison Operators)
+
+#### 정확히 일치(Exact Match)
+
+```json
+{ "type": "eq", "field": "status", "value": "ACTIVE" }
+```
+
+#### 크다 / 작다(Greater Than / Less Than)
+
+```json
+{ "type": "gt", "field": "salary", "value": 50000 }
+{ "type": "gte", "field": "salary", "value": 50000 }
+{ "type": "lt", "field": "age", "value": 65 }
+{ "type": "lte", "field": "age", "value": 65 }
+```
+
+#### Null 확인
+
+```json
+{ "type": "isNull", "field": "email", "value": true }
+{ "type": "isNull", "field": "email", "value": false }
+```
+
+### 컬렉션 연산자(Collection Operators)
+
+#### 집합 내 값(Value in Set)
+
+```json
+{ "type": "in", "field": "status", "value": ["ACTIVE", "PENDING", "REVIEW"] }
+```
+
+#### 배열 포함(Array Contains)
+
+```json
+{ "type": "contains", "field": "tags", "value": "urgent" }
+```
+
+### 텍스트 검색 연산자(Text Search Operators)
+
+#### 임의 용어 일치(Any Term Match)
+
+필드에 지정된 용어 중 **하나라도** 포함되면 일치합니다:
+
+```json
+{ "type": "containsAnyTerm", "field": "description", "value": "urgent critical important" }
+```
+
+#### 모든 용어 일치(All Terms Match)
+
+필드에 지정된 **모든** 용어가 포함되면 일치합니다 (순서 무관):
+
+```json
+{ "type": "containsAllTerms", "field": "description", "value": "budget approval" }
+```
+
+#### 구문 일치(Phrase Match - Ordered Terms)
+
+필드에 모든 용어가 지정된 순서대로 포함되면 일치합니다:
+
+```json
+{ "type": "containsAllTermsInOrder", "field": "title", "value": "senior software engineer" }
+```
+
+#### 자동 완성(Typeahead / Autocomplete)
+
+용어를 순서대로 일치시키되 마지막 용어는 접두사 일치(Prefix Matching)를 수행합니다 -- 입력 중 검색(Search-as-you-type)에 적합합니다:
+
+```json
+{ "type": "containsAllTermsInOrderPrefixLastTerm", "field": "fullName", "value": "jane d" }
+```
+
+이 쿼리는 "Jane Doe", "Jane Davis", "Jane Daniels" 등과 일치합니다.
+
+#### 접두사 일치(Prefix Match)
+
+```json
+{ "type": "startsWith", "field": "employeeId", "value": "EMP-" }
+```
+
+#### 와일드카드 패턴(Wildcard Pattern)
+
+```json
+{ "type": "wildcard", "field": "email", "value": "*@acme.com" }
+```
+
+`*`는 모든 문자 시퀀스와 일치합니다.
+
+#### 정규 표현식(Regular Expression)
+
+```json
+{ "type": "regex", "field": "code", "value": "^EMP-\\d{3,6}$" }
+```
+
+### 날짜 및 시간
+
+#### 상대 날짜 범위(Relative Date Range)
+
+현재 시점 기준으로 시간 범위 내의 객체를 찾습니다:
+
+```json
+{
+  "type": "relativeDateRange",
+  "field": "createdAt",
+  "startDuration": "P30D"
+}
+```
+
+ISO 8601 기간 형식(Duration Format)을 사용합니다:
+- `P30D` -- 최근 30일
+- `P7D` -- 최근 7일
+- `PT24H` -- 최근 24시간
+- `P1Y` -- 최근 1년
+
+### 지리공간 검색 (포인트 쿼리)
+
+지리적 위치로 객체를 찾습니다:
+
+#### 거리 내 검색(Within Distance)
+
+```json
+{
+  "type": "withinDistanceOf",
+  "field": "location",
+  "value": {
+    "center": { "lat": 37.7749, "lon": -122.4194 },
+    "distance": { "value": 10, "unit": "km" }
+  }
+}
+```
+
+#### 경계 상자 내 검색(Within Bounding Box)
+
+```json
+{
+  "type": "withinBoundingBox",
+  "field": "location",
+  "value": {
+    "topLeft": { "lat": 38.0, "lon": -123.0 },
+    "bottomRight": { "lat": 37.0, "lon": -121.0 }
+  }
+}
+```
+
+#### 다각형 내 검색(Within Polygon)
+
+```json
+{
+  "type": "withinPolygon",
+  "field": "location",
+  "value": {
+    "coordinates": [
+      [37.8, -122.5], [37.8, -122.3],
+      [37.7, -122.3], [37.7, -122.5]
+    ]
+  }
+}
+```
+
+### 지리공간 검색 (도형 쿼리)
+
+`geoshape` 속성용:
+
+| 연산자 | 설명 |
+|--------|------|
+| `intersectsBoundingBox` | 도형이 사각형과 겹침 |
+| `intersectsPolygon` | 도형이 다각형과 겹침 |
+| `doesNotIntersectBoundingBox` | 도형이 사각형 밖에 있음 |
+| `doesNotIntersectPolygon` | 도형이 다각형 밖에 있음 |
+
+## 필터 결합
+
+### AND -- 모든 조건 일치
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "gte", "field": "salary", "value": 80000 },
+    { "type": "eq", "field": "status", "value": "ACTIVE" }
+  ]
+}
+```
+
+### OR -- 하나라도 일치
+
+```json
+{
+  "type": "or",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "eq", "field": "department", "value": "Research" }
+  ]
+}
+```
+
+### NOT -- 조건 부정
+
+```json
+{
+  "type": "not",
+  "value": { "type": "eq", "field": "status", "value": "INACTIVE" }
+}
+```
+
+### 중첩 조합(Nested Combinations)
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "status", "value": "ACTIVE" },
+    {
+      "type": "or",
+      "value": [
+        {
+          "type": "and",
+          "value": [
+            { "type": "eq", "field": "department", "value": "Engineering" },
+            { "type": "gte", "field": "level", "value": 5 }
+          ]
+        },
+        { "type": "eq", "field": "role", "value": "Director" }
+      ]
+    }
+  ]
+}
+```
+
+:::caution
+쿼리 중첩은 **3단계** 깊이로 제한됩니다. 더 깊은 중첩이 필요한 경우 조건을 평탄화(Flatten)하도록 쿼리를 재구성하십시오.
+:::
+
+## 정렬 및 페이지네이션(Sorting and Pagination)
+
+### 결과 정렬
+
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "orderBy": {
+    "fields": [
+      { "field": "salary", "direction": "desc" },
+      { "field": "fullName", "direction": "asc" }
+    ]
+  }
+}
+```
+
+### 결과 페이지네이션
+
+결과는 커서 기반 토큰(Cursor-based Tokens)으로 페이지네이션됩니다:
+
+```json
+// 첫 번째 페이지
+{
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 50
+}
+
+// 응답에 nextPageToken이 포함됩니다
+{
+  "data": [...],
+  "nextPageToken": "eyJvZmZzZXQiOjUwfQ=="
+}
+
+// 다음 페이지
+{
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 50,
+  "pageToken": "eyJvZmZzZXQiOjUwfQ=="
+}
+```
+
+## 선택적 필드(Selective Fields)
+
+필요한 속성만 반환합니다:
+
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "select": ["employeeId", "fullName", "salary"],
+  "pageSize": 100
+}
+```
+
+이렇게 하면 응답 크기가 줄어들고 성능이 향상됩니다.
+
+## 일반적인 쿼리 패턴
+
+### 날짜 범위 (최근 30일)
+
+```json
+{
+  "type": "relativeDateRange",
+  "field": "createdAt",
+  "startDuration": "P30D"
+}
+```
+
+### 다중 값 필터(Multi-Value Filter)
+
+```json
+{
+  "type": "in",
+  "field": "department",
+  "value": ["Engineering", "Research", "Design"]
+}
+```
+
+### Null 확인 (누락된 데이터 찾기)
+
+```json
+{
+  "type": "isNull",
+  "field": "email",
+  "value": true
+}
+```
+
+### 자동 완성(Typeahead / Autocomplete)
+
+```json
+{
+  "type": "containsAllTermsInOrderPrefixLastTerm",
+  "field": "fullName",
+  "value": "jan"
+}
+```
+
+### 숫자 범위(Number Range)
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "gte", "field": "salary", "value": 80000 },
+    { "type": "lte", "field": "salary", "value": 120000 }
+  ]
+}
+```
+
+### 특정 값 제외(Exclude Specific Values)
+
+```json
+{
+  "type": "not",
+  "value": {
+    "type": "in",
+    "field": "status",
+    "value": ["DELETED", "ARCHIVED"]
+  }
+}
+```
+
+## 검색 성능 팁
+
+1. **`wildcard` 대신 `eq` 사용** -- 정확한 일치가 훨씬 빠릅니다
+2. **정렬 전 필터 적용** -- 정렬하기 전에 결과 집합을 줄입니다
+3. **`select` 사용** -- 필요한 필드만 요청하여 페이로드를 줄입니다
+4. **여러 `or` 대신 `in` 사용** -- `in` 연산자는 집합 멤버십에 최적화되어 있습니다
+5. **자동 완성에는 `containsAllTermsInOrderPrefixLastTerm` 사용** -- 이 패턴에 최적화되어 있습니다
+6. **`pageSize` 제한** -- 필요 이상의 결과를 요청하지 않습니다 (일반적으로 25-100)
+7. **깊은 중첩 피하기** -- 최상의 성능을 위해 쿼리를 2-3단계 내로 유지합니다
+8. **인덱싱된 속성 사용** -- 인덱싱된 필드에서 검색이 가장 빠릅니다
+
+## 사전 요구 사항
+
+- [핵심 개념](/docs/getting-started/concepts) -- 객체 유형 및 속성
+- [v2 Search API](/docs/api/v2-search) -- 검색 엔드포인트 문서
+
+## 다음 단계
+
+- **[액션 템플릿](./action-templates)** -- 검색 결과에 대해 액션을 수행합니다
+- **[대시보드 가이드](./dashboard)** -- 쿼리 결과를 시각화합니다
+- **[REST API 가이드](../integration-developer/rest-api)** -- 완전한 API 통합

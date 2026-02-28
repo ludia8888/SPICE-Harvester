@@ -79,7 +79,7 @@ A technique for reliably publishing events to Kafka. Events are written to an ou
 An opaque, base64-encoded string used for cursor-based pagination in the v2 API. Page tokens are returned in the `nextPageToken` field and should be passed back to retrieve subsequent pages.
 
 **Pipeline**
-A declarative data transformation workflow that reads from a source, applies a series of transforms, and writes results to the ontology. Pipelines support 22+ transform types and are executed by Pipeline Runner workers.
+A declarative data transformation workflow that reads from a source, applies a series of transforms, and writes results to the ontology. Pipelines support 38+ transform types and are executed by Pipeline Runner workers.
 
 **Platform API Scope**
 One of 8 predefined scopes that govern access to major API families: `api:datasets-read`, `api:datasets-write`, `api:ontologies-read`, `api:ontologies-write`, `api:orchestration-read`, `api:orchestration-write`, `api:connectivity-read`, `api:connectivity-write`. Enforced via the `require_scopes` dependency on protected endpoints.

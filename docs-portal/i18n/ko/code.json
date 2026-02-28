@@ -21,7 +21,7 @@
     "message": "파이프라인 빌더"
   },
   "homepage.features.pipeline.description": {
-    "message": "22개 이상의 변환(Transform)과 AI 보조 조합으로 데이터 변환 파이프라인을 구축하세요."
+    "message": "38개 이상의 변환(Transform)과 AI 보조 조합으로 데이터 변환 파이프라인을 구축하세요."
   },
   "homepage.features.action.title": {
     "message": "액션 시스템"

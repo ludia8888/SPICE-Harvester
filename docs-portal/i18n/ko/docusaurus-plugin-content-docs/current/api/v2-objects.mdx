@@ -1,0 +1,159 @@
+---
+title: "v2: 객체"
+sidebar_position: 3
+---
+
+# Foundry v2 객체 API
+
+객체(Objects)는 객체 유형의 구체적인 인스턴스입니다. 이 엔드포인트를 사용하여 온톨로지 내의 객체 인스턴스를 조회하고 관리할 수 있습니다.
+
+## 객체 응답 형식
+
+모든 객체 응답은 Foundry v2 형식을 사용합니다:
+
+```json
+{
+  "__rid": "ri.ontology.main.object.emp-042",
+  "__primaryKey": "EMP-042",
+  "__apiName": "Employee",
+  "properties": {
+    "employeeId": "EMP-042",
+    "fullName": "Jane Doe",
+    "department": "Engineering",
+    "startDate": "2023-06-15"
+  }
+}
+```
+
+| 필드 | 타입 | 설명 |
+|:-----|:-----|:-----|
+| `__rid` | string | 리소스 식별자, 플랫폼 전체에서 고유 |
+| `__primaryKey` | string | 기본키 속성의 값 |
+| `__apiName` | string | 객체 유형의 API 이름 |
+| `properties` | object | 속성 이름-값 맵 |
+
+---
+
+## 기본키로 객체 조회
+
+기본키 값으로 단일 객체를 조회합니다.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/{primaryKey}
+```
+
+### 경로 파라미터
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|:---------|:-----|:-----|:-----|
+| `ontologyApiName` | string | 예 | 온톨로지의 API 이름 |
+| `objectTypeApiName` | string | 예 | 객체 유형의 API 이름 |
+| `primaryKey` | string | 예 | 객체의 기본키 값 |
+
+### 쿼리 파라미터
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|:---------|:-----|:-----|:-----|
+| `select` | string[] | 아니오 | 포함할 속성 이름을 쉼표로 구분. 생략 시 모든 속성 반환 |
+
+### 요청 예시
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042" \
+  -H "Authorization: Bearer <token>"
+```
+
+### 선택적 속성 로딩
+
+`select` 파라미터로 특정 속성만 반환할 수 있습니다:
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042?select=fullName,department" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## 객체 목록 조회
+
+특정 유형의 모든 객체를 페이지네이션으로 조회합니다.
+
+```
+GET /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}
+```
+
+### 쿼리 파라미터
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|:---------|:-----|:-----|:-----|
+| `pageSize` | integer | 아니오 | 페이지당 결과 수 (기본값: 100, 최대: 1000) |
+| `pageToken` | string | 아니오 | 다음 페이지용 토큰 |
+| `orderBy` | string | 아니오 | 정렬할 속성. `-` 접두사로 내림차순 (예: `-startDate`) |
+| `select` | string[] | 아니오 | 포함할 속성 이름 목록 |
+
+### 요청 예시
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee?pageSize=2&orderBy=-startDate" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## 객체 일괄 조회 (Batch)
+
+여러 객체를 기본키로 한번에 조회합니다.
+
+```
+POST /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/loadObjects
+```
+
+### 요청 바디
+
+```json
+{
+  "primaryKeys": ["EMP-042", "EMP-043", "EMP-044"],
+  "select": ["fullName", "department"]
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|:-----|:-----|:-----|:-----|
+| `primaryKeys` | string[] | 예 | 조회할 기본키 배열 (최대 200개) |
+| `select` | string[] | 아니오 | 응답에 포함할 속성 |
+
+존재하지 않는 객체는 응답에서 자동으로 제외됩니다. 입력 배열 길이와 응답 `data` 배열 길이를 비교하여 누락된 객체를 감지하세요.
+
+---
+
+## 일관성 옵션
+
+기본적으로 조회 작업은 성능을 위해 **Elasticsearch 인덱스**에서 읽습니다. 쓰기 후 읽기 일관성(read-after-write consistency)이 필요한 경우, 일관성 헤더를 포함하세요:
+
+```bash
+curl -X GET \
+  "http://localhost:8002/api/v2/ontologies/acme/objects/Employee/EMP-042" \
+  -H "Authorization: Bearer <token>" \
+  -H "X-Consistency: strong"
+```
+
+:::note
+강한 일관성(Strong consistency) 읽기는 Elasticsearch 인덱스를 우회하고 PostgreSQL에서 직접 쿼리합니다. 최신 쓰기 상태를 보장하지만 더 느립니다. 꼭 필요한 경우에만 사용하세요.
+:::
+
+### 에러 응답
+
+| 상태 | 에러 코드 | 설명 |
+|:-----|:---------|:-----|
+| `404` | `ObjectNotFound` | 주어진 기본키의 객체가 존재하지 않음 |
+| `404` | `ObjectTypeNotFound` | 객체 유형이 존재하지 않음 |
+| `404` | `OntologyNotFound` | 온톨로지가 존재하지 않음 |
+
+## 다음 단계
+
+- **[v2 검색 API](./v2-search)** -- SearchJsonQueryV2로 객체 쿼리
+- **[v2 액션 API](./v2-actions)** -- 객체 생성, 수정, 삭제
+- **[v2 객체 유형 API](./v2-object-types)** -- 객체 유형 스키마 확인

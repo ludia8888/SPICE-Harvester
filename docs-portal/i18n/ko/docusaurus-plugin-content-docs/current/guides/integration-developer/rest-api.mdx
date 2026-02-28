@@ -1,0 +1,501 @@
+---
+title: REST API 통합
+sidebar_position: 1
+---
+
+# REST API 통합(REST API Integration)
+
+이 가이드는 통합 개발자(Integration Developer)가 Spice OS REST API를 소비하는 애플리케이션을 구축하는 과정을 안내합니다. 인증(Authentication), 객체 조회(Object Query), 액션 실행(Action Execution), 페이지네이션(Pagination) 처리, 그리고 견고한 오류 처리(Error Handling) 구현 방법을 학습합니다.
+
+## API 아키텍처(API Architecture)
+
+Spice OS는 BFF(Backend for Frontend) 서비스를 통해 **264개의 REST 엔드포인트**(v2 109개 + v1 155개)를 제공하며, 여러 API 패밀리로 구성되어 있습니다.
+
+| API 패밀리 | 접두사(Prefix) | 설명 |
+|-----------|--------|-------------|
+| **Foundry Ontology v2** | `/api/v2/ontologies` | 객체 타입, 객체, 검색, 액션, 링크 타입 |
+| **Foundry Datasets v2** | `/api/v2/datasets` | 데이터셋 CRUD, 브랜치, 트랜잭션, 파일 |
+| **Foundry Connectivity v2** | `/api/v2/connectivity` | 커넥션, 테이블 임포트, 파일 임포트 |
+| **Foundry Orchestration v2** | `/api/v2/orchestration` | 빌드, 스케줄, 작업 |
+| **Internal BFF** | `/api/databases`, `/api/admin` | 데이터베이스 관리, 관리자 작업 |
+| **Lineage** | `/api/lineage` | 데이터 리니지(Data Lineage) 추적 |
+| **Graph** | `/api/v1` | 그래프 순회(Graph Traversal) 작업 |
+
+### 기본 URL(Base URL)
+
+```
+http://localhost:8080/api
+```
+
+프로덕션 환경에서는 BFF 서비스가 일반적으로 리버스 프록시(Reverse Proxy) 또는 API 게이트웨이(API Gateway) 뒤에 배치됩니다.
+
+## 인증(Authentication)
+
+모든 API 요청(헬스 체크 제외)은 `Authorization` 헤더에 Bearer 토큰을 포함한 인증이 필요합니다.
+
+```bash
+curl -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  http://localhost:8080/api/v2/ontologies
+```
+
+Spice OS는 다양한 인증 전략(Authentication Strategy)을 지원합니다.
+
+| 전략 | 헤더 | 사용 사례 |
+|----------|--------|----------|
+| Bearer Token | `Authorization: Bearer <token>` | 표준 API 접근 |
+| Agent Token | `Authorization: Bearer <agent-token>` + `X-Agent-Tool-ID` | 에이전트/도구 통합 |
+| User JWT | `Authorization: Bearer <jwt>` | SSO/OIDC 인증 사용자 |
+| Admin Token | `X-Admin-Token: <token>` | 관리자 작업 |
+
+### OAuth 스코프 적용(OAuth Scope Enforcement)
+
+특정 v2 엔드포인트는 인증된 주체(Principal)에 대해 **OAuth 스코프(Scope)**를 적용합니다. 주체의 JWT에 필요한 스코프가 포함되어 있지 않으면, API는 Foundry 스타일의 오류를 반환합니다.
+
+```json
+{
+  "errorCode": "PERMISSION_DENIED",
+  "errorName": "ApiUsageDenied",
+  "errorInstanceId": "...",
+  "parameters": { "missingScope": "api:datasets-write" }
+}
+```
+
+전체 플랫폼 API 스코프 목록과 인증 패턴에 대해서는 [인증 흐름 가이드](./auth-flow)를 참조하십시오.
+
+## 객체 작업(Object Operations)
+
+### 객체 타입 목록 조회(List Object Types)
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes
+```
+
+**응답(Response):**
+
+```json
+{
+  "data": [
+    {
+      "apiName": "Employee",
+      "displayName": "Employee",
+      "description": "A person employed by the organization",
+      "primaryKey": "employeeId",
+      "properties": {
+        "employeeId": { "dataType": { "type": "string" } },
+        "fullName": { "dataType": { "type": "string" } },
+        "department": { "dataType": { "type": "string" } },
+        "startDate": { "dataType": { "type": "date" } }
+      },
+      "rid": "ri.spice.main.object-type.Employee"
+    }
+  ]
+}
+```
+
+### 객체 목록 조회(List Objects)
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects?pageSize=25
+```
+
+**응답(Response):**
+
+```json
+{
+  "data": [
+    {
+      "__rid": "ri.spice.main.object.employee-00042",
+      "__primaryKey": "EMP-042",
+      "__apiName": "Employee",
+      "properties": {
+        "employeeId": "EMP-042",
+        "fullName": "Jane Doe",
+        "department": "Engineering",
+        "startDate": "2023-06-15"
+      }
+    }
+  ],
+  "nextPageToken": "eyJvZmZzZXQiOjI1fQ=="
+}
+```
+
+### 단일 객체 조회(Get Single Object)
+
+```bash
+GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects/{primaryKey}
+```
+
+### 객체 생성 (액션을 통해)(Create Object via Actions)
+
+객체는 직접 POST가 아닌 액션 API(Actions API)를 통해 생성됩니다.
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/createObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "properties": {
+      "employeeId": "EMP-099",
+      "fullName": "John Smith",
+      "department": "Marketing",
+      "startDate": "2024-01-15"
+    }
+  }
+}
+```
+
+### 객체 수정(Edit Object)
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/editObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099",
+    "properties": {
+      "department": "Sales"
+    }
+  }
+}
+```
+
+### 객체 삭제(Delete Object)
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/actions/deleteObject
+Content-Type: application/json
+
+{
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-099"
+  }
+}
+```
+
+## 검색 API(Search API)
+
+검색 API는 `SearchJsonQueryV2` 쿼리 언어를 사용하여 객체를 필터링, 정렬 및 페이지네이션합니다.
+
+### 기본 검색(Basic Search)
+
+```bash
+POST /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}/objects/search
+Content-Type: application/json
+
+{
+  "where": {
+    "type": "eq",
+    "field": "department",
+    "value": "Engineering"
+  },
+  "pageSize": 25,
+  "orderBy": {
+    "fields": [
+      { "field": "fullName", "direction": "asc" }
+    ]
+  }
+}
+```
+
+### 검색 연산자(Search Operators)
+
+Spice OS는 **23개의 검색 연산자**를 지원합니다.
+
+#### 비교 연산자(Comparison Operators)
+
+| 연산자 | 설명 | 예시 |
+|----------|-------------|---------|
+| `eq` | 같음 | `{"type": "eq", "field": "status", "value": "ACTIVE"}` |
+| `gt` | 초과 | `{"type": "gt", "field": "salary", "value": 50000}` |
+| `gte` | 이상 | `{"type": "gte", "field": "age", "value": 18}` |
+| `lt` | 미만 | `{"type": "lt", "field": "age", "value": 65}` |
+| `lte` | 이하 | `{"type": "lte", "field": "score", "value": 100}` |
+
+#### Null 확인(Null Check)
+
+| 연산자 | 설명 | 예시 |
+|----------|-------------|---------|
+| `isNull` | Null 여부 확인 | `{"type": "isNull", "field": "email", "value": true}` |
+
+#### 컬렉션 연산자(Collection Operators)
+
+| 연산자 | 설명 | 예시 |
+|----------|-------------|---------|
+| `contains` | 배열에 값 포함 여부 | `{"type": "contains", "field": "tags", "value": "urgent"}` |
+| `in` | 집합 내 값 존재 여부 | `{"type": "in", "field": "status", "value": ["ACTIVE", "PENDING"]}` |
+
+#### 텍스트 검색 연산자(Text Search Operators)
+
+| 연산자 | 설명 | 예시 |
+|----------|-------------|---------|
+| `containsAnyTerm` | 임의의 용어 포함 | `{"type": "containsAnyTerm", "field": "name", "value": "jane john"}` |
+| `containsAllTerms` | 모든 용어 포함 | `{"type": "containsAllTerms", "field": "bio", "value": "engineer senior"}` |
+| `containsAllTermsInOrder` | 정확한 순서로 용어 포함 | `{"type": "containsAllTermsInOrder", "field": "title", "value": "senior engineer"}` |
+| `containsAllTermsInOrderPrefixLastTerm` | 마지막 용어 접두사 매칭 | 자동 완성(Typeahead/Autocomplete)에 적합 |
+| `startsWith` | 접두사로 시작 | `{"type": "startsWith", "field": "name", "value": "Jan"}` |
+| `wildcard` | 와일드카드 패턴 | `{"type": "wildcard", "field": "email", "value": "*@acme.com"}` |
+| `regex` | 정규식 패턴 | `{"type": "regex", "field": "code", "value": "^EMP-\\d{3}$"}` |
+
+#### 날짜 범위(Date Range)
+
+| 연산자 | 설명 |
+|----------|-------------|
+| `relativeDateRange` | ISO 8601 기간을 사용한 상대 날짜 범위 |
+
+#### 지리공간 - 포인트(Geospatial - Point)
+
+| 연산자 | 설명 |
+|----------|-------------|
+| `withinDistanceOf` | 반경 내 포인트 |
+| `withinBoundingBox` | 사각형 내 포인트 |
+| `withinPolygon` | 다각형 내 포인트 |
+
+#### 지리공간 - 도형(Geospatial - Shape)
+
+| 연산자 | 설명 |
+|----------|-------------|
+| `intersectsBoundingBox` | 사각형과 겹치는 도형 |
+| `intersectsPolygon` | 다각형과 겹치는 도형 |
+| `doesNotIntersectBoundingBox` | 사각형 밖의 도형 |
+| `doesNotIntersectPolygon` | 다각형 밖의 도형 |
+
+#### 논리 연산자(Logical Operators)
+
+`and`, `or`, `not`을 사용하여 쿼리를 결합할 수 있습니다.
+
+```json
+{
+  "type": "and",
+  "value": [
+    { "type": "eq", "field": "department", "value": "Engineering" },
+    { "type": "gte", "field": "salary", "value": 80000 },
+    {
+      "type": "or",
+      "value": [
+        { "type": "eq", "field": "level", "value": "Senior" },
+        { "type": "eq", "field": "level", "value": "Staff" }
+      ]
+    }
+  ]
+}
+```
+
+:::caution
+쿼리 중첩(Nesting)은 최대 **3단계**까지로 제한됩니다. 깊이 중첩된 쿼리는 거부됩니다.
+:::
+
+### 선택적 필드(Selective Fields)
+
+`select`를 사용하여 필요한 속성만 요청할 수 있습니다.
+
+```json
+{
+  "where": { "type": "eq", "field": "department", "value": "Engineering" },
+  "select": ["employeeId", "fullName", "salary"],
+  "pageSize": 50
+}
+```
+
+## 페이지네이션(Pagination)
+
+Spice OS는 불투명 페이지 토큰(Opaque Page Token)을 사용하는 **커서 기반 페이지네이션(Cursor-based Pagination)**을 사용합니다.
+
+### 결과 페이지네이션 처리
+
+```python
+import requests
+
+base_url = "http://localhost:8080/api/v2/ontologies/acme/objectTypes/Employee/objects"
+headers = {"Authorization": "Bearer YOUR_TOKEN"}
+params = {"pageSize": 25}
+
+all_objects = []
+page_token = None
+
+while True:
+    if page_token:
+        params["pageToken"] = page_token
+
+    response = requests.get(base_url, headers=headers, params=params)
+    data = response.json()
+
+    all_objects.extend(data["data"])
+
+    page_token = data.get("nextPageToken")
+    if not page_token:
+        break
+
+print(f"Total objects: {len(all_objects)}")
+```
+
+### 페이지네이션 모범 사례(Best Practices)
+
+- **일관된 페이지 크기 사용** -- 페이지 간에 `pageSize`를 변경하지 마십시오
+- **페이지네이션 중 데이터 수정 금지** -- 변형(Mutation) 간의 커서 안정성은 보장되지 않습니다
+- **페이지 토큰은 불투명합니다** -- 토큰을 직접 파싱하거나 생성하지 마십시오
+- **토큰 만료** -- 토큰이 유효하지 않게 되면 페이지네이션을 다시 시작하십시오
+
+## 링크 순회(Link Traversal)
+
+링크 API를 사용하여 객체 간의 관계를 탐색합니다.
+
+```bash
+# 연결된 객체 조회
+POST /api/v2/ontologies/{ontology}/linkTypes/{linkType}/links
+
+{
+  "sourceObjectRid": "ri.spice.main.object.employee-00042",
+  "pageSize": 25
+}
+```
+
+```bash
+# 연결된 객체 검색
+POST /api/v2/ontologies/{ontology}/linkTypes/{linkType}/links/search
+
+{
+  "sourceObjectRid": "ri.spice.main.object.employee-00042",
+  "where": { "type": "eq", "field": "status", "value": "ACTIVE" },
+  "pageSize": 25
+}
+```
+
+## 배치 작업(Batch Operations)
+
+높은 처리량이 필요한 시나리오에서는 배치 액션 엔드포인트를 사용합니다.
+
+```bash
+POST /api/v2/ontologies/{ontology}/actions/{actionType}/batch
+
+{
+  "requests": [
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-100", "fullName": "Alice" }
+      }
+    },
+    {
+      "parameters": {
+        "objectType": "Employee",
+        "properties": { "employeeId": "EMP-101", "fullName": "Bob" }
+      }
+    }
+  ]
+}
+```
+
+## 오류 처리(Error Handling)
+
+### 오류 응답 형식(Error Response Format)
+
+모든 오류는 구조화된 형식을 따릅니다.
+
+```json
+{
+  "errorCode": "ObjectNotFound",
+  "errorName": "ObjectNotFound",
+  "errorInstanceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "parameters": {
+    "objectType": "Employee",
+    "primaryKey": "EMP-999"
+  }
+}
+```
+
+:::note
+모든 `/api/v2/` 엔드포인트는 위에 표시된 Foundry 호환 `FoundryAPIError` 엔벨로프를 사용하여 오류를 반환합니다. 이는 BFF 서비스에 등록된 전역 예외 핸들러(Global Exception Handler)에 의해 처리됩니다. `errorInstanceId`는 추적을 위해 오류 발생 시마다 생성되는 UUID입니다.
+:::
+
+### 일반적인 오류 코드(Common Error Codes)
+
+| HTTP 상태 | 오류 코드 | 설명 |
+|------------|------------|-------------|
+| 400 | `InvalidRequest` | 잘못된 요청 본문 또는 매개변수 |
+| 401 | `Unauthorized` | 인증 누락 또는 유효하지 않음 |
+| 403 | `PermissionDenied` | 권한 부족 |
+| 404 | `ObjectNotFound` | 객체가 존재하지 않음 |
+| 404 | `ObjectTypeNotFound` | 객체 타입이 존재하지 않음 |
+| 409 | `ConflictError` | 동시 수정 충돌 |
+| 429 | `RateLimitExceeded` | 요청이 너무 많음 |
+| 500 | `InternalError` | 서버 측 오류 |
+
+### 재시도 전략(Retry Strategy)
+
+일시적인 오류에 대해 지수 백오프(Exponential Backoff)를 구현합니다.
+
+```python
+import time
+import requests
+
+def api_request_with_retry(url, headers, max_retries=3, base_delay=1):
+    for attempt in range(max_retries + 1):
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", base_delay * (2 ** attempt)))
+            time.sleep(retry_after)
+            continue
+
+        if response.status_code >= 500:
+            if attempt < max_retries:
+                time.sleep(base_delay * (2 ** attempt))
+                continue
+
+        return response
+
+    return response
+```
+
+**재시도해야 하는 상태 코드:** `429`, `500`, `502`, `503`, `504`
+
+**재시도하지 말아야 하는 상태 코드:** `400`, `401`, `403`, `404`, `409`
+
+## 헬스 체크(Health Check)
+
+API 가용성을 모니터링합니다.
+
+```bash
+# 서비스 메타데이터
+GET /api/
+
+# 종속성 상태를 포함한 헬스 체크
+GET /api/health
+```
+
+**응답(Response):**
+
+```json
+{
+  "data": {
+    "oms_connected": true,
+    "status": "healthy"
+  }
+}
+```
+
+| 상태 | 의미 |
+|--------|---------|
+| `healthy` | 모든 종속성 사용 가능 |
+| `degraded` | OMS를 사용할 수 없지만 BFF가 캐시된/부분 데이터를 계속 제공 |
+
+## 성능 팁(Performance Tips)
+
+1. **`select` 사용** -- 필요한 속성만 요청하여 페이로드 크기를 줄이십시오
+2. **적절한 `pageSize` 설정** -- 요청 횟수와 응답 크기 간의 균형을 맞추십시오 (일반적으로 25-100)
+3. **객체 타입 메타데이터 캐싱** -- 객체 타입 정의는 자주 변경되지 않습니다
+4. **목록 + 필터 대신 검색 사용** -- Elasticsearch를 통해 서버에서 필터링하도록 하십시오
+5. **쓰기 배치 처리** -- 여러 변형에 대해 배치 액션 엔드포인트를 사용하십시오
+6. **커넥션 풀링(Connection Pooling)** -- 순차적 요청에 HTTP 커넥션을 재사용하십시오
+
+## 다음 단계(Next Steps)
+
+- **[인증 흐름 가이드](./auth-flow)** -- 상세한 인증 패턴
+- **[SDK 가이드](./sdk-guide)** -- 타입 안전 클라이언트 라이브러리
+- **[v2 검색 API](/docs/api/v2-search)** -- 완전한 검색 레퍼런스
+- **[오류 코드](/docs/api/error-codes)** -- 전체 오류 코드 레퍼런스

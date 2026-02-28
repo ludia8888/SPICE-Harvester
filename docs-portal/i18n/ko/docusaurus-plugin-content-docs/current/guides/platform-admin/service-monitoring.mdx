@@ -1,0 +1,321 @@
+---
+title: 서비스 모니터링
+sidebar_position: 1
+---
+
+# 서비스 모니터링(Service Monitoring)
+
+이 가이드는 플랫폼 관리자가 Spice OS 서비스를 모니터링하는 방법을 안내합니다. 헬스 체크(Health Check), Docker 헬스 모니터링, 로깅을 활용하여 플랫폼의 안정성을 확보하는 방법을 학습합니다.
+
+## 서비스 인벤토리
+
+Spice OS는 **26개의 Docker 서비스**로 구성되며, 계층별로 분류됩니다.
+
+### 핵심 애플리케이션 서비스(Core Application Services)
+
+| Service | Port | 설명 |
+|---------|------|------|
+| **bff** | 8080 | Backend for Frontend -- API 게이트웨이, 234개 이상의 엔드포인트 |
+| **oms** | 8000 | Ontology Management Service -- 스키마 CRUD, 검색 |
+| **agent** | -- | AI 통합을 위한 에이전트 서비스 |
+
+### 워커 서비스(Worker Services)
+
+| Service | 설명 |
+|---------|------|
+| **ontology-worker** | 온톨로지 스키마 변경사항 처리 |
+| **instance-worker** | 오브젝트 인스턴스 생명주기 관리 |
+| **action-worker** | 검증된 액션 실행 |
+| **action-outbox-worker** | 아웃박스에서 Kafka로 액션 이벤트 발행 |
+| **pipeline-worker** | 데이터 변환 파이프라인 실행 |
+| **pipeline-scheduler** | 크론 스케줄 평가 및 파이프라인 작업 큐잉 |
+| **objectify-worker** | 원시 데이터셋 행을 온톨로지 인스턴스로 변환 |
+| **projection-worker** | 이벤트로부터 비정규화된 프로젝션 구축 |
+| **connector-trigger-service** | 데이터 커넥터 임포트 트리거 |
+| **connector-sync-worker** | 외부 데이터 소스 동기화 |
+| **ingest-reconciler-worker** | 수집 트랜잭션 조정 |
+| **message-relay** | 서비스 간 메시지 중계 |
+| **writeback-materializer-worker** | 쓰기 반영 구체화 |
+
+### 인프라 서비스(Infrastructure Services)
+
+| Service | Port | 설명 |
+|---------|------|------|
+| **postgres** | 5433 | PostgreSQL 16 -- 기본 데이터 저장소 |
+| **redis** | 6379 | Redis -- 캐싱 및 세션 저장소 |
+| **elasticsearch** | 9200 | Elasticsearch 8.12 -- 검색 및 분석 |
+| **kafka** | 39092 | Apache Kafka -- 이벤트 스트리밍 |
+| **zookeeper** | 2181 | ZooKeeper -- Kafka 코디네이션 |
+| **minio** | 9000/9001 | MinIO -- S3 호환 오브젝트 스토리지 |
+| **lakefs** | 48080 | lakeFS -- 데이터 버전 관리 |
+
+### 초기화 서비스(Initialization Services)
+
+| Service | 용도 |
+|---------|------|
+| **db-migrations** | 시작 시 데이터베이스 스키마 마이그레이션 실행 |
+| **minio-init** | MinIO 버킷 생성 |
+| **lakefs-init** | lakeFS 리포지토리 설정 |
+
+## 헬스 체크 엔드포인트(Health Check Endpoints)
+
+### BFF 헬스 체크
+
+```bash
+# 서비스 메타데이터
+curl http://localhost:8080/api/
+
+# 응답:
+{
+  "service": "Ontology BFF Service",
+  "version": "2.0.0",
+  "description": "..."
+}
+```
+
+```bash
+# 의존성 상태를 포함한 헬스 체크
+curl http://localhost:8080/api/health
+
+# 응답:
+{
+  "data": {
+    "oms_connected": true,
+    "status": "healthy"
+  }
+}
+```
+
+| 상태 | 의미 | 조치 |
+|------|------|------|
+| `healthy` | 모든 의존성 사용 가능 | 조치 불필요 |
+| `degraded` | OMS 사용 불가, BFF는 여전히 응답 중 | OMS 서비스 조사 필요 |
+
+### Docker 헬스 체크
+
+각 인프라 서비스에는 Docker 헬스 체크가 내장되어 있습니다.
+
+| Service | 헬스 체크 | 간격 | 재시도 |
+|---------|-----------|------|--------|
+| **PostgreSQL** | `pg_isready` | 30초 | 5회 |
+| **Redis** | Redis ping | 30초 | 5회 |
+| **Elasticsearch** | 클러스터 상태 (yellow 임계값) | 30초 | 10회 |
+| **Kafka** | 토픽 목록 조회 | 30초 | 5회 |
+| **ZooKeeper** | TCP 연결 | 30초 | 5회 |
+| **MinIO** | 포트 9000 TCP 체크 | 30초 | 5회 |
+| **lakeFS** | `GET /api/v1/healthcheck` | 10초 | 10회 |
+
+### 서비스 상태 확인
+
+```bash
+# 모든 서비스 상태 확인
+docker compose ps
+
+# 특정 서비스의 헬스 상태 확인
+docker inspect --format='{{.State.Health.Status}}' spice-harvester-postgres-1
+
+# 헬스 체크 로그 확인
+docker inspect --format='{{json .State.Health}}' spice-harvester-elasticsearch-1 | jq
+```
+
+## Docker Compose를 활용한 모니터링
+
+### 서비스 로그
+
+```bash
+# 모든 서비스 로그 실시간 추적
+docker compose logs -f
+
+# 특정 서비스 로그 추적
+docker compose logs -f bff
+
+# 서비스의 마지막 100줄 확인
+docker compose logs --tail=100 pipeline-worker
+
+# 에러 로그 필터링
+docker compose logs bff 2>&1 | grep -i error
+```
+
+### 리소스 사용량
+
+```bash
+# 실시간 컨테이너 리소스 사용량
+docker stats
+
+# 특정 서비스 리소스 확인
+docker stats spice-harvester-bff-1 spice-harvester-oms-1
+```
+
+### 서비스 재시작
+
+```bash
+# 단일 서비스 재시작
+docker compose restart bff
+
+# 새로운 컨테이너로 재시작
+docker compose up -d --force-recreate bff
+```
+
+## 주요 모니터링 지표
+
+### BFF 서비스
+
+| 지표 | 감시 대상 | 경고 임계값 |
+|------|-----------|-------------|
+| 요청 지연시간(Request latency, p95) | 느린 API 응답 | 2초 초과 |
+| 에러율(5xx) | 서버 측 장애 | 전체 요청의 1% 초과 |
+| 활성 연결 수 | 연결 고갈 | 최대값의 80% 초과 |
+| OMS 연결 상태 | 백엔드 가용성 | `oms_connected: false` |
+
+### 워커 서비스
+
+| 지표 | 감시 대상 | 경고 임계값 |
+|------|-----------|-------------|
+| 큐 깊이(Queue depth) | Kafka 컨슈머 랙(consumer lag) | 지속적으로 증가 |
+| 처리 시간 | 이벤트당 처리 지연시간 | 10초 초과 |
+| 에러 수 | 이벤트 처리 실패 | 연속 0회 초과 |
+| 재시작 횟수 | 컨테이너 크래시 | 5분 내 3회 초과 |
+
+### 인프라
+
+| 지표 | 감시 대상 | 경고 임계값 |
+|------|-----------|-------------|
+| PostgreSQL 연결 수 | 커넥션 풀 고갈 | 최대값의 80% 초과 |
+| Elasticsearch 클러스터 상태 | 노드 상태 | Yellow 또는 Red |
+| Kafka 컨슈머 랙 | 처리 백로그 | 증가 추세 |
+| MinIO 디스크 사용량 | 스토리지 용량 | 80% 초과 사용 |
+| Redis 메모리 사용량 | 메모리 압박 | maxmemory의 80% 초과 |
+
+## 파이프라인 스케줄러 모니터링(Pipeline Scheduler Monitoring)
+
+**파이프라인 스케줄러(Pipeline Scheduler)**는 특별한 주의가 필요한 중요한 백그라운드 프로세스입니다.
+
+```bash
+# 스케줄러 로그 확인
+docker compose logs -f pipeline-scheduler
+
+# 스케줄러가 폴링 중인지 확인
+docker compose logs pipeline-scheduler 2>&1 | grep "poll"
+```
+
+**모니터링 대상:**
+- **폴링 간격(Poll interval)** -- 스케줄러가 N초마다 레지스트리를 폴링합니다
+- **크론 평가(Cron evaluation)** -- 크론 표현식이 예상 시간에 트리거되는지 확인합니다
+- **작업 큐잉(Job enqueue)** -- 작업이 Kafka에 발행되고 있는지 확인합니다
+- **의존성 체크(Dependency checks)** -- 다운스트림 트리거 전에 업스트림 파이프라인이 완료되어야 합니다
+
+## 일반적인 문제 해결
+
+### 서비스가 시작되지 않는 경우
+
+```bash
+# 서비스 시작 오류 로그 확인
+docker compose logs <service-name>
+
+# 의존성이 정상인지 확인
+docker compose ps
+
+# 환경 변수 확인
+docker compose config | grep <variable>
+```
+
+### Elasticsearch 클러스터 Red 상태
+
+```bash
+# 클러스터 상태 확인
+curl http://localhost:9200/_cluster/health?pretty
+
+# 미할당 샤드 확인
+curl http://localhost:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason | grep UNASSIGNED
+
+# 단일 노드 샤드 할당 강제 실행
+curl -X PUT http://localhost:9200/_cluster/settings \
+  -H "Content-Type: application/json" \
+  -d '{"persistent": {"cluster.routing.allocation.enable": "all"}}'
+```
+
+### Kafka 컨슈머 랙(Consumer Lag)
+
+```bash
+# 컨슈머 그룹 랙 확인 (kafka 컨테이너 내부에서 실행)
+docker compose exec kafka kafka-consumer-groups \
+  --bootstrap-server localhost:29092 \
+  --describe --all-groups
+```
+
+### PostgreSQL 연결 문제
+
+```bash
+# 활성 연결 수 확인
+docker compose exec postgres psql -U postgres -c "SELECT count(*) FROM pg_stat_activity;"
+
+# 연결 제한 확인
+docker compose exec postgres psql -U postgres -c "SHOW max_connections;"
+
+# 유휴 연결 종료
+docker compose exec postgres psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND query_start < now() - interval '10 minutes';"
+```
+
+### lakeFS 문제
+
+```bash
+# lakeFS 상태 확인
+curl http://localhost:48080/api/v1/healthcheck
+
+# 리포지토리 목록 조회
+curl http://localhost:48080/api/v1/repositories
+```
+
+## 용량 계획(Capacity Planning)
+
+### 데이터베이스 증가량
+
+PostgreSQL 테이블 크기를 모니터링합니다.
+
+```bash
+docker compose exec postgres psql -U postgres -c "
+SELECT schemaname, tablename,
+       pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) AS size
+FROM pg_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC
+LIMIT 20;"
+```
+
+### Elasticsearch 인덱스 증가량
+
+```bash
+curl http://localhost:9200/_cat/indices?v&s=store.size:desc
+```
+
+### MinIO 스토리지
+
+```bash
+# 버킷 사용량 확인 (MinIO 콘솔에서)
+# MinIO 자격 증명으로 http://localhost:9001 에 접속합니다
+
+# 또는 mc CLI를 통해 확인
+docker compose exec minio mc ls --summarize --recursive /data/
+```
+
+## 모범 사례(Best Practices)
+
+1. **헬스 엔드포인트 모니터링** -- `/api/health`에 대한 자동화된 체크를 설정하고 degraded 상태에 대한 알림을 구성합니다
+2. **컨테이너 재시작 감시** -- 반복적인 재시작은 지속적인 장애를 나타냅니다
+3. **Kafka 컨슈머 랙 추적** -- 랙이 증가하면 워커가 이벤트 볼륨을 처리하지 못하고 있다는 의미입니다
+4. **리소스 제한 설정** -- Docker 메모리 및 CPU 제한을 구성하여 리소스 경합을 방지합니다
+5. **로그 로테이션** -- Docker 로그 로테이션을 구성하여 디스크 고갈을 방지합니다
+6. **PostgreSQL 백업** -- 정기적인 pg_dump 백업을 스케줄링합니다
+7. **Elasticsearch yellow 상태 모니터링** -- yellow 클러스터 상태가 red로 전환되기 전에 조치합니다
+
+## 사전 요구사항
+
+- [설치 가이드](/docs/getting-started/installation) -- 플랫폼이 실행 중이어야 합니다
+- [서비스 토폴로지](/docs/architecture/service-topology) -- 서비스 인벤토리에 대한 이해
+
+## 다음 단계
+
+- **[문제 해결](/docs/operations/troubleshooting)** -- 일반적인 문제 및 해결 방법
+- **[모니터링 운영](/docs/operations/monitoring)** -- 운영 모니터링 참고 자료
+- **[RBAC 가이드](./rbac)** -- 사용자 및 권한 관리
+- **[설정 참고](/docs/reference/config)** -- 모든 환경 변수

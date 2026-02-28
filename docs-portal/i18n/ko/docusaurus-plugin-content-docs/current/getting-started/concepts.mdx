@@ -5,94 +5,181 @@ sidebar_position: 3
 
 # 핵심 개념
 
-Spice OS는 Palantir Foundry에서 영감을 받은 강타입(Strongly-typed) 온톨로지 모델을 중심으로 설계되었습니다. 이 페이지는 플랫폼을 사용하기 전에 알아야 할 기본 개념을 소개합니다.
+Spice OS는 Palantir Foundry에서 영감을 받은 강타입(Strongly-typed) 온톨로지 모델을 중심으로 설계되었습니다. 이 페이지는 플랫폼을 사용하기 전에 알아야 할 기본 개념을 **SQL/코드 비유**와 함께 설명합니다.
+
+## 핵심 개념 한눈에 보기
+
+```mermaid
+erDiagram
+    Ontology ||--o{ ObjectType : "포함"
+    Ontology ||--o{ LinkType : "포함"
+    ObjectType ||--o{ Property : "정의"
+    ObjectType ||--o{ Instance : "생성"
+    LinkType }o--|| ObjectType : "source"
+    LinkType }o--|| ObjectType : "target"
+    Instance ||--o{ Action : "변경"
+    Action ||--o{ Event : "발행"
+```
+
+---
 
 ## 온톨로지(Ontology)
 
-**온톨로지(Ontology)** 는 조직의 데이터 모델을 정의하는 최상위 컨테이너입니다. 어떤 유형의 객체가 존재하는지, 서로 어떤 관계를 맺는지, 어떤 속성을 가지는지를 기술합니다.
+**온톨로지(Ontology)** 는 조직의 데이터 모델을 정의하는 최상위 컨테이너입니다.
 
-Spice OS의 온톨로지는 다음으로 구성됩니다:
-- **객체 유형(Object Types)** -- 엔티티의 청사진(예: Employee, Project, Asset)
-- **링크 유형(Link Types)** -- 객체 유형 간 관계(예: Employee가 Project를 *manages*)
-- **속성(Properties)** -- 객체 유형의 타입이 있는 특성(예: `fullName: string`, `startDate: date`)
+| Spice OS | SQL 비유 | 설명 |
+|:---------|:---------|:-----|
+| **Ontology** | `DATABASE` | 모든 스키마를 담는 최상위 컨테이너 |
+| **Object Type** | `CREATE TABLE` | 엔티티의 스키마 정의 |
+| **Property** | `COLUMN` | 타입이 있는 속성 |
+| **Link Type** | `FOREIGN KEY` (1급 시민) | 방향성 있는 관계 정의 |
+| **Instance** | `INSERT INTO` 된 행 | 실제 데이터 레코드 |
+| **Action** | `INSERT/UPDATE/DELETE` + 감사 로그 | 검증 + 이벤트 기반 쓰기 |
 
-여러 온톨로지를 둘 수도 있으며, 각 온톨로지는 고유한 `apiName` 으로 식별됩니다. 대부분의 배포에서는 하나의 기본 온톨로지를 사용합니다.
+```mermaid
+graph TB
+    subgraph ONT ["온톨로지: acme-corp"]
+        subgraph EMP ["ObjectType: Employee"]
+            P1["employeeId (string, PK)"]
+            P2["fullName (string)"]
+            P3["department (string)"]
+            P4["startDate (date)"]
+        end
+        subgraph PRJ ["ObjectType: Project"]
+            P5["projectId (string, PK)"]
+            P6["name (string)"]
+            P7["status (string)"]
+        end
+        EMP -->|"manages (1:N)"| PRJ
+    end
 
+    style ONT fill:#E3F2FD,stroke:#1565C0,color:#000
+    style EMP fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style PRJ fill:#FFF3E0,stroke:#E65100,color:#000
 ```
-Ontology: "acme-corp"
-├── ObjectType: Employee
-│   ├── Property: employeeId (string, primary key)
-│   ├── Property: fullName (string)
-│   ├── Property: department (string)
-│   └── Property: startDate (date)
-├── ObjectType: Project
-│   ├── Property: projectId (string, primary key)
-│   ├── Property: name (string)
-│   └── Property: status (string)
-└── LinkType: manages (Employee → Project)
-```
+
+여러 온톨로지를 둘 수도 있으며, 각 온톨로지는 고유한 `apiName`으로 식별됩니다. 대부분의 배포에서는 하나의 기본 온톨로지를 사용합니다.
+
+---
 
 ## 객체 유형(Object Types)
 
-**객체 유형(Object Type)** 은 관계형 DB의 테이블, 또는 객체지향 프로그래밍의 클래스와 유사한 스키마 정의입니다. 각 객체 유형은 다음을 선언합니다:
+**객체 유형(Object Type)** 은 관계형 DB의 테이블, 또는 객체지향 프로그래밍의 클래스와 유사한 스키마 정의입니다.
 
-- **apiName** -- API 호출에서 사용하는 고유 식별자(예: `Employee`)
-- **displayName** -- 사람이 읽기 좋은 라벨(예: "Employee")
-- **primaryKey** -- 인스턴스를 고유하게 식별하는 속성
-- **properties** -- 이름/타입이 지정된 속성 맵
+```sql
+-- SQL로 비유하면:
+CREATE TABLE Employee (
+    employeeId  VARCHAR PRIMARY KEY,  -- primary_key: true
+    fullName    VARCHAR NOT NULL,     -- required: true, title_key: true
+    department  VARCHAR,
+    startDate   DATE,
+    salary      DECIMAL CHECK (salary >= 0)
+);
+```
 
-객체 유형은 온톨로지에 등록되며, 해당 타입의 모든 인스턴스가 따라야 하는 구조를 정의합니다.
+```python
+# Python 코드로 비유하면:
+@dataclass
+class Employee:
+    employeeId: str    # primary key
+    fullName: str      # title key
+    department: str | None = None
+    startDate: date | None = None
+    salary: float | None = None
+```
 
 ### 지원 데이터 타입
 
-| 타입 | 설명 | 예시 |
-|------|-------------|---------|
-| `string` | UTF-8 텍스트 | `"Jane Doe"` |
-| `integer` | 64-bit 부호 있는 정수 | `42` |
-| `long` | 64-bit 부호 있는 정수(별칭) | `9876543210` |
-| `double` | 64-bit 부동소수점 | `3.14159` |
-| `boolean` | 참/거짓 | `true` |
-| `date` | ISO 8601 날짜 | `"2024-01-15"` |
-| `timestamp` | ISO 8601 일시 | `"2024-01-15T09:30:00Z"` |
-| `geopoint` | 위도/경도 쌍 | `{"lat": 37.7749, "lon": -122.4194}` |
-| `geoshape` | GeoJSON 지오메트리 | `{"type": "Polygon", ...}` |
-| `array` | 기본 타입의 순서 있는 리스트 | `["tag1", "tag2"]` |
+| 타입 | SQL 매핑 | 설명 | 예시 |
+|------|----------|------|------|
+| `string` | `TEXT` | UTF-8 텍스트 | `"Jane Doe"` |
+| `integer` | `BIGINT` | 64-bit 정수 | `42` |
+| `long` | `BIGINT` | 64-bit 정수 (별칭) | `9876543210` |
+| `double` | `DOUBLE PRECISION` | 64-bit 부동소수점 | `3.14159` |
+| `boolean` | `BOOLEAN` | 참/거짓 | `true` |
+| `date` | `DATE` | ISO 8601 날짜 | `"2024-01-15"` |
+| `timestamp` | `TIMESTAMP WITH TIME ZONE` | ISO 8601 일시 | `"2024-01-15T09:30:00Z"` |
+| `geopoint` | `TEXT` (JSON) | 위도/경도 쌍 | `{"lat": 37.77, "lon": -122.42}` |
+| `geoshape` | `TEXT` (GeoJSON) | GeoJSON 지오메트리 | `{"type": "Polygon", ...}` |
+| `array` | `JSONB` | 기본 타입의 리스트 | `["tag1", "tag2"]` |
+
+---
 
 ## 링크 유형(Link Types)
 
-**링크 유형(Link Type)** 은 두 객체 유형 사이의 방향성 있는 관계를 정의합니다. 링크는 온톨로지에서 1급(First-class) 엔티티로 취급되어, 그래프 형태로 데이터를 탐색할 수 있게 합니다.
+**링크 유형(Link Type)** 은 두 객체 유형 사이의 방향성 있는 관계를 정의합니다. SQL의 FOREIGN KEY와 유사하지만, 온톨로지에서 **1급 시민(First-class citizen)**으로 취급됩니다.
 
-각 링크 유형은 다음을 지정합니다:
-- **apiName** -- 고유 식별자(예: `manages`)
-- **sourceObjectType** -- 관계의 "출발(from)" 쪽
-- **targetObjectType** -- 관계의 "도착(to)" 쪽
-- **cardinality** -- `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_ONE`, `MANY_TO_MANY`
+```mermaid
+graph LR
+    EMP["Employee"] -->|"manages (1:N)"| PRJ["Project"]
+    EMP -->|"belongs_to (N:1)"| DEPT["Department"]
+    PRJ -->|"funded_by (N:M)"| ACC["Account"]
 
-링크는 데이터 모델에서 엣지로 저장되며 API로 조회할 수 있습니다. 링크를 따라가며 관련 객체로 이동(Traversal)할 수 있습니다.
+    style EMP fill:#E3F2FD,stroke:#1565C0,color:#000
+    style PRJ fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style DEPT fill:#FFF3E0,stroke:#E65100,color:#000
+    style ACC fill:#F3E5F5,stroke:#6A1B9A,color:#000
+```
+
+### 카디널리티(Cardinality)
+
+| 카디널리티 | SQL 비유 | 설명 | 구현 방식 |
+|:-----------|:---------|:-----|:----------|
+| `ONE_TO_ONE` | `UNIQUE FOREIGN KEY` | 1:1 관계 | Foreign Key |
+| `ONE_TO_MANY` | `FOREIGN KEY` | 1:N 관계 | Foreign Key |
+| `MANY_TO_ONE` | 역방향 `FOREIGN KEY` | N:1 관계 | Foreign Key |
+| `MANY_TO_MANY` | `JOIN TABLE` | N:M 관계 | Join Table / Object-Backed |
+
+### 관계 구현 방식
+
+링크 유형은 3가지 백킹 구현을 지원합니다:
+
+- **Foreign Key** -- 소스 테이블의 컬럼이 타겟의 PK를 참조 (가장 단순)
+- **Join Table** -- 별도 브릿지 테이블로 N:M 관계 표현
+- **Object-Backed** -- 관계 자체가 추가 속성을 가진 객체 유형으로 표현
+
+---
 
 ## 속성(Properties)
 
-**속성(Property)** 은 객체 유형에 붙는 이름/타입이 지정된 특성입니다. 속성은 각 인스턴스가 어떤 데이터를 갖는지 정의합니다.
+**속성(Property)** 은 객체 유형에 붙는 이름/타입이 지정된 특성입니다.
 
-속성은 다음을 가집니다:
-- **apiName** -- API 요청/응답에서 사용하는 식별자
-- **displayName** -- 사람이 읽기 좋은 라벨
-- **dataType** -- 위에서 정의한 지원 데이터 타입 중 하나
-- **required** -- 모든 인스턴스에 반드시 존재해야 하는지 여부
-- **indexed** -- Elasticsearch에서 검색 가능하도록 인덱싱할지 여부
+```json
+{
+  "name": "employeeId",
+  "type": "xsd:string",
+  "label": { "en": "Employee ID", "ko": "직원 ID" },
+  "required": true,
+  "primary_key": true,
+  "constraints": {
+    "pattern": "^EMP-\\d{3,6}$"
+  }
+}
+```
 
-기본키(primary key) 속성은 항상 required이며 indexed입니다.
+### 특수 역할
+
+| 역할 | 설명 | SQL 비유 |
+|:-----|:-----|:---------|
+| **primary_key** | 인스턴스를 고유 식별 | `PRIMARY KEY` |
+| **title_key** | UI에서 표시 이름으로 사용 | `-- display column` |
+| **required** | 모든 인스턴스에 필수 | `NOT NULL` |
+| **indexed** | ES에서 검색 가능 | `CREATE INDEX` |
+
+### 제약 조건(Constraints)
+
+| 제약 | 타입 | SQL 비유 | 예시 |
+|:-----|:-----|:---------|:-----|
+| `min` / `max` | number | `CHECK (age >= 0)` | `{"min": 0, "max": 200}` |
+| `pattern` | string | `CHECK (id ~ '^EMP-')` | `{"pattern": "^EMP-\\d+$"}` |
+| `enum` | array | `CHECK (status IN (...))` | `{"enum": ["ACTIVE", "INACTIVE"]}` |
+| `length` | object | `VARCHAR(100)` | `{"min": 1, "max": 100}` |
+
+---
 
 ## 인스턴스(Instances)
 
-**인스턴스(Instance)** 는 특정 객체 유형의 실제 레코드입니다. 객체 유형이 청사진이라면, 인스턴스는 실제 건물입니다. 각 인스턴스는 다음을 가집니다:
-
-- **\_\_rid** -- 플랫폼 전체에서 유일한 리소스 식별자
-- **\_\_primaryKey** -- 기본키 속성의 값
-- **\_\_apiName** -- 이 인스턴스가 속한 객체 유형
-- **properties** -- 실제 데이터 값
-
-`Employee` 객체 유형의 예시 인스턴스:
+**인스턴스(Instance)** 는 특정 객체 유형의 실제 레코드입니다. SQL의 `INSERT INTO`로 추가된 행과 같습니다.
 
 ```json
 {
@@ -108,229 +195,336 @@ Ontology: "acme-corp"
 }
 ```
 
-인스턴스는 PostgreSQL(정합성의 기준, source of truth)에 저장되고, Elasticsearch(검색/분석)에도 인덱싱됩니다.
+| 필드 | 설명 | SQL 비유 |
+|:-----|:-----|:---------|
+| `__rid` | 플랫폼 전체에서 유일한 리소스 식별자 | `CTID` (내부 행 ID) |
+| `__primaryKey` | 기본키 속성의 값 | `PRIMARY KEY` 값 |
+| `__apiName` | 이 인스턴스가 속한 객체 유형 | `TABLE` 이름 |
+| `properties` | 실제 데이터 값 | 행의 컬럼 값들 |
+
+인스턴스는 **PostgreSQL**(Source of Truth, 정확성)에 저장되고, **Elasticsearch**(검색/분석, 속도)에도 인덱싱됩니다.
+
+---
 
 ## 액션(Actions)
 
-**액션(Actions)** 은 플랫폼의 쓰기(write) 경로입니다. Spice OS는 단순 CRUD 변이를 직접 수행하는 대신, 다음을 제공하는 액션 시스템을 사용합니다:
+**액션(Actions)** 은 플랫폼의 쓰기(write) 경로입니다. 단순 CRUD 대신 **검증 → 이벤트 생성 → 비동기 처리** 파이프라인을 거칩니다.
 
-- **검증(Validation)** -- 실행 전 규칙 기반 검증
-- **감사 추적(Audit trail)** -- 모든 액션이 이벤트 스토어에 이벤트로 기록
-- **되돌리기(Undo) 지원** -- 보상 액션(Compensating actions)으로 되돌리기 가능
-- **충돌 해결(Conflict resolution)** -- 동시 수정 감지 및 해결
-- **템플릿(Templates)** -- 동적 표현식을 포함한 재사용 가능한 액션 정의
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant BFF as BFF Gateway
+    participant OMS as OMS Engine
+    participant PG as PostgreSQL
+    participant KF as Kafka
+    participant W as Workers
+
+    C->>BFF: POST /actions/apply
+    BFF->>OMS: 액션 전달
+    OMS->>OMS: 스키마 검증 + 비즈니스 룰
+    OMS->>PG: 이벤트 저장
+    OMS->>KF: 이벤트 발행
+    OMS-->>BFF: 즉시 응답 (~100ms)
+    BFF-->>C: 200 OK
+
+    Note over KF,W: 비동기 처리 (1~5초)
+    KF->>W: 이벤트 전달
+    W->>W: ES 인덱싱 + PG 갱신
+```
 
 ### 액션 타입
 
-| 액션 타입 | 설명 |
-|-------------|-------------|
-| `createObject` | 객체 유형의 새 인스턴스 생성 |
-| `editObject` | 기존 인스턴스의 속성 수정 |
-| `deleteObject` | 인스턴스 삭제 |
-| `createLink` | 두 인스턴스 간 관계 생성 |
-| `deleteLink` | 관계 삭제 |
-| `bulkAction` | 여러 액션을 원자적으로 실행 |
+| 액션 타입 | SQL 비유 | 설명 |
+|:----------|:---------|:-----|
+| `createObject` | `INSERT INTO` | 새 인스턴스 생성 |
+| `editObject` | `UPDATE SET` | 기존 인스턴스 속성 수정 |
+| `deleteObject` | `DELETE FROM` | 인스턴스 삭제 |
+| `createLink` | `INSERT INTO join_table` | 두 인스턴스 간 관계 생성 |
+| `deleteLink` | `DELETE FROM join_table` | 관계 삭제 |
+| `bulkAction` | `BEGIN; ... COMMIT;` | 여러 액션을 원자적으로 실행 |
+
+### SQL과의 차이점
+
+| SQL | Spice OS 액션 |
+|:----|:-------------|
+| 직접 실행 | 검증(Validation) 후 실행 |
+| 로그는 선택적 | 모든 변경이 이벤트로 기록 (감사 추적) |
+| ROLLBACK | Undo API로 보상 액션 실행 |
+| 락(Lock) 기반 | 낙관적 잠금(Optimistic Locking) + 충돌 감지 |
 
 ### 액션 템플릿
 
-액션 템플릿은 `$ref`, `$now`, `$if`, `$switch`, `$call` 같은 연산자를 제공하는 동적 표현식 언어를 사용해 재사용 가능한 로직을 정의합니다. 템플릿은 실행 시점에 평가되며, 현재 사용자/타임스탬프/기존 객체 속성을 참조할 수 있습니다.
+재사용 가능한 동적 표현식 언어를 사용합니다:
+
+| 연산자 | 설명 | 예시 |
+|:-------|:-----|:-----|
+| `$ref` | 파라미터/속성 참조 | `{"$ref": "parameters.fullName"}` |
+| `$now` | 현재 타임스탬프 | `{"$now": "ISO8601"}` |
+| `$if` | 조건부 표현식 | `{"$if": {"cond": ..., "then": ..., "else": ...}}` |
+| `$switch` | 다중 분기 조건 | `{"$switch": {"on": ..., "cases": {...}}}` |
+| `$call` | 등록된 함수 호출 | `{"$call": {"fn": "generateId", "args": [...]}}` |
+
+---
+
+## 멀티홉 쿼리(Multi-hop Query)
+
+Spice OS는 **링크 유형을 따라 여러 단계를 탐색**하는 멀티홉 쿼리를 지원합니다. 별도의 그래프 DB 없이 **Elasticsearch만으로** 구현됩니다.
+
+```mermaid
+graph LR
+    A["Account<br/>계좌"] -->|"owned_by"| P["Person<br/>인물"]
+    P -->|"works_at"| C["Company<br/>회사"]
+    C -->|"registered_in"| R["Region<br/>지역"]
+
+    style A fill:#FFCDD2,stroke:#C62828,color:#000
+    style P fill:#C8E6C9,stroke:#2E7D32,color:#000
+    style C fill:#BBDEFB,stroke:#1565C0,color:#000
+    style R fill:#FFF9C4,stroke:#F57F17,color:#000
+```
+
+### 쿼리 예시: 4-홉 금융 조사
+
+> "의심 계좌 ACC-001에 연결된 인물 → 그 인물이 근무하는 회사 → 그 회사가 등록된 지역"
+
+```json
+{
+  "start_class": "Account",
+  "start_filter": { "type": "eq", "field": "accountId", "value": "ACC-001" },
+  "hops": [
+    { "predicate": "owned_by", "target_class": "Person" },
+    { "predicate": "works_at", "target_class": "Company" },
+    { "predicate": "registered_in", "target_class": "Region" }
+  ]
+}
+```
+
+**API 엔드포인트:** `POST /api/v1/graph-query/{db}/multi-hop`
+
+### 내부 동작
+
+1. **시작점 검색** -- Elasticsearch에서 `Account` 중 `accountId = "ACC-001"` 검색
+2. **각 홉 순회** -- `relationships.{predicate}` 필드에서 연결된 인스턴스 ID 추출
+3. **팬아웃 제한** -- 각 홉의 최대 결과 수 1,000개로 제한 (무한 팽창 방지)
+4. **순환 감지** -- 이미 방문한 노드를 추적하여 무한 루프 방지
+5. **역방향 탐색** -- `reverse: true` 설정으로 링크 반대 방향 탐색 가능
+
+---
 
 ## 데이터셋(Datasets)
 
-**데이터셋(Dataset)** 은 LakeFS(백엔드: MinIO/S3)에 저장되는 버전 관리 가능한 불변(immutable) 데이터 객체입니다. 데이터셋은 원천 데이터를 제공하고, 이 데이터가 객체화(objectify)되어 인스턴스가 됩니다.
+**데이터셋(Dataset)** 은 LakeFS(MinIO/S3 기반)에 저장되는 버전 관리 가능한 불변 데이터 객체입니다.
 
-주요 데이터셋 연산:
-- **브랜치(Branches)** -- 병렬 데이터 개발을 위한 Git 유사 브랜칭
-- **트랜잭션(Transactions)** -- OPEN/COMMITTED/ABORTED 라이프사이클을 가진 원자적 read-modify-write
-- **버전 관리(Versioning)** -- 모든 변경은 LakeFS 커밋 ID를 갖는 새 버전을 생성
-- **파일 저장(File storage)** -- CSV/Parquet 등 파일을 경로로 주소 지정
+```mermaid
+graph TB
+    subgraph DS ["Dataset: sales-orders"]
+        subgraph MAIN ["Branch: main"]
+            V3["v3 (commit: abc123)<br/>data.csv (180K rows)"]
+            V2["v2 (commit: def456)"]
+            V1["v1 (commit: ghi789)"]
+            V3 --> V2 --> V1
+        end
+        subgraph STG ["Branch: staging"]
+            SV1["v1 (commit: jkl012)"]
+        end
+    end
 
+    style DS fill:#E3F2FD,stroke:#1565C0,color:#000
+    style MAIN fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style STG fill:#FFF3E0,stroke:#E65100,color:#000
 ```
-Dataset: "sales-orders"
-├── Branch: main
-│   ├── Version: v3 (commit: abc123)
-│   │   └── data.csv (180,000 rows)
-│   ├── Version: v2 (commit: def456)
-│   └── Version: v1 (commit: ghi789)
-└── Branch: staging
-    └── Version: v1 (commit: jkl012)
-```
 
-데이터셋은 CRUD, 브랜칭, 트랜잭션, 파일 관리, 스키마 작업을 포함한 19개 엔드포인트의 **Foundry Datasets v2 API** 로 관리됩니다.
+:::info LakeFS default_branch 주의
+LakeFS 리포지토리의 기본 브랜치는 `"main"`입니다 (`"master"` 아님).
+:::
+
+---
 
 ## 커넥션 & 커넥터(Connections & Connectors)
 
-**커넥션(Connection)** 은 외부 데이터 소스에 대한 구성된 연결을 의미합니다. Spice OS는 6가지 커넥터 타입을 지원합니다:
+외부 데이터 소스에 대한 구성된 연결입니다. 6가지 커넥터 타입을 지원합니다:
 
 | 커넥터 | 라이브러리 | 사용 사례 |
-|-----------|---------|----------|
+|:-------|:---------|:---------|
 | **Google Sheets** | gspread | 스프레드시트 가져오기 |
-| **PostgreSQL** | asyncpg | 관계형 데이터베이스 |
-| **MySQL** | pymysql | 관계형 데이터베이스 |
+| **PostgreSQL** | asyncpg | 관계형 DB |
+| **MySQL** | pymysql | 관계형 DB |
 | **Oracle** | oracledb | 엔터프라이즈 DB |
 | **Snowflake** | snowflake-connector | 데이터 웨어하우스 |
 | **SQL Server** | pymssql | 엔터프라이즈 DB |
 
-각 커넥션은 다음을 저장합니다:
-- **공개 구성**(host, port, database) -- `connector_sources.config_json`
-- **시크릿**(비밀번호, 커넥션 스트링) -- **AES-GCM 암호화**되어 `connector_connection_secrets`에 저장
-
-커넥션은 3가지 리소스 타입을 지원합니다:
-- **Table Imports** -- SQL 쿼리 기반 데이터 적재
-- **File Imports** -- 파일 기반 데이터 적재
-- **Virtual Tables** -- 읽기 전용 쿼리 뷰(SNAPSHOT 전용)
-
 ### 동기화 모드(Sync Modes)
 
-데이터를 가져올 때, 새 데이터가 기존 데이터와 어떻게 병합되는지를 결정하는 동기화 모드를 선택합니다:
+| 모드 | SQL 비유 | 전략 | 사용 시점 |
+|:-----|:---------|:-----|:---------|
+| **SNAPSHOT** | `TRUNCATE + INSERT` | 매 실행 시 전체 교체 | 일일 리포트 |
+| **APPEND** | `INSERT ON CONFLICT DO NOTHING` | 해시 기반 중복 제거 추가 | 이벤트 로그 |
+| **UPDATE** | `INSERT ON CONFLICT DO UPDATE` | PK 기준 업서트 | 고객 프로필 |
+| **INCREMENTAL** | `WHERE updated_at > watermark` | 워터마크 이후만 가져오기 | 대형 테이블 |
+| **CDC** | Binlog / SCN 추적 | DB 변경 실시간 추적 | 실시간 복제 |
 
-| 모드 | 전략 | 사용 시점 |
-|------|----------|-------------|
-| **SNAPSHOT** | 매 실행 시 전체 교체 | 일일 리포트, 작은 테이블 |
-| **APPEND** | 새 행 추가(해시 기반 중복 제거) | 이벤트 로그, 증가형 데이터 |
-| **UPDATE** | 기본키 기준 업서트(Upsert) | 고객 프로필, 상태 테이블 |
-| **INCREMENTAL** | 워터마크 이후 행만 가져오기 | 타임스탬프 기반 대형 테이블 |
-| **CDC** | DB 토큰(SCN/binlog)으로 변경 추적 | 실시간 복제 |
+---
 
 ## 파이프라인(Pipelines)
 
-**파이프라인(Pipeline)** 은 노드로 구성된 DAG(방향 비순환 그래프) 형태의 선언적 데이터 변환 워크플로입니다. 소스에서 변환을 거쳐 결과로 데이터가 흐르는 방식을 정의합니다.
+**파이프라인(Pipeline)** 은 노드로 구성된 DAG(방향 비순환 그래프) 형태의 선언적 데이터 변환 워크플로입니다.
 
-### 파이프라인 노드
+```mermaid
+graph LR
+    subgraph Input ["Input Nodes"]
+        I1["CSV Dataset"]
+        I2["JDBC Source"]
+    end
+    subgraph Transform ["Transform Nodes (38개)"]
+        T1["Filter"]
+        T2["Join"]
+        T3["Compute"]
+        T4["Aggregate"]
+    end
+    subgraph Output ["Output Nodes"]
+        O1["Dataset"]
+        O2["Ontology"]
+    end
 
+    I1 --> T1 --> T2 --> T3 --> O1
+    I2 --> T2
+    T3 --> T4 --> O2
+
+    style Input fill:#E3F2FD,stroke:#1565C0,color:#000
+    style Transform fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style Output fill:#FFF3E0,stroke:#E65100,color:#000
 ```
-[Input Nodes] → [Transform Nodes] → [Output Nodes]
-```
 
-- **Input** -- 데이터 소스(datasets, JDBC, Kafka, S3)
-- **Transform** -- 38개 연산(join, filter, compute, aggregate, window, UDF 등)
-- **Output** -- 결과 싱크(dataset, ontology, geotemporal)
-
-### 실행 모드(Execution Modes)
+### 실행 모드
 
 | 모드 | 목적 | 부수 효과 |
-|------|---------|-------------|
-| **Preview** | 샘플 데이터로 인메모리 시뮬레이션 | 없음 |
-| **Build** | 전체 실행으로 아티팩트 생성 | S3에 아티팩트 생성 |
-| **Deploy** | 아티팩트를 프로덕션으로 승격 | 출력 데이터셋 + 온톨로지에 기록 |
+|:-----|:-----|:---------|
+| **Preview** | 샘플 데이터로 시뮬레이션 | 없음 |
+| **Build** | 전체 실행, 아티팩트 생성 | S3에 아티팩트 저장 |
+| **Deploy** | 프로덕션에 반영 | 데이터셋 + 온톨로지에 기록 |
 
-### 사용자 정의 함수(UDFs)
+### UDF (사용자 정의 함수)
 
-UDF는 **샌드박스** 환경에서 행 단위 변환을 사용자 정의할 수 있게 합니다. 안전한 Python builtins만 허용되며, import/루프/시스템 접근은 차단됩니다.
+**샌드박스** 환경에서 행 단위 변환을 커스터마이징합니다:
 
 ```python
 def transform(row):
     return row.get("name", "").upper()
 ```
 
-### 프로포절(Proposals)
+:::caution UDF 보안
+안전한 Python builtins만 허용됩니다. `import`, 루프, 시스템 접근은 AST 검증으로 차단됩니다.
+:::
 
-보호된 브랜치(`main`, `prod`)에서 파이프라인을 변경하는 경우, 배포 전에 **프로포절 승인**이 필요합니다. 프로포절은 빌드 출력/스키마/온톨로지 상태의 불변 스냅샷을 캡처합니다.
-
-## 오케스트레이션 & 스케줄링
-
-**오케스트레이션(Orchestration)** 은 빌드/스케줄/런(run)을 통해 파이프라인 실행 라이프사이클을 관리합니다.
-
-- **빌드(Builds)** -- 파이프라인 실행 잡을 생성/모니터링/취소
-- **스케줄(Schedules)** -- 반복 실행을 위한 cron 표현식 또는 인터벌 정의
-- **런(Runs)** -- 상태/출력을 포함한 실행 히스토리 추적
-
-**Pipeline Scheduler** 는 독립적인 백그라운드 프로세스로, N초마다 레지스트리를 폴링하고 cron 표현식을 평가하며, 의존성을 확인한 뒤 Kafka에 잡을 enqueue합니다.
-
-스케줄은 구성을 삭제하지 않고도 **일시정지(paused)** / **재개(unpaused)** 할 수 있습니다.
-
-## 보안(Security)
-
-Spice OS는 여러 보안 계층을 제공합니다:
-
-| 계층 | 보호 |
-|-------|-----------|
-| **시크릿 암호화** | 소스별 AAD(Additional Authenticated Data)를 포함한 AES-GCM |
-| **SQL Injection 방어** | 모든 JDBC 쿼리를 정규화; 세미콜론/멀티 스테이트먼트 거부 |
-| **쿼리 타임아웃** | 모든 JDBC 어댑터 작업에 300초 타임아웃 |
-| **피처 플래그** | JDBC/CDC 기능을 DB별로 게이팅 |
-| **평문 차단** | 프로덕션 환경에서는 암호화 키 없이 시크릿 저장 불가 |
-| **UDF 샌드박스** | AST 검증으로 import/루프/시스템 접근 차단 |
-
-## 프로젝션(Projections)
-
-**프로젝션(Projection)** 은 특정 쿼리 패턴에 최적화된 사전 계산된 비정규화 뷰입니다. 프로젝션은 이벤트 스트림을 기반으로 Projection Builder 워커들이 생성합니다.
-
-프로젝션 예시:
-- 타입/부서별 객체 수 집계
-- 링크 유형을 따라 객체를 조인한 플랫(flat) 뷰
-- 액션 활동을 시간대별로 롤업한 시계열
-
-프로젝션은 source of truth와 최종 일관성(eventual consistency)을 가집니다. 플랫폼은 프로젝션 지연(lag)을 모니터링하고 리빌드를 트리거하는 도구를 제공합니다.
-
-## 라인리지(Lineage)
-
-**라인리지(Lineage)** 는 데이터가 시스템을 통해 어떻게 흐르는지 추적합니다. Spice OS는 15개의 라인리지 엣지 타입을 캡처합니다:
-
-| 엣지 타입 | 설명 |
-|-----------|-------------|
-| `DERIVED_FROM` | 객체가 다른 객체로부터 파생됨 |
-| `IMPORTED_BY` | 데이터가 파이프라인에 의해 가져와짐 |
-| `TRANSFORMED_BY` | 데이터가 변환(transform)으로 처리됨 |
-| `LINKED_TO` | 객체가 다른 객체와 링크됨 |
-| `CREATED_BY` | 객체가 액션으로 생성됨 |
-| `MODIFIED_BY` | 객체가 액션으로 수정됨 |
-| `DELETED_BY` | 객체가 액션으로 삭제됨 |
-| `VALIDATED_BY` | 데이터가 규칙에 의해 검증됨 |
-| `ENRICHED_BY` | 데이터가 조회(lookup)로 보강됨 |
-| `MERGED_FROM` | 객체가 여러 소스에서 병합됨 |
-| `SPLIT_INTO` | 객체가 여러 객체로 분할됨 |
-| `AGGREGATED_FROM` | 프로젝션이 소스 객체에서 집계됨 |
-| `PUBLISHED_TO` | 데이터가 외부 시스템으로 게시됨 |
-| `CONSUMED_FROM` | 데이터가 외부 시스템에서 소비됨 |
-| `SNAPSHOT_OF` | 객체의 시점 스냅샷 |
-
-라인리지 데이터는 이벤트 스토어에 저장되며, API로 조회해 데이터 출처(provenance)를 추적할 수 있습니다.
+---
 
 ## 이벤트 소싱(Event Sourcing)
 
-Spice OS는 영속성 패턴으로 **이벤트 소싱(Event Sourcing)** 을 사용합니다. 모든 상태 변경은 불변 이벤트로 캡처됩니다:
+모든 상태 변경이 불변 이벤트로 캡처됩니다. **Git for Data**와 같은 개념입니다.
 
-1. API를 통해 액션이 제출됩니다
-2. 액션이 검증되고 하나 이상의 이벤트로 변환됩니다
-3. 이벤트는 실시간 처리를 위해 **Kafka** 에 게시됩니다
-4. 이벤트는 내구성을 위해 **S3/MinIO Event Store** 에 저장됩니다
-5. 워커가 이벤트를 소비해 **리드 모델**(PostgreSQL, Elasticsearch, projections)을 갱신합니다
+```mermaid
+graph LR
+    A1["1. 액션 제출"] --> A2["2. 검증"]
+    A2 --> A3["3. 이벤트 생성"]
+    A3 --> A4["4. Kafka 게시"]
+    A4 --> A5["5. 워커 처리"]
+    A5 --> A6["6. 조회 가능"]
 
-이 설계는 완전한 감사 추적을 제공하고, 타임 트래블 쿼리를 가능하게 하며, 이벤트 히스토리에서 어떤 리드 모델이든 재구성할 수 있게 합니다.
+    A3 -.-> S3["S3/MinIO<br/>(영구 저장)"]
+    A5 -.-> PG["PostgreSQL<br/>(Source of Truth)"]
+    A5 -.-> ES["Elasticsearch<br/>(Read Model)"]
+
+    style A1 fill:#E3F2FD,stroke:#1565C0,color:#000
+    style A2 fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style A3 fill:#FFF3E0,stroke:#E65100,color:#000
+    style A4 fill:#FFF9C4,stroke:#F57F17,color:#000
+    style A5 fill:#F3E5F5,stroke:#6A1B9A,color:#000
+    style A6 fill:#C8E6C9,stroke:#2E7D32,color:#000
+```
+
+| Git | Spice OS |
+|:----|:---------|
+| `git commit` | 이벤트 생성 (INSTANCE_CREATED, PROPERTY_UPDATED...) |
+| `git log` | 이벤트 스토어 조회 (S3/MinIO에 영구 보관) |
+| `git checkout <hash>` | 타임 트래블 쿼리 (과거 시점 데이터 조회) |
+| HEAD | PostgreSQL + Elasticsearch (현재 데이터) |
+
+---
+
+## 프로젝션(Projections)
+
+특정 쿼리 패턴에 최적화된 사전 계산된 비정규화 뷰입니다.
+
+- 타입/부서별 객체 수 집계
+- 링크 유형을 따라 객체를 조인한 플랫 뷰
+- 액션 활동의 시계열 롤업
+
+프로젝션은 Source of Truth와 **최종 일관성(Eventual Consistency)** 을 가집니다. 보통 1~5초 내에 동기화됩니다.
+
+---
+
+## 라인리지(Lineage)
+
+데이터가 시스템을 통해 어떻게 흐르는지 추적합니다. **15개의 엣지 타입**을 캡처합니다:
+
+| 엣지 타입 | 설명 |
+|:----------|:-----|
+| `DERIVED_FROM` | 객체가 다른 객체로부터 파생 |
+| `IMPORTED_BY` | 파이프라인에 의해 가져와짐 |
+| `TRANSFORMED_BY` | 변환으로 처리됨 |
+| `LINKED_TO` | 다른 객체와 링크됨 |
+| `CREATED_BY` / `MODIFIED_BY` / `DELETED_BY` | 액션으로 생성/수정/삭제 |
+| `VALIDATED_BY` | 규칙에 의해 검증 |
+| `ENRICHED_BY` | 조회로 보강 |
+| `MERGED_FROM` / `SPLIT_INTO` | 병합/분할 |
+| `AGGREGATED_FROM` | 프로젝션에서 집계 |
+| `PUBLISHED_TO` / `CONSUMED_FROM` | 외부 시스템 게시/소비 |
+| `SNAPSHOT_OF` | 시점 스냅샷 |
+
+---
 
 ## 개념 간 관계
 
+```mermaid
+graph TB
+    subgraph Ontology ["Ontology (데이터 모델)"]
+        OT["ObjectType<br/>(스키마)"]
+        LT["LinkType<br/>(관계)"]
+        PR["Properties<br/>(속성)"]
+        OT --> LT
+        OT --> PR
+    end
+
+    OT -->|"구조 정의"| INST["Instances<br/>(실제 데이터)"]
+    INST <-->|"변경"| ACT["Actions<br/>(쓰기 작업)"]
+    ACT -->|"발행"| EVT["Events<br/>(불변 기록)"]
+    EVT -->|"소비"| PROJ["Projections<br/>Pipelines<br/>Lineage"]
+
+    CONN["Connections<br/>(외부 소스)"] -->|"가져오기"| DS["Datasets<br/>(버전 관리)"]
+    DS -->|"Objectify"| INST
+
+    style Ontology fill:#E3F2FD,stroke:#1565C0,color:#000
+    style INST fill:#E8F5E9,stroke:#2E7D32,color:#000
+    style ACT fill:#FFF3E0,stroke:#E65100,color:#000
+    style EVT fill:#FFF9C4,stroke:#F57F17,color:#000
+    style PROJ fill:#F3E5F5,stroke:#6A1B9A,color:#000
+    style CONN fill:#FCE4EC,stroke:#880E4F,color:#000
+    style DS fill:#F1F8E9,stroke:#558B2F,color:#000
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         Ontology                            │
-│  ┌──────────────┐    ┌──────────────┐                       │
-│  │  ObjectType   │───▶│   LinkType   │                       │
-│  │  (blueprint)  │    │ (relationship)│                      │
-│  └──────┬───────┘    └──────────────┘                       │
-│         │                                                   │
-│  ┌──────▼───────┐                                           │
-│  │  Properties   │                                           │
-│  │  (attributes) │                                           │
-│  └──────────────┘                                           │
-└─────────────────────────────────────────────────────────────┘
-         │ defines structure for
-         ▼
-┌─────────────────┐     ┌─────────────┐     ┌──────────────┐
-│    Instances     │────▶│   Actions   │     │  Connections  │
-│  (actual data)   │◀────│  (mutations) │     │ (ext. sources)│
-└────────┬────────┘     └──────┬──────┘     └──────┬───────┘
-         │                     │ emit               │ import
-         │              ┌──────▼──────┐      ┌──────▼───────┐
-         │              │   Events    │      │   Datasets   │
-         │              └──────┬──────┘      │  (versioned) │
-         │                     │ consumed    └──────┬───────┘
-         │              ┌──────▼──────┐             │
-         └─────────────▶│ Projections │◀────────────┘
-                        │  Pipelines  │
-                        │  Lineage    │
-                        └─────────────┘
-```
+
+---
+
+## 보안(Security)
+
+| 계층 | 보호 |
+|:-----|:-----|
+| **시크릿 암호화** | 소스별 AAD를 포함한 AES-GCM |
+| **SQL Injection 방어** | JDBC 쿼리 정규화; 세미콜론/멀티 스테이트먼트 거부 |
+| **쿼리 타임아웃** | 모든 JDBC 작업 300초 타임아웃 |
+| **피처 플래그** | JDBC/CDC 기능 DB별 게이팅 |
+| **평문 차단** | 프로덕션에서 암호화 키 없이 시크릿 저장 불가 |
+| **UDF 샌드박스** | AST 검증으로 import/루프/시스템 접근 차단 |
+
+---
 
 ## 다음 단계
 

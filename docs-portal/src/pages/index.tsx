@@ -66,7 +66,7 @@ const FEATURES: Feature[] = [
       translate({
         id: "homepage.features.pipeline.description",
         message:
-          "Build data transformation pipelines with 22+ transforms and AI-assisted composition.",
+          "Build data transformation pipelines with 38+ transforms and AI-assisted composition.",
       }),
     link: "/docs/guides/data-engineer/schema-config",
   },
