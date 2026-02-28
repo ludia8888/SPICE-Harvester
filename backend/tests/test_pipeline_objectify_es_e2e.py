@@ -52,60 +52,28 @@ if os.getenv("RUN_PIPELINE_OBJECTIFY_E2E", "").strip().lower() not in {"1", "tru
     )
 
 
-def _postgres_url_candidates() -> list[str]:
-    env_url = (os.getenv("POSTGRES_URL") or "").strip()
-    if env_url:
-        return [env_url]
-    return [
-        "postgresql://spiceadmin:spicepass123@localhost:55433/spicedb",
-        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
-    ]
-
-
-async def _grant_db_role(
+async def _grant_db_role_http(
+    client: httpx.AsyncClient,
     *,
     db_name: str,
     principal_id: str,
     role: str = "Owner",
     principal_type: str = "user",
 ) -> None:
-    import asyncpg
-
-    from shared.security.database_access import ensure_database_access_table
-
-    last_error: Optional[Exception] = None
-    for dsn in _postgres_url_candidates():
-        try:
-            conn = await asyncpg.connect(dsn)
-        except Exception as exc:
-            last_error = exc
-            continue
-        try:
-            await ensure_database_access_table(conn)
-            await conn.execute(
-                """
-                INSERT INTO database_access (
-                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                ON CONFLICT (db_name, principal_type, principal_id)
-                DO UPDATE SET
-                    principal_name = EXCLUDED.principal_name,
-                    role = EXCLUDED.role,
-                    updated_at = NOW()
-                """,
-                db_name,
-                principal_type,
-                principal_id,
-                principal_id,
-                role,
-            )
-            return
-        except Exception as exc:
-            last_error = exc
-        finally:
-            await conn.close()
-    if last_error:
-        raise RuntimeError("Failed to grant database role for test user") from last_error
+    resp = await client.post(
+        f"{BFF_URL}/api/v1/databases/{db_name}/access",
+        json={
+            "entries": [
+                {
+                    "principal_type": principal_type,
+                    "principal_id": principal_id,
+                    "principal_name": principal_id,
+                    "role": role,
+                }
+            ]
+        },
+    )
+    resp.raise_for_status()
 
 
 async def _post_with_retry(
@@ -455,7 +423,8 @@ async def test_pipeline_objectify_es_projection() -> None:
     async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
         client = PipelinesV2AdapterClient(raw_client)
         await _create_db_with_retry(client, db_name=db_name, description="pipeline objectify e2e")
-        await _grant_db_role(
+        await _grant_db_role_http(
+            raw_client,
             db_name=db_name,
             principal_id=headers["X-User-ID"],
             principal_type=headers["X-User-Type"],

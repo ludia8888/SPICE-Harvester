@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **262**
+- Total documented endpoints: **264**
 - Deprecated endpoints: **0**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 153 |
+| `v1` | 155 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -36,7 +36,7 @@
 | `ontologies` | 48 |
 | `connectivity` | 31 |
 | `pipelines` | 30 |
-| `databases` | 22 |
+| `databases` | 24 |
 | `datasets` | 19 |
 | `admin` | 13 |
 | `orchestration` | 11 |
@@ -170,6 +170,8 @@
 | `POST` | `/api/v1/databases` | Create Database | `v1` | no | no | `create_database_api_v1_databases_post` |
 | `GET` | `/api/v1/databases/{db_name}` | Get Database | `v1` | no | no | `get_database_api_v1_databases__db_name__get` |
 | `DELETE` | `/api/v1/databases/{db_name}` | Delete Database | `v1` | no | no | `delete_database_api_v1_databases__db_name__delete` |
+| `GET` | `/api/v1/databases/{db_name}/access` | List Database Access | `v1` | no | no | `list_database_access_api_v1_databases__db_name__access_get` |
+| `POST` | `/api/v1/databases/{db_name}/access` | Upsert Database Access | `v1` | no | no | `upsert_database_access_api_v1_databases__db_name__access_post` |
 | `GET` | `/api/v1/databases/{db_name}/expected-seq` | Get Database Expected Seq | `v1` | no | no | `get_database_expected_seq_api_v1_databases__db_name__expected_seq_get` |
 
 ### Document Bundles

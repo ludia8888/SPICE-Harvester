@@ -7,14 +7,17 @@ Tests the full Palantir Foundry lifecycle:
 
 Data sources:
   - Brazilian E-Commerce by Olist (Kaggle, 5 relational CSVs)
-  - Open-Meteo Weather API (no key)
-  - Frankfurter Exchange Rate API (no key)
-  - USGS Earthquake API (no key)
+  - (Optional live) Open-Meteo Weather API (no key)
+  - (Optional live) Frankfurter Exchange Rate API (no key)
+  - (Optional live) USGS Earthquake API (no key)
 
 Run:
   RUN_FOUNDRY_E2E_QA=true \\
     PYTHONPATH=backend \\
     python -m pytest backend/tests/test_foundry_e2e_qa.py -v -s --tb=short
+
+Enable live APIs (nightly/manual; may be flaky):
+  RUN_FOUNDRY_E2E_QA_LIVE=true
 """
 
 from __future__ import annotations
@@ -35,7 +38,6 @@ import pytest
 
 from shared.config.search_config import get_instances_index_name
 from shared.foundry.rids import build_rid
-from shared.security.database_access import ensure_database_access_table
 from tests.utils.auth import build_smoke_user_jwt, oms_auth_headers
 from tests.utils.qa_helpers import (
     BugTracker,
@@ -69,6 +71,7 @@ HTTPX_TIMEOUT = float(os.getenv("QA_HTTP_TIMEOUT", "180") or 180)
 ES_TIMEOUT = int(os.getenv("QA_ES_TIMEOUT", "240") or 240)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+RUN_LIVE_APIS = os.getenv("RUN_FOUNDRY_E2E_QA_LIVE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 _SEVERITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
@@ -640,6 +643,59 @@ async def _wait_for_command(
     raise AssertionError(f"Timed out waiting for command {command_id} (last={last_payload})")
 
 
+async def _wait_for_pipeline_run_sample(
+    client: httpx.AsyncClient,
+    *,
+    pipeline_id: str,
+    job_id: str,
+    timeout: int = 180,
+) -> Dict[str, Any]:
+    """Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows."""
+    deadline = time.monotonic() + timeout
+    last_payload: Optional[Dict[str, Any]] = None
+    while time.monotonic() < deadline:
+        resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 50})
+        if resp.status_code == 200:
+            payload = resp.json()
+            last_payload = payload
+            runs = (payload.get("data") or {}).get("runs") or []
+            if isinstance(runs, list):
+                run = next((r for r in runs if str(r.get("job_id") or "") == str(job_id)), None)
+            else:
+                run = None
+            if isinstance(run, dict):
+                status_value = str(run.get("status") or "").upper()
+                sample = run.get("sample_json") if isinstance(run.get("sample_json"), dict) else None
+                if status_value in {"FAILED", "ERROR"}:
+                    raise AssertionError(f"Pipeline run failed (job_id={job_id}): {run}")
+                if status_value in {"SUCCESS", "SUCCEEDED", "COMPLETED", "DEPLOYED"}:
+                    if isinstance(sample, dict) and isinstance(sample.get("rows"), list) and sample.get("rows"):
+                        return sample
+        await asyncio.sleep(2.0)
+    raise AssertionError(f"Timed out waiting for pipeline run sample (job_id={job_id}, last={last_payload})")
+
+
+async def _wait_for_dataset_by_name(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    dataset_name: str,
+    timeout: int = 180,
+) -> Dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        resp = await client.get(f"{BFF_URL}/api/v1/pipelines/datasets", params={"db_name": db_name})
+        if resp.status_code == 200:
+            data = resp.json().get("data") or resp.json()
+            ds_list = data.get("datasets") or data.get("items") or []
+            if isinstance(ds_list, list):
+                hit = next((d for d in ds_list if str(d.get("name") or "") == dataset_name), None)
+                if isinstance(hit, dict):
+                    return hit
+        await asyncio.sleep(2.0)
+    raise AssertionError(f"Timed out waiting for dataset '{dataset_name}' to appear in db={db_name}")
+
+
 async def _wait_for_ontology(
     client: httpx.AsyncClient,
     *,
@@ -693,48 +749,17 @@ async def _wait_for_es_doc(
     raise AssertionError(f"Timed out waiting for ES doc {doc_id} in {index_name}")
 
 
-async def _grant_db_role(
+async def _upsert_database_access_http(
+    client: httpx.AsyncClient,
     *,
     db_name: str,
-    principal_id: str,
-    role: str,
-    principal_type: str = "user",
-    principal_name: Optional[str] = None,
+    entries: List[Dict[str, Any]],
 ) -> None:
-    import asyncpg  # type: ignore
-
-    dsn_candidates = [
-        (os.getenv("POSTGRES_URL") or "").strip(),
-        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
-        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
-    ]
-    for dsn in dsn_candidates:
-        if not dsn:
-            continue
-        try:
-            conn = await asyncpg.connect(dsn)
-        except Exception:
-            continue
-        try:
-            await ensure_database_access_table(conn)
-            resolved_name = (principal_name or principal_id or "").strip() or principal_id
-            await conn.execute(
-                """
-                INSERT INTO database_access (
-                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                ON CONFLICT (db_name, principal_type, principal_id)
-                DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
-                """,
-                db_name,
-                str(principal_type or "user"),
-                principal_id,
-                resolved_name,
-                role,
-            )
-            return
-        finally:
-            await conn.close()
+    resp = await client.post(
+        f"{BFF_URL}/api/v1/databases/{db_name}/access",
+        json={"entries": entries},
+    )
+    resp.raise_for_status()
 
 
 async def _upsert_object_type_contract(
@@ -878,19 +903,24 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
     # ── 1-3: Provision DB roles (RBAC) ────────────────────────────
     print("  [1-3] Provisioning DB roles for personas (RBAC)...")
     try:
+        _switch_persona(state, client, "owner")
+        entries: List[Dict[str, Any]] = []
         for persona_key, persona in state.personas.items():
             if not persona.db_role:
                 continue
-            await _grant_db_role(
-                db_name=state.db_name,
-                principal_id=persona.subject,
-                principal_name=persona.subject,
-                role=persona.db_role,
+            entries.append(
+                {
+                    "principal_type": "user",
+                    "principal_id": persona.subject,
+                    "principal_name": persona.subject,
+                    "role": persona.db_role,
+                }
             )
+        await _upsert_database_access_http(client, db_name=state.db_name, entries=entries)
         state.bug_tracker.record_pass()
         print(f"    DB roles provisioned: {', '.join(sorted(k for k,v in state.personas.items() if v.db_role))}")
     except Exception as exc:
-        state.bug_tracker.record(phase, "1-3", "asyncpg database_access upsert", "roles provisioned", str(exc)[:200], "P0")
+        state.bug_tracker.record(phase, "1-3", "POST /api/v1/databases/{db}/access", "roles provisioned", str(exc)[:200], "P0")
 
     # Phase 0: Hard guardrails (negative cases must be correct 4xx, never 500).
     await phase0_guardrails(state, client)
@@ -1055,76 +1085,81 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
 
     # ── 1-5: Upload real-time API data ────────────────────────────
     print("  [1-5] Fetching and uploading real-time API data...")
-    live_sources = {
-        "weather_saopaulo": ("São Paulo weather (Open-Meteo)", fetch_open_meteo_csv),
-        "exchange_rates_brl": ("BRL exchange rates (Frankfurter)", fetch_frankfurter_csv),
-        "earthquakes_month": ("Monthly earthquakes (USGS)", fetch_usgs_earthquake_csv),
-    }
-    for name, (description, fetch_fn) in live_sources.items():
-        csv_bytes: Optional[bytes] = None
-        try:
-            csv_bytes = await fetch_fn()
-        except Exception as exc:
-            # External API fetch failures are soft-fail (P2) by policy.
-            state.bug_tracker.record(
-                phase,
-                f"1-5:{name}",
-                f"fetch {name}",
-                "200 + csv bytes",
-                f"External fetch failed: {str(exc)[:200]}",
-                "P2",
-            )
-            continue
+    if not RUN_LIVE_APIS:
+        print("    Skipped (set RUN_FOUNDRY_E2E_QA_LIVE=true to enable live API phase)")
+        state.bug_tracker.record_pass()
+    else:
+        live_sources = {
+            "weather_saopaulo": ("São Paulo weather (Open-Meteo)", fetch_open_meteo_csv),
+            "exchange_rates_brl": ("BRL exchange rates (Frankfurter)", fetch_frankfurter_csv),
+            "earthquakes_month": ("Monthly earthquakes (USGS)", fetch_usgs_earthquake_csv),
+        }
+        for name, (description, fetch_fn) in live_sources.items():
+            csv_bytes: Optional[bytes] = None
+            try:
+                csv_bytes = await fetch_fn()
+            except Exception as exc:
+                # External API fetch failures are soft-fail (P2) by policy.
+                state.bug_tracker.record(
+                    phase,
+                    f"1-5:{name}",
+                    f"fetch {name}",
+                    "200 + csv bytes",
+                    f"External fetch failed: {str(exc)[:200]}",
+                    "P2",
+                )
+                continue
 
-        if not csv_bytes or len(csv_bytes) <= 50:
-            state.bug_tracker.record(
-                phase,
-                f"1-5:{name}",
-                f"fetch {name}",
-                "csv bytes (>50)",
-                f"External API returned too little data (len={len(csv_bytes or b'')})",
-                "P2",
-            )
-            continue
+            if not csv_bytes or len(csv_bytes) <= 50:
+                state.bug_tracker.record(
+                    phase,
+                    f"1-5:{name}",
+                    f"fetch {name}",
+                    "csv bytes (>50)",
+                    f"External API returned too little data (len={len(csv_bytes or b'')})",
+                    "P2",
+                )
+                continue
 
-        try:
-            idem_key = f"idem-{name}-{state.suffix}"
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-                params={"db_name": state.db_name, "branch": "main"},
-                headers={**state.headers, "Idempotency-Key": idem_key},
-                data={
-                    "dataset_name": name,
-                    "description": description,
-                    "delimiter": ",",
-                    "has_header": "true",
-                },
-                files={"file": (f"{name}.csv", csv_bytes, "text/csv")},
-            )
-            resp.raise_for_status()
-            payload = resp.json().get("data") or {}
-            ds = payload.get("dataset") or {}
-            ver = payload.get("version") or {}
-            dataset_id = str(ds.get("dataset_id") or "")
-            version_id = str(ver.get("version_id") or "")
-            assert dataset_id, f"No dataset_id for {name}"
-            state.live_datasets[name] = {
-                "dataset_id": dataset_id,
-                "version_id": version_id,
-            }
-            state.bug_tracker.record_pass()
-            row_count = csv_bytes.count(b"\n") - 1
-            print(f"    {name}: {row_count} rows, dataset_id={dataset_id[:12]}...")
-        except Exception as exc:
-            # Fetch succeeded but ingest failed => hard fail (internal).
-            state.bug_tracker.record(
-                phase,
-                f"1-5:{name}",
-                f"upload {name}",
-                "200 with dataset_id",
-                str(exc)[:200],
-                "P1",
-            )
+            try:
+                idem_key = f"idem-{name}-{state.suffix}"
+                resp = await client.post(
+                    f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
+                    params={"db_name": state.db_name, "branch": "main"},
+                    headers={**state.headers, "Idempotency-Key": idem_key},
+                    data={
+                        "dataset_name": name,
+                        "description": description,
+                        "delimiter": ",",
+                        "has_header": "true",
+                    },
+                    files={"file": (f"{name}.csv", csv_bytes, "text/csv")},
+                )
+                resp.raise_for_status()
+                payload = resp.json().get("data") or {}
+                ds = payload.get("dataset") or {}
+                ver = payload.get("version") or {}
+                dataset_id = str(ds.get("dataset_id") or "")
+                version_id = str(ver.get("version_id") or "")
+                assert dataset_id, f"No dataset_id for {name}"
+                state.live_datasets[name] = {
+                    "dataset_id": dataset_id,
+                    "version_id": version_id,
+                    "row_count": csv_bytes.count(b"\n") - 1,
+                }
+                state.bug_tracker.record_pass()
+                row_count = csv_bytes.count(b"\n") - 1
+                print(f"    {name}: {row_count} rows, dataset_id={dataset_id[:12]}...")
+            except Exception as exc:
+                # Fetch succeeded but ingest failed => hard fail (internal).
+                state.bug_tracker.record(
+                    phase,
+                    f"1-5:{name}",
+                    f"upload {name}",
+                    "200 with dataset_id",
+                    str(exc)[:200],
+                    "P1",
+                )
 
     # ── 1-6: List datasets ────────────────────────────────────────
     print(f"  [1-6] Listing datasets for db={state.db_name}")
@@ -1242,7 +1277,42 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         resp.raise_for_status()
         preview = resp.json()
         preview_data = preview.get("data") or preview
-        print(f"    Preview returned: {json.dumps(preview_data)[:200]}")
+        preview_job_id = str(preview_data.get("job_id") or (preview_data.get("sample") or {}).get("job_id") or "").strip()
+        if not preview_job_id:
+            raise AssertionError(f"Missing preview job_id: {preview_data}")
+
+        sample = await _wait_for_pipeline_run_sample(
+            client,
+            pipeline_id=pipeline_id,
+            job_id=preview_job_id,
+            timeout=240,
+        )
+        rows = sample.get("rows") if isinstance(sample, dict) else None
+        if not isinstance(rows, list) or not rows:
+            raise AssertionError(f"Preview sample rows missing: {sample}")
+
+        # Semantic assertions: delivered-only + total_value = price + freight_value (casted numeric)
+        for row in rows[:10]:
+            if not isinstance(row, dict):
+                continue
+            status_raw = row.get("order_status")
+            if status_raw is not None:
+                assert str(status_raw).lower() == "delivered", f"Non-delivered row in preview: order_status={status_raw!r}"
+            raw_price = row.get("price")
+            raw_freight = row.get("freight_value")
+            raw_total = row.get("total_value")
+            try:
+                price = float(raw_price)
+                freight = float(raw_freight)
+                total = float(raw_total)
+            except Exception:
+                raise AssertionError(
+                    f"Expected numeric price/freight/total in preview rows, got price={raw_price!r} freight={raw_freight!r} total={raw_total!r}"
+                ) from None
+            if abs(total - (price + freight)) > 1e-6:
+                raise AssertionError(f"total_value mismatch: total={total} price+freight={price + freight}")
+
+        print(f"    Preview sample verified: {len(rows)} rows (job_id={preview_job_id[:12]}...)")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "2-2", f"POST /pipelines/{pipeline_id}/preview", "preview result", str(exc)[:200])
@@ -1307,6 +1377,46 @@ async def phase2_pipeline_transforms(state: QAState, client: httpx.AsyncClient) 
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "2-4", f"POST /pipelines/{pipeline_id}/deploy", "deploy success", str(exc)[:200])
+
+    # ── 2-4b: Verify output dataset exists + has expected semantics ─
+    print("  [2-4b] Verifying Pipeline A output dataset (enriched_orders) is readable...")
+    try:
+        ds = await _wait_for_dataset_by_name(client, db_name=state.db_name, dataset_name="enriched_orders", timeout=240)
+        dataset_id = str(ds.get("dataset_id") or "").strip()
+        assert dataset_id, f"enriched_orders dataset_id missing: {ds}"
+        rid = build_rid("dataset", dataset_id)
+        read_resp = await client.get(
+            f"{BFF_URL}/api/v2/datasets/{rid}/readTable",
+            params={"rowLimit": 5, "branchName": "main", "format": "CSV"},
+        )
+        read_resp.raise_for_status()
+        lines = [ln for ln in read_resp.text.splitlines() if ln.strip()]
+        header = (lines[:1] or [""])[0]
+        for required_col in ("order_id", "order_status", "price", "freight_value", "total_value"):
+            if required_col not in header:
+                raise AssertionError(f"Missing column in enriched_orders: {required_col} (header={header[:200]})")
+
+        import csv as csv_mod
+
+        reader = csv_mod.DictReader(lines)
+        first = next(reader, None)
+        if not first:
+            raise AssertionError("enriched_orders readTable returned no rows")
+        status_raw = first.get("order_status")
+        if status_raw is not None:
+            assert str(status_raw).lower() == "delivered", f"Expected delivered in enriched_orders, got {status_raw!r}"
+        try:
+            price = float(first.get("price") or 0)
+            freight = float(first.get("freight_value") or 0)
+            total = float(first.get("total_value") or 0)
+        except Exception:
+            raise AssertionError(f"Numeric parse failed for enriched_orders row: {first}") from None
+        if abs(total - (price + freight)) > 1e-6:
+            raise AssertionError(f"enriched_orders total_value mismatch: total={total} price+freight={price + freight}")
+        state.bug_tracker.record_pass()
+        print("    enriched_orders readTable semantic check: OK")
+    except Exception as exc:
+        state.bug_tracker.record(phase, "2-4b", "GET /api/v2/datasets/*/readTable", "CSV includes computed total_value", str(exc)[:200], "P1")
 
     # ── 2-5: Pipeline B - Category Revenue ───────────────────────
     if items_id and products_id:
@@ -2310,24 +2420,37 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
     except Exception as exc:
         state.bug_tracker.record(phase, "5-2", "search gt price", ">=1 result and numeric", str(exc)[:200], "P1")
 
-    # ── 5-3: and (delivered AND price >= 500) ────────────────────
+    # ── 5-3: and (customer_state == SP AND city contains "sao paulo") ───────
     print("  [5-3] Search: compound AND query")
     try:
         resp = await client.post(
-            f"{base_search_url}/OrderItem/search",
+            f"{base_search_url}/Customer/search",
             params={"branch": "main"},
             json={
                 "where": {
                     "type": "and",
                     "value": [
-                        {"type": "gte", "field": "price", "value": 500},
+                        {"type": "eq", "field": "customer_state", "value": "SP"},
+                        {"type": "containsAnyTerm", "field": "customer_city", "value": "sao paulo"},
                     ],
                 },
                 "pageSize": 10,
             },
         )
         resp.raise_for_status()
-        print(f"    Compound AND: {resp.status_code}")
+        data = resp.json()
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 SP customer in Sao Paulo")
+        for obj in objects[:10]:
+            props = obj.get("properties") or obj
+            state_val = str(props.get("customer_state") or "").strip().upper()
+            city_val = str(props.get("customer_city") or "").strip().lower()
+            if state_val:
+                assert state_val == "SP", f"Expected customer_state=SP, got {state_val!r}"
+            if city_val:
+                assert "sao paulo" in city_val, f"Expected city contains 'sao paulo', got {city_val!r}"
+        print(f"    Compound AND verified: {len(objects)} customers")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "5-3", "search and compound", "results", str(exc)[:200])
@@ -2341,7 +2464,19 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             json={"where": {"type": "isNull", "field": "order_delivered_customer_date", "value": True}, "pageSize": 10},
         )
         resp.raise_for_status()
-        print(f"    isNull results: {resp.status_code}")
+        data = resp.json()
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 Order with NULL delivered date")
+        for obj in objects[:10]:
+            props = obj.get("properties") or obj
+            delivered = props.get("order_delivered_customer_date")
+            if delivered is None:
+                continue
+            if isinstance(delivered, str) and not delivered.strip():
+                continue
+            raise AssertionError(f"Expected NULL delivered date, got {delivered!r}")
+        print(f"    isNull verified: {len(objects)} orders")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "5-4", "search isNull", "undelivered orders", str(exc)[:200])
@@ -2355,7 +2490,16 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             json={"where": {"type": "containsAnyTerm", "field": "customer_city", "value": "sao paulo"}, "pageSize": 10},
         )
         resp.raise_for_status()
-        print(f"    Text search: {resp.status_code}")
+        data = resp.json()
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 Sao Paulo customer")
+        for obj in objects[:10]:
+            props = obj.get("properties") or obj
+            city_val = str(props.get("customer_city") or "").strip().lower()
+            if city_val:
+                assert "sao paulo" in city_val, f"Expected city contains 'sao paulo', got {city_val!r}"
+        print(f"    containsAnyTerm verified: {len(objects)} customers")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "5-5", "search containsAnyTerm", "SP customers", str(exc)[:200])
@@ -2369,7 +2513,17 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
             json={"where": {"type": "in", "field": "order_status", "value": ["delivered", "shipped"]}, "pageSize": 10},
         )
         resp.raise_for_status()
-        print(f"    IN results: {resp.status_code}")
+        data = resp.json()
+        objects = data.get("data") or data.get("objects") or []
+        if not isinstance(objects, list) or not objects:
+            raise AssertionError("Expected at least 1 Order with status delivered/shipped")
+        allowed = {"delivered", "shipped"}
+        for obj in objects[:10]:
+            props = obj.get("properties") or obj
+            st = str(props.get("order_status") or "").strip().lower()
+            if st:
+                assert st in allowed, f"Expected order_status in {allowed}, got {st!r}"
+        print(f"    IN verified: {len(objects)} orders")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "5-6", "search in", "delivered/shipped", str(exc)[:200])
@@ -2911,13 +3065,26 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
     phase = "Phase 8"
     print(f"\n{'='*60}\n  {phase}: LIVE DATA CROSS-DOMAIN\n{'='*60}")
 
-    # ── 8-1: WeatherData Object Type ──────────────────────────────
-    weather_ds = state.live_datasets.get("weather_saopaulo")
-    if weather_ds:
-        print("  [8-1] WeatherData: ontology + objectify")
-        try:
-            _switch_persona(state, client, "domain_modeler")
-            weather_cls = {
+    if not RUN_LIVE_APIS:
+        print("  Live API phase disabled (set RUN_FOUNDRY_E2E_QA_LIVE=true). Skipping Phase 8.")
+        state.bug_tracker.record_pass()
+        return
+
+    if not state.live_datasets:
+        print("  No live datasets were ingested (fetch/upload may have failed). Skipping Phase 8.")
+        state.bug_tracker.record_pass()
+        return
+
+    db_name = state.db_name
+    base_search_url = f"{BFF_URL}/api/v2/ontologies/{db_name}/objects"
+
+    # ── 8-1/8-2/8-3: Ontology + ObjectType contracts for live classes ───────
+    live_defs: List[Dict[str, Any]] = [
+        {
+            "dataset_key": "weather_saopaulo",
+            "class_id": "WeatherData",
+            "pk_spec": {"primary_key": ["time"], "title_key": ["time"]},
+            "ontology": {
                 "id": "WeatherData",
                 "label": {"en": "Weather Data", "ko": "날씨 데이터"},
                 "description": {"en": "Hourly weather observations", "ko": "시간별 날씨 관측"},
@@ -2929,39 +3096,19 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                 ],
                 "relationships": [],
                 "metadata": {"source": "foundry_e2e_qa"},
-            }
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/databases/{state.db_name}/ontology",
-                params={"branch": "main"},
-                json=weather_cls,
-            )
-            resp.raise_for_status()
-            cmd_id = str((resp.json().get("data") or {}).get("command_id") or "")
-            if cmd_id:
-                try:
-                    await _wait_for_command(client, cmd_id, timeout=120)
-                except Exception:
-                    pass
-            await _wait_for_ontology(
-                client,
-                db_name=state.db_name,
-                class_id="WeatherData",
-                oms_headers=state.oms_headers,
-                require_properties=True,
-                timeout=120,
-            )
-            print("    WeatherData class created")
-            state.bug_tracker.record_pass()
-        except Exception as exc:
-            state.bug_tracker.record(phase, "8-1", "WeatherData ontology", "class created", str(exc)[:200])
-
-    # ── 8-2: ExchangeRate Object Type ─────────────────────────────
-    rates_ds = state.live_datasets.get("exchange_rates_brl")
-    if rates_ds:
-        print("  [8-2] ExchangeRate: ontology + objectify")
-        try:
-            _switch_persona(state, client, "domain_modeler")
-            rate_cls = {
+            },
+            "mappings": [
+                {"source_field": "time", "target_field": "time"},
+                {"source_field": "temperature_2m", "target_field": "temperature_2m"},
+                {"source_field": "windspeed_10m", "target_field": "windspeed_10m"},
+                {"source_field": "precipitation", "target_field": "precipitation"},
+            ],
+        },
+        {
+            "dataset_key": "exchange_rates_brl",
+            "class_id": "ExchangeRate",
+            "pk_spec": {"primary_key": ["date"], "title_key": ["date"]},
+            "ontology": {
                 "id": "ExchangeRate",
                 "label": {"en": "Exchange Rate", "ko": "환율"},
                 "description": {"en": "Daily BRL exchange rates", "ko": "일별 BRL 환율"},
@@ -2974,39 +3121,20 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                 ],
                 "relationships": [],
                 "metadata": {"source": "foundry_e2e_qa"},
-            }
-            resp = await client.post(
-                f"{BFF_URL}/api/v1/databases/{state.db_name}/ontology",
-                params={"branch": "main"},
-                json=rate_cls,
-            )
-            resp.raise_for_status()
-            cmd_id = str((resp.json().get("data") or {}).get("command_id") or "")
-            if cmd_id:
-                try:
-                    await _wait_for_command(client, cmd_id, timeout=120)
-                except Exception:
-                    pass
-            await _wait_for_ontology(
-                client,
-                db_name=state.db_name,
-                class_id="ExchangeRate",
-                oms_headers=state.oms_headers,
-                require_properties=True,
-                timeout=120,
-            )
-            print("    ExchangeRate class created")
-            state.bug_tracker.record_pass()
-        except Exception as exc:
-            state.bug_tracker.record(phase, "8-2", "ExchangeRate ontology", "class created", str(exc)[:200])
-
-    # ── 8-3: Earthquake Object Type ───────────────────────────────
-    eq_ds = state.live_datasets.get("earthquakes_month")
-    if eq_ds:
-        print("  [8-3] Earthquake: ontology + objectify")
-        try:
-            _switch_persona(state, client, "domain_modeler")
-            eq_cls = {
+            },
+            "mappings": [
+                {"source_field": "date", "target_field": "date"},
+                {"source_field": "base", "target_field": "base"},
+                {"source_field": "usd_rate", "target_field": "usd_rate"},
+                {"source_field": "eur_rate", "target_field": "eur_rate"},
+                {"source_field": "krw_rate", "target_field": "krw_rate"},
+            ],
+        },
+        {
+            "dataset_key": "earthquakes_month",
+            "class_id": "Earthquake",
+            "pk_spec": {"primary_key": ["eq_id"], "title_key": ["eq_id"]},
+            "ontology": {
                 "id": "Earthquake",
                 "label": {"en": "Earthquake", "ko": "지진"},
                 "description": {"en": "Seismic event data", "ko": "지진 이벤트 데이터"},
@@ -3021,11 +3149,44 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                 ],
                 "relationships": [],
                 "metadata": {"source": "foundry_e2e_qa"},
-            }
+            },
+            "mappings": [
+                {"source_field": "eq_id", "target_field": "eq_id"},
+                {"source_field": "magnitude", "target_field": "magnitude"},
+                {"source_field": "place", "target_field": "place"},
+                {"source_field": "latitude", "target_field": "latitude"},
+                {"source_field": "longitude", "target_field": "longitude"},
+                {"source_field": "depth_km", "target_field": "depth_km"},
+                {"source_field": "time", "target_field": "time"},
+            ],
+        },
+    ]
+
+    live_class_ids: List[str] = []
+    for item in live_defs:
+        ds_key = str(item.get("dataset_key") or "")
+        class_id = str(item.get("class_id") or "")
+        ds = state.live_datasets.get(ds_key) or {}
+        dataset_id = str(ds.get("dataset_id") or "").strip()
+        row_count = ds.get("row_count")
+        try:
+            row_count_int = int(row_count) if row_count is not None else None
+        except Exception:
+            row_count_int = None
+
+        if not dataset_id:
+            continue
+        if row_count_int is not None and row_count_int <= 0:
+            state.bug_tracker.record(phase, f"8-0:{class_id}", f"live ingest {ds_key}", ">0 rows", f"row_count={row_count_int}", "P2")
+            continue
+
+        print(f"  [8-ont] {class_id}: ontology + contract + mapping-spec")
+        try:
+            _switch_persona(state, client, "domain_modeler")
             resp = await client.post(
-                f"{BFF_URL}/api/v1/databases/{state.db_name}/ontology",
+                f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
                 params={"branch": "main"},
-                json=eq_cls,
+                json=item.get("ontology") or {},
             )
             resp.raise_for_status()
             cmd_id = str((resp.json().get("data") or {}).get("command_id") or "")
@@ -3036,69 +3197,172 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                     pass
             await _wait_for_ontology(
                 client,
-                db_name=state.db_name,
-                class_id="Earthquake",
+                db_name=db_name,
+                class_id=class_id,
                 oms_headers=state.oms_headers,
                 require_properties=True,
                 timeout=120,
             )
-            print("    Earthquake class created")
             state.bug_tracker.record_pass()
         except Exception as exc:
-            state.bug_tracker.record(phase, "8-3", "Earthquake ontology", "class created", str(exc)[:200])
+            state.bug_tracker.record(phase, f"8-ont:{class_id}", "POST /api/v1/databases/{db}/ontology", "202+properties", str(exc)[:200], "P1")
+            continue
 
-    # ── 8-4: Search weather data ──────────────────────────────────
-    base_search_url = f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objects"
-    if weather_ds:
-        print("  [8-4] Search: WeatherData temperature_2m > 20")
+        # ObjectType contract is required for /api/v2 search surface.
         try:
-            _switch_persona(state, client, "viewer")
-            resp = await client.post(
-                f"{base_search_url}/WeatherData/search",
-                params={"branch": "main"},
-                json={"where": {"type": "gt", "field": "temperature_2m", "value": 20}, "pageSize": 10},
+            await _upsert_object_type_contract(
+                client,
+                db_name=db_name,
+                class_id=class_id,
+                backing_dataset_id=dataset_id,
+                pk_spec=item.get("pk_spec") or {},
+                oms_headers=state.oms_headers,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            print(f"    Weather search: {resp.status_code}")
             state.bug_tracker.record_pass()
         except Exception as exc:
-            state.bug_tracker.record(phase, "8-4", "search WeatherData", "warm hours", str(exc)[:200])
+            state.bug_tracker.record(phase, f"8-contract:{class_id}", "OMS objectTypes upsert", "200/201", str(exc)[:200], "P1")
 
-    # ── 8-5: Search earthquake data ───────────────────────────────
-    if eq_ds:
-        print("  [8-5] Search: Earthquake magnitude >= 4.0")
+        # Mapping spec (Domain Modeler)
+        mappings = item.get("mappings") or []
+        max_retries = 3
+        created = False
+        last_err = ""
+        for attempt in range(max_retries):
+            try:
+                resp = await client.post(
+                    f"{BFF_URL}/api/v1/objectify/mapping-specs",
+                    json={
+                        "dataset_id": dataset_id,
+                        "artifact_output_name": ds_key,
+                        "target_class_id": class_id,
+                        "options": {"ontology_branch": "main"},
+                        "mappings": mappings,
+                    },
+                )
+                if resp.status_code == 409:
+                    err_text = resp.text[:200]
+                    if "schema is required" in err_text and attempt < max_retries - 1:
+                        await asyncio.sleep(10 * (attempt + 1))
+                        continue
+                    last_err = f"409 Conflict: {err_text}"
+                    break
+                resp.raise_for_status()
+                spec = (resp.json().get("data") or {}).get("mapping_spec") or {}
+                spec_id = str(spec.get("mapping_spec_id") or "").strip()
+                if spec_id:
+                    state.mapping_specs[class_id] = spec_id
+                state.bug_tracker.record_pass()
+                live_class_ids.append(class_id)
+                created = True
+                break
+            except Exception as exc:
+                last_err = str(exc)[:200]
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(10)
+                    continue
+                break
+        if not created:
+            state.bug_tracker.record(phase, f"8-map:{class_id}", "POST /api/v1/objectify/mapping-specs", "201", last_err, "P1")
+
+    # ── 8-4: Objectify live classes + verify search has results ─────────────
+    if live_class_ids:
+        print(f"  [8-4] Objectify live classes: {live_class_ids}")
         try:
-            _switch_persona(state, client, "viewer")
-            resp = await client.post(
-                f"{base_search_url}/Earthquake/search",
-                params={"branch": "main"},
-                json={"where": {"type": "gte", "field": "magnitude", "value": 4.0}, "pageSize": 10},
+            _switch_persona(state, client, "data_engineer")
+            dry = await client.post(
+                f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
+                json={
+                    "class_ids": live_class_ids,
+                    "branch": "main",
+                    "include_dependencies": False,
+                    "dry_run": True,
+                },
             )
-            resp.raise_for_status()
-            data = resp.json()
-            print(f"    Earthquake search: {resp.status_code}")
+            dry.raise_for_status()
+            state.bug_tracker.record_pass()
+
+            run = await client.post(
+                f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
+                json={
+                    "class_ids": live_class_ids,
+                    "branch": "main",
+                    "include_dependencies": False,
+                    "dry_run": False,
+                },
+            )
+            if run.status_code not in {200, 202, 409}:
+                run.raise_for_status()
             state.bug_tracker.record_pass()
         except Exception as exc:
-            state.bug_tracker.record(phase, "8-5", "search Earthquake", "mag >= 4.0", str(exc)[:200])
+            state.bug_tracker.record(phase, "8-4", "POST /api/v1/objectify/.../run-dag", "jobs queued", str(exc)[:200], "P1")
 
-    # ── 8-6: Cross-domain pipeline ────────────────────────────────
+        # Poll v2 search until we see at least one instance per class.
+        print("  [8-5] Verifying v2 search returns live objects (non-empty + basic semantics)...")
+        for class_id in live_class_ids:
+            try:
+                _switch_persona(state, client, "viewer")
+                deadline = time.monotonic() + 240
+                last_status: Optional[int] = None
+                last_text: str = ""
+                objects: List[Dict[str, Any]] = []
+                while time.monotonic() < deadline:
+                    resp = await client.post(
+                        f"{base_search_url}/{class_id}/search",
+                        params={"branch": "main"},
+                        json={"pageSize": 5},
+                    )
+                    last_status = resp.status_code
+                    last_text = resp.text[:200]
+                    if resp.status_code == 200:
+                        payload = resp.json()
+                        data = payload.get("data") or payload.get("objects") or []
+                        if isinstance(data, list) and data:
+                            objects = data
+                            break
+                    await asyncio.sleep(2.0)
+                if not objects:
+                    raise AssertionError(f"No search results (status={last_status} body={last_text})")
+
+                # Minimal semantic checks per type (avoid brittle thresholds).
+                for obj in objects[:5]:
+                    props = obj.get("properties") or obj
+                    if class_id == "WeatherData":
+                        assert str(props.get("time") or "").strip(), "WeatherData.time is required"
+                        for key in ("temperature_2m", "windspeed_10m", "precipitation"):
+                            val = props.get(key)
+                            if val is None or val == "":
+                                continue
+                            float(val)
+                    elif class_id == "ExchangeRate":
+                        assert str(props.get("date") or "").strip(), "ExchangeRate.date is required"
+                        for key in ("usd_rate", "eur_rate", "krw_rate"):
+                            val = props.get(key)
+                            if val is None or val == "":
+                                continue
+                            float(val)
+                    elif class_id == "Earthquake":
+                        assert str(props.get("eq_id") or "").strip(), "Earthquake.eq_id is required"
+                        val = props.get("magnitude")
+                        if val not in (None, ""):
+                            float(val)
+                state.bug_tracker.record_pass()
+                print(f"    {class_id}: search semantic check OK ({len(objects)} hits)")
+            except Exception as exc:
+                state.bug_tracker.record(phase, f"8-5:{class_id}", "v2 search", "non-empty + semantic", str(exc)[:200], "P1")
+
+    # ── 8-6: Cross-domain pipeline (orders + exchange rates) ────────────────
     orders_id = (state.datasets.get("olist_orders") or {}).get("dataset_id")
     rates_id = (state.live_datasets.get("exchange_rates_brl") or {}).get("dataset_id")
     if orders_id and rates_id:
-        print("  [8-6] Cross-domain pipeline: orders + exchange_rates")
+        print("  [8-6] Cross-domain pipeline: orders + exchange_rates (union pad + deploy)")
         try:
             _switch_persona(state, client, "data_engineer")
             cross_def = {
                 "nodes": [
                     {"id": "in_orders", "type": "input", "metadata": {"datasetId": orders_id}},
                     {"id": "in_rates", "type": "input", "metadata": {"datasetId": rates_id}},
-                    {"id": "union_cross", "type": "transform", "metadata": {
-                        "operation": "union",
-                    }},
-                    {"id": "out_cross", "type": "output", "metadata": {
-                        "outputName": "cross_domain", "outputKind": "dataset",
-                    }},
+                    {"id": "union_cross", "type": "transform", "metadata": {"operation": "union", "unionMode": "pad"}},
+                    {"id": "out_cross", "type": "output", "metadata": {"outputName": "cross_domain", "outputKind": "dataset"}},
                 ],
                 "edges": [
                     {"from": "in_orders", "to": "union_cross"},
@@ -3113,7 +3377,7 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                 f"{BFF_URL}/api/v1/pipelines",
                 headers={**state.headers, "Idempotency-Key": idem_key},
                 json={
-                    "db_name": state.db_name,
+                    "db_name": db_name,
                     "name": f"cross_domain_{state.suffix}",
                     "description": "Cross-domain: orders + exchange rates",
                     "definition_json": cross_def,
@@ -3123,10 +3387,89 @@ async def phase8_live_data_cross_domain(state: QAState, client: httpx.AsyncClien
                 },
             )
             resp.raise_for_status()
-            print(f"    Cross-domain pipeline created: {resp.status_code}")
+            payload = resp.json().get("data") or resp.json()
+            pipeline_obj = payload.get("pipeline") or payload
+            pipeline_id = str(pipeline_obj.get("pipeline_id") or pipeline_obj.get("id") or payload.get("pipeline_id") or "").strip()
+            if not pipeline_id:
+                raise AssertionError(f"Missing pipeline_id: {payload}")
+
+            preview_idem = f"idem-preview-cross-{state.suffix}"
+            preview = await client.post(
+                f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/preview",
+                headers={**state.headers, "Idempotency-Key": preview_idem},
+                json={"db_name": db_name, "branch": "main", "limit": 50},
+            )
+            preview.raise_for_status()
+            preview_data = preview.json().get("data") or preview.json()
+            preview_job_id = str(preview_data.get("job_id") or (preview_data.get("sample") or {}).get("job_id") or "").strip()
+            if not preview_job_id:
+                raise AssertionError(f"Missing preview job_id: {preview_data}")
+            sample = await _wait_for_pipeline_run_sample(client, pipeline_id=pipeline_id, job_id=preview_job_id, timeout=240)
+            rows = sample.get("rows") if isinstance(sample, dict) else None
+            if not isinstance(rows, list) or not rows:
+                raise AssertionError(f"Cross-domain preview returned no rows: {sample}")
+
+            # Build + deploy (best-effort)
+            build_job_id = ""
+            build_idem = f"idem-build-cross-{state.suffix}"
+            build = await client.post(
+                f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
+                headers={**state.headers, "Idempotency-Key": build_idem},
+                json={"db_name": db_name, "branch": "main", "limit": 50},
+            )
+            build.raise_for_status()
+            build_job_id = str((build.json().get("data") or build.json()).get("job_id") or "").strip()
+            if build_job_id:
+                deadline = time.monotonic() + 300
+                while time.monotonic() < deadline:
+                    runs_resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 50})
+                    if runs_resp.status_code == 200:
+                        runs = (runs_resp.json().get("data") or {}).get("runs") or []
+                        run = next((r for r in (runs or []) if r.get("job_id") == build_job_id), None)
+                        if isinstance(run, dict):
+                            run_status = str(run.get("status") or "").upper()
+                            if run_status in {"SUCCESS", "DEPLOYED", "COMPLETED"}:
+                                break
+                            if run_status == "FAILED":
+                                raise AssertionError(f"Cross-domain build failed: {run}")
+                    await asyncio.sleep(2.0)
+
+            deploy_idem = f"idem-deploy-cross-{state.suffix}"
+            deploy_payload: Dict[str, Any] = {
+                "promote_build": True,
+                "branch": "main",
+                "node_id": "out_cross",
+                "output": {"db_name": db_name},
+            }
+            if build_job_id:
+                deploy_payload["build_job_id"] = build_job_id
+            deploy = await client.post(
+                f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
+                headers={**state.headers, "Idempotency-Key": deploy_idem},
+                json=deploy_payload,
+            )
+            deploy.raise_for_status()
+
+            out_ds = await _wait_for_dataset_by_name(client, db_name=db_name, dataset_name="cross_domain", timeout=240)
+            out_id = str(out_ds.get("dataset_id") or "").strip()
+            if not out_id:
+                raise AssertionError(f"cross_domain dataset_id missing: {out_ds}")
+            rid = build_rid("dataset", out_id)
+            table = await client.get(
+                f"{BFF_URL}/api/v2/datasets/{rid}/readTable",
+                params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
+            )
+            table.raise_for_status()
+            lines = [ln for ln in table.text.splitlines() if ln.strip()]
+            if len(lines) < 2:
+                raise AssertionError("cross_domain readTable returned no data rows")
+            header = lines[0]
+            if "order_id" not in header or "date" not in header:
+                raise AssertionError(f"cross_domain header missing expected cols (order_id/date): {header[:200]}")
             state.bug_tracker.record_pass()
+            print("    Cross-domain pipeline verified: preview + deploy + readTable OK")
         except Exception as exc:
-            state.bug_tracker.record(phase, "8-6", "cross-domain pipeline", "pipeline created", str(exc)[:200])
+            state.bug_tracker.record(phase, "8-6", "cross-domain pipeline", "deploy + readTable", str(exc)[:200], "P1")
 
 
 # =============================================================================

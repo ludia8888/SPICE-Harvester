@@ -8,6 +8,18 @@ from shared.observability.tracing import trace_endpoint
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
+from bff.routers.role_deps import enforce_required_database_role
+from bff.schemas.database_access_requests import UpsertDatabaseAccessRequest
+from bff.services.input_validation_service import enforce_db_scope_or_403, validated_db_name
+from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.security.database_access import (
+    DATABASE_ACCESS_ROLES,
+    SECURITY_ROLES,
+    fetch_database_access_entries,
+    normalize_database_role,
+    upsert_database_access_entry,
+)
+
 from bff.dependencies import OMSClientDep
 from bff.routers.registry_deps import get_dataset_registry
 from bff.services import database_service
@@ -94,3 +106,72 @@ async def get_database_expected_seq(
     """
     return await database_service.get_database_expected_seq(db_name=db_name)
 
+
+@router.get("/{db_name}/access", response_model=ApiResponse)
+@trace_endpoint("bff.database.list_database_access")
+async def list_database_access(
+    db_name: str,
+    http_request: Request,
+) -> ApiResponse:
+    """List database access entries (RBAC)."""
+    resolved = validated_db_name(db_name)
+    enforce_db_scope_or_403(http_request, db_name=resolved)
+    await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
+    grouped = await fetch_database_access_entries(db_names=[resolved])
+    return ApiResponse.success(
+        message="Database access entries",
+        data={"db_name": resolved, "entries": grouped.get(resolved, [])},
+    ).to_dict()
+
+
+@router.post("/{db_name}/access", response_model=ApiResponse)
+@trace_endpoint("bff.database.upsert_database_access")
+async def upsert_database_access(
+    db_name: str,
+    body: UpsertDatabaseAccessRequest,
+    http_request: Request,
+) -> ApiResponse:
+    """Upsert database access entries (RBAC). Requires Owner/Security."""
+    resolved = validated_db_name(db_name)
+    enforce_db_scope_or_403(http_request, db_name=resolved)
+    await enforce_required_database_role(http_request, db_name=resolved, roles=SECURITY_ROLES)
+
+    entries = body.entries or []
+    if not entries:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "entries is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+
+    updated = 0
+    for entry in entries:
+        principal_type = str(entry.principal_type or "user").strip().lower() or "user"
+        principal_id = str(entry.principal_id or "").strip()
+        if not principal_id:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "principal_id is required",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        principal_name = (str(entry.principal_name or "").strip() or principal_id).strip()
+        role = normalize_database_role(entry.role) or str(entry.role or "").strip()
+        if role not in set(DATABASE_ACCESS_ROLES):
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid role: {entry.role}",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        await upsert_database_access_entry(
+            db_name=resolved,
+            principal_type=principal_type,
+            principal_id=principal_id,
+            principal_name=principal_name,
+            role=role,
+        )
+        updated += 1
+
+    return ApiResponse.success(
+        message="Database access updated",
+        data={"db_name": resolved, "updated": updated},
+    ).to_dict()

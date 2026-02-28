@@ -198,37 +198,20 @@ class QAClient:
             await self.wait_for_command(command_id, timeout=180)
 
     async def grant_db_role(self) -> None:
-        import asyncpg  # type: ignore
-
-        dsn_candidates = [
-            (os.getenv("POSTGRES_URL") or "").strip(),
-            "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
-            "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
-        ]
-        from shared.security.database_access import ensure_database_access_table
-
-        for dsn in dsn_candidates:
-            if not dsn:
-                continue
-            try:
-                conn = await asyncpg.connect(dsn)
-            except Exception:
-                continue
-            try:
-                await ensure_database_access_table(conn)
-                await conn.execute(
-                    """
-                    INSERT INTO database_access (
-                        db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (db_name, principal_type, principal_id)
-                    DO UPDATE SET role = EXCLUDED.role, updated_at = NOW()
-                    """,
-                    self.db_name, "user", self.user_id, self.user_id, "Owner",
-                )
-                return
-            finally:
-                await conn.close()
+        resp = await self.client.post(
+            f"{self.bff_url}/api/v1/databases/{self.db_name}/access",
+            json={
+                "entries": [
+                    {
+                        "principal_type": "user",
+                        "principal_id": self.user_id,
+                        "principal_name": self.user_id,
+                        "role": "Owner",
+                    }
+                ]
+            },
+        )
+        resp.raise_for_status()
 
     # ── Command polling ───────────────────────────────────────────────
 

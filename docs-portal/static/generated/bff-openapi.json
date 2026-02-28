@@ -1403,6 +1403,44 @@
         "title": "CreateMappingSpecRequest",
         "type": "object"
       },
+      "DatabaseAccessEntryRequest": {
+        "properties": {
+          "principal_id": {
+            "description": "Principal identifier (e.g., JWT subject)",
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "principal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name for auditing",
+            "title": "Principal Name"
+          },
+          "principal_type": {
+            "default": "user",
+            "description": "Principal type (e.g., user, service)",
+            "title": "Principal Type",
+            "type": "string"
+          },
+          "role": {
+            "description": "Database role (Owner/Editor/Viewer/DomainModeler/DataEngineer/Security)",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "role"
+        ],
+        "title": "DatabaseAccessEntryRequest",
+        "type": "object"
+      },
       "DatabaseCreateRequest": {
         "description": "Request model for creating a database",
         "properties": {
@@ -4764,6 +4802,19 @@
           "code"
         ],
         "title": "UdfVersionCreateRequest",
+        "type": "object"
+      },
+      "UpsertDatabaseAccessRequest": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/DatabaseAccessEntryRequest"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "title": "UpsertDatabaseAccessRequest",
         "type": "object"
       },
       "UserMeResponse": {
@@ -8455,6 +8506,146 @@
           }
         },
         "summary": "Get Database",
+        "tags": [
+          "Database Management"
+        ]
+      }
+    },
+    "/api/v1/databases/{db_name}/access": {
+      "get": {
+        "description": "List database access entries (RBAC).",
+        "operationId": "list_database_access_api_v1_databases__db_name__access_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "db_name",
+            "required": true,
+            "schema": {
+              "title": "Db Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Database Access",
+        "tags": [
+          "Database Management"
+        ]
+      },
+      "post": {
+        "description": "Upsert database access entries (RBAC). Requires Owner/Security.",
+        "operationId": "upsert_database_access_api_v1_databases__db_name__access_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "db_name",
+            "required": true,
+            "schema": {
+              "title": "Db Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "enum": [
+                "en",
+                "ko"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertDatabaseAccessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Database Access",
         "tags": [
           "Database Management"
         ]

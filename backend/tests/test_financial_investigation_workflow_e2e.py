@@ -11,7 +11,6 @@ import httpx
 import pytest
 
 from shared.config.search_config import get_instances_index_name
-from shared.security.database_access import ensure_database_access_table
 from tests.utils.auth import bff_auth_headers
 from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
@@ -28,58 +27,28 @@ HTTPX_TIMEOUT = float(os.getenv("WORKFLOW_HTTP_TIMEOUT", "180") or 180)
 ES_TIMEOUT_SECONDS = int(os.getenv("WORKFLOW_ES_TIMEOUT_SECONDS", "240") or 240)
 
 
-def _postgres_url_candidates() -> list[str]:
-    env_url = (os.getenv("POSTGRES_URL") or "").strip()
-    if env_url:
-        return [env_url]
-    return [
-        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
-        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
-    ]
-
-
-async def _grant_db_role(
+async def _grant_db_role_http(
+    client: httpx.AsyncClient,
     *,
     db_name: str,
     principal_id: str,
     role: str = "Owner",
     principal_type: str = "user",
 ) -> None:
-    import asyncpg
-
-    last_error: Optional[Exception] = None
-    for dsn in _postgres_url_candidates():
-        try:
-            conn = await asyncpg.connect(dsn)
-        except Exception as exc:
-            last_error = exc
-            continue
-        try:
-            await ensure_database_access_table(conn)
-            await conn.execute(
-                """
-                INSERT INTO database_access (
-                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                ON CONFLICT (db_name, principal_type, principal_id)
-                DO UPDATE SET
-                    principal_name = EXCLUDED.principal_name,
-                    role = EXCLUDED.role,
-                    updated_at = NOW()
-                """,
-                db_name,
-                principal_type,
-                principal_id,
-                principal_id,
-                role,
-            )
-            return
-        except Exception as exc:
-            last_error = exc
-        finally:
-            await conn.close()
-    if last_error:
-        raise RuntimeError("Failed to grant database role for test user") from last_error
+    resp = await client.post(
+        f"{BFF_URL}/api/v1/databases/{db_name}/access",
+        json={
+            "entries": [
+                {
+                    "principal_type": principal_type,
+                    "principal_id": principal_id,
+                    "principal_name": principal_id,
+                    "role": role,
+                }
+            ]
+        },
+    )
+    resp.raise_for_status()
 
 
 async def _wait_for_command(
@@ -343,7 +312,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         client = PipelinesV2AdapterClient(raw_client)
         # Phase 0: DB + permissions
         await _create_db_with_retry(client, db_name=db_name)
-        await _grant_db_role(db_name=db_name, principal_id=user_id, principal_type="user", role="Owner")
+        await _grant_db_role_http(raw_client, db_name=db_name, principal_id=user_id, principal_type="user", role="Owner")
 
         # Phase 1: Ingest datasets (Excel + CSVs)
         xlsx_bytes = _build_transactions_xlsx_bytes()

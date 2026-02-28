@@ -475,11 +475,13 @@
 
 ### `backend/bff/routers/database.py`
 - **Functions**
-  - `async list_databases(request, oms, dataset_registry)` (line 23): 데이터베이스 목록 조회
-  - `async create_database(request, http_request, oms)` (line 43): 데이터베이스 생성
-  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 59): 데이터베이스 삭제
-  - `async get_database(db_name, oms)` (line 80): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 87): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_databases(request, oms, dataset_registry)` (line 35): 데이터베이스 목록 조회
+  - `async create_database(request, http_request, oms)` (line 55): 데이터베이스 생성
+  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 71): 데이터베이스 삭제
+  - `async get_database(db_name, oms)` (line 92): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 99): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_database_access(db_name, http_request)` (line 112): List database access entries (RBAC).
+  - `async upsert_database_access(db_name, body, http_request)` (line 129): Upsert database access entries (RBAC). Requires Owner/Security.
 
 ### `backend/bff/routers/document_bundles.py`
 - **Functions**
@@ -1332,6 +1334,11 @@
   - `KnowledgeRequest` (line 18): Request to add knowledge to Context7.
   - `EntityLinkRequest` (line 27): Request to create entity relationship.
   - `OntologyAnalysisRequest` (line 36): Request to analyze ontology with Context7.
+
+### `backend/bff/schemas/database_access_requests.py`
+- **Classes**
+  - `DatabaseAccessEntryRequest` (line 10): no docstring
+  - `UpsertDatabaseAccessRequest` (line 17): no docstring
 
 ### `backend/bff/schemas/governance_requests.py`
 - **Classes**
@@ -6476,13 +6483,13 @@
   - `async fetch_database_access_entries(db_names)` (line 60): no docstring
   - `async list_database_names()` (line 98): no docstring
   - `async upsert_database_access_entry(db_name, principal_type, principal_id, principal_name, role)` (line 122): no docstring
-  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 161): no docstring
-  - `resolve_database_actor_with_name(headers)` (line 177): no docstring
-  - `async ensure_database_access_table(conn)` (line 183): no docstring
-  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 220): no docstring
-  - `async has_database_access_config(db_name)` (line 250): no docstring
-  - `async delete_database_access_entries(db_name)` (line 265): no docstring
-  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, require_env_key)` (line 279): no docstring
+  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 178): no docstring
+  - `resolve_database_actor_with_name(headers)` (line 194): no docstring
+  - `async ensure_database_access_table(conn)` (line 200): no docstring
+  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 237): no docstring
+  - `async has_database_access_config(db_name)` (line 267): no docstring
+  - `async delete_database_access_entries(db_name)` (line 282): no docstring
+  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, require_env_key)` (line 296): no docstring
 
 ### `backend/shared/security/input_sanitizer.py`
 - **Functions**
@@ -9990,52 +9997,53 @@
 
 ### `backend/tests/test_financial_investigation_workflow_e2e.py`
 - **Functions**
-  - `_postgres_url_candidates()` (line 31): no docstring
-  - `async _grant_db_role(db_name, principal_id, role, principal_type)` (line 41): no docstring
-  - `async _wait_for_command(client, command_id, timeout_seconds)` (line 85): no docstring
-  - `async _create_db_with_retry(client, db_name)` (line 108): no docstring
-  - `async _post_with_conflict_retry(client, url, json_payload, timeout_seconds, retry_sleep)` (line 121): no docstring
-  - `async _wait_for_ontology(client, db_name, class_id, branch, timeout_seconds)` (line 142): no docstring
-  - `async _wait_for_es_doc(client, index_name, doc_id, timeout_seconds)` (line 164): no docstring
-  - `async _upsert_object_type_contract(client, db_name, class_id, branch, contract_payload)` (line 188): no docstring
-  - `_extract_tabular_types(payload)` (line 284): no docstring
-  - `_build_transactions_xlsx_bytes()` (line 303): no docstring
-  - `async test_financial_investigation_workflow_e2e()` (line 328): no docstring
+  - `async _grant_db_role_http(client, db_name, principal_id, role, principal_type)` (line 30): no docstring
+  - `async _wait_for_command(client, command_id, timeout_seconds)` (line 54): no docstring
+  - `async _create_db_with_retry(client, db_name)` (line 77): no docstring
+  - `async _post_with_conflict_retry(client, url, json_payload, timeout_seconds, retry_sleep)` (line 90): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, branch, timeout_seconds)` (line 111): no docstring
+  - `async _wait_for_es_doc(client, index_name, doc_id, timeout_seconds)` (line 133): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, branch, contract_payload)` (line 157): no docstring
+  - `_extract_tabular_types(payload)` (line 253): no docstring
+  - `_build_transactions_xlsx_bytes()` (line 272): no docstring
+  - `async test_financial_investigation_workflow_e2e()` (line 297): no docstring
 
 ### `backend/tests/test_foundry_e2e_qa.py`
 - **Functions**
-  - `_severity_rank(value)` (line 76): no docstring
-  - `_qa_fail_threshold_rank()` (line 80): no docstring
-  - `_count_fixture_rows(path)` (line 86): no docstring
-  - `_expected_instance_counts_from_fixtures()` (line 96): no docstring
-  - `_pick_sample_order_from_fixtures()` (line 106): Return (order_id, customer_id) from fixtures.
-  - `_pick_order_with_items_from_fixtures()` (line 120): Return (order_id, product_id) for an order that has at least 1 item.
-  - `_safe(func)` (line 185): Decorator: catch assertion errors and record as bugs instead of failing.
-  - `_switch_persona(state, client, persona_key)` (line 207): no docstring
-  - `_assert_v2_error_shape(payload)` (line 216): no docstring
-  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 224): no docstring
-  - `async phase0_guardrails(state, client)` (line 251): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
-  - `async _wait_for_command(client, command_id, timeout)` (line 620): no docstring
-  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 643): Wait for ontology class to exist (and optionally have properties populated).
-  - `async _wait_for_es_doc(client, index_name, doc_id, timeout)` (line 674): no docstring
-  - `async _grant_db_role(db_name, principal_id, role, principal_type, principal_name)` (line 696): no docstring
-  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 740): Create or update an object type contract (pk_spec + backing source).
-  - `async phase1_data_ingestion(state, client)` (line 836): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
-  - `async phase2_pipeline_transforms(state, client)` (line 1153): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
-  - `async phase3_ontology_creation(state, client)` (line 1549): Create 5 Object Types + 3 Action Types.
-  - `async phase4_objectify(state, client)` (line 1888): Create mapping specs, run DAG objectify, verify ES indexing.
-  - `async phase5_search_and_query(state, client)` (line 2168): 12 search scenarios using Foundry v2 API + graph queries.
-  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2542): Record ontology deployment via HTTP API so actions can execute (required by OMS).
-  - `async phase6_actions(state, client)` (line 2563): Test simulate, apply, batch-apply actions with closed-loop ES verification.
-  - `async phase7_closed_loop(state, client)` (line 2788): Verify action effects are reflected in search results.
-  - `async phase8_live_data_cross_domain(state, client)` (line 2909): Test real-time API data: objectify + search + cross-domain pipeline.
-  - `async phase9_branch_and_incremental(state, client)` (line 3136): Hard gates:
-  - `async phase10_teardown(state, client)` (line 3660): no docstring
-  - `async test_foundry_e2e_qa()` (line 3717): Full Foundry lifecycle QA with real Kaggle data + live APIs.
+  - `_severity_rank(value)` (line 79): no docstring
+  - `_qa_fail_threshold_rank()` (line 83): no docstring
+  - `_count_fixture_rows(path)` (line 89): no docstring
+  - `_expected_instance_counts_from_fixtures()` (line 99): no docstring
+  - `_pick_sample_order_from_fixtures()` (line 109): Return (order_id, customer_id) from fixtures.
+  - `_pick_order_with_items_from_fixtures()` (line 123): Return (order_id, product_id) for an order that has at least 1 item.
+  - `_safe(func)` (line 188): Decorator: catch assertion errors and record as bugs instead of failing.
+  - `_switch_persona(state, client, persona_key)` (line 210): no docstring
+  - `_assert_v2_error_shape(payload)` (line 219): no docstring
+  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 227): no docstring
+  - `async phase0_guardrails(state, client)` (line 254): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
+  - `async _wait_for_command(client, command_id, timeout)` (line 623): no docstring
+  - `async _wait_for_pipeline_run_sample(client, pipeline_id, job_id, timeout)` (line 646): Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows.
+  - `async _wait_for_dataset_by_name(client, db_name, dataset_name, timeout)` (line 678): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 699): Wait for ontology class to exist (and optionally have properties populated).
+  - `async _wait_for_es_doc(client, index_name, doc_id, timeout)` (line 730): no docstring
+  - `async _upsert_database_access_http(client, db_name, entries)` (line 752): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 765): Create or update an object type contract (pk_spec + backing source).
+  - `async phase1_data_ingestion(state, client)` (line 861): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
+  - `async phase2_pipeline_transforms(state, client)` (line 1188): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
+  - `async phase3_ontology_creation(state, client)` (line 1659): Create 5 Object Types + 3 Action Types.
+  - `async phase4_objectify(state, client)` (line 1998): Create mapping specs, run DAG objectify, verify ES indexing.
+  - `async phase5_search_and_query(state, client)` (line 2278): 12 search scenarios using Foundry v2 API + graph queries.
+  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2696): Record ontology deployment via HTTP API so actions can execute (required by OMS).
+  - `async phase6_actions(state, client)` (line 2717): Test simulate, apply, batch-apply actions with closed-loop ES verification.
+  - `async phase7_closed_loop(state, client)` (line 2942): Verify action effects are reflected in search results.
+  - `async phase8_live_data_cross_domain(state, client)` (line 3063): Test real-time API data: objectify + search + cross-domain pipeline.
+  - `async phase9_branch_and_incremental(state, client)` (line 3479): Hard gates:
+  - `async phase10_teardown(state, client)` (line 4003): no docstring
+  - `async test_foundry_e2e_qa()` (line 4060): Full Foundry lifecycle QA with real Kaggle data + live APIs.
 - **Classes**
-  - `Persona` (line 137): no docstring
-  - `QAState` (line 145): Mutable state shared across all 8 phases.
-    - `__init__(self)` (line 147): no docstring
+  - `Persona` (line 140): no docstring
+  - `QAState` (line 148): Mutable state shared across all 8 phases.
+    - `__init__(self)` (line 150): no docstring
 
 ### `backend/tests/test_idempotency_chaos.py`
 - **Functions**
@@ -10143,19 +10151,18 @@
 ### `backend/tests/test_pipeline_objectify_es_e2e.py`
 - **Functions**
   - `_resolve_admin_token()` (line 32): no docstring
-  - `_postgres_url_candidates()` (line 55): no docstring
-  - `async _grant_db_role(db_name, principal_id, role, principal_type)` (line 65): no docstring
-  - `async _post_with_retry(client, url, json_payload, headers, retries, retry_sleep)` (line 111): no docstring
-  - `async _wait_for_command(client, command_id, timeout_seconds, db_name)` (line 138): no docstring
-  - `async _create_db_with_retry(client, db_name, description)` (line 182): no docstring
-  - `async _wait_for_ontology(client, db_name, class_id, branch, timeout_seconds)` (line 202): no docstring
-  - `async _wait_for_run_terminal(client, pipeline_id, job_id, timeout_seconds)` (line 230): no docstring
-  - `async _wait_for_artifact(client, pipeline_id, job_id, timeout_seconds)` (line 264): no docstring
-  - `async _wait_for_es_doc(client, index_name, doc_id, timeout_seconds)` (line 303): no docstring
-  - `_commit_id_from_artifact(artifact_key)` (line 330): no docstring
-  - `async _get_head_commit(client, db_name, branch)` (line 341): no docstring
-  - `async _upsert_object_type_contract(client, db_name, class_id, branch, contract_payload)` (line 346): no docstring
-  - `async test_pipeline_objectify_es_projection()` (line 427): Full flow: raw ingest -> pipeline build -> objectify -> ES projection.
+  - `async _grant_db_role_http(client, db_name, principal_id, role, principal_type)` (line 55): no docstring
+  - `async _post_with_retry(client, url, json_payload, headers, retries, retry_sleep)` (line 79): no docstring
+  - `async _wait_for_command(client, command_id, timeout_seconds, db_name)` (line 106): no docstring
+  - `async _create_db_with_retry(client, db_name, description)` (line 150): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, branch, timeout_seconds)` (line 170): no docstring
+  - `async _wait_for_run_terminal(client, pipeline_id, job_id, timeout_seconds)` (line 198): no docstring
+  - `async _wait_for_artifact(client, pipeline_id, job_id, timeout_seconds)` (line 232): no docstring
+  - `async _wait_for_es_doc(client, index_name, doc_id, timeout_seconds)` (line 271): no docstring
+  - `_commit_id_from_artifact(artifact_key)` (line 298): no docstring
+  - `async _get_head_commit(client, db_name, branch)` (line 309): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, branch, contract_payload)` (line 314): no docstring
+  - `async test_pipeline_objectify_es_projection()` (line 395): Full flow: raw ingest -> pipeline build -> objectify -> ES projection.
 
 ### `backend/tests/test_pipeline_streaming_semantics_e2e.py`
 - **Functions**
@@ -13689,9 +13696,9 @@
 
 ### `backend/tests/utils/qa_helpers.py`
 - **Functions**
-  - `async fetch_open_meteo_csv()` (line 339): Fetch São Paulo hourly weather (past 7 days) → CSV bytes.
-  - `async fetch_frankfurter_csv()` (line 371): Fetch BRL exchange rates (2024 full year) → CSV bytes.
-  - `async fetch_usgs_earthquake_csv(min_magnitude, max_rows)` (line 395): Fetch USGS earthquakes (past month, mag >= 2.5) → CSV bytes.
+  - `async fetch_open_meteo_csv()` (line 322): Fetch São Paulo hourly weather (past 7 days) → CSV bytes.
+  - `async fetch_frankfurter_csv()` (line 354): Fetch BRL exchange rates (2024 full year) → CSV bytes.
+  - `async fetch_usgs_earthquake_csv(min_magnitude, max_rows)` (line 378): Fetch USGS earthquakes (past month, mag >= 2.5) → CSV bytes.
 - **Classes**
   - `BugRecord` (line 33): no docstring
   - `BugTracker` (line 46): Collect bugs in real-time without failing the test.
@@ -13707,11 +13714,11 @@
     - `client(self)` (line 182): no docstring
     - `async create_db(self)` (line 188): no docstring
     - `async grant_db_role(self)` (line 200): no docstring
-    - `async wait_for_command(self, command_id, timeout)` (line 235): no docstring
-    - `async upload_csv(self, name, csv_bytes, description)` (line 253): no docstring
-    - `async wait_for_ontology(self, class_id, timeout)` (line 277): no docstring
-    - `async wait_for_es_doc(self, index_name, doc_id, timeout)` (line 292): no docstring
-    - `async wait_for_es_overlay(self, index_name, doc_id, timeout)` (line 313): no docstring
+    - `async wait_for_command(self, command_id, timeout)` (line 218): no docstring
+    - `async upload_csv(self, name, csv_bytes, description)` (line 236): no docstring
+    - `async wait_for_ontology(self, class_id, timeout)` (line 260): no docstring
+    - `async wait_for_es_doc(self, index_name, doc_id, timeout)` (line 275): no docstring
+    - `async wait_for_es_overlay(self, index_name, doc_id, timeout)` (line 296): no docstring
 
 ## writeback_materializer_worker
 

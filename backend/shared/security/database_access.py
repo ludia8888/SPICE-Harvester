@@ -152,8 +152,25 @@ async def upsert_database_access_entry(
                 normalized_role,
             )
         except asyncpg.UndefinedTableError:
-            # Treat missing table as "unconfigured" (migrations not applied yet).
-            return
+            # Local/dev stacks may start without migrations. Self-heal on first write.
+            await ensure_database_access_table(conn)
+            await conn.execute(
+                """
+                INSERT INTO database_access (
+                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                ON CONFLICT (db_name, principal_type, principal_id)
+                DO UPDATE SET
+                    principal_name = EXCLUDED.principal_name,
+                    role = EXCLUDED.role,
+                    updated_at = NOW()
+                """,
+                db_name,
+                principal_type,
+                principal_id,
+                principal_name,
+                normalized_role,
+            )
     finally:
         await conn.close()
 
