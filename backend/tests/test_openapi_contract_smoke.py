@@ -785,6 +785,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "fileImportRid": "ri.spice.main.file-import.smoke-missing",
         "virtualTableRid": "ri.spice.main.virtual-table.smoke-missing",
         "datasetRid": "ri.spice.main.dataset.00000000-0000-0000-0000-000000000000",
+        "pipelineRid": "ri.spice.main.pipeline.00000000-0000-0000-0000-000000000000",
         "transactionRid": "ri.spice.main.transaction.00000000-0000-0000-0000-000000000000",
         "branchName": ctx.branch_name,
         "filePath": "missing.csv",
@@ -966,6 +967,15 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/graph-query/health"):
         return RequestPlan(op.method, op.path, f"{BFF_URL}{op.path}", (200,))
 
+    # ---------- Auth ----------
+    if key == ("POST", "/api/v1/auth/login"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (422,), json_body={})
+
+    if key == ("POST", "/api/v1/auth/refresh"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (422,), json_body={})
+
     # ---------- Agent ----------
     if key == ("POST", "/api/v1/agent/runs"):
         url = f"{BFF_URL}{op.path}"
@@ -980,12 +990,14 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "goal": "openapi smoke pipeline run",
             "data_scope": {"db_name": ctx.db_name, "branch": "master", "dataset_ids": []},
         }
+        headers = {"X-DB-Name": ctx.db_name}
         return RequestPlan(
             op.method,
             op.path,
             url,
             (200, 400, 422, 429, 503),
             json_body=body,
+            headers=headers,
             auth_mode="delegated_user",
             allow_5xx=True,
         )
@@ -994,6 +1006,18 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{op.path}"
         # Validation-only: avoid opening a streaming response in the smoke harness.
         # Missing required fields -> 422 (no tool execution / no side effects).
+        return RequestPlan(op.method, op.path, url, (422,), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent/builder-runs"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (422,), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent/builder-runs/stream"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (422,), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent/builder-runs/{run_id}/approvals/{approval_request_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (422,), json_body={}, auth_mode="delegated_user")
 
     if key == ("POST", "/api/v1/ontology-agent/runs"):
@@ -1076,6 +1100,48 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/pipelines/proposals"):
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    # ---------- Foundry Pipelines v2 ----------
+    if key == ("GET", "/api/v2/pipelines"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"db_name": ctx.db_name, "branch": ctx.branch_name}
+        return RequestPlan(op.method, op.path, url, (200,), params=params)
+
+    if key == ("GET", "/api/v2/pipelines/branches"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    if key == ("POST", "/api/v2/pipelines"):
+        url = f"{BFF_URL}{op.path}"
+        headers = {"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-pipelines-v2-create"}
+        return RequestPlan(op.method, op.path, url, (400, 422), json_body=[], headers=headers)
+
+    if key == ("PATCH", "/api/v2/pipelines/{pipelineRid}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[])
+
+    if key == ("POST", "/api/v2/pipelines/{pipelineRid}/branches"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[])
+
+    if key == ("POST", "/api/v2/pipelines/{pipelineRid}/branches/{branchName}/merge"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[])
+
+    if key == ("POST", "/api/v2/pipelines/{pipelineRid}/builds"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-pipelines-v2-build"}
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[], headers=headers)
+
+    if key == ("POST", "/api/v2/pipelines/{pipelineRid}/deployments"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-pipelines-v2-deploy"}
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[], headers=headers)
+
+    if key == ("POST", "/api/v2/pipelines/{pipelineRid}/preview"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-pipelines-v2-preview"}
+        return RequestPlan(op.method, op.path, url, (400, 404, 422), json_body=[], headers=headers)
 
     # ---------- Pipeline UDFs (read-only + validation-only) ----------
     if key == ("GET", "/api/v1/pipelines/udfs"):
@@ -1201,6 +1267,16 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             },
         }
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
+
+    if key == ("DELETE", "/api/v1/pipelines/datasets/{dataset_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404, 422), headers=headers)
+
+    if key == ("GET", "/api/v1/pipelines/datasets/{dataset_id}/raw-file"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
 
     if key == ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"

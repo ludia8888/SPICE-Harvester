@@ -70,6 +70,34 @@ async def _maybe_enqueue_objectify_job(
             except Exception as exc:
                 logger.warning("Failed to record schema gate: %s", exc)
         return None
+
+    # Auto-sync mapping specs are validated against a specific dataset version (impact_scope /
+    # backing_datasource_version_id). When a new dataset version is published (same schema_hash),
+    # ensure the backing datasource version is advanced so objectify can run on the latest data.
+    options = dict(mapping_spec.options or {})
+    try:
+        if dataset_registry and mapping_spec.backing_datasource_id and version.version_id:
+            backing_version = await dataset_registry.get_or_create_backing_datasource_version(
+                backing_id=mapping_spec.backing_datasource_id,
+                dataset_version_id=version.version_id,
+                schema_hash=schema_hash or mapping_spec.schema_hash,
+                metadata={"artifact_key": getattr(version, "artifact_key", None)},
+            )
+            if backing_version and mapping_spec.backing_datasource_version_id != backing_version.version_id:
+                impact_scope = options.get("impact_scope") if isinstance(options.get("impact_scope"), dict) else {}
+                impact_scope = dict(impact_scope or {})
+                impact_scope["dataset_version_id"] = version.version_id
+                impact_scope.setdefault("schema_hash", schema_hash or mapping_spec.schema_hash)
+                impact_scope.setdefault("artifact_output_name", resolved_output_name)
+                options["impact_scope"] = impact_scope
+                await objectify_registry.update_mapping_spec(
+                    mapping_spec_id=mapping_spec.mapping_spec_id,
+                    backing_datasource_version_id=backing_version.version_id,
+                    options=options,
+                )
+    except Exception as exc:
+        logger.warning("Failed to advance mapping spec backing version (mapping_spec_id=%s): %s", mapping_spec.mapping_spec_id, exc)
+
     dedupe_key = objectify_registry.build_dedupe_key(
         dataset_id=dataset.dataset_id,
         dataset_branch=dataset.branch,
@@ -83,7 +111,6 @@ async def _maybe_enqueue_objectify_job(
     if existing:
         return existing.job_id
     job_id = str(uuid4())
-    options = dict(mapping_spec.options or {})
     job = ObjectifyJob(
         job_id=job_id,
         db_name=dataset.db_name,

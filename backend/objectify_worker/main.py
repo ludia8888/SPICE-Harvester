@@ -11,7 +11,9 @@ import hashlib
 import io
 import json
 import logging
+import os
 import queue as queue_module
+import tempfile
 import threading
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
@@ -129,21 +131,34 @@ async def _compute_lakefs_delta(
     if not base_commit:
         return None
 
-    # Determine target commit (current dataset version)
-    target_commit = job.dataset_version_id or "main"
-    # Determine repository (dataset_id is typically the lakeFS repository)
-    repository = job.dataset_id
+    # Derive lakeFS repository/ref/path from the artifact_key S3 gateway URL:
+    #   s3://<repo>/<ref>/<path>
+    # In this stack, <ref> is typically a commit id (not a branch).
+    repository = ""
+    target_ref = ""
+    diff_prefix = ""
+    if job.artifact_key:
+        parts = job.artifact_key.replace("s3://", "").split("/", 2)
+        if len(parts) >= 2:
+            repository = parts[0]
+            target_ref = parts[1]
+            raw_path = parts[2] if len(parts) >= 3 else ""
+            if raw_path:
+                # Use a stable dataset-level prefix so diffs include old/new staging paths.
+                # Example:
+                #   datasets/<db>/<dataset_id>/<dataset_name>/staging/<ingest_id>/source.csv
+                # → datasets/<db>/<dataset_id>/<dataset_name>
+                if "/staging/" in raw_path:
+                    diff_prefix = raw_path.split("/staging/")[0]
+                else:
+                    diff_prefix = raw_path.rsplit("/", 1)[0] if "/" in raw_path else raw_path
+
+    if not repository or not target_ref:
+        return None
 
     try:
         lakefs_config = LakeFSConfig.from_env()
-        lakefs_client = LakeFSClient(lakefs_config)
-
-        # The artifact_key typically has format "s3://repo/branch/path"
-        prefix = ""
-        if job.artifact_key:
-            parts = job.artifact_key.replace("s3://", "").split("/", 2)
-            if len(parts) >= 3:
-                prefix = parts[2]
+        lakefs_client = LakeFSClient(config=lakefs_config)
 
         async def _read_file_rows(repo: str, ref: str, path: str) -> List[Dict[str, Any]]:
             """Read rows from a file at a given LakeFS ref via S3 gateway."""
@@ -164,8 +179,8 @@ async def _compute_lakefs_delta(
             lakefs_client=lakefs_client,
             repository=repository,
             base_ref=base_commit,
-            target_ref=target_commit,
-            path=prefix,
+            target_ref=target_ref,
+            path=diff_prefix,
             file_reader=_read_file_rows,
         )
         return result
@@ -1905,9 +1920,20 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         # LakeFS delta mode: compute diff between commits
         if execution_mode == "delta" and job.base_commit_id:
-            delta_computer = create_delta_computer_for_mapping_spec(
-                vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
-            )
+            pk_source_columns: List[str] = []
+            if pk_targets:
+                mapping_by_target = {
+                    str(m.target_field): str(m.source_field)
+                    for m in (property_mappings or [])
+                    if getattr(m, "target_field", None) and getattr(m, "source_field", None)
+                }
+                for target in pk_targets:
+                    src = mapping_by_target.get(str(target)) or str(target)
+                    if src:
+                        pk_source_columns.append(src)
+            if not pk_source_columns:
+                pk_source_columns = ["id"]
+            delta_computer = ObjectifyDeltaComputer(pk_columns=pk_source_columns)
             lakefs_delta_result = await _compute_lakefs_delta(
                 job=job,
                 delta_computer=delta_computer,
@@ -1938,6 +1964,20 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         # --- LakeFS delta mode: process delta rows directly, skip dataset iteration ---
         if lakefs_delta_result and lakefs_delta_result.has_changes:
             delta_rows_all = lakefs_delta_result.added_rows + lakefs_delta_result.modified_rows
+            effective_deleted_keys: List[str] = list(lakefs_delta_result.deleted_keys or [])
+            if effective_deleted_keys and delta_computer and delta_rows_all:
+                try:
+                    new_row_keys = {
+                        delta_computer.compute_row_key(row)
+                        for row in delta_rows_all
+                        if isinstance(row, dict)
+                    }
+                    effective_deleted_keys = [k for k in effective_deleted_keys if k not in new_row_keys]
+                except Exception:
+                    logger.warning(
+                        "Failed to compute delta row keys for deletion filtering; skipping deletions for safety"
+                    )
+                    effective_deleted_keys = []
             if delta_rows_all:
                 # Convert list-of-dicts to (columns, rows_as_lists) format
                 _delta_cols = list(delta_rows_all[0].keys()) if delta_rows_all else []
@@ -2035,27 +2075,31 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                         instance_ids_sample.extend(instance_ids[: max(0, 10 - len(instance_ids_sample))])
 
             # Handle deletions from delta
-            if lakefs_delta_result.deleted_keys:
+            if effective_deleted_keys:
                 branch = job.ontology_branch or job.dataset_branch or "main"
                 index_name = get_instances_index_name(job.db_name, branch=branch)
-                for deleted_key in lakefs_delta_result.deleted_keys:
+                for deleted_key in effective_deleted_keys:
                     try:
                         await self.instance_write_path._es.delete_document(
                             index=index_name, doc_id=deleted_key, refresh=False,
                         )
                     except Exception:
                         logger.debug("Delete failed for stale delta key: %s", deleted_key)
-                logger.info("Deleted %d stale instances from LakeFS delta", len(lakefs_delta_result.deleted_keys))
+                logger.info("Deleted %d stale instances from LakeFS delta", len(effective_deleted_keys))
 
         else:
             # --- Standard iteration (full or watermark-incremental mode) ---
             pass
 
+        incremental_filtering_enabled = bool(
+            execution_mode in ("incremental", "delta") and delta_computer and watermark_column
+        )
+
         async for columns, rows, row_offset in self._iter_dataset_batches(
             job=job,
             options=options,
             row_batch_size=row_batch_size,
-            max_rows=max_rows if not delta_computer else None,  # Filter manually in incremental mode
+            max_rows=None if incremental_filtering_enabled else max_rows,  # Filter manually in incremental mode
         ):
             # Skip dataset iteration when LakeFS delta was already processed
             if lakefs_delta_result and lakefs_delta_result.has_changes:
@@ -2065,7 +2109,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 continue
 
             # Incremental filtering: skip rows that haven't changed since previous watermark
-            if delta_computer and watermark_column:
+            if incremental_filtering_enabled:
                 col_map = {col: idx for idx, col in enumerate(columns)}
                 wm_col_idx = col_map.get(watermark_column)
 
@@ -2592,6 +2636,39 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if key.endswith(".xlsx") or key.endswith(".xlsm") or key.endswith(".xls"):
             raise RuntimeError("Excel artifacts are not supported for objectify; convert via pipeline first.")
 
+        parquet_keys: List[str] = []
+        try:
+            if key.endswith(".parquet"):
+                parquet_keys = [key]
+            else:
+                async for obj in self.storage.iter_objects(bucket=bucket, prefix=key, max_keys=self.list_page_size):
+                    obj_key = obj.get("Key")
+                    if not obj_key or obj_key.endswith("/"):
+                        continue
+                    if not obj_key.startswith(key):
+                        continue
+                    if str(obj_key).endswith(".parquet"):
+                        parquet_keys.append(str(obj_key))
+        except Exception as exc:
+            logger.warning(
+                "Failed to detect parquet artifacts for objectify sidecar output (%s/%s): %s",
+                bucket,
+                key,
+                exc,
+                exc_info=True,
+            )
+            parquet_keys = []
+
+        if parquet_keys:
+            async for columns, rows, row_offset in self._iter_parquet_object_batches(
+                bucket=bucket,
+                parquet_keys=parquet_keys,
+                row_batch_size=row_batch_size,
+                max_rows=max_rows,
+            ):
+                yield columns, rows, row_offset
+            return
+
         async for columns, rows, row_offset in self._iter_json_part_batches(
             bucket=bucket,
             prefix=key,
@@ -2599,6 +2676,129 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             max_rows=max_rows,
         ):
             yield columns, rows, row_offset
+
+    async def _download_object_to_file(
+        self,
+        *,
+        bucket: str,
+        key: str,
+        dest_path: str,
+    ) -> None:
+        if not self.storage:
+            raise RuntimeError("Storage service not initialized")
+
+        def _download() -> None:
+            body = None
+            try:
+                resp = self.storage.client.get_object(Bucket=bucket, Key=key)
+                body = resp.get("Body")
+                if body is None:
+                    raise RuntimeError(f"Storage returned empty body for {bucket}/{key}")
+
+                with open(dest_path, "wb") as out:
+                    for chunk in iter(lambda: body.read(1024 * 1024), b""):
+                        out.write(chunk)
+            finally:
+                try:
+                    if body:
+                        body.close()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to close storage stream for parquet download %s/%s: %s",
+                        bucket,
+                        key,
+                        exc,
+                        exc_info=True,
+                    )
+
+        await asyncio.to_thread(_download)
+
+    async def _iter_parquet_object_batches(
+        self,
+        *,
+        bucket: str,
+        parquet_keys: List[str],
+        row_batch_size: int,
+        max_rows: Optional[int],
+    ):
+        if not self.storage:
+            raise RuntimeError("Storage service not initialized")
+        try:
+            import duckdb  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("DuckDB is required to objectify Parquet artifacts (pip install duckdb)") from exc
+
+        resolved_keys = sorted({str(k) for k in parquet_keys if str(k).endswith(".parquet")})
+        if not resolved_keys:
+            return
+
+        with tempfile.TemporaryDirectory(prefix="spice-objectify-parquet-") as tmpdir:
+            for idx, obj_key in enumerate(resolved_keys):
+                base = os.path.basename(obj_key) or f"part-{idx}.parquet"
+                base = base.replace(os.sep, "_").replace("..", "_")
+                local_path = os.path.join(tmpdir, f"{idx:05d}_{base}")
+                await self._download_object_to_file(bucket=bucket, key=obj_key, dest_path=local_path)
+
+            q: queue_module.Queue = queue_module.Queue(maxsize=2)
+            stop_flag = threading.Event()
+
+            def _safe_put(item: Tuple[str, Any, Any, Any]) -> None:
+                while not stop_flag.is_set():
+                    try:
+                        q.put(item, timeout=0.5)
+                        return
+                    except queue_module.Full:
+                        continue
+
+            def _reader() -> None:
+                conn = None
+                try:
+                    conn = duckdb.connect(":memory:")
+                    pattern = os.path.join(tmpdir, "*.parquet")
+                    cursor = conn.execute("SELECT * FROM read_parquet(?)", [pattern])
+                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+                    row_offset = 0
+                    seen_rows = 0
+                    while not stop_flag.is_set():
+                        batch = cursor.fetchmany(row_batch_size)
+                        if not batch:
+                            break
+                        rows = [list(row) for row in batch]
+                        if max_rows is not None and (seen_rows + len(rows)) > max_rows:
+                            rows = rows[: max_rows - seen_rows]
+                        if rows:
+                            _safe_put(("batch", columns, rows, row_offset))
+                            row_offset += len(rows)
+                            seen_rows += len(rows)
+                        if max_rows is not None and seen_rows >= max_rows:
+                            break
+
+                    _safe_put(("done", columns, [], row_offset))
+                except Exception as exc:
+                    logger.error("Objectify parquet reader failed: %s", exc, exc_info=True)
+                    _safe_put(("error", exc, None, None))
+                finally:
+                    try:
+                        if conn:
+                            conn.close()
+                    except Exception as exc:
+                        logger.warning("Failed to close DuckDB connection: %s", exc, exc_info=True)
+
+            thread = threading.Thread(target=_reader, daemon=True)
+            thread.start()
+
+            try:
+                while True:
+                    kind, columns, rows, row_offset = await asyncio.to_thread(q.get)
+                    if kind == "error":
+                        raise columns
+                    if kind == "done":
+                        break
+                    if kind == "batch":
+                        yield columns, rows, row_offset
+            finally:
+                stop_flag.set()
 
     async def _iter_csv_batches(
         self,
@@ -2721,7 +2921,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     continue
                 try:
                     payload = json.loads(line)
-                except json.JSONDecodeError as exc:
+                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                     logger.warning("Invalid JSON line from objectify sidecar output: %s", exc, exc_info=True)
                     continue
                 if isinstance(payload, dict):
@@ -2872,12 +3072,18 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             return
 
         try:
+            lakefs_ref = None
+            if job.artifact_key:
+                parts = job.artifact_key.replace("s3://", "").split("/", 2)
+                if len(parts) >= 2:
+                    lakefs_ref = parts[1]
             await self.objectify_registry.update_watermark(
                 mapping_spec_id=job.mapping_spec_id,
                 dataset_branch=job.dataset_branch,
                 watermark_column=watermark_column,
                 watermark_value=new_watermark,
-                lakefs_commit_id=job.dataset_version_id,
+                dataset_version_id=job.dataset_version_id,
+                lakefs_commit_id=lakefs_ref,
             )
             logger.info(
                 "Updated watermark for mapping_spec %s: %s=%s",

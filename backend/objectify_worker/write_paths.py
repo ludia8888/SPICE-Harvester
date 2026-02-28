@@ -246,12 +246,22 @@ class DatasetPrimaryIndexWritePath:
         execution_mode: str,
         indexed_instance_ids: Iterable[str],
     ) -> Dict[str, Any]:
-        if str(execution_mode or "").strip().lower() != "full" or not self._prune_stale_on_full:
+        resolved_mode = str(execution_mode or "").strip().lower()
+        prune_reason: Optional[str] = None
+        if resolved_mode != "full":
+            prune_reason = "execution_mode_not_full"
+        elif not self._prune_stale_on_full:
+            prune_reason = "prune_disabled"
+        elif job.max_rows is not None:
+            prune_reason = "max_rows_set"
+
+        if prune_reason is not None:
             return {
                 "stale_prune": {
                     "enabled": bool(self._prune_stale_on_full),
                     "executed": False,
                     "deleted": 0,
+                    "reason": prune_reason,
                 }
             }
 

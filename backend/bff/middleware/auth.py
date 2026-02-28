@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.foundry.errors import foundry_error
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
 from shared.services.registries.agent_tool_registry import AgentToolPolicyRecord
@@ -1154,6 +1155,15 @@ async def _bff_auth_handle_missing_token(request: Request, call_next: _CallNext,
     if ctx.dev_master:
         _attach_dev_master_principal(request)
         return await call_next(request)
+    if request.url.path.startswith("/api/v2"):
+        response = foundry_error(
+            status.HTTP_401_UNAUTHORIZED,
+            error_code="UNAUTHORIZED",
+            error_name="MissingCredentials",
+            parameters={},
+        )
+        response.headers["WWW-Authenticate"] = "Bearer"
+        return response
     return _error_response(
         request=request,
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1362,7 +1372,10 @@ async def _bff_auth_handle_expected_token(request: Request, call_next: _CallNext
 async def _bff_auth_handle_user_jwt(request: Request, call_next: _CallNext, ctx: _BffAuthContext) -> Optional[Response]:
     if not ctx.auth.user_jwt_enabled:
         return None
-    presented = (ctx.presented or "").strip()
+    auth_header = str(request.headers.get("Authorization") or "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    presented = auth_header[7:].strip()
     if not presented:
         return None
     try:
@@ -1379,7 +1392,23 @@ async def _bff_auth_handle_user_jwt(request: Request, call_next: _CallNext, ctx:
         _attach_verified_principal(request, principal)
         return await call_next(request)
     except UserTokenError:
-        return None
+        if request.url.path.startswith("/api/v2"):
+            response = foundry_error(
+                status.HTTP_401_UNAUTHORIZED,
+                error_code="UNAUTHORIZED",
+                error_name="Unauthorized",
+                parameters={},
+            )
+            response.headers["WWW-Authenticate"] = "Bearer"
+            return response
+        return _error_response(
+            request=request,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            message="Invalid authentication credentials",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 async def _bff_auth_handle_no_token_configured(

@@ -1,0 +1,14 @@
+[
+  {
+    "phase": "Phase 9",
+    "step": "9-3",
+    "endpoint": "delta delete Customer",
+    "expected": "deleted customer removed",
+    "actual": "Customer count after delete mismatch: expected=499 got=1",
+    "severity": "P1",
+    "persona": null,
+    "status_code": null,
+    "traceback": "Traceback (most recent call last):\n  File \"/Users/isihyeon/Desktop/SPICE-Harvester/backend/tests/test_foundry_e2e_qa.py\", line 3647, in phase9_branch_and_incremental\n    raise AssertionError(f\"Customer count after delete mismatch: expected={expected} got={count_after_delete}\")\nAssertionError: Customer count after delete mismatch: expected=499 got=1\n",
+    "timestamp": "2026-02-28T07:04:47.369533"
+  }
+]

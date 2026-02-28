@@ -36,6 +36,7 @@ from shared.utils.action_simulation_utils import reject_simulation_delete_flag
 from shared.utils.resource_rid import format_resource_rid, parse_metadata_rev
 from shared.utils.access_policy import apply_access_policy
 from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.principal_policy import build_principal_tags
 from shared.utils.action_permission_profile import (
     ActionPermissionProfileError,
     requires_action_data_access_enforcement,
@@ -798,6 +799,15 @@ async def simulate_action_async(
             action_spec=spec,
         )
 
+        principal_tags = None
+        if submitted_by and submitted_by != "system":
+            principal_tags = build_principal_tags(
+                principal_type=submitted_by_type,
+                principal_id=submitted_by,
+                role=actor_role,
+            )
+        enforce_edit_access = bool(principal_tags)
+
         settings = get_settings()
         base_storage = create_storage_service(settings)
         if not base_storage:
@@ -814,7 +824,7 @@ async def simulate_action_async(
                 code=ErrorCode.STORAGE_UNAVAILABLE,
             )
 
-        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE or enforce_data_access:
+        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE or enforce_data_access or enforce_edit_access:
             dataset_registry = DatasetRegistry()
             await dataset_registry.connect()
 

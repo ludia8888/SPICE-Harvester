@@ -8,6 +8,18 @@ from jose import jwt
 from shared.utils.repo_dotenv import load_repo_dotenv
 
 
+_DEFAULT_PLATFORM_API_SCOPES = (
+    "api:datasets-read",
+    "api:datasets-write",
+    "api:ontologies-read",
+    "api:ontologies-write",
+    "api:orchestration-read",
+    "api:orchestration-write",
+    "api:connectivity-read",
+    "api:connectivity-write",
+)
+
+
 def _load_repo_dotenv() -> Dict[str, str]:
     return load_repo_dotenv()
 
@@ -59,6 +71,7 @@ def build_smoke_user_jwt(
     *,
     subject: str = "smoke_user",
     roles: Iterable[str] = ("admin",),
+    scopes: Iterable[str] = _DEFAULT_PLATFORM_API_SCOPES,
     tenant_id: str = "smoke_tenant",
     org_id: str = "smoke_org",
     email: str = "smoke_user@local.test",
@@ -82,6 +95,10 @@ def build_smoke_user_jwt(
         "tenant_id": tenant_id,
         "org_id": org_id,
     }
+    scopes_list = [str(scope).strip() for scope in (scopes or ()) if str(scope).strip()]
+    if scopes_list:
+        # OAuth2 standard: space-delimited scope string.
+        claims["scope"] = " ".join(dict.fromkeys(scopes_list))
     if issuer:
         claims["iss"] = issuer
     if audience:

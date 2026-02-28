@@ -62,7 +62,7 @@ services:
       - cluster.name=spice-harvester-cluster
       - node.name=spice-harvester-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms${ELASTICSEARCH_HEAP:-1g} -Xmx${ELASTICSEARCH_HEAP:-1g}"
+      - "ES_JAVA_OPTS=-Xms${ELASTICSEARCH_HEAP:-512m} -Xmx${ELASTICSEARCH_HEAP:-512m}"
       # Dev/test only: avoid RED cluster when the Docker VM disk is tight (shards become unassigned).
       - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false

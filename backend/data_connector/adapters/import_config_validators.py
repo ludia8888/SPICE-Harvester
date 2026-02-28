@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from data_connector.adapters.sql_query_guard import normalize_sql_query
+from shared.models.import_modes import (
+    APPEND_MERGE_IMPORT_MODES,
+    CDC_COMPAT_IMPORT_MODES,
+    TABLE_IMPORT_MODE_ORDER,
+    TABLE_IMPORT_MODES,
+)
 
-_TABLE_IMPORT_MODE_ORDER = ("SNAPSHOT", "APPEND", "UPDATE", "INCREMENTAL", "CDC", "STREAMING")
-TABLE_IMPORT_MODES = frozenset(_TABLE_IMPORT_MODE_ORDER)
-CDC_COMPAT_IMPORT_MODES = frozenset({"CDC", "STREAMING"})
-APPEND_MERGE_IMPORT_MODES = frozenset({"APPEND", "INCREMENTAL", "CDC", "STREAMING"})
 FILE_IMPORT_SELECTOR_FIELDS = ("fileImportFilters", "path", "subfolder", "filePattern", "fileFormat")
 
 
@@ -18,7 +20,7 @@ def is_jdbc_connector_kind(connector_kind: str) -> bool:
 def normalize_import_mode(raw_mode: Any, *, mode_field_name: str = "importMode") -> str:
     mode = str(raw_mode or "SNAPSHOT").strip().upper()
     if mode not in TABLE_IMPORT_MODES:
-        allowed = ", ".join(_TABLE_IMPORT_MODE_ORDER)
+        allowed = ", ".join(TABLE_IMPORT_MODE_ORDER)
         raise ValueError(f"{mode_field_name} must be one of {allowed}")
     return mode
 

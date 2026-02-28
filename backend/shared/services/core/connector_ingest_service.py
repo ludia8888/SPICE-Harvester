@@ -7,8 +7,8 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from data_connector.adapters.import_config_validators import APPEND_MERGE_IMPORT_MODES, TABLE_IMPORT_MODES
 from shared.config.settings import get_settings
+from shared.models.import_modes import APPEND_MERGE_IMPORT_MODES, TABLE_IMPORT_MODES
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry

@@ -648,6 +648,10 @@ async def test_financial_investigation_workflow_e2e() -> None:
         await _wait_for_es_doc(client, index_name=index_name, doc_id="110-123-4567")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="tx_001")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="call_001")
+        # Elasticsearch GET is realtime, but graph traversal relies on SEARCH.
+        # Force a refresh so reverse hops (terms queries on relationships.*) are deterministic.
+        refresh = await client.post(f"{ELASTICSEARCH_URL}/{index_name}/_refresh")
+        refresh.raise_for_status()
 
         # Phase 5: Graph queries (reverse traversal + multi-hop)
         query_accounts = await client.post(

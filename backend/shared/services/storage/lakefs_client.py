@@ -399,6 +399,32 @@ class LakeFSClient:
                     break
         return results
 
+    @trace_external_call("lakefs.diff")
+    async def diff(
+        self,
+        *,
+        repository: str,
+        left_ref: str,
+        right_ref: str,
+        prefix: Optional[str] = None,
+        amount: int = 1000,
+    ) -> Dict[str, Any]:
+        """
+        Compatibility wrapper for callers that expect a `diff()` method returning
+        a JSON payload with a top-level `results` array.
+
+        Internally, this delegates to `list_diff_objects()` which already
+        supports lakeFS API variants across versions.
+        """
+        results = await self.list_diff_objects(
+            repository=repository,
+            ref=right_ref,
+            since=left_ref,
+            prefix=prefix,
+            amount=amount,
+        )
+        return {"results": results}
+
     @trace_external_call("lakefs.merge")
     async def merge(
         self,
