@@ -1,5 +1,6 @@
 import React from "react";
 import Layout from "@theme/Layout";
+import Mermaid from "@theme/Mermaid";
 import Translate, { translate } from "@docusaurus/Translate";
 import HeroSection from "@site/src/components/layout/HeroSection";
 import FeatureGrid from "@site/src/components/layout/FeatureGrid";
@@ -129,17 +130,17 @@ const FEATURES: Feature[] = [
 ];
 
 const ARCHITECTURE_DIAGRAM = `graph LR
-    A[Client SDK] --> B[API Gateway]
-    B --> C[Ontology Service]
-    B --> D[Pipeline Engine]
-    B --> E[Action Executor]
-    C --> F[(Object Storage)]
-    D --> F
-    E --> G[Event Bus]
-    G --> H[Projection Engine]
-    H --> F
-    C --> I[Search Index]
-    D --> I`;
+A[Client SDK] --> B[API Gateway]
+B --> C[Ontology Service]
+B --> D[Pipeline Engine]
+B --> E[Action Executor]
+C --> F[(Object Storage)]
+D --> F
+E --> G[Event Bus]
+G --> H[Projection Engine]
+H --> F
+C --> I[Search Index]
+D --> I`;
 
 const STEPS = [
   {
@@ -242,9 +243,7 @@ function ArchitectureSection(): React.ReactElement {
         </div>
         <div className={styles.architectureContent}>
           <div className={styles.architectureDiagram}>
-            <pre>
-              <code>{ARCHITECTURE_DIAGRAM}</code>
-            </pre>
+            <Mermaid value={ARCHITECTURE_DIAGRAM} />
           </div>
         </div>
       </div>
