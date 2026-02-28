@@ -581,7 +581,8 @@ docker compose -f docker-compose.full.yml build oms   # OMS 리빌드
 | 9 | [테스트 가이드](docs/onboarding/ko/09-TESTING-GUIDE.md) | 테스트 실행 및 작성 |
 | 10 | [트러블슈팅 FAQ](docs/onboarding/ko/10-TROUBLESHOOTING-FAQ.md) | 자주 겪는 문제와 해결법 |
 | 11 | [실전 시나리오](docs/onboarding/ko/11-REAL-WORLD-SCENARIOS.md) | 실제 비즈니스 시나리오로 플랫폼 기능 이해 |
-| 12 | [30일 학습 로드맵](docs/onboarding/ko/LEARNING-ROADMAP.md) | 체계적 온보딩 일정 가이드 |
+| 12 | [Action Type 완전 해부](docs/onboarding/ko/12-ACTION-TYPES-DEEP-DIVE.md) | 데이터 변경 명령 시스템의 구조와 동작 |
+| 13 | [30일 학습 로드맵](docs/onboarding/ko/LEARNING-ROADMAP.md) | 체계적 온보딩 일정 가이드 |
 
 추가로 [Spice OS Documentation Portal](https://spice-harvester-docs.vercel.app/ko/)에서 더 상세한 API 레퍼런스, 아키텍처 문서, 운영 가이드를 한국어로 확인할 수 있습니다.
 
