@@ -5,11 +5,11 @@ sidebar_position: 5
 
 # Foundry v2 액션 API
 
-액션(Actions)은 Spice OS의 쓰기 인터페이스입니다. 모든 변경 작업 -- 객체 생성, 속성 수정, 레코드 삭제, 링크 관리 -- 은 액션 API를 통해 수행됩니다. 액션은 **검증, 감사 로깅, Undo 지원, 충돌 해결**을 제공합니다.
+액션(Action)은 Spice OS의 쓰기 인터페이스예요. 객체 생성, 속성(Property) 수정, 레코드 삭제, 링크 유형(Link Type) 관리 등 모든 변경 작업을 액션 API로 처리합니다. **검증, 감사 로깅, Undo, 충돌 해결**까지 기본 제공되거든요.
 
 ## 액션 실행
 
-온톨로지에 하나 이상의 액션을 실행합니다.
+온톨로지에 하나 이상의 액션을 실행해요.
 
 ```
 POST /api/v2/ontologies/{ontologyApiName}/actions/apply
@@ -62,7 +62,7 @@ POST /api/v2/ontologies/{ontologyApiName}/actions/apply
 
 #### `editObject` -- 객체 수정
 
-지정된 속성만 업데이트됩니다. 다른 속성은 변경되지 않습니다.
+지정한 속성만 업데이트돼요. 나머지 속성은 그대로 유지됩니다.
 
 ```json
 {
@@ -116,7 +116,7 @@ POST /api/v2/ontologies/{ontologyApiName}/actions/apply
 
 ### 벌크 액션
 
-단일 요청에 여러 액션을 제출합니다. **원자적으로 실행**됩니다 -- 모두 성공하거나 모두 실패합니다.
+단일 요청에 여러 액션을 한꺼번에 보낼 수 있어요. **원자적(atomic)**으로 실행되기 때문에 모두 성공하거나 모두 실패합니다.
 
 ```bash
 curl -X POST \
@@ -171,7 +171,7 @@ curl -X POST \
 
 ## 액션 타입 목록 조회
 
-온톨로지에 정의된 모든 액션 타입 템플릿을 조회합니다.
+온톨로지에 정의된 모든 액션 타입 템플릿을 가져와요.
 
 ```
 GET /api/v2/ontologies/{ontologyApiName}/actionTypes
@@ -181,13 +181,13 @@ GET /api/v2/ontologies/{ontologyApiName}/actionTypes
 
 ## 액션 검증
 
-실제로 실행하지 않고 액션이 성공할지 확인합니다.
+실제로 실행하지 않고 액션이 성공할지 미리 확인할 수 있어요.
 
 ```
 POST /api/v2/ontologies/{ontologyApiName}/actions/validate
 ```
 
-요청 형식은 `apply`와 동일하지만, 변경은 수행되지 않습니다.
+요청 형식은 `apply`와 동일하지만, 실제 변경은 수행되지 않아요.
 
 ### 유효한 경우
 
@@ -220,7 +220,7 @@ POST /api/v2/ontologies/{ontologyApiName}/actions/validate
 
 ## 액션 템플릿 시스템
 
-액션 템플릿은 동적 표현식 언어를 사용하여 재사용 가능한 파라미터화 액션을 정의합니다.
+액션 템플릿은 동적 표현식 언어를 사용해 재사용 가능한 파라미터화된 액션을 정의해요.
 
 ### 템플릿 연산자
 
@@ -272,7 +272,7 @@ POST /api/v2/ontologies/{ontologyApiName}/actions/validate
 
 ## 액션 되돌리기 (Undo)
 
-이전에 실행한 액션을 보상 액션(compensating action)으로 되돌립니다.
+이전에 실행한 액션을 보상 액션(compensating action)으로 되돌릴 수 있어요.
 
 ```
 POST /api/v2/ontologies/{ontologyApiName}/actions/{actionId}/undo
@@ -289,16 +289,16 @@ POST /api/v2/ontologies/{ontologyApiName}/actions/{actionId}/undo
 ```
 
 :::caution
-모든 액션이 되돌리기 가능한 것은 아닙니다. `deleteObject` 액션은 이벤트 스토어에 객체의 생성/수정 이벤트가 남아있는 경우에만 되돌릴 수 있습니다. 액션 결과의 `undoable` 필드를 확인하세요.
+모든 액션이 되돌리기 가능한 것은 아니에요. `deleteObject` 액션은 이벤트 스토어에 객체의 생성/수정 이벤트가 남아 있을 때만 되돌릴 수 있습니다. 액션 결과의 `undoable` 필드를 꼭 확인해 주세요.
 :::
 
 ---
 
 ## 충돌 해결
 
-동시 수정이 같은 객체를 대상으로 할 때, 플랫폼은 **낙관적 잠금(Optimistic Locking)**으로 충돌을 감지합니다. 각 객체는 업데이트마다 증가하는 `version` 번호를 가집니다.
+동시에 같은 객체를 수정하려 하면, 플랫폼이 **낙관적 잠금(Optimistic Locking)**으로 충돌을 감지해요. 각 객체는 업데이트할 때마다 `version` 번호가 1씩 올라갑니다.
 
-충돌이 감지되면 API는 다음을 반환합니다:
+충돌이 감지되면 다음과 같은 에러가 반환돼요.
 
 ```json
 {

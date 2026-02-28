@@ -5,11 +5,11 @@ sidebar_position: 1
 
 # 빠른 시작
 
-10분 안에 로컬에서 Spice OS를 실행해보세요. 이 가이드는 사전 준비, 플랫폼 실행, 그리고 첫 API 호출까지 단계별로 안내합니다.
+10분 안에 로컬에서 Spice OS를 실행해봅시다. 사전 준비부터 플랫폼 실행, 첫 API 호출까지 단계별로 안내합니다.
 
 ## 사전 준비
 
-시작하기 전에 개발 머신에 아래 도구가 설치되어 있는지 확인하세요:
+시작하기 전에 개발 머신에 아래 도구가 설치되어 있는지 확인하세요.
 
 | 도구 | 최소 버전 | 확인 명령 |
 |------|----------|----------|
@@ -19,8 +19,9 @@ sidebar_position: 1
 | Python | 3.11+ | `python3 --version` |
 | Git | 2.40+ | `git --version` |
 
-**시스템 요구 사항:**
-- RAM 최소 16 GB (전체 관측성 스택 사용 시 32 GB 권장)
+**시스템 요구 사항**
+
+- RAM 최소 16 GB (관측성 스택까지 사용하려면 32 GB 권장)
 - 디스크 여유 공간 20 GB
 - macOS 13+, Ubuntu 22.04+, 또는 WSL2가 포함된 Windows 11
 
@@ -33,13 +34,13 @@ cd spice-harvester
 
 ## 2단계: 환경 변수 설정
 
-예제 환경 파일을 복사한 뒤, 필요에 따라 값을 조정하세요:
+예제 환경 파일을 복사한 뒤, 필요에 따라 값을 조정하세요.
 
 ```bash
 cp .env.example .env
 ```
 
-기본 설정은 로컬 개발에서 바로 동작하도록 구성되어 있습니다. 주요 기본값은 다음과 같습니다:
+기본 설정은 로컬 개발에서 바로 동작하도록 구성되어 있어요. 주요 기본값은 다음과 같습니다.
 
 ```bash
 # Core service ports
@@ -57,17 +58,18 @@ MINIO_PORT=9000
 
 ## 3단계: 플랫폼 실행
 
-Docker Compose로 32개 서비스를 모두 실행합니다:
+Docker Compose로 32개 서비스를 모두 실행합니다.
 
 ```bash
 docker compose up -d
 ```
 
-이 명령은 다음 전체 스택을 실행합니다:
-- **API 서버 3개** (OMS, BFF, Agent)
-- **워커 12개** (액션 워커, 프로젝션 빌더, 파이프라인 러너, 커넥터 동기화 등)
-- **데이터 플랫폼 서비스 7개** (PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, LakeFS)
-- **관측성 서비스 6개** (Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Kafka UI)
+이 명령으로 실행되는 전체 스택은 다음과 같아요.
+
+- **API 서버 3개** -- OMS, BFF, Agent
+- **워커 12개** -- 액션 워커, 프로젝션 빌더, 파이프라인 러너, 커넥터 동기화 등
+- **데이터 플랫폼 서비스 7개** -- PostgreSQL, Elasticsearch, Redis, Kafka, ZooKeeper, MinIO, LakeFS
+- **관측성 서비스 6개** -- Grafana, Prometheus, Jaeger, OTEL Collector, AlertManager, Kafka UI
 
 :::tip
 개발 중 가볍게 실행하려면 핵심 서비스만 시작하세요:
@@ -78,13 +80,13 @@ docker compose --profile core up -d
 
 ## 4단계: 서비스 확인
 
-모든 서비스가 정상인지 확인합니다:
+모든 서비스가 정상인지 확인해봅시다.
 
 ```bash
 docker compose ps
 ```
 
-또는 헬스 엔드포인트를 직접 호출할 수도 있습니다:
+또는 헬스 엔드포인트를 직접 호출할 수도 있습니다.
 
 ```bash
 # OMS health check
@@ -97,7 +99,7 @@ curl http://localhost:8002/health
 curl http://localhost:8004/health
 ```
 
-각 엔드포인트는 다음과 같은 응답을 반환해야 합니다:
+각 엔드포인트는 다음과 같은 응답을 반환해야 합니다.
 
 ```json
 {
@@ -115,20 +117,20 @@ curl http://localhost:8004/health
 
 ## 5단계: 데이터베이스 마이그레이션 실행
 
-초기 스키마와 시드 데이터를 적용합니다:
+초기 스키마와 시드 데이터를 적용합니다.
 
 ```bash
 docker compose exec oms python -m alembic upgrade head
 docker compose exec oms python -m spice.cli seed --demo
 ```
 
-`seed` 명령은 샘플 객체 유형/링크 유형/인스턴스를 포함한 데모 온톨로지를 생성하므로, 플랫폼을 바로 탐색할 수 있습니다.
+`seed` 명령은 샘플 객체 유형, 링크 유형, 인스턴스를 포함한 데모 온톨로지를 생성합니다. 이 데이터로 바로 플랫폼을 탐색할 수 있어요.
 
 ## 6단계: 첫 API 호출
 
 ### 인증
 
-Bearer 토큰을 발급받습니다:
+먼저 Bearer 토큰을 발급받습니다.
 
 ```bash
 curl -X POST http://localhost:8002/api/v2/auth/token \
@@ -139,7 +141,7 @@ curl -X POST http://localhost:8002/api/v2/auth/token \
   }'
 ```
 
-응답:
+정상적으로 처리되면 다음과 같은 응답을 받게 됩니다.
 
 ```json
 {
@@ -151,14 +153,14 @@ curl -X POST http://localhost:8002/api/v2/auth/token \
 
 ### 객체 유형 목록 조회
 
-토큰을 사용해 데모 온톨로지에서 사용 가능한 객체 유형을 조회합니다:
+발급받은 토큰으로 데모 온톨로지의 객체 유형 목록을 조회해볼까요.
 
 ```bash
 curl http://localhost:8002/api/v2/ontologies/demo/objectTypes \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
-응답:
+다음과 같은 응답을 확인할 수 있습니다.
 
 ```json
 {
@@ -183,7 +185,7 @@ curl http://localhost:8002/api/v2/ontologies/demo/objectTypes \
 
 ### 객체 검색
 
-Engineering 부서의 직원을 검색합니다:
+Engineering 부서의 직원을 검색해봅시다.
 
 ```bash
 curl -X POST http://localhost:8002/api/v2/ontologies/demo/objects/Employee/search \

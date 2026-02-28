@@ -1,21 +1,23 @@
 # 첫 API 호출 따라하기
 
-> 이 문서는 Spice OS가 실행된 상태에서 직접 API를 호출하며 플랫폼을 체험하는 실습 가이드입니다. 각 단계에서 "뒤에서 무슨 일이 일어나는지"도 함께 설명합니다.
+> Spice OS가 실행된 상태에서 직접 API를 호출하며 플랫폼을 체험하는 실습 가이드예요. 각 단계에서 "뒤에서 무슨 일이 일어나는지"도 함께 설명해 드릴게요.
 
-**사전 준비:** [로컬 환경 설정](03-LOCAL-SETUP.md)을 완료하고, 전체 스택이 실행 중이어야 합니다.
+**사전 준비:** [로컬 환경 설정](03-LOCAL-SETUP.md)을 완료하고, 전체 스택이 실행 중이어야 해요.
 
 ---
 
 ## 0단계: 관리자 토큰 확인
 
-API 호출에는 인증 토큰이 필요합니다. `.env` 파일에서 `ADMIN_TOKEN` 값을 확인하세요.
+> API 호출에 필요한 인증 토큰을 먼저 준비해요.
+
+`.env` 파일에서 `ADMIN_TOKEN` 값을 확인하세요.
 
 ```bash
 # .env에서 토큰 확인
 grep ADMIN_TOKEN .env
 ```
 
-이후 모든 curl 명령에서 이 토큰을 사용합니다:
+이후 모든 curl 명령에서 이 토큰을 사용할 거예요:
 
 ```bash
 # 편의를 위해 환경 변수로 설정
@@ -26,7 +28,7 @@ export TOKEN="여기에_ADMIN_TOKEN_값"
 
 ## 1단계: 헬스 체크
 
-먼저 BFF가 정상인지 확인합니다:
+> 먼저 BFF가 정상적으로 동작하고 있는지 확인해 봐요.
 
 ```bash
 curl -s http://localhost:8002/api/v1/health | python3 -m json.tool
@@ -46,13 +48,15 @@ curl -s http://localhost:8002/api/v1/health | python3 -m json.tool
 }
 ```
 
-> **뒤에서 일어나는 일:** BFF가 PostgreSQL, Elasticsearch, Redis, Kafka에 각각 연결을 시도하고, 모두 응답하면 "healthy"를 반환합니다. 코드 위치: `backend/bff/main.py`의 `/health` 엔드포인트.
+> 💡 **뒤에서 일어나는 일:** BFF가 PostgreSQL, Elasticsearch, Redis, Kafka에 각각 연결을 시도해요. 모두 응답하면 "healthy"를 반환해요. 코드 위치는 `backend/bff/main.py`의 `/health` 엔드포인트예요.
 
 ---
 
 ## 2단계: 데이터베이스(온톨로지 컨테이너) 생성
 
-Spice OS에서 "데이터베이스"는 온톨로지의 최상위 컨테이너입니다. 하나의 데이터베이스 안에 여러 객체 유형과 인스턴스가 들어갑니다.
+> 모든 데이터를 담을 그릇을 먼저 만들어 볼까요.
+
+Spice OS에서 "데이터베이스"는 온톨로지의 최상위 컨테이너예요. 하나의 데이터베이스 안에 여러 객체 유형과 인스턴스가 들어가요.
 
 ```bash
 curl -s -X POST http://localhost:8002/api/v1/databases \
@@ -77,17 +81,19 @@ curl -s -X POST http://localhost:8002/api/v1/databases \
 }
 ```
 
-> **뒤에서 일어나는 일:**
-> 1. BFF가 요청을 받아 인증을 확인합니다
-> 2. OMS에 전달하여 PostgreSQL에 데이터베이스 메타데이터를 저장합니다
-> 3. Elasticsearch에 해당 데이터베이스용 인덱스를 생성합니다
-> 4. LakeFS에 해당 데이터베이스용 리포지토리를 생성합니다
+> 💡 **뒤에서 일어나는 일:**
+> 1. BFF가 요청을 받아 인증을 확인해요.
+> 2. OMS에 전달해서 PostgreSQL에 데이터베이스 메타데이터를 저장해요.
+> 3. Elasticsearch에 해당 데이터베이스용 인덱스를 생성해요.
+> 4. LakeFS에 해당 데이터베이스용 리포지토리를 생성해요.
 
 ---
 
 ## 3단계: 객체 유형 생성
 
-"Employee"라는 객체 유형을 만들어봅시다:
+> 데이터 구조(스키마)를 정의하는 단계예요. SQL의 `CREATE TABLE`에 해당해요.
+
+"Employee"라는 객체 유형을 만들어 볼까요:
 
 ```bash
 curl -s -X POST "http://localhost:8002/api/v2/ontologies/tutorial-db/objectTypes" \
@@ -119,11 +125,11 @@ curl -s -X POST "http://localhost:8002/api/v2/ontologies/tutorial-db/objectTypes
   }' | python3 -m json.tool
 ```
 
-> **뒤에서 일어나는 일:**
-> 1. BFF가 Foundry v2 API 형식을 OMS 내부 형식으로 변환합니다
-> 2. OMS가 스키마를 검증합니다 (타입이 유효한지, primaryKey가 존재하는지)
-> 3. 이벤트("ONTOLOGY_CLASS_CREATED")가 이벤트 스토어(S3)에 저장됩니다
-> 4. Kafka를 통해 Projection Worker가 ES 인덱스 매핑을 갱신합니다
+> 💡 **뒤에서 일어나는 일:**
+> 1. BFF가 Foundry v2 API 형식을 OMS 내부 형식으로 변환해요.
+> 2. OMS가 스키마를 검증해요. 타입이 유효한지, primaryKey가 존재하는지 확인하는 거죠.
+> 3. 이벤트("ONTOLOGY_CLASS_CREATED")가 이벤트 스토어(S3)에 저장돼요.
+> 4. Kafka를 통해 Projection Worker가 ES 인덱스 매핑을 갱신해요.
 
 ---
 

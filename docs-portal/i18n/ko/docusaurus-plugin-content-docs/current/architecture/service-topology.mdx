@@ -5,18 +5,18 @@ sidebar_position: 3
 
 # 서비스 토폴로지
 
-Spice OS는 4개 범주로 구성된 33개 이상의 Docker 서비스로 이루어져 있습니다. 이 페이지는 각 서비스의 포트, 의존성, 목적을 정리합니다.
+Spice OS는 4개 범주, 33개 이상의 Docker 서비스로 구성되어 있습니다. 이 페이지에서는 각 서비스의 포트, 의존성, 목적을 정리합니다.
 
 {/* The interactive D3 topology visualization will be embedded here */}
 
 ## 핵심 API 서버
 
-외부에서 접근 가능한 서비스로, 클라이언트 요청을 처리합니다.
+외부에서 접근 가능한 서비스로서 클라이언트 요청을 직접 처리합니다.
 
 | 서비스 | 포트 | 프로토콜 | 설명 |
 |---------|------|----------|-------------|
-| **OMS** (Ontology Management Service) | 8000 | HTTP/REST | 온톨로지 CRUD, 객체 관리, 검색, 액션, 라인리지의 핵심 API |
-| **BFF** (Backend-for-Frontend) | 8002 | HTTP/REST | 인증/라우팅/레이트 리미팅/응답 변환을 담당하는 API 게이트웨이 |
+| **OMS** (Ontology Management Service) | 8000 | HTTP/REST | 온톨로지 CRUD, 객체 관리, 검색, 액션, 라인리지를 담당하는 핵심 API |
+| **BFF** (Backend-for-Frontend) | 8002 | HTTP/REST | 인증, 라우팅, 레이트 리미팅, 응답 변환을 담당하는 API 게이트웨이 |
 | **Agent** | 8004 | HTTP/REST | 오케스트레이션된 액션과 워크플로 실행을 위한 도구 실행 런타임 |
 
 ### 의존성
@@ -29,12 +29,12 @@ BFF  ──▶  OMS  ──▶  PostgreSQL, Elasticsearch, Redis, Kafka
 
 ## 워커(Workers)
 
-워커는 Kafka 이벤트를 소비하고 플랫폼의 리드 모델과 처리 파이프라인을 유지하는 백그라운드 서비스입니다.
+워커는 Kafka 이벤트를 소비하면서 플랫폼의 리드 모델과 처리 파이프라인을 유지하는 백그라운드 서비스입니다.
 
 | 서비스 | Kafka 컨슈머 그룹 | 설명 |
 |---------|---------------------|-------------|
-| **Event Processor** | `spice-event-processor` | 핵심 이벤트 핸들러; PostgreSQL 업데이트 및 하위 워커로 디스패치 |
-| **Projection Builder** | `spice-projection-builder` | 비정규화 프로젝션 뷰 생성/유지 |
+| **Event Processor** | `spice-event-processor` | 핵심 이벤트 핸들러로, PostgreSQL 업데이트 및 하위 워커로 디스패치 |
+| **Projection Builder** | `spice-projection-builder` | 비정규화 프로젝션 뷰 생성 및 유지 |
 | **Pipeline Runner** | `spice-pipeline-runner` | 데이터 변환 파이프라인 실행 |
 | **Lineage Worker** | `spice-lineage-worker` | 데이터 라인리지 엣지 캡처/저장 |
 | **Schema Validator** | `spice-schema-validator` | 온톨로지 스키마 정의에 대한 입력 데이터 검증 |
@@ -49,7 +49,7 @@ BFF  ──▶  OMS  ──▶  PostgreSQL, Elasticsearch, Redis, Kafka
 
 ### 워커 스케일링
 
-워커는 수평 확장이 가능합니다. Kafka 컨슈머 그룹 리밸런싱은 파티션을 워커 인스턴스에 균등 분배합니다:
+워커는 수평 확장이 가능합니다. Kafka 컨슈머 그룹 리밸런싱을 통해 파티션이 워커 인스턴스에 균등 분배됩니다.
 
 ```bash
 # 이벤트 프로세서를 3개 레플리카로 스케일
@@ -64,7 +64,7 @@ docker compose up -d --scale event-processor=3
 
 | 서비스 | 포트 | 버전 | 목적 |
 |---------|------|---------|---------|
-| **PostgreSQL** | 5432 | 15+ | 온톨로지 스키마/객체 인스턴스/액션 히스토리/사용자 데이터의 source of truth |
+| **PostgreSQL** | 5432 | 15+ | 온톨로지 스키마, 객체 인스턴스(Instance), 액션 히스토리, 사용자 데이터의 source of truth |
 | **Elasticsearch** | 9200 | 8.x | 전체 텍스트 검색, 분석, 객체 인덱싱 |
 | **Redis** | 6379 | 7.x | 캐싱, 세션 저장, 레이트 리미팅, 분산 락 |
 | **Kafka** | 9092 | 3.x | 이벤트 스트리밍, 서비스 간 메시징 |
@@ -87,7 +87,7 @@ Kafka Connect   ──▶ Kafka, Schema Registry
 
 ### 스토리지 볼륨
 
-각 데이터 스토어는 영속성을 위해 이름이 지정된 Docker 볼륨을 사용합니다:
+각 데이터 스토어는 영속성을 위해 이름이 지정된 Docker 볼륨을 사용합니다.
 
 | 서비스 | 볼륨 | 기본 크기 |
 |---------|--------|-------------|
@@ -125,7 +125,7 @@ Prometheus ──▶ AlertManager ──▶ Slack / PagerDuty / Email
 
 ## 네트워크 아키텍처
 
-모든 서비스는 공유 Docker 네트워크(`spice-network`)를 통해 통신합니다. 외부 접근은 포트 8002의 BFF 게이트웨이를 통해서만 가능합니다.
+모든 서비스는 공유 Docker 네트워크(`spice-network`)를 통해 통신합니다. 외부에서는 포트 8002의 BFF 게이트웨이를 통해서만 접근할 수 있습니다.
 
 ### 포트 요약
 
@@ -144,7 +144,7 @@ Prometheus ──▶ AlertManager ──▶ Slack / PagerDuty / Email
 
 ## 기동 순서(Startup Order)
 
-서비스는 의존성 때문에 특정 순서로 시작되어야 합니다. Docker Compose는 헬스 체크 기반 `depends_on`으로 이를 처리합니다:
+서비스는 의존성 때문에 특정 순서로 시작해야 합니다. Docker Compose에서 헬스 체크 기반 `depends_on`으로 이를 처리합니다.
 
 1. **데이터 스토어**: PostgreSQL, Elasticsearch, Redis, ZooKeeper, MinIO
 2. **Kafka 생태계**: Kafka(ZooKeeper 의존), Schema Registry, Kafka Connect

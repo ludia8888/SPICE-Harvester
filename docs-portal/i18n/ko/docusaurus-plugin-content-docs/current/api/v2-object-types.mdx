@@ -5,11 +5,11 @@ sidebar_position: 2
 
 # Foundry v2 객체 유형 API
 
-객체 유형(Object Types)은 온톨로지 내 엔티티의 스키마를 정의합니다. 이 엔드포인트를 사용하여 객체 유형 정의를 조회하고 검사할 수 있습니다.
+객체 유형(Object Type)은 온톨로지 안에서 엔티티의 스키마를 정의해요. 이 엔드포인트를 통해 객체 유형 정의를 조회하고 상세 정보를 확인할 수 있습니다.
 
 ## 객체 유형 목록 조회
 
-특정 온톨로지에 정의된 모든 객체 유형을 조회합니다.
+특정 온톨로지에 정의된 모든 객체 유형을 가져옵니다.
 
 ```
 GET /api/v2/ontologies/{ontologyApiName}/objectTypes
@@ -91,11 +91,11 @@ curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes?pageSize=2
 |:-----|:-----|:-----|
 | `data` | array | 객체 유형 정의 목록 |
 | `data[].apiName` | string | 객체 유형의 고유 식별자 |
-| `data[].displayName` | string | 사람이 읽기 좋은 이름 |
+| `data[].displayName` | string | 화면에 표시되는 이름 |
 | `data[].pluralDisplayName` | string | 표시 이름의 복수형 |
 | `data[].description` | string | 객체 유형 설명 |
 | `data[].primaryKey` | string | 기본키 속성 이름 |
-| `data[].properties` | object | 속성 이름 → 속성 정의 맵 |
+| `data[].properties` | object | 속성(Property) 이름을 키로 한 속성 정의 맵 |
 | `data[].rid` | string | 리소스 식별자 |
 | `nextPageToken` | string 또는 null | 다음 페이지 조회용 토큰 |
 
@@ -103,7 +103,7 @@ curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes?pageSize=2
 
 ## 단일 객체 유형 조회
 
-API 이름으로 단일 객체 유형을 조회합니다.
+API 이름으로 특정 객체 유형 하나를 조회해요.
 
 ```
 GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}
@@ -134,7 +134,7 @@ curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes/Employee" 
 
 ### 속성 데이터 타입
 
-`properties` 맵의 각 속성은 값 타입을 설명하는 `dataType` 객체를 포함합니다:
+`properties` 맵의 각 속성에는 값 타입을 나타내는 `dataType` 객체가 들어 있어요.
 
 | 데이터 타입 | JSON 표현 | 예시 값 |
 |:-----------|:----------|:--------|
@@ -150,6 +150,6 @@ curl -X GET "http://localhost:8002/api/v2/ontologies/acme/objectTypes/Employee" 
 
 ## 다음 단계
 
-- **[v2 객체 API](./v2-objects)** -- 이 객체 유형의 인스턴스 작업
-- **[v2 검색 API](./v2-search)** -- 객체 검색
-- **[API 개요](./overview)** -- 인증 및 일반 규칙
+- **[v2 객체 API](./v2-objects)** -- 객체 유형의 인스턴스 조회 및 관리
+- **[v2 검색 API](./v2-search)** -- 다양한 연산자로 객체 검색
+- **[API 개요](./overview)** -- 인증, 페이지네이션 등 공통 규칙

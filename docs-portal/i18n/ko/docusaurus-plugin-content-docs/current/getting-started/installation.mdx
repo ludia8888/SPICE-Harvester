@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # 설치
 
-이 가이드는 시스템 요구 사항, 서비스 구성, 데이터베이스 설정, 프로덕션 하드닝까지 포함한 Spice OS 전체 설치 과정을 다룹니다.
+이 가이드에서는 Spice OS의 전체 설치 과정을 다룹니다. 시스템 요구 사항부터 서비스 구성, 데이터베이스 설정, 프로덕션 하드닝까지 안내해요.
 
 ## 시스템 요구 사항
 
@@ -31,13 +31,13 @@ sidebar_position: 2
 
 - **macOS**: 13 Ventura 이상(Apple Silicon / Intel)
 - **Linux**: Ubuntu 22.04+, Debian 12+, RHEL 9+, Amazon Linux 2023
-- **Windows**: WSL2가 포함된 Windows 11 (네이티브 Windows는 지원하지 않습니다)
+- **Windows**: WSL2가 포함된 Windows 11 (네이티브 Windows는 지원하지 않아요)
 
 ## Docker Compose 설정
 
 ### 전체 스택
 
-기본 Docker Compose 구성은 32개 서비스를 모두 시작합니다:
+기본 Docker Compose 구성은 32개 서비스를 모두 시작합니다.
 
 ```bash
 docker compose up -d
@@ -45,7 +45,7 @@ docker compose up -d
 
 ### 서비스 프로파일
 
-Docker Compose 프로파일을 사용해 일부 서비스만 선택적으로 시작할 수 있습니다:
+Docker Compose 프로파일을 사용하면 일부 서비스만 선택적으로 시작할 수 있어요.
 
 ```bash
 # Core only: API 서버 + 데이터 스토어(관측성 제외)
@@ -58,7 +58,7 @@ docker compose --profile core --profile observability up -d
 docker compose --profile core --profile workers up -d
 ```
 
-사용 가능한 프로파일:
+사용 가능한 프로파일은 다음과 같습니다.
 
 | 프로파일 | 서비스 | 포트 |
 |---------|----------|-------|
@@ -70,7 +70,7 @@ docker compose --profile core --profile workers up -d
 
 ### 핵심 설정
 
-프로젝트 루트에 `.env` 파일을 생성합니다. 아래 변수는 필수 동작을 제어합니다:
+프로젝트 루트에 `.env` 파일을 생성합니다. 아래 변수는 핵심 동작을 제어해요.
 
 ```bash
 # ─── Service Ports ───────────────────────────────────────
@@ -120,7 +120,7 @@ LOG_OUTPUT=stdout
 
 ### 프로덕션 오버라이드
 
-프로덕션 배포에서는 다음 항목을 반드시 오버라이드하세요:
+프로덕션 배포에서는 다음 항목을 반드시 오버라이드하세요.
 
 ```bash
 # Strong secrets (generate with: openssl rand -hex 32)
@@ -145,7 +145,7 @@ KAFKA_PARTITIONS=12
 
 ### 초기 설정
 
-Alembic 마이그레이션을 실행해 DB 스키마를 생성합니다:
+Alembic 마이그레이션을 실행해 DB 스키마를 생성합니다.
 
 ```bash
 docker compose exec oms python -m alembic upgrade head
@@ -153,7 +153,7 @@ docker compose exec oms python -m alembic upgrade head
 
 ### 시드 데이터
 
-개발/테스트용 데모 데이터를 로드합니다:
+개발 및 테스트용 데모 데이터를 로드합니다.
 
 ```bash
 # 샘플 온톨로지를 포함한 전체 데모 데이터셋
@@ -181,7 +181,7 @@ docker compose exec oms python -m alembic downgrade -1
 
 ### Elasticsearch 인덱스 설정
 
-Elasticsearch 인덱스는 첫 부팅 시 자동 생성됩니다. 수동으로 다시 만들려면:
+Elasticsearch 인덱스는 첫 부팅 시 자동으로 생성됩니다. 수동으로 다시 만들어야 한다면 다음 명령을 사용하세요.
 
 ```bash
 docker compose exec oms python -m spice.cli reindex --all
@@ -189,13 +189,13 @@ docker compose exec oms python -m spice.cli reindex --all
 
 ## 헬스 체크
 
-모든 서비스는 `/health` 엔드포인트를 제공합니다. CLI로 전체 서비스 상태를 확인할 수 있습니다:
+모든 서비스는 `/health` 엔드포인트를 제공합니다. CLI로 전체 서비스 상태를 한번에 확인할 수 있어요.
 
 ```bash
 docker compose exec oms python -m spice.cli health --all
 ```
 
-개별 서비스 헬스 체크:
+개별 서비스를 확인하려면 다음 표를 참고하세요.
 
 | 서비스 | URL | 기대 상태 |
 |---------|-----|----------------|
@@ -211,14 +211,14 @@ docker compose exec oms python -m spice.cli health --all
 
 ### 포트 충돌
 
-이미 사용 중인 포트가 있다면 `.env` 파일에서 오버라이드하세요:
+이미 사용 중인 포트가 있다면 `.env` 파일에서 오버라이드하세요.
 
 ```bash
 # 예: BFF를 8082 포트로 변경
 BFF_PORT=8082
 ```
 
-그 다음, 영향을 받는 서비스를 재시작합니다:
+그 다음, 해당 서비스를 재시작합니다.
 
 ```bash
 docker compose up -d bff
@@ -226,7 +226,7 @@ docker compose up -d bff
 
 ### Elasticsearch 시작 실패
 
-Linux에서 Elasticsearch는 `vm.max_map_count` 값이 최소 262144이어야 합니다:
+Linux에서 Elasticsearch는 `vm.max_map_count` 값이 최소 262144이어야 합니다.
 
 ```bash
 # 현재 값 확인
@@ -243,17 +243,17 @@ macOS + Docker Desktop에서는 자동으로 처리됩니다.
 
 ### Kafka 연결 문제
 
-워커가 Kafka에 연결하지 못한다면 advertised listeners 설정을 확인하세요:
+워커가 Kafka에 연결하지 못하면 advertised listeners 설정을 확인해보세요.
 
 ```bash
 docker compose logs kafka | grep "advertised.listeners"
 ```
 
-`KAFKA_ADVERTISED_LISTENERS`가 네트워크 구성과 일치하는지 확인합니다.
+`KAFKA_ADVERTISED_LISTENERS`가 현재 네트워크 구성과 일치하는지 확인해보세요.
 
 ### 데이터베이스 마이그레이션 실패
 
-마이그레이션이 실패하면 현재 상태를 확인하고 충돌을 해결하세요:
+마이그레이션이 실패하면 현재 상태를 확인하고 충돌을 해결하세요.
 
 ```bash
 # 대기 중인 마이그레이션 확인
@@ -265,7 +265,7 @@ docker compose exec oms python -m alembic stamp head
 
 ### 메모리 압박
 
-서비스가 OOM-kill 된다면 Docker 리소스 제한을 조정하세요:
+서비스가 OOM-kill 된다면 Docker 리소스 제한을 조정하세요.
 
 ```yaml
 # docker-compose.override.yml
@@ -284,7 +284,7 @@ services:
 
 ### 전체 초기화
 
-플랫폼을 완전히 초기화하고 새로 시작하려면:
+플랫폼을 완전히 초기화하고 처음부터 시작하려면 다음을 실행하세요.
 
 ```bash
 docker compose down -v    # 서비스 중지 + 볼륨 제거
@@ -294,7 +294,7 @@ docker compose exec oms python -m spice.cli seed --demo
 ```
 
 :::caution
-`-v` 플래그는 데이터베이스 내용, Elasticsearch 인덱스, Kafka 토픽을 포함한 모든 영속 데이터를 삭제합니다. 개발 환경에서만 사용하세요.
+`-v` 플래그는 데이터베이스 내용, Elasticsearch 인덱스, Kafka 토픽 등 모든 영속 데이터를 삭제합니다. 개발 환경에서만 사용하세요.
 :::
 
 ## 다음 단계
