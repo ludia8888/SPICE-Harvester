@@ -23,7 +23,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/commands", tags=["Command Status"])
 
 
-@router.get("/{command_id}/status", response_model=CommandResult)
+def _map_upstream_status_to_error_code(status_code: int) -> ErrorCode:
+    if status_code in {400, 422}:
+        return ErrorCode.REQUEST_VALIDATION_FAILED
+    if status_code == 401:
+        return ErrorCode.AUTH_REQUIRED
+    if status_code == 403:
+        return ErrorCode.PERMISSION_DENIED
+    if status_code == 404:
+        return ErrorCode.RESOURCE_NOT_FOUND
+    if status_code == 409:
+        return ErrorCode.CONFLICT
+    if status_code in {502, 503, 504}:
+        return ErrorCode.UPSTREAM_UNAVAILABLE
+    if status_code >= 500:
+        return ErrorCode.INTERNAL_ERROR
+    return ErrorCode.UPSTREAM_ERROR
+
+
+@router.get(
+    "/{command_id}/status",
+    response_model=CommandResult,
+    responses={
+        400: {"description": "Invalid command_id"},
+        404: {"description": "Command not found"},
+        503: {"description": "Upstream command status unavailable"},
+    },
+)
 @trace_endpoint("bff.command_status.get_command_status")
 async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> CommandResult:
     """
@@ -46,13 +72,27 @@ async def get_command_status(command_id: str, oms: OMSClient = OMSClientDep) -> 
     except httpx.HTTPStatusError as e:
         resp = getattr(e, "response", None)
         if resp is not None:
-            detail = None
+            detail: str | dict = ""
             try:
-                detail = resp.json().get("detail")
+                payload = resp.json()
+                if isinstance(payload, dict):
+                    detail_obj = payload.get("detail")
+                    if isinstance(detail_obj, dict):
+                        detail = detail_obj
+                    elif detail_obj is not None:
+                        detail = str(detail_obj)
+                    else:
+                        detail = str(payload)
+                else:
+                    detail = str(payload)
             except Exception:
                 logging.getLogger(__name__).warning("Exception fallback at bff/routers/command_status.py:53", exc_info=True)
                 detail = resp.text
-            raise classified_http_exception(resp.status_code, str(detail), code=ErrorCode.UPSTREAM_ERROR) from e
+            raise classified_http_exception(
+                resp.status_code,
+                detail if isinstance(detail, dict) else str(detail),
+                code=_map_upstream_status_to_error_code(resp.status_code),
+            ) from e
         raise classified_http_exception(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "OMS command status 조회 실패",
