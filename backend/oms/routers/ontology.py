@@ -515,10 +515,12 @@ def _merge_lint_reports(*reports: LintReport) -> LintReport:
 router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Management"])
 
 
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
 @router.post(
     "",
     response_model=ApiResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
     responses={
         status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
         status.HTTP_400_BAD_REQUEST: {"model": ApiResponse},
@@ -809,7 +811,8 @@ async def create_ontology(
         )
 
 
-@router.post("/validate")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.post("/validate", include_in_schema=False)
 @trace_endpoint("oms.ontology.validate_create")
 async def validate_ontology_create(
     ontology_request: OntologyCreateRequest,
@@ -908,7 +911,8 @@ async def validate_ontology_create(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.get("")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.get("", include_in_schema=False)
 @trace_endpoint("oms.ontology.list")
 async def list_ontologies(
     db_name: str = Depends(ensure_database_exists),
@@ -991,7 +995,8 @@ async def list_ontologies(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.get("/{class_id}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.get("/{class_id}", include_in_schema=False)
 @trace_endpoint("oms.ontology.get")
 async def get_ontology(
     request: Request,
@@ -1069,10 +1074,12 @@ async def get_ontology(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
 @router.put(
     "/{class_id}",
     response_model=ApiResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
     responses={
         status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
         status.HTTP_400_BAD_REQUEST: {"model": ApiResponse},
@@ -1429,7 +1436,8 @@ async def update_ontology(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.delete("/{class_id}", response_model=BaseResponse)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.delete("/{class_id}", response_model=BaseResponse, include_in_schema=False)
 @trace_endpoint("oms.ontology.delete")
 async def delete_ontology(
     request: Request,

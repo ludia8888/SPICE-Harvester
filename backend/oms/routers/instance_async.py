@@ -208,7 +208,8 @@ class BulkInstanceUpdateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
 
 
-@router.post("/{class_id}/create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.post("/{class_id}/create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @trace_endpoint("oms.instance_async.create")
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
@@ -295,7 +296,8 @@ async def create_instance_async(
         )
 
 
-@router.put("/{class_id}/{instance_id}/update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.put("/{class_id}/{instance_id}/update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @trace_endpoint("oms.instance_async.update")
 async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
@@ -382,7 +384,8 @@ async def update_instance_async(
         )
 
 
-@router.delete("/{class_id}/{instance_id}/delete", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.delete("/{class_id}/{instance_id}/delete", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @trace_endpoint("oms.instance_async.delete")
 async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
@@ -468,7 +471,8 @@ async def delete_instance_async(
         )
 
 
-@router.post("/{class_id}/bulk-create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.post("/{class_id}/bulk-create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @trace_endpoint("oms.instance_async.bulk_create")
 async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
@@ -564,7 +568,8 @@ async def bulk_create_instances_async(
         )
 
 
-@router.post("/{class_id}/bulk-update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.post("/{class_id}/bulk-update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 @trace_endpoint("oms.instance_async.bulk_update")
 async def bulk_update_instances_async(
     db_name: str = Depends(ensure_database_exists),
@@ -654,7 +659,8 @@ async def bulk_update_instances_async(
         )
 
 
-@router.get("/command/{command_id}/status", response_model=CommandResult)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.get("/command/{command_id}/status", response_model=CommandResult, include_in_schema=False)
 @trace_endpoint("oms.instance_async.get_command_status")
 async def get_instance_command_status(
     db_name: str = Depends(ensure_database_exists),
@@ -816,7 +822,8 @@ async def _track_bulk_create_progress(
         # Don't raise - this is a background task
 
 
-@router.post("/{class_id}/bulk-create-tracked", response_model=Dict[str, Any])
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/instances/* (plural).
+@router.post("/{class_id}/bulk-create-tracked", response_model=Dict[str, Any], include_in_schema=False)
 @trace_endpoint("oms.instance_async.bulk_create_tracked")
 async def bulk_create_instances_with_tracking(
     db_name: str = Depends(ensure_database_exists),

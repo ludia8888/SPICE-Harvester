@@ -183,7 +183,8 @@ async def _assert_expected_head_commit(
     return expected
 
 
-@router.post("/records/deployments")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.post("/records/deployments", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.record_deployment")
 async def record_deployment(
     db_name: str,
@@ -219,7 +220,8 @@ async def record_deployment(
         )
 
 
-@router.get("/resources")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.get("/resources", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.list_resources")
 async def list_resources(
     db_name: str,
@@ -261,7 +263,8 @@ async def list_resources(
         )
 
 
-@router.get("/resources/{resource_type}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.get("/resources/{resource_type}", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.list_resources_by_type")
 async def list_resources_by_type(
     db_name: str,
@@ -279,7 +282,8 @@ async def list_resources_by_type(
     )
 
 
-@router.post("/resources/{resource_type}", status_code=status.HTTP_201_CREATED)
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.post("/resources/{resource_type}", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.create_resource")
 async def create_resource(
     db_name: str,
@@ -359,7 +363,8 @@ async def create_resource(
         )
 
 
-@router.get("/resources/{resource_type}/{resource_id}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.get("/resources/{resource_type}/{resource_id}", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.get_resource")
 async def get_resource(
     db_name: str,
@@ -404,7 +409,8 @@ async def get_resource(
         )
 
 
-@router.put("/resources/{resource_type}/{resource_id}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.put("/resources/{resource_type}/{resource_id}", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.update_resource")
 async def update_resource(
     db_name: str,
@@ -488,7 +494,8 @@ async def update_resource(
         )
 
 
-@router.delete("/resources/{resource_type}/{resource_id}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/*/ontology (plural).
+@router.delete("/resources/{resource_type}/{resource_id}", include_in_schema=False)
 @trace_endpoint("oms.ontology_ext.delete_resource")
 async def delete_resource(
     db_name: str,

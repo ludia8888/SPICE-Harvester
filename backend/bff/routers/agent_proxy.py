@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
 
-@router.post("/pipeline-runs")
+# Legacy: frontend blocklist blocks this path. Canonical: /api/v1/ontology-agent/runs.
+@router.post("/pipeline-runs", include_in_schema=False)
 @trace_endpoint("bff.agent.create_pipeline_run")
 async def create_pipeline_run(
     request: Request,
@@ -130,7 +131,8 @@ async def create_pipeline_run(
     return ApiResponse.success(message=agent_message or "Pipeline agent completed", data=payload)
 
 
-@router.post("/pipeline-runs/stream")
+# Legacy: frontend blocklist blocks this path. Canonical: /api/v1/ontology-agent/runs.
+@router.post("/pipeline-runs/stream", include_in_schema=False)
 @trace_endpoint("bff.agent.stream_pipeline_run")
 async def stream_pipeline_run(
     request: Request,

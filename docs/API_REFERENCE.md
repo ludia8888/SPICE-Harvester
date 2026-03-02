@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **248**
+- Total documented endpoints: **246**
 - Deprecated endpoints: **1**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 138 |
+| `v1` | 136 |
 | `v2` | 110 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -72,13 +72,6 @@
 | `POST` | `/api/v1/admin/replay-instance-state` | Replay single instance event history (debugging) | `v1` | no | no | `replay_instance_state_api_v1_admin_replay_instance_state_post` |
 | `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get instance replay result | `v1` | no | no | `get_replay_result_api_v1_admin_replay_instance_state__task_id__result_get` |
 | `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get instance replay trace with audit/lineage | `v1` | no | no | `get_replay_trace_api_v1_admin_replay_instance_state__task_id__trace_get` |
-
-### Agent
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/agent/pipeline-runs` | Create Pipeline Run | `v1` | no | no | `create_pipeline_run_api_v1_agent_pipeline_runs_post` |
-| `POST` | `/api/v1/agent/pipeline-runs/stream` | Stream Pipeline Run | `v1` | no | no | `stream_pipeline_run_api_v1_agent_pipeline_runs_stream_post` |
 
 ### AI
 

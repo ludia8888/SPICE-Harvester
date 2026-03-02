@@ -235,7 +235,8 @@ async def _execute_agent_run(
                 )
 
 
-@router.post("/runs")
+# Internal: Agent service (port 8004) is not directly exposed to clients.
+@router.post("/runs", include_in_schema=False)
 async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str, Any]:
     if not body.steps:
         raise classified_http_exception(400, "steps are required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
@@ -326,7 +327,8 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     return response.to_dict()
 
 
-@router.get("/runs/{run_id}")
+# Internal: Agent service (port 8004) is not directly exposed to clients.
+@router.get("/runs/{run_id}", include_in_schema=False)
 async def get_agent_run(
     request: Request,
     run_id: str,
@@ -421,7 +423,8 @@ async def get_agent_run(
     return response.to_dict()
 
 
-@router.get("/runs/{run_id}/events")
+# Internal: Agent service (port 8004) is not directly exposed to clients.
+@router.get("/runs/{run_id}/events", include_in_schema=False)
 async def list_agent_run_events(
     request: Request,
     run_id: str,

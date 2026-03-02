@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T03:40:01+09:00
+> Generated: 2026-03-03T04:37:20+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **1007**
-- Modules with module docstring: **538/1007**
+- Modules scanned: **1008**
+- Modules with module docstring: **539/1008**
 - Modules with broad `except Exception`: **274**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **252216**
+- Total code lines (non-empty, non-comment): **252261**
 
 ## Package Scoreboard
 
@@ -34,7 +34,7 @@
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
 | `objectify_worker` | 4 | 4/4 (100%) | 2 | 33 | 51 | 7 | 4621 |
-| `oms` | 51 | 38/51 (74%) | 18 | 93 | 162 | 193 | 15947 |
+| `oms` | 51 | 38/51 (74%) | 18 | 93 | 162 | 193 | 15949 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1192 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
 | `shared` | 309 | 208/309 (67%) | 106 | 386 | 872 | 1145 | 80723 |
-| `tests` | 308 | 53/308 (17%) | 20 | 154 | 1654 | 1507 | 54541 |
+| `tests` | 309 | 54/309 (17%) | 20 | 154 | 1654 | 1508 | 54584 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
@@ -273,7 +273,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=444 | code_lines=399 | risk_score=20
+- Source footprint: total_lines=447 | code_lines=399 | risk_score=20
 - API surface: public=3 | top-level functions=14 | classes=0 | methods=0
 - Runtime signals: async_functions=5 | try=4 | raise=4 | broad_except=4 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -597,7 +597,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=216 | code_lines=187 | risk_score=10
+- Source footprint: total_lines=218 | code_lines=187 | risk_score=10
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=4 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=2/2 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5263,7 +5263,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=285 | code_lines=239 | risk_score=25
+- Source footprint: total_lines=289 | code_lines=239 | risk_score=25
 - API surface: public=4 | top-level functions=4 | classes=0 | methods=0
 - Runtime signals: async_functions=4 | try=5 | raise=15 | broad_except=5 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=4/4 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5295,7 +5295,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=947 | code_lines=816 | risk_score=75
+- Source footprint: total_lines=954 | code_lines=816 | risk_score=75
 - API surface: public=12 | top-level functions=14 | classes=5 | methods=0
 - Runtime signals: async_functions=11 | try=15 | raise=24 | broad_except=15 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=11/14 (78%) | classes=5/5 (100%) | methods=0/0 (n/a)
@@ -5311,7 +5311,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=1551 | code_lines=1385 | risk_score=60
+- Source footprint: total_lines=1559 | code_lines=1387 | risk_score=60
 - API surface: public=6 | top-level functions=25 | classes=0 | methods=0
 - Runtime signals: async_functions=11 | try=12 | raise=44 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=6/25 (24%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5327,7 +5327,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=542 | code_lines=486 | risk_score=35
+- Source footprint: total_lines=549 | code_lines=486 | risk_score=35
 - API surface: public=7 | top-level functions=15 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=7 | raise=34 | broad_except=7 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/15 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12671,13 +12671,29 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=51 | code_lines=43 | risk_score=0
+- Source footprint: total_lines=47 | code_lines=39 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): oms.main
 - External imports (1): __future__
 - Public API names: test_oms_foundry_action_surface_is_apply_only; test_oms_legacy_routes_removed_from_openapi
+
+### `backend/tests/unit/oms/test_p1_contract_drift_guard.py`
+- Module summary: Guard test: OMS internal-only paths must NOT appear in OMS OpenAPI.
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=48 | code_lines=35 | risk_score=0
+- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): oms.main
+- External imports (2): __future__; pytest
+- Public API names: test_oms_internal_paths_hidden_from_openapi
 
 ### `backend/tests/unit/oms/test_timeseries_router.py`
 - Module summary: Tests for OMS Foundry-style Time Series Property router.
@@ -16223,12 +16239,12 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1065 | code_lines=965 | risk_score=22
-- API surface: public=1 | top-level functions=11 | classes=1 | methods=19
+- Source footprint: total_lines=1079 | code_lines=977 | risk_score=22
+- API surface: public=1 | top-level functions=11 | classes=1 | methods=20
 - Runtime signals: async_functions=15 | try=9 | raise=2 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/11 (0%) | classes=1/1 (100%) | methods=0/19 (0%)
+- Doc coverage: module=no | top-level functions=0/11 (0%) | classes=1/1 (100%) | methods=0/20 (0%)
 - Internal imports (5): shared.foundry.rids; shared.models.pipeline_job; shared.services.pipeline.pipeline_job_queue; shared.services.registries.dataset_registry; shared.services.registries.pipeline_registry
-- External imports (10): __future__; csv; datetime; httpx; io; re; time; typing (+2 more)
+- External imports (11): __future__; csv; datetime; httpx; io; os; re; time (+3 more)
 - Public API names: PipelinesV2AdapterClient
 
 ### `backend/tests/utils/qa_helpers.py`

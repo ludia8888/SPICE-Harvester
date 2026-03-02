@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/database", tags=["Database Management"])
 
 
-@router.get("/list")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
+@router.get("/list", include_in_schema=False)
 @trace_endpoint("oms.database.list")
 async def list_databases():
     """
@@ -54,7 +55,8 @@ async def list_databases():
         )
 
 
-@router.post("/create")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
+@router.post("/create", include_in_schema=False)
 @trace_endpoint("oms.database.create")
 async def create_database(
     request: dict,
@@ -169,7 +171,8 @@ async def create_database(
         )
 
 
-@router.delete("/{db_name}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
+@router.delete("/{db_name}", include_in_schema=False)
 @trace_endpoint("oms.database.delete")
 async def delete_database(
     db_name: str,
@@ -248,7 +251,8 @@ async def delete_database(
         )
 
 
-@router.get("/exists/{db_name}")
+# Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
+@router.get("/exists/{db_name}", include_in_schema=False)
 @trace_endpoint("oms.database.exists")
 async def database_exists(db_name: str):
     """

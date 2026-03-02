@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T03:40:01+09:00
+> Generated: 2026-03-03T04:37:20+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -125,9 +125,9 @@
   - `_extract_risk_level(context)` (line 84): no docstring
   - `async _record_run_start(agent_registry, run_id, tenant_id, actor, requester, delegated_actor, body, request_meta)` (line 91): no docstring
   - `async _execute_agent_run(runtime, state, request_id, agent_registry, tenant_id)` (line 139): no docstring
-  - `async create_agent_run(request, body)` (line 239): no docstring
-  - `async get_agent_run(request, run_id, include_events, limit)` (line 330): no docstring
-  - `async list_agent_run_events(request, run_id, limit, offset)` (line 425): no docstring
+  - `async create_agent_run(request, body)` (line 240): no docstring
+  - `async get_agent_run(request, run_id, include_events, limit)` (line 332): no docstring
+  - `async list_agent_run_events(request, run_id, limit, offset)` (line 428): no docstring
 
 ### `backend/agent/services/__init__.py`
 
@@ -396,8 +396,8 @@
 
 ### `backend/bff/routers/agent_proxy.py`
 - **Functions**
-  - `async create_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 44): Pipeline agent runs are handled in the BFF as a single autonomous loop + MCP tools.
-  - `async stream_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 135): SSE 스트리밍 버전의 Pipeline Agent API.
+  - `async create_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 45): Pipeline agent runs are handled in the BFF as a single autonomous loop + MCP tools.
+  - `async stream_pipeline_run(request, body, llm, redis_service, audit_store, dataset_registry, pipeline_registry, plan_registry)` (line 137): SSE 스트리밍 버전의 Pipeline Agent API.
 
 ### `backend/bff/routers/ai.py`
 - **Functions**
@@ -4112,10 +4112,10 @@
 
 ### `backend/oms/routers/database.py`
 - **Functions**
-  - `async list_databases()` (line 33): 데이터베이스 목록 조회
-  - `async create_database(request, event_store, command_status_service)` (line 59): 새 데이터베이스 생성
-  - `async delete_database(db_name, expected_seq, event_store, command_status_service)` (line 174): 데이터베이스 삭제
-  - `async database_exists(db_name)` (line 253): 데이터베이스 존재 여부 확인
+  - `async list_databases()` (line 34): 데이터베이스 목록 조회
+  - `async create_database(request, event_store, command_status_service)` (line 61): 새 데이터베이스 생성
+  - `async delete_database(db_name, expected_seq, event_store, command_status_service)` (line 177): 데이터베이스 삭제
+  - `async database_exists(db_name)` (line 257): 데이터베이스 존재 여부 확인
 
 ### `backend/oms/routers/instance.py`
 - **Functions**
@@ -4130,15 +4130,15 @@
   - `_derive_ordering_key(command)` (line 109): no docstring
   - `async _publish_instance_command(command, event_store, command_status_service, actor, status_extra)` (line 118): Append an InstanceCommand to the Event Store + best-effort Redis status.
   - `_derive_instance_id(class_id, payload)` (line 159): Derive a stable instance_id for CREATE_INSTANCE so command/event aggregate_id matches.
-  - `async create_instance_async(db_name, class_id, branch, request, command_status_service, event_store, user_id)` (line 213): 인스턴스 생성 명령을 비동기로 처리
-  - `async update_instance_async(db_name, class_id, instance_id, branch, expected_seq, request, command_status_service, event_store, user_id)` (line 300): 인스턴스 수정 명령을 비동기로 처리
-  - `async delete_instance_async(db_name, class_id, instance_id, branch, expected_seq, request, command_status_service, event_store, user_id)` (line 387): 인스턴스 삭제 명령을 비동기로 처리
-  - `async bulk_create_instances_async(db_name, class_id, branch, request, background_tasks, command_status_service, event_store, user_id)` (line 473): 대량 인스턴스 생성 명령을 비동기로 처리
-  - `async bulk_update_instances_async(db_name, class_id, branch, request, command_status_service, event_store, user_id)` (line 569): 대량 인스턴스 수정 명령을 비동기로 처리
-  - `async get_instance_command_status(db_name, command_id, command_status_service, processed_event_registry, event_store)` (line 659): 인스턴스 명령의 상태 조회
-  - `async _track_bulk_create_progress(command_id, total_instances, command_status_service)` (line 754): Track progress of bulk create operation in background.
-  - `async bulk_create_instances_with_tracking(db_name, class_id, branch, request, background_tasks, command_status_service, event_store, user_id)` (line 821): Enhanced bulk instance creation with proper background task tracking.
-  - `async _process_bulk_create_in_background(task_id, db_name, class_id, branch, instances, metadata, user_id, ontology_version, event_store, command_status_service)` (line 875): Process bulk create operation in background with proper error handling.
+  - `async create_instance_async(db_name, class_id, branch, request, command_status_service, event_store, user_id)` (line 214): 인스턴스 생성 명령을 비동기로 처리
+  - `async update_instance_async(db_name, class_id, instance_id, branch, expected_seq, request, command_status_service, event_store, user_id)` (line 302): 인스턴스 수정 명령을 비동기로 처리
+  - `async delete_instance_async(db_name, class_id, instance_id, branch, expected_seq, request, command_status_service, event_store, user_id)` (line 390): 인스턴스 삭제 명령을 비동기로 처리
+  - `async bulk_create_instances_async(db_name, class_id, branch, request, background_tasks, command_status_service, event_store, user_id)` (line 477): 대량 인스턴스 생성 명령을 비동기로 처리
+  - `async bulk_update_instances_async(db_name, class_id, branch, request, command_status_service, event_store, user_id)` (line 574): 대량 인스턴스 수정 명령을 비동기로 처리
+  - `async get_instance_command_status(db_name, command_id, command_status_service, processed_event_registry, event_store)` (line 665): 인스턴스 명령의 상태 조회
+  - `async _track_bulk_create_progress(command_id, total_instances, command_status_service)` (line 760): Track progress of bulk create operation in background.
+  - `async bulk_create_instances_with_tracking(db_name, class_id, branch, request, background_tasks, command_status_service, event_store, user_id)` (line 828): Enhanced bulk instance creation with proper background task tracking.
+  - `async _process_bulk_create_in_background(task_id, db_name, class_id, branch, instances, metadata, user_id, ontology_version, event_store, command_status_service)` (line 882): Process bulk create operation in background with proper error handling.
 - **Classes**
   - `InstanceCreateRequest` (line 181): 인스턴스 생성 요청
   - `InstanceUpdateRequest` (line 187): 인스턴스 수정 요청
@@ -4167,12 +4167,12 @@
   - `async _load_existing_ontology_for_write(db_name, class_id, branch)` (line 453): no docstring
   - `_localized_to_string(value, lang)` (line 471): no docstring
   - `_merge_lint_reports(*reports)` (line 493): no docstring
-  - `async create_ontology(ontology_request, request, db_name, branch, event_store, command_status_service)` (line 531): 내부 ID 기반 온톨로지 생성
-  - `async validate_ontology_create(ontology_request, request, db_name, branch)` (line 814): 온톨로지 생성 검증 (no write).
-  - `async list_ontologies(db_name, branch, class_type, limit, offset, label_mapper)` (line 913): 내부 ID 기반 온톨로지 목록 조회
-  - `async get_ontology(request, db_name, class_id, branch, label_mapper)` (line 996): 내부 ID 기반 온톨로지 조회
-  - `async update_ontology(ontology_data, request, db_name, class_id, branch, expected_seq, event_store, command_status_service)` (line 1084): 내부 ID 기반 온톨로지 업데이트
-  - `async delete_ontology(request, db_name, class_id, branch, expected_seq, event_store, command_status_service)` (line 1434): 내부 ID 기반 온톨로지 삭제
+  - `async create_ontology(ontology_request, request, db_name, branch, event_store, command_status_service)` (line 533): 내부 ID 기반 온톨로지 생성
+  - `async validate_ontology_create(ontology_request, request, db_name, branch)` (line 817): 온톨로지 생성 검증 (no write).
+  - `async list_ontologies(db_name, branch, class_type, limit, offset, label_mapper)` (line 917): 내부 ID 기반 온톨로지 목록 조회
+  - `async get_ontology(request, db_name, class_id, branch, label_mapper)` (line 1001): 내부 ID 기반 온톨로지 조회
+  - `async update_ontology(ontology_data, request, db_name, class_id, branch, expected_seq, event_store, command_status_service)` (line 1091): 내부 ID 기반 온톨로지 업데이트
+  - `async delete_ontology(request, db_name, class_id, branch, expected_seq, event_store, command_status_service)` (line 1442): 내부 ID 기반 온톨로지 삭제
 
 ### `backend/oms/routers/ontology_extensions.py`
 - **Functions**
@@ -4184,13 +4184,13 @@
   - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 107): no docstring
   - `_normalize_occ_branch_token(branch)` (line 112): no docstring
   - `async _assert_expected_head_commit(db_name, branch, expected_head_commit, strict_mode)` (line 119): no docstring
-  - `async record_deployment(db_name, payload)` (line 188): no docstring
-  - `async list_resources(db_name, resource_type, branch, limit, offset)` (line 224): no docstring
-  - `async list_resources_by_type(db_name, resource_type, branch, limit, offset)` (line 266): no docstring
-  - `async create_resource(db_name, resource_type, payload, branch, expected_head_commit)` (line 284): no docstring
-  - `async get_resource(db_name, resource_type, resource_id, branch)` (line 364): no docstring
-  - `async update_resource(db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 409): no docstring
-  - `async delete_resource(db_name, resource_type, resource_id, branch, expected_head_commit)` (line 493): no docstring
+  - `async record_deployment(db_name, payload)` (line 189): no docstring
+  - `async list_resources(db_name, resource_type, branch, limit, offset)` (line 226): no docstring
+  - `async list_resources_by_type(db_name, resource_type, branch, limit, offset)` (line 269): no docstring
+  - `async create_resource(db_name, resource_type, payload, branch, expected_head_commit)` (line 288): no docstring
+  - `async get_resource(db_name, resource_type, resource_id, branch)` (line 369): no docstring
+  - `async update_resource(db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 415): no docstring
+  - `async delete_resource(db_name, resource_type, resource_id, branch, expected_head_commit)` (line 500): no docstring
 
 ### `backend/oms/routers/query.py`
 - **Functions**
@@ -10823,7 +10823,11 @@
 ### `backend/tests/unit/oms/test_openapi_legacy_visibility.py`
 - **Functions**
   - `test_oms_legacy_routes_removed_from_openapi()` (line 6): no docstring
-  - `test_oms_foundry_action_surface_is_apply_only()` (line 45): no docstring
+  - `test_oms_foundry_action_surface_is_apply_only()` (line 41): no docstring
+
+### `backend/tests/unit/oms/test_p1_contract_drift_guard.py`
+- **Functions**
+  - `test_oms_internal_paths_hidden_from_openapi()` (line 42): Internal-only OMS paths must not appear in the OMS OpenAPI schema.
 
 ### `backend/tests/unit/oms/test_timeseries_router.py`
 - **Functions**
@@ -13565,38 +13569,39 @@
 
 ### `backend/tests/utils/pipelines_v2_adapter.py`
 - **Functions**
-  - `_normalize_branch(branch)` (line 27): no docstring
-  - `_legacy_status(status)` (line 36): no docstring
-  - `_response(method, url, status_code, payload)` (line 45): no docstring
-  - `_extract_dataset_id(dataset_rid)` (line 55): no docstring
-  - `_build_job_id_from_build_rid(build_rid)` (line 62): no docstring
-  - `_rows_to_csv_bytes(rows, schema_json)` (line 69): no docstring
-  - `_read_upload_bytes(file_entry)` (line 101): no docstring
-  - `_infer_xsd_type(values)` (line 123): no docstring
-  - `_build_tabular_analysis(rows, schema_json)` (line 179): no docstring
-  - `_extract_output_dataset_name(definition_json, node_id)` (line 207): no docstring
-  - `_json_safe(value)` (line 245): no docstring
+  - `_normalize_branch(branch)` (line 28): no docstring
+  - `_legacy_status(status)` (line 37): no docstring
+  - `_response(method, url, status_code, payload)` (line 46): no docstring
+  - `_extract_dataset_id(dataset_rid)` (line 56): no docstring
+  - `_build_job_id_from_build_rid(build_rid)` (line 63): no docstring
+  - `_rows_to_csv_bytes(rows, schema_json)` (line 70): no docstring
+  - `_read_upload_bytes(file_entry)` (line 102): no docstring
+  - `_infer_xsd_type(values)` (line 124): no docstring
+  - `_build_tabular_analysis(rows, schema_json)` (line 180): no docstring
+  - `_extract_output_dataset_name(definition_json, node_id)` (line 208): no docstring
+  - `_json_safe(value)` (line 246): no docstring
 - **Classes**
-  - `PipelinesV2AdapterClient` (line 257): E2E test adapter: rewrites legacy /api/v1/pipelines* calls onto v2/datasets+orchestration.
-    - `__init__(self, client)` (line 268): no docstring
-    - `headers(self)` (line 277): no docstring
-    - `__getattr__(self, name)` (line 280): no docstring
-    - `async _get_dataset_registry(self)` (line 283): no docstring
-    - `async _get_pipeline_registry(self)` (line 289): no docstring
-    - `async _create_dataset_v2(self, url, db_name, name, description, branch, schema_json, headers)` (line 295): no docstring
-    - `async _create_dataset_version_v2(self, url, dataset_id, branch, sample_json, schema_json, headers)` (line 363): no docstring
-    - `async _csv_or_excel_upload_v2(self, url, params, data, files, headers, excel)` (line 447): no docstring
-    - `async _create_pipeline_direct(self, url, payload)` (line 555): no docstring
-    - `async _queue_preview_job(self, url, pipeline_id, payload)` (line 601): no docstring
-    - `async _queue_build_job(self, url, pipeline_id, payload)` (line 657): no docstring
-    - `async _create_build_v2(self, url, pipeline_id, payload, headers)` (line 713): no docstring
-    - `async _legacy_runs_response(self, url, pipeline_id, limit)` (line 793): no docstring
-    - `async _legacy_artifacts_response(self, url, pipeline_id, limit, mode)` (line 809): no docstring
-    - `async _legacy_pipeline_detail_response(self, url, pipeline_id)` (line 858): no docstring
-    - `_base_url(self, url)` (line 883): no docstring
-    - `async post(self, url, *args, **kwargs)` (line 887): no docstring
-    - `async get(self, url, *args, **kwargs)` (line 983): no docstring
-    - `async put(self, url, *args, **kwargs)` (line 1014): no docstring
+  - `PipelinesV2AdapterClient` (line 258): E2E test adapter: rewrites legacy /api/v1/pipelines* calls onto v2/datasets+orchestration.
+    - `__init__(self, client)` (line 269): no docstring
+    - `headers(self)` (line 278): no docstring
+    - `headers(self, value)` (line 282): no docstring
+    - `__getattr__(self, name)` (line 285): no docstring
+    - `async _get_dataset_registry(self)` (line 288): no docstring
+    - `async _get_pipeline_registry(self)` (line 294): no docstring
+    - `async _create_dataset_v2(self, url, db_name, name, description, branch, schema_json, headers)` (line 300): no docstring
+    - `async _create_dataset_version_v2(self, url, dataset_id, branch, sample_json, schema_json, headers)` (line 368): no docstring
+    - `async _csv_or_excel_upload_v2(self, url, params, data, files, headers, excel)` (line 452): no docstring
+    - `async _create_pipeline_direct(self, url, payload)` (line 560): no docstring
+    - `async _queue_preview_job(self, url, pipeline_id, payload)` (line 606): no docstring
+    - `async _queue_build_job(self, url, pipeline_id, payload)` (line 662): no docstring
+    - `async _create_build_v2(self, url, pipeline_id, payload, headers)` (line 718): no docstring
+    - `async _legacy_runs_response(self, url, pipeline_id, limit)` (line 798): no docstring
+    - `async _legacy_artifacts_response(self, url, pipeline_id, limit, mode)` (line 814): no docstring
+    - `async _legacy_pipeline_detail_response(self, url, pipeline_id)` (line 863): no docstring
+    - `_base_url(self, url)` (line 888): no docstring
+    - `async post(self, url, *args, **kwargs)` (line 892): no docstring
+    - `async get(self, url, *args, **kwargs)` (line 997): no docstring
+    - `async put(self, url, *args, **kwargs)` (line 1028): no docstring
 
 ### `backend/tests/utils/qa_helpers.py`
 - **Functions**

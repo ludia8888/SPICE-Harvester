@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
 import time
 from datetime import date, datetime
@@ -276,6 +277,10 @@ class PipelinesV2AdapterClient:
     @property
     def headers(self) -> httpx.Headers:
         return self._client.headers
+
+    @headers.setter
+    def headers(self, value: Any) -> None:
+        self._client.headers = httpx.Headers(value or {})
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
@@ -890,6 +895,15 @@ class PipelinesV2AdapterClient:
         json_payload = kwargs.get("json") if isinstance(kwargs.get("json"), dict) else {}
         headers = kwargs.get("headers")
         params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else {}
+        translate_datasets = str(os.getenv("PIPELINES_V2_ADAPTER_TRANSLATE_DATASETS") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        if path.startswith(_PIPELINE_DATASETS_PREFIX) and not translate_datasets:
+            return await self._client.post(url, *args, **kwargs)
 
         if path == _PIPELINE_DATASETS_PREFIX:
             db_name = str(json_payload.get("db_name") or self._client.headers.get("X-DB-Name") or "").strip()
