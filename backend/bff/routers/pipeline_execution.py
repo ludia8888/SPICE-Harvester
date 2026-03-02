@@ -35,7 +35,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline Builder"])
 
 
-@router.post("/{pipeline_id}/preview", response_model=ApiResponse)
+@router.post(
+    "/{pipeline_id}/preview",
+    response_model=ApiResponse,
+    deprecated=True,
+    summary="Preview pipeline (deprecated)",
+    description="Deprecated: use POST /api/v2/orchestration/builds/create instead.",
+)
 @trace_endpoint("preview_pipeline")
 async def preview_pipeline(
     pipeline_id: str,
@@ -58,7 +64,13 @@ async def preview_pipeline(
     )
 
 
-@router.post("/{pipeline_id}/build", response_model=ApiResponse)
+@router.post(
+    "/{pipeline_id}/build",
+    response_model=ApiResponse,
+    deprecated=True,
+    summary="Build pipeline (deprecated)",
+    description="Deprecated: use POST /api/v2/orchestration/builds/create instead.",
+)
 @trace_endpoint("build_pipeline")
 async def build_pipeline(
     pipeline_id: str,
@@ -83,7 +95,13 @@ async def build_pipeline(
     )
 
 
-@router.post("/{pipeline_id}/deploy", response_model=ApiResponse)
+@router.post(
+    "/{pipeline_id}/deploy",
+    response_model=ApiResponse,
+    deprecated=True,
+    summary="Deploy pipeline (deprecated)",
+    description="Deprecated: use POST /api/v2/orchestration/builds/create instead.",
+)
 @trace_endpoint("deploy_pipeline")
 async def deploy_pipeline(
     pipeline_id: str,

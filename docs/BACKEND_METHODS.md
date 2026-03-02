@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T02:00:56+09:00
+> Generated: 2026-03-03T02:57:40+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1061,7 +1061,7 @@
 
 ### `backend/bff/routers/ontology_crud.py`
 - **Functions**
-  - `async create_ontology(db_name, ontology, request, branch, mapper, oms_client)` (line 34): no docstring
+  - `async create_ontology(db_name, ontology, request, branch, mapper, oms_client)` (line 36): no docstring
 
 ### `backend/bff/routers/ontology_extensions.py`
 - **Functions**
@@ -1184,9 +1184,9 @@
 
 ### `backend/bff/routers/pipeline_execution.py`
 - **Functions**
-  - `async preview_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, request)` (line 40): no docstring
-  - `async build_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, request)` (line 63): no docstring
-  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store)` (line 88): no docstring
+  - `async preview_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, request)` (line 46): no docstring
+  - `async build_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, request)` (line 75): no docstring
+  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store)` (line 106): no docstring
 
 ### `backend/bff/routers/pipeline_history.py`
 - **Functions**
@@ -10020,43 +10020,43 @@
 
 ### `backend/tests/test_foundry_e2e_qa.py`
 - **Functions**
-  - `_severity_rank(value)` (line 80): no docstring
-  - `_qa_fail_threshold_rank()` (line 84): no docstring
-  - `_count_fixture_rows(path)` (line 90): no docstring
-  - `_compute_forbidden_es_netlocs()` (line 100): no docstring
-  - `async _http_only_request_guard(request)` (line 135): Runtime guard: prevent accidental direct calls to Elasticsearch.
-  - `_build_rid(kind, id)` (line 147): Build a Foundry-style RID without importing backend internals.
-  - `_assert_http_only_strict_static_guards()` (line 158): Fail fast if this test regresses into DB/ES gray-box behavior.
-  - `_expected_instance_counts_from_fixtures()` (line 218): no docstring
-  - `_pick_sample_order_from_fixtures()` (line 228): Return (order_id, customer_id) from fixtures.
-  - `_pick_order_with_items_from_fixtures()` (line 242): Return (order_id, product_id) for an order that has at least 1 item.
-  - `_safe(func)` (line 306): Decorator: catch assertion errors and record as bugs instead of failing.
-  - `_switch_persona(state, client, persona_key)` (line 328): no docstring
-  - `_assert_v2_error_shape(payload)` (line 337): no docstring
-  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 345): no docstring
-  - `async phase0_guardrails(state, client)` (line 372): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
-  - `async _wait_for_command(client, command_id, timeout)` (line 741): no docstring
-  - `async _wait_for_pipeline_run_sample(client, pipeline_id, job_id, timeout)` (line 764): Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows.
-  - `async _wait_for_dataset_by_name(client, db_name, dataset_name, timeout)` (line 796): no docstring
-  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 817): Wait for ontology class to exist (and optionally have properties populated).
-  - `async _upsert_database_access_http(client, db_name, entries)` (line 847): no docstring
-  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 860): Create or update an object type contract (pk_spec + backing source).
-  - `async phase1_data_ingestion(state, client)` (line 956): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
-  - `async phase2_pipeline_transforms(state, client)` (line 1283): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
-  - `async phase3_ontology_creation(state, client)` (line 1754): Create 5 Object Types + 3 Action Types.
-  - `async phase4_objectify(state, client)` (line 2093): Create mapping specs, run DAG objectify, verify ES indexing.
-  - `async phase5_search_and_query(state, client)` (line 2382): 12 search scenarios using Foundry v2 API + graph queries.
-  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2811): Record ontology deployment via HTTP API so actions can execute (required by OMS).
-  - `async phase6_actions(state, client)` (line 2832): Test simulate, apply, batch-apply actions with closed-loop ES verification.
-  - `async phase7_closed_loop(state, client)` (line 3057): Verify action effects are reflected in search results.
-  - `async phase8_live_data_cross_domain(state, client)` (line 3178): Test real-time API data: objectify + search + cross-domain pipeline.
-  - `async phase9_branch_and_incremental(state, client)` (line 3594): Hard gates:
-  - `async phase10_teardown(state, client)` (line 4104): no docstring
-  - `async test_foundry_e2e_qa()` (line 4139): Full Foundry lifecycle QA with real Kaggle data + live APIs.
+  - `_severity_rank(value)` (line 81): no docstring
+  - `_qa_fail_threshold_rank()` (line 85): no docstring
+  - `_count_fixture_rows(path)` (line 91): no docstring
+  - `_compute_forbidden_es_netlocs()` (line 101): no docstring
+  - `async _http_only_request_guard(request)` (line 136): Runtime guard: prevent accidental direct calls to Elasticsearch.
+  - `_build_rid(kind, id)` (line 148): Build a Foundry-style RID without importing backend internals.
+  - `_assert_http_only_strict_static_guards()` (line 159): Fail fast if this test regresses into DB/ES gray-box behavior.
+  - `_expected_instance_counts_from_fixtures()` (line 219): no docstring
+  - `_pick_sample_order_from_fixtures()` (line 229): Return (order_id, customer_id) from fixtures.
+  - `_pick_order_with_items_from_fixtures()` (line 243): Return (order_id, product_id) for an order that has at least 1 item.
+  - `_safe(func)` (line 307): Decorator: catch assertion errors and record as bugs instead of failing.
+  - `_switch_persona(state, client, persona_key)` (line 329): no docstring
+  - `_assert_v2_error_shape(payload)` (line 338): no docstring
+  - `async _expect_v2_error(resp, expected_status, expected_error_name, expected_error_code)` (line 346): no docstring
+  - `async phase0_guardrails(state, client)` (line 373): Hard-gate negative cases: 401/403/409/400 should be correct and never 500.
+  - `async _wait_for_command(client, command_id, timeout)` (line 742): no docstring
+  - `async _wait_for_pipeline_run_sample(client, pipeline_id, job_id, timeout)` (line 765): Poll pipeline runs until the given job_id has a SUCCESS sample_json with rows.
+  - `async _wait_for_dataset_by_name(client, db_name, dataset_name, timeout)` (line 797): no docstring
+  - `async _wait_for_ontology(client, db_name, class_id, oms_headers, timeout, require_properties)` (line 818): Wait for ontology class to exist (and optionally have properties populated).
+  - `async _upsert_database_access_http(client, db_name, entries)` (line 848): no docstring
+  - `async _upsert_object_type_contract(client, db_name, class_id, backing_dataset_id, pk_spec, oms_headers)` (line 861): Create or update an object type contract (pk_spec + backing source).
+  - `async phase1_data_ingestion(state, client)` (line 957): Upload 5 Olist CSVs + 3 real-time API CSVs = 8 datasets.
+  - `async phase2_pipeline_transforms(state, client)` (line 1284): Create and execute pipelines: join, compute, filter, groupBy, aggregate.
+  - `async phase3_ontology_creation(state, client)` (line 1755): Create 5 Object Types + 3 Action Types.
+  - `async phase4_objectify(state, client)` (line 2094): Create mapping specs, run DAG objectify, verify ES indexing.
+  - `async phase5_search_and_query(state, client)` (line 2383): 12 search scenarios using Foundry v2 API + graph queries.
+  - `async _record_deployed_commit_qa(client, db_name, oms_headers, target_branch)` (line 2812): Record ontology deployment via HTTP API so actions can execute (required by OMS).
+  - `async phase6_actions(state, client)` (line 2833): Test simulate, apply, batch-apply actions with closed-loop ES verification.
+  - `async phase7_closed_loop(state, client)` (line 3058): Verify action effects are reflected in search results.
+  - `async phase8_live_data_cross_domain(state, client)` (line 3179): Test real-time API data: objectify + search + cross-domain pipeline.
+  - `async phase9_branch_and_incremental(state, client)` (line 3595): Hard gates:
+  - `async phase10_teardown(state, client)` (line 4105): no docstring
+  - `async test_foundry_e2e_qa()` (line 4140): Full Foundry lifecycle QA with real Kaggle data + live APIs.
 - **Classes**
-  - `Persona` (line 259): no docstring
-  - `QAState` (line 267): Mutable state shared across all phases.
-    - `__init__(self)` (line 269): no docstring
+  - `Persona` (line 260): no docstring
+  - `QAState` (line 268): Mutable state shared across all phases.
+    - `__init__(self)` (line 270): no docstring
 
 ### `backend/tests/test_idempotency_chaos.py`
 - **Functions**
@@ -11132,40 +11132,40 @@
 
 ### `backend/tests/unit/openapi/test_removed_v1_compat_guard.py`
 - **Functions**
-  - `_build_schema()` (line 164): no docstring
-  - `_param_names(paths, path, method)` (line 170): no docstring
-  - `test_removed_v1_compat_operations_absent_from_openapi()` (line 186): no docstring
-  - `test_removed_v1_compat_operations_absent_from_full_bff_openapi()` (line 194): no docstring
-  - `test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract()` (line 207): no docstring
-  - `test_removed_v1_query_path_not_allowlisted_for_agent_tools()` (line 374): no docstring
-  - `test_removed_v1_query_path_not_present_in_seed_allowlist_script()` (line 424): no docstring
-  - `test_agent_runtime_and_migrated_e2e_scripts_do_not_reference_v1_pipelines_prefix()` (line 432): no docstring
-  - `test_pipeline_e2e_suites_route_legacy_v1_calls_through_v2_adapter()` (line 455): no docstring
-  - `test_removed_v1_compat_path_literals_absent_from_runtime_code()` (line 483): no docstring
-  - `test_architecture_guard_covers_legacy_action_and_funnel_path_literals()` (line 604): no docstring
-  - `test_removed_bff_legacy_branch_and_merge_path_literals_absent_from_runtime_code()` (line 633): no docstring
-  - `test_funnel_runtime_does_not_call_bff_google_sheets_v1_paths()` (line 659): no docstring
-  - `test_action_worker_direct_undo_literal_absent_from_runtime()` (line 683): no docstring
-  - `test_oms_action_apply_runtime_not_coupled_to_internal_simulation_registry()` (line 701): no docstring
-  - `test_migration_docs_synced_to_code_deleted_status()` (line 712): no docstring
-  - `test_legacy_link_types_router_composition_shim_deleted()` (line 722): no docstring
-  - `test_legacy_link_type_and_objectify_helper_shims_deleted()` (line 732): no docstring
-  - `test_legacy_actions_and_query_router_shims_deleted()` (line 743): no docstring
-  - `test_legacy_data_connector_sheet_tools_router_deleted()` (line 762): no docstring
-  - `test_legacy_ontology_suggest_and_import_router_shims_deleted()` (line 774): no docstring
-  - `test_legacy_ontology_metadata_router_shim_deleted()` (line 791): no docstring
-  - `test_legacy_instances_sample_values_router_deleted()` (line 801): no docstring
-  - `test_legacy_pipeline_compile_and_simulation_router_shims_deleted()` (line 814): no docstring
-  - `test_external_funnel_service_artifacts_deleted()` (line 839): no docstring
-  - `test_legacy_oms_pull_request_modules_deleted()` (line 864): no docstring
-  - `test_legacy_action_simulation_registry_module_deleted()` (line 880): no docstring
-  - `test_migration_docs_do_not_reintroduce_fullmetadata_preview_contradiction()` (line 887): no docstring
-  - `test_foundry_reference_docs_use_current_urls()` (line 895): no docstring
-  - `test_legacy_version_head_endpoint_literal_is_only_in_visibility_guard()` (line 909): no docstring
-  - `test_legacy_branch_endpoint_literals_are_only_in_visibility_guard()` (line 930): no docstring
-  - `test_legacy_version_history_diff_literals_are_only_in_visibility_guard(needle)` (line 958): no docstring
-  - `test_removed_v1_paths_absent_from_generated_api_docs()` (line 982): no docstring
-  - `test_tabular_ingest_response_schema_uses_tabular_analysis_key_only()` (line 1046): no docstring
+  - `_build_schema()` (line 174): no docstring
+  - `_param_names(paths, path, method)` (line 180): no docstring
+  - `test_removed_v1_compat_operations_absent_from_openapi()` (line 196): no docstring
+  - `test_removed_v1_compat_operations_absent_from_full_bff_openapi()` (line 204): no docstring
+  - `test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract()` (line 217): no docstring
+  - `test_removed_v1_query_path_not_allowlisted_for_agent_tools()` (line 384): no docstring
+  - `test_removed_v1_query_path_not_present_in_seed_allowlist_script()` (line 434): no docstring
+  - `test_agent_runtime_and_migrated_e2e_scripts_do_not_reference_v1_pipelines_prefix()` (line 442): no docstring
+  - `test_pipeline_e2e_suites_route_legacy_v1_calls_through_v2_adapter()` (line 465): no docstring
+  - `test_removed_v1_compat_path_literals_absent_from_runtime_code()` (line 493): no docstring
+  - `test_architecture_guard_covers_legacy_action_and_funnel_path_literals()` (line 614): no docstring
+  - `test_removed_bff_legacy_branch_and_merge_path_literals_absent_from_runtime_code()` (line 643): no docstring
+  - `test_funnel_runtime_does_not_call_bff_google_sheets_v1_paths()` (line 669): no docstring
+  - `test_action_worker_direct_undo_literal_absent_from_runtime()` (line 693): no docstring
+  - `test_oms_action_apply_runtime_not_coupled_to_internal_simulation_registry()` (line 711): no docstring
+  - `test_migration_docs_synced_to_code_deleted_status()` (line 722): no docstring
+  - `test_legacy_link_types_router_composition_shim_deleted()` (line 732): no docstring
+  - `test_legacy_link_type_and_objectify_helper_shims_deleted()` (line 742): no docstring
+  - `test_legacy_actions_and_query_router_shims_deleted()` (line 753): no docstring
+  - `test_legacy_data_connector_sheet_tools_router_deleted()` (line 772): no docstring
+  - `test_legacy_ontology_suggest_and_import_router_shims_deleted()` (line 784): no docstring
+  - `test_legacy_ontology_metadata_router_shim_deleted()` (line 801): no docstring
+  - `test_legacy_instances_sample_values_router_deleted()` (line 811): no docstring
+  - `test_legacy_pipeline_compile_and_simulation_router_shims_deleted()` (line 824): no docstring
+  - `test_external_funnel_service_artifacts_deleted()` (line 849): no docstring
+  - `test_legacy_oms_pull_request_modules_deleted()` (line 874): no docstring
+  - `test_legacy_action_simulation_registry_module_deleted()` (line 890): no docstring
+  - `test_migration_docs_do_not_reintroduce_fullmetadata_preview_contradiction()` (line 897): no docstring
+  - `test_foundry_reference_docs_use_current_urls()` (line 905): no docstring
+  - `test_legacy_version_head_endpoint_literal_is_only_in_visibility_guard()` (line 919): no docstring
+  - `test_legacy_branch_endpoint_literals_are_only_in_visibility_guard()` (line 940): no docstring
+  - `test_legacy_version_history_diff_literals_are_only_in_visibility_guard(needle)` (line 968): no docstring
+  - `test_removed_v1_paths_absent_from_generated_api_docs()` (line 992): no docstring
+  - `test_tabular_ingest_response_schema_uses_tabular_analysis_key_only()` (line 1056): no docstring
 
 ### `backend/tests/unit/openapi/test_wip_hidden.py`
 - **Functions**

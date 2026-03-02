@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Pipeline Builder"])
 
 
-@router.post("/datasets/excel-upload", response_model=ApiResponse)
+@router.post("/datasets/excel-upload", response_model=ApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("upload_excel_dataset")
 async def upload_excel_dataset(
     db_name: str = Query(..., description="Database name"),

@@ -38,6 +38,7 @@ import httpx
 import pytest
 
 from tests.utils.auth import build_smoke_user_jwt, oms_auth_headers
+from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 from tests.utils.qa_helpers import (
     BugTracker,
     fetch_frankfurter_csv,
@@ -4184,7 +4185,7 @@ async def test_foundry_e2e_qa() -> None:
         timeout=HTTPX_TIMEOUT,
         event_hooks={"request": [_http_only_request_guard]},
     ) as raw_client:
-        client = raw_client
+        client = PipelinesV2AdapterClient(raw_client)
         try:
             # Phase 1: Data Ingestion
             await phase1_data_ingestion(state, client)

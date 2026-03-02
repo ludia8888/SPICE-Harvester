@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T02:00:56+09:00
+> Generated: 2026-03-03T02:57:40+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **278**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **253618**
+- Total code lines (non-empty, non-comment): **253647**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2431 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2846 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 223 | 168/223 (75%) | 78 | 363 | 1152 | 796 | 60482 |
+| `bff` | 223 | 168/223 (75%) | 78 | 363 | 1152 | 796 | 60502 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -42,14 +42,14 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
 | `shared` | 309 | 208/309 (67%) | 106 | 386 | 872 | 1145 | 80723 |
-| `tests` | 308 | 53/308 (17%) | 20 | 154 | 1654 | 1507 | 54529 |
+| `tests` | 308 | 53/308 (17%) | 20 | 154 | 1654 | 1507 | 54538 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
 
 | Module | Risk Score | Broad Except | Bare Except | Finally Return | Try | Raise | Code Lines |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend/tests/test_foundry_e2e_qa.py` | 520 | 104 | 0 | 0 | 106 | 106 | 3713 |
+| `backend/tests/test_foundry_e2e_qa.py` | 520 | 104 | 0 | 0 | 106 | 106 | 3714 |
 | `backend/pipeline_worker/main.py` | 221 | 42 | 0 | 0 | 57 | 46 | 5592 |
 | `backend/bff/main.py` | 208 | 39 | 0 | 0 | 41 | 28 | 816 |
 | `backend/instance_worker/main.py` | 190 | 38 | 0 | 0 | 46 | 73 | 2381 |
@@ -1173,7 +1173,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=49 | code_lines=41 | risk_score=0
+- Source footprint: total_lines=51 | code_lines=43 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1541,7 +1541,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=122 | code_lines=107 | risk_score=0
+- Source footprint: total_lines=140 | code_lines=125 | risk_score=0
 - API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -11743,11 +11743,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=4239 | code_lines=3713 | risk_score=520
+- Source footprint: total_lines=4240 | code_lines=3714 | risk_score=520
 - API surface: public=14 | top-level functions=33 | classes=2 | methods=1
 - Runtime signals: async_functions=24 | try=106 | raise=106 | broad_except=104 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=21/33 (63%) | classes=1/2 (50%) | methods=0/1 (0%)
-- Internal imports (2): tests.utils.auth; tests.utils.qa_helpers
+- Internal imports (3): tests.utils.auth; tests.utils.pipelines_v2_adapter; tests.utils.qa_helpers
 - External imports (14): __future__; ast; asyncio; dataclasses; httpx; json; os; pathlib (+6 more)
 - Public API names: Persona; QAState; phase0_guardrails; phase10_teardown; phase1_data_ingestion; phase2_pipeline_transforms; phase3_ontology_creation; phase4_objectify; phase5_search_and_query; phase6_actions; phase7_closed_loop; phase8_live_data_cross_domain (+2 more)
 
@@ -12991,7 +12991,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1052 | code_lines=915 | risk_score=6
+- Source footprint: total_lines=1062 | code_lines=923 | risk_score=6
 - API surface: public=32 | top-level functions=34 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=6 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/34 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)

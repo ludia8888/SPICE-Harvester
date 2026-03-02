@@ -24,6 +24,8 @@ router = APIRouter(tags=["Ontology Management"])
     "/ontology",
     response_model=ApiResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    deprecated=True,
+    include_in_schema=False,
     responses={
         status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode"},
         status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},

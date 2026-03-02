@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Pipeline Builder"])
 
-@router.get("/datasets/ingest-requests/{ingest_request_id}", response_model=TabularAnalysisApiResponse)
+@router.get("/datasets/ingest-requests/{ingest_request_id}", response_model=TabularAnalysisApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("get_dataset_ingest_request")
 async def get_dataset_ingest_request(
     ingest_request_id: str,
@@ -57,7 +57,7 @@ async def get_dataset_ingest_request(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.post("/datasets/ingest-requests/{ingest_request_id}/schema/approve", response_model=ApiResponse)
+@router.post("/datasets/ingest-requests/{ingest_request_id}/schema/approve", response_model=ApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("approve_dataset_schema")
 async def approve_dataset_schema(
     ingest_request_id: str,

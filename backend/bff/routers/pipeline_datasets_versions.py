@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Pipeline Builder"])
 
-@router.post("/datasets", response_model=ApiResponse)
+@router.post("/datasets", response_model=ApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("create_dataset")
 async def create_dataset(
     payload: Dict[str, Any],
@@ -94,7 +94,7 @@ async def create_dataset(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.post("/datasets/{dataset_id}/versions", response_model=ApiResponse)
+@router.post("/datasets/{dataset_id}/versions", response_model=ApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("create_dataset_version")
 async def create_dataset_version(
     dataset_id: str,

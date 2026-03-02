@@ -50,7 +50,7 @@ async def list_datasets(
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e), code=ErrorCode.INTERNAL_ERROR)
 
 
-@router.get("/branches", response_model=ApiResponse, include_in_schema=False)
+@router.get("/branches", response_model=ApiResponse, include_in_schema=False, deprecated=True)
 @trace_endpoint("list_pipeline_branches")
 async def list_pipeline_branches(
     db_name: str = Query(...),
@@ -69,7 +69,7 @@ async def list_pipeline_branches(
     return ApiResponse.success(data={"branches": branch_names}).to_dict()
 
 
-@router.post("/branches", response_model=ApiResponse, include_in_schema=False)
+@router.post("/branches", response_model=ApiResponse, include_in_schema=False, deprecated=True)
 @trace_endpoint("create_pipeline_branch")
 async def create_pipeline_branch(
     request: Request,

@@ -119,6 +119,16 @@ REMOVED_V1_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/v1/backing-datasources/{backing_id}/versions"),
     ("get", "/api/v1/backing-datasources/{backing_id}/versions"),
     ("get", "/api/v1/backing-datasource-versions/{version_id}"),
+    # Phase 1 v2 migration: dataset endpoints hidden (replaced by /api/v2/datasets/*)
+    ("post", "/api/v1/pipelines/datasets"),
+    ("post", "/api/v1/pipelines/datasets/{dataset_id}/versions"),
+    ("post", "/api/v1/pipelines/datasets/csv-upload"),
+    ("post", "/api/v1/pipelines/datasets/excel-upload"),
+    ("post", "/api/v1/pipelines/datasets/media-upload"),
+    ("get", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}"),
+    ("post", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve"),
+    # Phase 1 v2 migration: ontology create hidden (replaced by /api/v2/ontologies/*/objectTypes)
+    ("post", "/api/v1/databases/{db_name}/ontology"),
 )
 
 _BROKEN_OFFICIAL_DOC_URLS: tuple[str, ...] = (

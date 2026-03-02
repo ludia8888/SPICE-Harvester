@@ -22,7 +22,7 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 router = APIRouter(tags=["Pipeline Builder"])
 
 
-@router.post("/datasets/media-upload", response_model=ApiResponse)
+@router.post("/datasets/media-upload", response_model=ApiResponse, deprecated=True, include_in_schema=False)
 @trace_endpoint("upload_media_dataset")
 async def upload_media_dataset(
     db_name: str = Query(..., description="Database name"),

@@ -16,9 +16,9 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 149**
+**Total v1 endpoints: 141**
 
-### Object Types & Schema (25 endpoints)
+### Object Types & Schema (24 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -39,7 +39,6 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/databases/{db_name}/mappings/export` | Export Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/mappings/import` | Import Mappings | No |
 | `POST` | `/api/v1/databases/{db_name}/mappings/validate` | Validate Mappings | No |
-| `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | No |
 | `POST` | `/api/v1/databases/{db_name}/ontology/records/deployments` | Record Deployment | No |
 | `GET` | `/api/v1/databases/{db_name}/ontology/resources` | List Resources | No |
 | `GET` | `/api/v1/databases/{db_name}/ontology/resources/{resource_type}` | List Resources By Type | No |
@@ -158,7 +157,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v1/tasks/{task_id}` | Cancel Task | No |
 | `GET` | `/api/v1/tasks/{task_id}/result` | Get Task Result | No |
 
-### Other (49 endpoints)
+### Other (42 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -183,15 +182,8 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/pipelines` | List Pipelines | No |
 | `POST` | `/api/v1/pipelines` | Create Pipeline | No |
 | `GET` | `/api/v1/pipelines/datasets` | List Datasets | No |
-| `POST` | `/api/v1/pipelines/datasets` | Create Dataset | No |
-| `POST` | `/api/v1/pipelines/datasets/csv-upload` | Upload Csv Dataset | No |
-| `POST` | `/api/v1/pipelines/datasets/excel-upload` | Upload Excel Dataset | No |
-| `GET` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}` | Get Dataset Ingest Request | No |
-| `POST` | `/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve` | Approve Dataset Schema | No |
-| `POST` | `/api/v1/pipelines/datasets/media-upload` | Upload Media Dataset | No |
 | `DELETE` | `/api/v1/pipelines/datasets/{dataset_id}` | Delete Dataset | No |
 | `GET` | `/api/v1/pipelines/datasets/{dataset_id}/raw-file` | Get Dataset Raw File | No |
-| `POST` | `/api/v1/pipelines/datasets/{dataset_id}/versions` | Create Dataset Version | No |
 | `GET` | `/api/v1/pipelines/proposals` | List Pipeline Proposals | No |
 | `GET` | `/api/v1/pipelines/udfs` | List Udfs | No |
 | `POST` | `/api/v1/pipelines/udfs` | Create Udf | No |
@@ -202,9 +194,9 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `PUT` | `/api/v1/pipelines/{pipeline_id}` | Update Pipeline | No |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts` | List Pipeline Artifacts | No |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}` | Get Pipeline Artifact | No |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build Pipeline | No |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy Pipeline | No |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview Pipeline | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build pipeline (deprecated) ~~deprecated~~ | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy pipeline (deprecated) ~~deprecated~~ | No |
+| `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview pipeline (deprecated) ~~deprecated~~ | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals` | Submit Pipeline Proposal | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/approve` | Approve Pipeline Proposal | No |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/reject` | Reject Pipeline Proposal | No |
