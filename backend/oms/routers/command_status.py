@@ -70,7 +70,15 @@ async def _fallback_from_registry(
     )
 
 
-@router.get("/{command_id}/status", response_model=CommandResult)
+@router.get(
+    "/{command_id}/status",
+    response_model=CommandResult,
+    responses={
+        400: {"description": "Invalid command_id"},
+        404: {"description": "Command not found"},
+        503: {"description": "Command status tracking unavailable"},
+    },
+)
 @trace_endpoint("oms.command_status.get")
 async def get_command_status(
     command_id: str,

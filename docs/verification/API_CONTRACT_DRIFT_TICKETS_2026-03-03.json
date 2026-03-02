@@ -1,0 +1,197 @@
+{
+  "generated_at": "2026-03-03T02:00:00+09:00",
+  "source_inventory": "/Users/isihyeon/Desktop/SPICE-Harvester/docs/reference/_generated/API_DUPLICATE_LEGACY_INVENTORY.json",
+  "phase2_snapshot": {
+    "target_count": 12,
+    "passed": 12,
+    "failed": 0,
+    "server_errors": 0,
+    "contract_mismatch_count": 5,
+    "fallback_4xx_count": 5
+  },
+  "post_fix_phase2_snapshot": {
+    "target_count": 12,
+    "passed": 12,
+    "failed": 0,
+    "server_errors": 0,
+    "contract_mismatch_count": 0,
+    "fallback_4xx_count": 0
+  },
+  "tickets": [
+    {
+      "id": "SHV-API-DRIFT-001",
+      "priority": "P0",
+      "fix_type": "handler_fix",
+      "title": "BFF command-status proxy preserves upstream semantic error code",
+      "scope": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/bff/routers/command_status.py"
+      ],
+      "endpoints": [
+        {
+          "service": "bff",
+          "method": "GET",
+          "path": "/api/v1/commands/{command_id}/status",
+          "observed_status": 404,
+          "observed_code": "UPSTREAM_ERROR",
+          "expected_status": 404,
+          "expected_code": "RESOURCE_NOT_FOUND"
+        }
+      ],
+      "status": "done",
+      "acceptance_criteria": [
+        "Missing command_id returns HTTP 404 with RESOURCE_NOT_FOUND semantics",
+        "BFF proxy does not overwrite upstream domain code for pass-through not-found",
+        "Phase2 strict-contract mismatch removed for this endpoint"
+      ]
+    },
+    {
+      "id": "SHV-API-DRIFT-002",
+      "priority": "P0",
+      "fix_type": "openapi_doc_fix",
+      "title": "BFF v2 attachment upload documents 400 InvalidArgument",
+      "scope": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/bff/routers/foundry_ontology_v2.py"
+      ],
+      "endpoints": [
+        {
+          "service": "bff",
+          "method": "POST",
+          "path": "/api/v2/ontologies/attachments/upload",
+          "observed_status": 400,
+          "observed_code": "INVALID_ARGUMENT",
+          "documented_statuses_before": [
+            "200",
+            "422"
+          ],
+          "documented_statuses_after": [
+            "200",
+            "400",
+            "401",
+            "403",
+            "500"
+          ]
+        }
+      ],
+      "status": "done",
+      "acceptance_criteria": [
+        "OpenAPI for endpoint includes 400",
+        "v2 error payload schema is documented for 400 path",
+        "Phase2 strict-contract mismatch removed for this endpoint"
+      ]
+    },
+    {
+      "id": "SHV-API-DRIFT-003",
+      "priority": "P0",
+      "fix_type": "openapi_doc_fix",
+      "title": "OMS v2 attachment upload documents 400 InvalidArgument",
+      "scope": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/oms/routers/attachments.py"
+      ],
+      "endpoints": [
+        {
+          "service": "oms",
+          "method": "POST",
+          "path": "/api/v2/ontologies/attachments/upload",
+          "observed_status": 400,
+          "observed_code": "INVALID_ARGUMENT",
+          "documented_statuses_before": [
+            "200",
+            "422"
+          ],
+          "documented_statuses_after": [
+            "200",
+            "400",
+            "403",
+            "404",
+            "500"
+          ]
+        }
+      ],
+      "status": "done",
+      "acceptance_criteria": [
+        "OpenAPI for endpoint includes 400 and error schema",
+        "Empty attachment path (400 EmptyAttachment) is documented",
+        "Phase2 strict-contract mismatch removed for this endpoint"
+      ]
+    },
+    {
+      "id": "SHV-API-DRIFT-004",
+      "priority": "P1",
+      "fix_type": "openapi_doc_fix",
+      "title": "Command-status endpoints document 404/503 paths",
+      "scope": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/oms/routers/command_status.py",
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/bff/routers/command_status.py"
+      ],
+      "endpoints": [
+        {
+          "service": "oms",
+          "method": "GET",
+          "path": "/api/v1/commands/{command_id}/status",
+          "observed_statuses": [
+            400,
+            404,
+            503
+          ],
+          "documented_statuses_before": [
+            "200",
+            "422"
+          ]
+        },
+        {
+          "service": "bff",
+          "method": "GET",
+          "path": "/api/v1/commands/{command_id}/status",
+          "observed_statuses": [
+            400,
+            404,
+            503
+          ],
+          "documented_statuses_before": [
+            "200",
+            "422"
+          ]
+        }
+      ],
+      "status": "done",
+      "acceptance_criteria": [
+        "OpenAPI includes 404 for command not found",
+        "OpenAPI includes 503 for upstream/store unavailable",
+        "Phase2 strict-contract mismatch removed for command-status endpoints"
+      ]
+    },
+    {
+      "id": "SHV-API-DRIFT-005",
+      "priority": "P1",
+      "fix_type": "openapi_doc_fix",
+      "title": "Config drift-analysis endpoint documents 400 validation error",
+      "scope": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/shared/routers/config_monitoring.py"
+      ],
+      "endpoints": [
+        {
+          "service": "oms",
+          "method": "GET",
+          "path": "/api/v1/config/config/drift-analysis",
+          "observed_status": 400,
+          "observed_code": "REQUEST_VALIDATION_FAILED",
+          "documented_statuses_before": [
+            "200",
+            "422"
+          ],
+          "documented_statuses_after": [
+            "200",
+            "400",
+            "500"
+          ]
+        }
+      ],
+      "status": "done",
+      "acceptance_criteria": [
+        "OpenAPI includes 400 for missing compare_environment",
+        "Shared router consumers (BFF/OMS) expose same documented responses",
+        "Phase2 strict-contract mismatch removed for this endpoint"
+      ]
+    }
+  ]
+}

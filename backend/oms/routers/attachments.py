@@ -213,7 +213,15 @@ def _extract_attachment_property(source: Dict[str, Any], property_name: str) -> 
 # ---------------------------------------------------------------------------
 
 
-@attachments_upload_router.post("/attachments/upload")
+@attachments_upload_router.post(
+    "/attachments/upload",
+    responses={
+        400: {"description": "InvalidArgument"},
+        403: {"description": "PermissionDenied"},
+        404: {"description": "ObjectNotFound"},
+        500: {"description": "AttachmentUploadFailed"},
+    },
+)
 @trace_endpoint("upload_attachment")
 async def upload_attachment(
     request: Request,

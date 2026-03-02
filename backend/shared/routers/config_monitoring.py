@@ -333,9 +333,15 @@ async def check_configuration_changes(
         )
 
 
-@router.get("/config/drift-analysis",
-           summary="Environment Drift Analysis",
-           description="Analyze configuration drift between environments")
+@router.get(
+    "/config/drift-analysis",
+    summary="Environment Drift Analysis",
+    description="Analyze configuration drift between environments",
+    responses={
+        400: {"description": "Request validation failed"},
+        500: {"description": "Environment drift analysis failed"},
+    },
+)
 async def analyze_environment_drift(
     compare_environment: str = Query(..., description="Environment to compare against (development, staging, production)"),
     monitor: ConfigurationMonitor = Depends(get_config_monitor)

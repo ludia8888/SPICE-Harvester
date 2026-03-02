@@ -7549,7 +7549,16 @@ async def stream_timeseries_points_v2(
 # =====================================================================
 
 
-@router.post("/attachments/upload", dependencies=[_ONTOLOGY_WRITE])
+@router.post(
+    "/attachments/upload",
+    dependencies=[_ONTOLOGY_WRITE],
+    responses={
+        400: {"description": "InvalidArgument"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "PermissionDenied"},
+        500: {"description": "Internal error"},
+    },
+)
 async def upload_attachment_v2(
     request: Request,
     filename: str = Query(..., description="The name of the file being uploaded"),
