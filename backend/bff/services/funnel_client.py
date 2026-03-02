@@ -7,6 +7,7 @@ Internal runtime routes are non-versioned and mounted under `/internal/funnel/*`
 
 import hashlib
 import io
+import importlib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -29,7 +30,25 @@ class FunnelClient(ManagedAsyncClient):
 
     def _build_internal_client(self) -> httpx.AsyncClient:
         # Import lazily to avoid app import side effects unless internal mode is enabled.
-        from funnel.main import app as funnel_app
+        # Compose/runtime image layouts may differ:
+        # - local/backend test runner: `funnel.main`
+        # - compose image (package under /app/backend): `backend.funnel.main`
+        funnel_app = None
+        import_errors: list[str] = []
+        for module_name in ("funnel.main", "backend.funnel.main"):
+            try:
+                module = importlib.import_module(module_name)
+                funnel_app = getattr(module, "app", None)
+                if funnel_app is not None:
+                    break
+            except Exception as exc:
+                import_errors.append(f"{module_name}: {exc}")
+
+        if funnel_app is None:
+            raise ModuleNotFoundError(
+                "Failed to import Funnel ASGI app. Tried: "
+                + ", ".join(import_errors or ["funnel.main", "backend.funnel.main"])
+            )
 
         return httpx.AsyncClient(
             transport=httpx.ASGITransport(app=funnel_app),

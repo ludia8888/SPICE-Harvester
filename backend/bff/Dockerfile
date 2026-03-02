@@ -39,6 +39,9 @@ COPY bff /app/bff
 # Copy data_connector module
 COPY data_connector /app/data_connector
 
+# Internal funnel runtime used by dataset upload endpoints
+COPY funnel /app/funnel
+
 # Shared runtime dependency used by BFF rebuild/index services
 COPY objectify_worker /app/objectify_worker
 

@@ -595,13 +595,38 @@ if get_settings().is_development:
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology_extensions.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
-app.include_router(query.foundry_router, prefix="/api", tags=["foundry-object-search-v2"])
+app.include_router(
+    query.foundry_router,
+    prefix="/api",
+    tags=["foundry-object-search-v2"],
+    include_in_schema=False,
+)
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
-app.include_router(action_async.foundry_router, prefix="/api", tags=["foundry-actions-v2"])
-app.include_router(timeseries.timeseries_router, prefix="/api", tags=["foundry-timeseries-v2"])
-app.include_router(attachments.attachments_upload_router, prefix="/api", tags=["foundry-attachments-v2"])
-app.include_router(attachments.attachments_property_router, prefix="/api", tags=["foundry-attachments-v2"])
+app.include_router(
+    action_async.foundry_router,
+    prefix="/api",
+    tags=["foundry-actions-v2"],
+    include_in_schema=False,
+)
+app.include_router(
+    timeseries.timeseries_router,
+    prefix="/api",
+    tags=["foundry-timeseries-v2"],
+    include_in_schema=False,
+)
+app.include_router(
+    attachments.attachments_upload_router,
+    prefix="/api",
+    tags=["foundry-attachments-v2"],
+    include_in_schema=False,
+)
+app.include_router(
+    attachments.attachments_property_router,
+    prefix="/api",
+    tags=["foundry-attachments-v2"],
+    include_in_schema=False,
+)
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 logger.info("Deprecated /branch and /version routers are permanently disabled (Foundry-style profile)")
 logger.info("Legacy pull-request router is disabled (Foundry-aligned public surface)")

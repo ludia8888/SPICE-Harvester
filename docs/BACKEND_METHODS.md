@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T04:37:20+09:00
+> Generated: 2026-03-03T05:21:26+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1050,6 +1050,8 @@
   - `async run_objectify(dataset_id, body, request, dataset_registry, objectify_registry, job_queue, pipeline_registry, oms_client)` (line 39): no docstring
 
 ### `backend/bff/routers/ontology.py`
+- **Functions**
+  - `async create_ontology_compat(db_name, ontology, branch, mapper, oms_client)` (line 21): no docstring
 
 ### `backend/bff/routers/ontology_agent.py`
 - **Functions**
@@ -1097,6 +1099,11 @@
 
 ### `backend/bff/routers/pipeline_datasets_deps.py`
 
+### `backend/bff/routers/pipeline_datasets_ingest.py`
+- **Functions**
+  - `async get_dataset_ingest_request(ingest_request_id, request, dataset_registry)` (line 30): no docstring
+  - `async approve_dataset_schema(ingest_request_id, payload, request, dataset_registry)` (line 62): no docstring
+
 ### `backend/bff/routers/pipeline_datasets_ops.py`
 
 ### `backend/bff/routers/pipeline_datasets_ops_funnel.py`
@@ -1143,6 +1150,25 @@
   - `_parse_csv_rows(reader, has_header, preview_limit)` (line 107): no docstring
   - `_parse_csv_file(file_obj, delimiter, has_header, preview_limit)` (line 137): no docstring
   - `_parse_csv_content(content, delimiter, has_header, preview_limit)` (line 205): no docstring
+
+### `backend/bff/routers/pipeline_datasets_uploads.py`
+
+### `backend/bff/routers/pipeline_datasets_uploads_csv.py`
+- **Functions**
+  - `async upload_csv_dataset(db_name, branch, file, dataset_name, description, delimiter, has_header, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 42): no docstring
+
+### `backend/bff/routers/pipeline_datasets_uploads_excel.py`
+- **Functions**
+  - `async upload_excel_dataset(db_name, branch, file, dataset_name, description, sheet_name, table_id, table_top, table_left, table_bottom, table_right, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 43): no docstring
+
+### `backend/bff/routers/pipeline_datasets_uploads_media.py`
+- **Functions**
+  - `async upload_media_dataset(db_name, branch, files, dataset_name, description, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 27): no docstring
+
+### `backend/bff/routers/pipeline_datasets_versions.py`
+- **Functions**
+  - `async create_dataset(payload, dataset_registry)` (line 36): no docstring
+  - `async create_dataset_version(dataset_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 99): no docstring
 
 ### `backend/bff/routers/pipeline_deps.py`
 - **Functions**
@@ -1568,25 +1594,25 @@
 
 ### `backend/bff/services/funnel_client.py`
 - **Classes**
-  - `FunnelClient` (line 21): Funnel HTTP 클라이언트
-    - `__init__(self)` (line 24): no docstring
-    - `_build_internal_client(self)` (line 30): no docstring
-    - `_resolve_excel_timeout_seconds()` (line 42): no docstring
-    - `async check_health(self)` (line 45): Funnel 서비스 상태 확인
-    - `async google_sheets_to_structure_preview(self, sheet_url, worksheet_name, api_key, connection_id, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 67): Google Sheets URL → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async analyze_google_sheets_structure(self, sheet_url, worksheet_name, api_key, connection_id, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 111): Analyze sheet structure via Funnel (Google Sheets URL → grid/merged_cells → structure analysis).
-    - `async excel_to_structure_preview(self, xlsx_bytes, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 147): Excel bytes → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async excel_to_structure_preview_stream(self, fileobj, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 188): Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
-    - `async analyze_excel_structure(self, xlsx_bytes, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 225): Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
-    - `async analyze_excel_structure_stream(self, fileobj, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 270): Analyze sheet structure via Funnel (streaming Excel upload).
-    - `_select_primary_table(structure)` (line 352): Choose a single "primary" table for schema suggestion.
-    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 386): Select a table from structure analysis output.
-    - `_normalize_bbox_dict(bbox)` (line 434): no docstring
-    - `_estimate_total_rows(table)` (line 445): Estimate the total data rows from a table structure's bounding box.
-    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 465): no docstring
-    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 502): no docstring
-    - `async __aenter__(self)` (line 536): no docstring
-    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 539): no docstring
+  - `FunnelClient` (line 22): Funnel HTTP 클라이언트
+    - `__init__(self)` (line 25): no docstring
+    - `_build_internal_client(self)` (line 31): no docstring
+    - `_resolve_excel_timeout_seconds()` (line 61): no docstring
+    - `async check_health(self)` (line 64): Funnel 서비스 상태 확인
+    - `async google_sheets_to_structure_preview(self, sheet_url, worksheet_name, api_key, connection_id, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 86): Google Sheets URL → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async analyze_google_sheets_structure(self, sheet_url, worksheet_name, api_key, connection_id, include_complex_types, max_tables, max_rows, max_cols, trim_trailing_empty, options)` (line 130): Analyze sheet structure via Funnel (Google Sheets URL → grid/merged_cells → structure analysis).
+    - `async excel_to_structure_preview(self, xlsx_bytes, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 166): Excel bytes → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async excel_to_structure_preview_stream(self, fileobj, filename, sheet_name, table_id, table_bbox, include_complex_types, max_tables, max_rows, max_cols, options)` (line 207): Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
+    - `async analyze_excel_structure(self, xlsx_bytes, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 244): Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
+    - `async analyze_excel_structure_stream(self, fileobj, filename, sheet_name, include_complex_types, max_tables, max_rows, max_cols, options)` (line 289): Analyze sheet structure via Funnel (streaming Excel upload).
+    - `_select_primary_table(structure)` (line 371): Choose a single "primary" table for schema suggestion.
+    - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 405): Select a table from structure analysis output.
+    - `_normalize_bbox_dict(bbox)` (line 453): no docstring
+    - `_estimate_total_rows(table)` (line 464): Estimate the total data rows from a table structure's bounding box.
+    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 484): no docstring
+    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 521): no docstring
+    - `async __aenter__(self)` (line 555): no docstring
+    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 558): no docstring
 
 ### `backend/bff/services/governance_service.py`
 - **Functions**
@@ -10003,7 +10029,7 @@
   - `_target_schema_json(ctx)` (line 936): no docstring
   - `_mappings_json(ctx)` (line 945): no docstring
   - `async _build_plan(op, ctx)` (line 953): Return a runnable RequestPlan for every non-WIP/non-ops operation.
-  - `async test_openapi_stable_contract_smoke()` (line 2608): no docstring
+  - `async test_openapi_stable_contract_smoke()` (line 2620): no docstring
 - **Classes**
   - `Operation` (line 416): no docstring
   - `SmokeContext` (line 672): no docstring
@@ -10823,11 +10849,12 @@
 ### `backend/tests/unit/oms/test_openapi_legacy_visibility.py`
 - **Functions**
   - `test_oms_legacy_routes_removed_from_openapi()` (line 6): no docstring
-  - `test_oms_foundry_action_surface_is_apply_only()` (line 41): no docstring
+  - `test_oms_foundry_action_surface_hidden_from_openapi()` (line 41): no docstring
+  - `test_oms_foundry_action_routes_still_registered_runtime()` (line 47): no docstring
 
 ### `backend/tests/unit/oms/test_p1_contract_drift_guard.py`
 - **Functions**
-  - `test_oms_internal_paths_hidden_from_openapi()` (line 42): Internal-only OMS paths must not appear in the OMS OpenAPI schema.
+  - `test_oms_internal_paths_hidden_from_openapi()` (line 62): Internal-only OMS paths must not appear in the OMS OpenAPI schema.
 
 ### `backend/tests/unit/oms/test_timeseries_router.py`
 - **Functions**

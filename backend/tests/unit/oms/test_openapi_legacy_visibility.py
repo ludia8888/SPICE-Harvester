@@ -34,14 +34,25 @@ def test_oms_legacy_routes_removed_from_openapi() -> None:
     for path in removed_legacy_paths:
         assert path not in paths
 
-    assert "/api/v2/ontologies/{ontology}/objects/{objectType}/search" in paths
+    assert "/api/v2/ontologies/{ontology}/objects/{objectType}/search" not in paths
     assert "/api/v2/ontologies/{ontology}/actions/logs/{actionLogId}/undo" not in paths
 
 
-def test_oms_foundry_action_surface_is_apply_only() -> None:
+def test_oms_foundry_action_surface_hidden_from_openapi() -> None:
     paths = set((app.openapi() or {}).get("paths", {}).keys())
     action_paths = {path for path in paths if path.startswith("/api/v2/ontologies/{ontology}/actions")}
-    assert action_paths == {
+    assert action_paths == set()
+
+
+def test_oms_foundry_action_routes_still_registered_runtime() -> None:
+    route_paths = {getattr(route, "path", "") for route in app.routes}
+    schema_paths = set((app.openapi() or {}).get("paths", {}).keys())
+
+    expected_runtime_paths = {
         "/api/v2/ontologies/{ontology}/actions/{action}/apply",
         "/api/v2/ontologies/{ontology}/actions/{action}/applyBatch",
     }
+
+    for path in expected_runtime_paths:
+        assert path in route_paths
+        assert path not in schema_paths

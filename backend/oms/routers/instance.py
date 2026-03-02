@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/instance/{db_name}", tags=["Instance Management"])
 
 
-@router.get("/class/{class_id}/instances")
+@router.get("/class/{class_id}/instances", include_in_schema=False)
 @trace_endpoint("oms.instance.get_class_instances")
 async def get_class_instances(
     es: ElasticsearchServiceDep,
@@ -122,7 +122,7 @@ async def get_class_instances(
         )
 
 
-@router.get("/instance/{instance_id}")
+@router.get("/instance/{instance_id}", include_in_schema=False)
 @trace_endpoint("oms.instance.get")
 async def get_instance(
     es: ElasticsearchServiceDep,
@@ -183,7 +183,7 @@ async def get_instance(
         )
 
 
-@router.get("/class/{class_id}/count")
+@router.get("/class/{class_id}/count", include_in_schema=False)
 @trace_endpoint("oms.instance.get_class_count")
 async def get_class_instance_count(
     es: ElasticsearchServiceDep,

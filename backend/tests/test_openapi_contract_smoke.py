@@ -2458,6 +2458,18 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'buildRid': 'ri.spice.main.build.smoke-missing'})}"
         return RequestPlan(op.method, op.path, url, (200, 204, 400, 404, 409, 422), json_body={})
 
+    if key == ("POST", "/api/v2/orchestration/builds/{buildRid}/deploy"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'buildRid': 'ri.spice.main.build.smoke-missing'})}"
+        body = {
+            "nodeId": "missing_node",
+            "output": {
+                "dbName": ctx.db_name,
+                "datasetName": f"{ctx.dataset_name}_deploy_missing",
+            },
+            "branchName": "master",
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
+
     if key == ("POST", "/api/v2/orchestration/schedules"):
         url = f"{BFF_URL}{op.path}"
         body = {
