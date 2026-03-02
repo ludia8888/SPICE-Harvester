@@ -1,0 +1,94 @@
+{
+  "duplicate_threshold": 0.87,
+  "histogram": [
+    {
+      "bucket": "0.00-0.05",
+      "count": 852
+    },
+    {
+      "bucket": "0.05-0.10",
+      "count": 413
+    },
+    {
+      "bucket": "0.10-0.15",
+      "count": 3615
+    },
+    {
+      "bucket": "0.15-0.20",
+      "count": 5960
+    },
+    {
+      "bucket": "0.20-0.25",
+      "count": 6797
+    },
+    {
+      "bucket": "0.25-0.30",
+      "count": 13885
+    },
+    {
+      "bucket": "0.30-0.35",
+      "count": 7826
+    },
+    {
+      "bucket": "0.35-0.40",
+      "count": 9371
+    },
+    {
+      "bucket": "0.40-0.45",
+      "count": 5004
+    },
+    {
+      "bucket": "0.45-0.50",
+      "count": 3317
+    },
+    {
+      "bucket": "0.50-0.55",
+      "count": 2015
+    },
+    {
+      "bucket": "0.55-0.60",
+      "count": 1558
+    },
+    {
+      "bucket": "0.60-0.65",
+      "count": 504
+    },
+    {
+      "bucket": "0.65-0.70",
+      "count": 333
+    },
+    {
+      "bucket": "0.70-0.75",
+      "count": 274
+    },
+    {
+      "bucket": "0.75-0.80",
+      "count": 186
+    },
+    {
+      "bucket": "0.80-0.85",
+      "count": 123
+    },
+    {
+      "bucket": "0.85-0.90",
+      "count": 39
+    },
+    {
+      "bucket": "0.90-0.95",
+      "count": 35
+    },
+    {
+      "bucket": "0.95-1.00",
+      "count": 2
+    },
+    {
+      "bucket": "1.00-1.00",
+      "count": 19
+    }
+  ],
+  "negative_score_mean": 0.1675,
+  "negative_seed_count": 400,
+  "positive_score_mean": 0.9282,
+  "positive_seed_count": 43,
+  "similar_threshold": 0.69
+}

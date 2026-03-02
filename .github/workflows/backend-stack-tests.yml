@@ -54,6 +54,11 @@ jobs:
         run: |
           PYTHON_BIN=python ./backend/run_production_tests.sh ${{ inputs.script-args }}
 
+      - name: Run API duplicate/legacy contract audit (strict)
+        run: |
+          python scripts/api_audit -m phase1 --services bff,oms,agent --include-hidden --strict
+          python scripts/api_audit -m phase2 --input docs/reference/_generated/API_DUPLICATE_LEGACY_INVENTORY.json --risk high --strict --strict-contract
+
       - name: Dump docker logs (on failure)
         if: failure()
         run: |
