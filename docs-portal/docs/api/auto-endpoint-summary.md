@@ -12,7 +12,7 @@
 | Value Types | 2 | `/api/v2/ontologies/{ontology}/valueTypes` |
 | Other v2 Endpoints | 61 | `/api/v2/...` |
 
-### v1 Endpoints (156)
+### v1 Endpoints (149)
 
 v1 routes are internal SPICE-specific/compatibility surfaces and may not map to Foundry public APIs.
 For Foundry-style contracts, prefer [v2 reference pages](./auto-v2-reference).

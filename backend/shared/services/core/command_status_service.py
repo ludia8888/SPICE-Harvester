@@ -7,23 +7,13 @@ Manages command lifecycle states and provides status tracking functionality.
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
-from enum import Enum
 
 from shared.config.settings import get_settings
+from shared.models.commands import CommandStatus
 from shared.services.storage.redis_service import RedisService
 from shared.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
-
-
-class CommandStatus(str, Enum):
-    """Command execution status enumeration."""
-    PENDING = "PENDING"
-    PROCESSING = "PROCESSING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-    RETRYING = "RETRYING"
 
 
 class CommandStatusService:

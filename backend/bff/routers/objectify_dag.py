@@ -23,7 +23,12 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 router = APIRouter(tags=["Objectify"])
 
 
-@router.post("/databases/{db_name}/run-dag", response_model=Dict[str, Any])
+@router.post(
+    "/databases/{db_name}/run-dag",
+    response_model=Dict[str, Any],
+    summary="Orchestrate objectify across multiple ontology classes (DAG)",
+    description="Resolves dependency graph and fans out objectify jobs for all specified classes. Use this for full batch processing.",
+)
 @trace_endpoint("bff.objectify.run_objectify_dag")
 async def run_objectify_dag(
     db_name: str,

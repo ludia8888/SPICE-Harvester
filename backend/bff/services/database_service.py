@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.errors.http_error_mapper import code_for_http_status
 
 from bff.services.database_error_policy import MessageErrorPolicy, apply_message_error_policies
 from bff.services.oms_client import OMSClient
@@ -481,18 +482,10 @@ async def create_class(*, db_name: str, class_data: Dict[str, Any], oms: OMSClie
             upstream_body = getattr(exc.response, "text", str(exc))
 
         if upstream_status in {400, 401, 403, 404, 409, 422}:
-            code_by_status = {
-                400: ErrorCode.REQUEST_VALIDATION_FAILED,
-                401: ErrorCode.AUTH_REQUIRED,
-                403: ErrorCode.PERMISSION_DENIED,
-                404: ErrorCode.RESOURCE_NOT_FOUND,
-                409: ErrorCode.CONFLICT,
-                422: ErrorCode.REQUEST_VALIDATION_FAILED,
-            }
             raise classified_http_exception(
                 upstream_status,
                 str(upstream_body),
-                code=code_by_status.get(upstream_status, ErrorCode.UPSTREAM_ERROR),
+                code=code_for_http_status(upstream_status),
             ) from exc
 
         raise classified_http_exception(status.HTTP_502_BAD_GATEWAY, str(upstream_body) if not isinstance(upstream_body, str) else upstream_body, code=ErrorCode.UPSTREAM_ERROR) from exc

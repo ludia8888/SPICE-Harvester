@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 
-def normalize_string_list(value: Any) -> List[str]:
+def coerce_to_string_list(value: Any) -> List[str]:
     if value is None:
         return []
     items = value if isinstance(value, list) else [value]

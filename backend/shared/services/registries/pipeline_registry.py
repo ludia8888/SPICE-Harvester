@@ -24,6 +24,7 @@ from shared.services.storage.lakefs_client import (
     LakeFSConflictError,
     LakeFSError,
 )
+from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch as _shared_ensure_lakefs_branch
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.time_utils import utcnow
@@ -576,11 +577,12 @@ class PipelineRegistry(PostgresSchemaRegistry):
             return
 
         lakefs_client = await self.get_lakefs_client(user_id=user_id)
-        try:
-            await lakefs_client.create_branch(repository=repository, name=branch, source=source)
-        except LakeFSConflictError:
-            # Safe under concurrency: branch already created by another caller.
-            return
+        await _shared_ensure_lakefs_branch(
+            lakefs_client=lakefs_client,
+            repository=repository,
+            branch=branch,
+            source=source,
+        )
 
     def _resolve_repository(self, *, pipeline: PipelineRecord) -> str:
         repo = (pipeline.lakefs_repository or "").strip()

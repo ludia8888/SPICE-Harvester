@@ -17,7 +17,7 @@ from shared.dependencies.providers import BackgroundTaskManagerDep, RedisService
 router = APIRouter(tags=["Admin Operations"])
 
 
-@router.get("/system-health")
+@router.get("/system-health", include_in_schema=False)
 @trace_endpoint("bff.admin.get_system_health")
 async def get_system_health(
     task_manager: BackgroundTaskManagerDep,

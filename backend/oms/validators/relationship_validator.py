@@ -22,7 +22,7 @@ class ValidationSeverity(Enum):
 
 
 @dataclass
-class ValidationResult:
+class RelationshipValidationResult:
     """검증 결과"""
 
     severity: ValidationSeverity
@@ -76,7 +76,7 @@ class RelationshipValidator:
 
     def validate_relationship(
         self, relationship: Relationship, source_class: str
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """단일 관계 검증"""
 
         results = []
@@ -103,7 +103,7 @@ class RelationshipValidator:
 
     def validate_relationship_pair(
         self, forward: Relationship, inverse: Relationship, source_class: str, target_class: str
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """관계 쌍 검증 (정방향 + 역방향)"""
 
         results = []
@@ -125,7 +125,7 @@ class RelationshipValidator:
 
         return results
 
-    def validate_ontology_relationships(self, ontology: OntologyResponse) -> List[ValidationResult]:
+    def validate_ontology_relationships(self, ontology: OntologyResponse) -> List[RelationshipValidationResult]:
         """온톨로지 전체 관계 검증"""
 
         results = []
@@ -147,7 +147,7 @@ class RelationshipValidator:
 
     def validate_multiple_ontologies(
         self, ontologies: List[OntologyResponse]
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """다중 온톨로지 간 관계 검증"""
 
         results = []
@@ -164,14 +164,14 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_basic_fields(self, relationship: Relationship) -> List[ValidationResult]:
+    def _validate_basic_fields(self, relationship: Relationship) -> List[RelationshipValidationResult]:
         """기본 필드 검증"""
 
         results = []
 
         if not relationship.predicate:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="MISSING_PREDICATE",
                     message="Relationship predicate is required",
@@ -181,7 +181,7 @@ class RelationshipValidator:
 
         if not relationship.target:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="MISSING_TARGET",
                     message="Relationship target is required",
@@ -191,7 +191,7 @@ class RelationshipValidator:
 
         if not relationship.label:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.WARNING,
                     code="MISSING_LABEL",
                     message="Relationship label is recommended",
@@ -201,7 +201,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_predicate(self, predicate: str) -> List[ValidationResult]:
+    def _validate_predicate(self, predicate: str) -> List[RelationshipValidationResult]:
         """predicate 명명 규칙 검증"""
 
         results = []
@@ -233,7 +233,7 @@ class RelationshipValidator:
 
             if not validation_result.is_valid:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.ERROR,
                         code="INVALID_PREDICATE_FORMAT",
                         message=validation_result.message,
@@ -246,7 +246,7 @@ class RelationshipValidator:
 
             if not camelcase_result.is_valid:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.INFO,
                         code="PREDICATE_NAMING_CONVENTION",
                         message=f"Predicate '{predicate}' should follow camelCase convention",
@@ -256,7 +256,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_cardinality(self, cardinality: Any) -> List[ValidationResult]:
+    def _validate_cardinality(self, cardinality: Any) -> List[RelationshipValidationResult]:
         """카디널리티 검증"""
 
         results = []
@@ -268,7 +268,7 @@ class RelationshipValidator:
         valid_cardinalities = {"one", "many", "1:1", "1:n", "n:1", "n:m"}
         if card_str not in valid_cardinalities:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="INVALID_CARDINALITY",
                     message=f"Invalid cardinality '{card_str}'. Valid values: {', '.join(valid_cardinalities)}",
@@ -280,7 +280,7 @@ class RelationshipValidator:
         recommended = {"1:1", "1:n", "n:m"}
         if card_str not in recommended:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.INFO,
                     code="CARDINALITY_RECOMMENDATION",
                     message=f"Consider using more specific cardinality instead of '{card_str}'",
@@ -290,7 +290,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_target_class(self, target: str) -> List[ValidationResult]:
+    def _validate_target_class(self, target: str) -> List[RelationshipValidationResult]:
         """타겟 클래스 검증"""
 
         results = []
@@ -306,7 +306,7 @@ class RelationshipValidator:
 
             if not validation_result.is_valid:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.ERROR,
                         code="INVALID_TARGET_FORMAT",
                         message=f"Target class '{target}' must be PascalCase",
@@ -317,7 +317,7 @@ class RelationshipValidator:
         # 존재 여부 검증 (알려진 클래스만)
         if self.known_classes and target not in self.known_classes:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.WARNING,
                     code="UNKNOWN_TARGET_CLASS",
                     message=f"Target class '{target}' is not known. Ensure it exists.",
@@ -329,7 +329,7 @@ class RelationshipValidator:
 
     def _validate_self_reference(
         self, relationship: Relationship, source_class: str
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """자기 참조 검증"""
 
         results = []
@@ -338,7 +338,7 @@ class RelationshipValidator:
             # 자기 참조는 허용하지만 카디널리티에 주의
             if relationship.cardinality in ["1:1"]:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.WARNING,
                         code="SELF_REFERENCE_ONE_TO_ONE",
                         message=f"Self-reference with 1:1 cardinality may cause issues",
@@ -348,7 +348,7 @@ class RelationshipValidator:
                 )
 
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.INFO,
                     code="SELF_REFERENCE_DETECTED",
                     message=f"Self-referential relationship detected in {source_class}",
@@ -359,7 +359,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_labels(self, relationship: Relationship) -> List[ValidationResult]:
+    def _validate_labels(self, relationship: Relationship) -> List[RelationshipValidationResult]:
         """레이블 검증"""
 
         results = []
@@ -368,7 +368,7 @@ class RelationshipValidator:
             # 레이블 검증 - 이제 단순 문자열
             if isinstance(relationship.label, str) and not relationship.label.strip():
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.WARNING,
                         code="EMPTY_LABEL",
                         message="Label is empty",
@@ -380,7 +380,7 @@ class RelationshipValidator:
 
     def _validate_cardinality_consistency(
         self, forward: Relationship, inverse: Relationship
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """카디널리티 일관성 검증"""
 
         results = []
@@ -401,7 +401,7 @@ class RelationshipValidator:
 
         if card_pair in self.invalid_combinations:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="INCOMPATIBLE_CARDINALITIES",
                     message=f"Incompatible cardinalities: {forward_card} and {inverse_card}",
@@ -413,7 +413,7 @@ class RelationshipValidator:
         # 권장 카디널리티 쌍
         if not self.cardinality_matrix.get(card_pair, False):
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.WARNING,
                     code="UNUSUAL_CARDINALITY_PAIR",
                     message=f"Unusual cardinality combination: {forward_card} ↔ {inverse_card}",
@@ -426,7 +426,7 @@ class RelationshipValidator:
 
     def _validate_mutual_reference(
         self, forward: Relationship, inverse: Relationship
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """상호 참조 검증"""
 
         results = []
@@ -434,7 +434,7 @@ class RelationshipValidator:
         # 정방향의 inverse_predicate가 역방향의 predicate와 일치하는지
         if forward.inverse_predicate and forward.inverse_predicate != inverse.predicate:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="MISMATCHED_INVERSE_PREDICATE",
                     message=f"Forward inverse_predicate '{forward.inverse_predicate}' doesn't match inverse predicate '{inverse.predicate}'",
@@ -446,7 +446,7 @@ class RelationshipValidator:
         # 역방향의 inverse_predicate가 정방향의 predicate와 일치하는지
         if inverse.inverse_predicate and inverse.inverse_predicate != forward.predicate:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="MISMATCHED_INVERSE_PREDICATE",
                     message=f"Inverse inverse_predicate '{inverse.inverse_predicate}' doesn't match forward predicate '{forward.predicate}'",
@@ -459,7 +459,7 @@ class RelationshipValidator:
 
     def _validate_target_consistency(
         self, forward: Relationship, inverse: Relationship, source_class: str, target_class: str
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """타겟 일관성 검증"""
 
         results = []
@@ -467,7 +467,7 @@ class RelationshipValidator:
         # 정방향 관계의 타겟이 역방향 관계의 소스와 일치하는지
         if forward.target != target_class:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="TARGET_MISMATCH",
                     message=f"Forward target '{forward.target}' doesn't match expected target class '{target_class}'",
@@ -479,7 +479,7 @@ class RelationshipValidator:
         # 역방향 관계의 타겟이 정방향 관계의 소스와 일치하는지
         if inverse.target != source_class:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.ERROR,
                     code="TARGET_MISMATCH",
                     message=f"Inverse target '{inverse.target}' doesn't match expected source class '{source_class}'",
@@ -492,7 +492,7 @@ class RelationshipValidator:
 
     def _validate_relationship_conflicts(
         self, relationships: List[Relationship]
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """관계 간 충돌 검증"""
 
         results = []
@@ -503,7 +503,7 @@ class RelationshipValidator:
             key = (rel.predicate, rel.target)
             if key in predicate_targets:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.ERROR,
                         code="DUPLICATE_RELATIONSHIP",
                         message=f"Duplicate relationship: {rel.predicate} -> {rel.target}",
@@ -517,7 +517,7 @@ class RelationshipValidator:
 
     def _validate_predicate_uniqueness(
         self, relationships: List[Relationship]
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """predicate 유일성 검증"""
 
         results = []
@@ -526,7 +526,7 @@ class RelationshipValidator:
         for rel in relationships:
             if rel.predicate in predicates:
                 results.append(
-                    ValidationResult(
+                    RelationshipValidationResult(
                         severity=ValidationSeverity.ERROR,
                         code="DUPLICATE_PREDICATE",
                         message=f"Duplicate predicate '{rel.predicate}' found",
@@ -538,7 +538,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_relationship_network(self, ontology: OntologyResponse) -> List[ValidationResult]:
+    def _validate_relationship_network(self, ontology: OntologyResponse) -> List[RelationshipValidationResult]:
         """관계 네트워크 검증"""
 
         results = []
@@ -550,7 +550,7 @@ class RelationshipValidator:
         # 참조되지 않는 클래스 탐지
         if ontology.id not in targets and ontology.relationships:
             results.append(
-                ValidationResult(
+                RelationshipValidationResult(
                     severity=ValidationSeverity.INFO,
                     code="ISOLATED_CLASS",
                     message=f"Class '{ontology.id}' is not referenced by any relationships",
@@ -563,7 +563,7 @@ class RelationshipValidator:
 
     def _validate_cross_ontology_relationships(
         self, ontologies: List[OntologyResponse]
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """온톨로지 간 관계 검증"""
 
         results = []
@@ -575,7 +575,7 @@ class RelationshipValidator:
                 # 다른 온톨로지 클래스를 참조하는 관계 체크
                 if rel.target not in all_class_ids:
                     results.append(
-                        ValidationResult(
+                        RelationshipValidationResult(
                             severity=ValidationSeverity.WARNING,
                             code="EXTERNAL_CLASS_REFERENCE",
                             message=f"Relationship '{rel.predicate}' references external class '{rel.target}'",
@@ -588,7 +588,7 @@ class RelationshipValidator:
 
     def _validate_global_relationship_consistency(
         self, ontologies: List[OntologyResponse]
-    ) -> List[ValidationResult]:
+    ) -> List[RelationshipValidationResult]:
         """전역 관계 일관성 검증"""
 
         results = []
@@ -602,7 +602,7 @@ class RelationshipValidator:
                     other_class = global_predicates[rel.predicate]
                     if other_class != ontology.id:
                         results.append(
-                            ValidationResult(
+                            RelationshipValidationResult(
                                 severity=ValidationSeverity.WARNING,
                                 code="GLOBAL_PREDICATE_CONFLICT",
                                 message=f"Predicate '{rel.predicate}' used in multiple classes: {ontology.id}, {other_class}",
@@ -614,7 +614,7 @@ class RelationshipValidator:
 
         return results
 
-    def get_validation_summary(self, results: List[ValidationResult]) -> Dict[str, Any]:
+    def get_validation_summary(self, results: List[RelationshipValidationResult]) -> Dict[str, Any]:
         """검증 결과 요약"""
 
         summary = {

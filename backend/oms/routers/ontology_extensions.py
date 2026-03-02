@@ -6,7 +6,6 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
 
 from oms.exceptions import DatabaseError, OntologyNotFoundError
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
@@ -20,6 +19,10 @@ from oms.services.ontology_resource_validator import (
     validate_resource,
 )
 from shared.models.requests import ApiResponse
+from shared.schemas.ontology_extension_requests import (
+    OntologyDeploymentRecordRequest,
+    OntologyResourceRequest,
+)
 from shared.security.input_sanitizer import (
     sanitize_input,
     validate_branch_name,
@@ -36,27 +39,6 @@ from shared.observability.tracing import trace_endpoint
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Extensions"])
-
-
-class OntologyResourceRequest(BaseModel):
-    id: Optional[str] = Field(None, description="Resource id (optional; auto-generated from label)")
-    label: Any = Field(..., description="Resource label")
-    description: Optional[Any] = Field(None, description="Resource description")
-    spec: Dict[str, Any] = Field(default_factory=dict)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    model_config = ConfigDict(extra="allow")
-
-
-class OntologyDeploymentRecordRequest(BaseModel):
-    target_branch: str = Field("master", description="Deployment target branch")
-    ontology_commit_id: Optional[str] = Field(
-        None,
-        description="Deployed ontology commit id (defaults to branch:<target_branch>)",
-    )
-    snapshot_rid: Optional[str] = Field(None, description="Optional snapshot resource identifier")
-    deployed_by: Optional[str] = Field(None, description="Actor id for deployment audit")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _normalize_resource_payload(payload: OntologyResourceRequest) -> Dict[str, Any]:
@@ -131,7 +113,7 @@ def _normalize_occ_branch_token(branch: str) -> str:
     raw = str(branch or "").strip()
     if raw.lower().startswith("branch:"):
         raw = raw.split(":", 1)[1].strip()
-    return raw or "master"
+    return raw or "main"
 
 
 async def _assert_expected_head_commit(
@@ -209,7 +191,7 @@ async def record_deployment(
 ):
     try:
         db_name = validate_db_name(db_name)
-        target_branch = validate_branch_name(payload.target_branch or "master")
+        target_branch = validate_branch_name(payload.target_branch or "main")
         ontology_commit_id = str(payload.ontology_commit_id or "").strip() or f"branch:{target_branch}"
         deployed_by = str(payload.deployed_by or "").strip() or "system"
 

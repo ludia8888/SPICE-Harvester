@@ -33,6 +33,8 @@ router = APIRouter(tags=["Admin Operations"])
     "/recompute-projection",
     response_model=RecomputeProjectionResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Replay S3 events to rebuild a projection",
+    description="Replays LakeFS/S3 immutable events within a time range to reconstruct instances or ontologies projection.",
 )
 @rate_limit(**RateLimitPresets.STRICT)
 @trace_endpoint("bff.admin.recompute_projection")
@@ -59,7 +61,10 @@ async def recompute_projection(
     )
 
 
-@router.get("/recompute-projection/{task_id}/result")
+@router.get(
+    "/recompute-projection/{task_id}/result",
+    summary="Get recompute projection task result",
+)
 @trace_endpoint("bff.admin.get_recompute_projection_result")
 async def get_recompute_projection_result(
     task_id: str,
@@ -78,6 +83,7 @@ async def get_recompute_projection_result(
     "/reindex-instances",
     status_code=status.HTTP_202_ACCEPTED,
     summary="Reindex all instances for a database (dataset-primary rebuild)",
+    description="Re-executes ALL objectify jobs from source datasets. This is the nuclear rebuild option.",
 )
 @rate_limit(**RateLimitPresets.STRICT)
 @trace_endpoint("bff.admin.reindex_instances_endpoint")

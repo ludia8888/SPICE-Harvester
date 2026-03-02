@@ -58,3 +58,10 @@ onboarding/ko/11-REAL-WORLD-SCENARIOS
 onboarding/ko/12-ACTION-TYPES-DEEP-DIVE
 onboarding/ko/LEARNING-ROADMAP
 ```
+
+```{toctree}
+:hidden:
+
+reference/_generated/API_DUPLICATE_LEGACY_AUDIT
+verification/API_CONTRACT_DRIFT_TICKETS_2026-03-03
+```

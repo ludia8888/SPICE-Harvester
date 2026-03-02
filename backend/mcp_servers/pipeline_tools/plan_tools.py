@@ -57,7 +57,7 @@ from shared.services.pipeline.pipeline_plan_builder import (
 )
 from shared.utils.llm_safety import mask_pii
 
-from ..pipeline_mcp_helpers import normalize_aggregates, normalize_string_list
+from ..pipeline_mcp_helpers import normalize_aggregates, coerce_to_string_list
 from ..pipeline_mcp_errors import tool_error
 
 logger = logging.getLogger(__name__)
@@ -187,8 +187,8 @@ async def _plan_add_join(_server: Any, arguments: Dict[str, Any]) -> Any:
     if join_type not in valid_join_types:
         return {"status": "invalid", "errors": [f"Invalid join_type '{join_type}'. Must be one of: {', '.join(sorted(valid_join_types))}"]}
     # Validate key count match
-    left_keys_list = normalize_string_list(left_keys)
-    right_keys_list = normalize_string_list(right_keys)
+    left_keys_list = coerce_to_string_list(left_keys)
+    right_keys_list = coerce_to_string_list(right_keys)
     if len(left_keys_list) != len(right_keys_list):
         return {
             "status": "invalid",
@@ -218,7 +218,7 @@ async def _plan_add_join(_server: Any, arguments: Dict[str, Any]) -> Any:
 async def _plan_add_group_by(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
-    group_by = normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+    group_by = coerce_to_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
     aggregates, agg_warnings = normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
     if not aggregates:
         if agg_warnings:
@@ -242,7 +242,7 @@ async def _plan_add_group_by(_server: Any, arguments: Dict[str, Any]) -> Any:
 async def _plan_add_group_by_expr(_server: Any, arguments: Dict[str, Any]) -> Any:
     plan = arguments.get("plan") or {}
     input_node_id = str(arguments.get("input_node_id") or "")
-    group_by = normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+    group_by = coerce_to_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
     exprs = arguments.get("aggregate_expressions") or arguments.get("aggregateExpressions") or []
     op = str(arguments.get("operation") or "groupBy").strip() or "groupBy"
     if op not in {"groupBy", "aggregate"}:
@@ -264,7 +264,7 @@ async def _plan_add_window(_server: Any, arguments: Dict[str, Any]) -> Any:
     input_node_id = str(arguments.get("input_node_id") or "")
     window = arguments.get("window") if isinstance(arguments.get("window"), dict) else None
     if window is None:
-        partition_by = normalize_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
+        partition_by = coerce_to_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
         order_by_raw = arguments.get("order_by") or arguments.get("orderBy") or []
         order_by = order_by_raw if isinstance(order_by_raw, list) else [order_by_raw]
         window = {"partitionBy": partition_by, "orderBy": order_by}
@@ -305,13 +305,13 @@ async def _plan_add_transform(_server: Any, arguments: Dict[str, Any]) -> Any:
         metadata = {}
     transform_agg_warnings: List[str] = []
     if not metadata and operation in {"groupBy", "aggregate"}:
-        group_by = normalize_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
+        group_by = coerce_to_string_list(arguments.get("group_by") or arguments.get("groupBy") or [])
         aggregates, transform_agg_warnings = normalize_aggregates(arguments.get("aggregates") or arguments.get("aggregations") or [])
         metadata = {"groupBy": group_by, "aggregates": aggregates}
     if not metadata and operation == "window":
         window = arguments.get("window") if isinstance(arguments.get("window"), dict) else None
         if window is None:
-            partition_by = normalize_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
+            partition_by = coerce_to_string_list(arguments.get("partition_by") or arguments.get("partitionBy") or [])
             order_by_raw = arguments.get("order_by") or arguments.get("orderBy") or []
             order_by = order_by_raw if isinstance(order_by_raw, list) else [order_by_raw]
             window = {"partitionBy": partition_by, "orderBy": order_by}
@@ -742,8 +742,8 @@ async def _plan_add_stream_join(_server: Any, arguments: Dict[str, Any]) -> Any:
         plan,
         left_node_id=str(arguments.get("left_node_id") or ""),
         right_node_id=str(arguments.get("right_node_id") or ""),
-        left_keys=normalize_string_list(arguments.get("left_keys") or arguments.get("leftKeys") or []),
-        right_keys=normalize_string_list(arguments.get("right_keys") or arguments.get("rightKeys") or []),
+        left_keys=coerce_to_string_list(arguments.get("left_keys") or arguments.get("leftKeys") or []),
+        right_keys=coerce_to_string_list(arguments.get("right_keys") or arguments.get("rightKeys") or []),
         join_type=arguments.get("join_type") or arguments.get("joinType"),
         strategy=str(arguments.get("strategy") or "dynamic"),
         left_event_time_column=arguments.get("left_event_time_column") or arguments.get("leftEventTimeColumn"),

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ops", tags=["Ops"])
 
 
-@router.get("/status", response_model=Dict[str, Any])
+@router.get("/status", response_model=Dict[str, Any], include_in_schema=False)
 @trace_endpoint("bff.ops.ops_status")
 async def ops_status(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),

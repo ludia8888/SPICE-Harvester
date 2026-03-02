@@ -25,7 +25,12 @@ from shared.services.storage.storage_service import StorageService
 router = APIRouter(tags=["Admin Operations"])
 
 
-@router.post("/replay-instance-state", response_model=ReplayInstanceStateResponse)
+@router.post(
+    "/replay-instance-state",
+    response_model=ReplayInstanceStateResponse,
+    summary="Replay single instance event history (debugging)",
+    description="Replays the full event history of one specific instance for debugging and state inspection.",
+)
 @trace_endpoint("bff.admin.replay_instance_state")
 async def replay_instance_state(
     request: ReplayInstanceStateRequest,
@@ -44,7 +49,10 @@ async def replay_instance_state(
     )
 
 
-@router.get("/replay-instance-state/{task_id}/result")
+@router.get(
+    "/replay-instance-state/{task_id}/result",
+    summary="Get instance replay result",
+)
 @trace_endpoint("bff.admin.get_replay_result")
 async def get_replay_result(
     task_id: str,
@@ -58,7 +66,10 @@ async def get_replay_result(
     )
 
 
-@router.get("/replay-instance-state/{task_id}/trace")
+@router.get(
+    "/replay-instance-state/{task_id}/trace",
+    summary="Get instance replay trace with audit/lineage",
+)
 @trace_endpoint("bff.admin.get_replay_trace")
 async def get_replay_trace(
     task_id: str,

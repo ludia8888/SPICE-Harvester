@@ -6,28 +6,11 @@ from typing import Any, Iterable
 
 from fastapi import HTTPException
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.errors.http_error_mapper import code_for_http_status as _code_for_status
 
 from shared.security.input_sanitizer import SecurityViolationError
 
 _NO_FALLBACK_RETURN = object()
-
-
-def _code_for_status(status_code: int) -> ErrorCode:
-    if status_code == 400 or status_code == 422:
-        return ErrorCode.REQUEST_VALIDATION_FAILED
-    if status_code == 401:
-        return ErrorCode.AUTH_REQUIRED
-    if status_code == 403:
-        return ErrorCode.PERMISSION_DENIED
-    if status_code == 404:
-        return ErrorCode.RESOURCE_NOT_FOUND
-    if status_code == 409:
-        return ErrorCode.CONFLICT
-    if status_code == 429:
-        return ErrorCode.RATE_LIMITED
-    if status_code >= 500:
-        return ErrorCode.INTERNAL_ERROR
-    return ErrorCode.INTERNAL_ERROR
 
 
 @dataclass(frozen=True)

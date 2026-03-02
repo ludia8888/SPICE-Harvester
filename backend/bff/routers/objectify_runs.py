@@ -29,7 +29,12 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 router = APIRouter(tags=["Objectify"])
 
 
-@router.post("/datasets/{dataset_id}/run", response_model=Dict[str, Any])
+@router.post(
+    "/datasets/{dataset_id}/run",
+    response_model=Dict[str, Any],
+    summary="Run objectify for a single dataset",
+    description="Executes objectify for one specific dataset with explicit mapping spec control.",
+)
 @trace_endpoint("bff.objectify.run_objectify")
 async def run_objectify(
     dataset_id: str,

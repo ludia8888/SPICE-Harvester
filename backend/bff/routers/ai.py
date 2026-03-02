@@ -4,7 +4,7 @@ AI API (BFF).
 Thin router that delegates domain logic to `bff.services.ai_service`.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from shared.observability.tracing import trace_endpoint
 
 from bff.dependencies import (
@@ -50,7 +50,7 @@ async def ai_intent(
     )
 
 
-@router.post("/translate/query-plan/{db_name}")
+@router.post("/translate/query-plan/{db_name}", deprecated=True)
 @rate_limit(**RateLimitPresets.STRICT)
 @trace_endpoint("bff.ai.translate_query_plan")
 async def translate_query_plan(
@@ -64,6 +64,7 @@ async def translate_query_plan(
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
+    """Deprecated: use ``POST /ai/query/{db_name}?dry_run=true`` instead."""
     return await ai_service.translate_query_plan(
         db_name=db_name,
         body=body,
@@ -85,6 +86,10 @@ async def ai_query(
     body: AIQueryRequest,
     request: Request,
     *,
+    dry_run: bool = Query(
+        default=False,
+        description="When true, return only the query plan without executing (same as translate/query-plan).",
+    ),
     llm: LLMGatewayDep,
     redis_service: RedisServiceDep,
     audit_store: AuditLogStoreDep,
@@ -95,6 +100,18 @@ async def ai_query(
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
+    if dry_run:
+        return await ai_service.translate_query_plan(
+            db_name=db_name,
+            body=body,
+            request=request,
+            llm=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+            oms=oms,
+            sessions=sessions,
+            dataset_registry=dataset_registry,
+        )
     return await ai_service.ai_query(
         db_name=db_name,
         body=body,

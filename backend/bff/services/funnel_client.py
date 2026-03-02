@@ -442,6 +442,26 @@ class FunnelClient(ManagedAsyncClient):
             return None
 
     @staticmethod
+    def _estimate_total_rows(table: Dict[str, Any]) -> int:
+        """Estimate the total data rows from a table structure's bounding box."""
+        bbox = table.get("bbox") or {}
+        mode = table.get("mode")
+        header_rows = int(table.get("header_rows") or 0)
+        header_cols = int(table.get("header_cols") or 0)
+        try:
+            height = int(bbox.get("bottom") - bbox.get("top") + 1)
+            width = int(bbox.get("right") - bbox.get("left") + 1)
+            if mode == "table":
+                return max(0, height - max(1, header_rows))
+            elif mode == "transposed":
+                return max(0, width - max(1, header_cols))
+            elif mode == "property":
+                return len(table.get("key_values") or [])
+        except Exception:
+            pass
+        return 0
+
+    @staticmethod
     def _structure_table_to_preview(
         *,
         structure: Dict[str, Any],
@@ -456,25 +476,9 @@ class FunnelClient(ManagedAsyncClient):
 
         headers = table.get("headers") or []
         rows = table.get("sample_rows") or []
-
         bbox = table.get("bbox") or {}
         mode = table.get("mode")
-        header_rows = int(table.get("header_rows") or 0)
-        header_cols = int(table.get("header_cols") or 0)
-
-        total_rows_est = 0
-        try:
-            height = int(bbox.get("bottom") - bbox.get("top") + 1)
-            width = int(bbox.get("right") - bbox.get("left") + 1)
-            if mode == "table":
-                total_rows_est = max(0, height - max(1, header_rows))
-            elif mode == "transposed":
-                total_rows_est = max(0, width - max(1, header_cols))
-            elif mode == "property":
-                total_rows_est = len(table.get("key_values") or [])
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at bff/services/funnel_client.py:694", exc_info=True)
-            total_rows_est = 0
+        total_rows_est = FunnelClient._estimate_total_rows(table)
 
         return {
             "source_metadata": {
@@ -505,25 +509,9 @@ class FunnelClient(ManagedAsyncClient):
         meta = structure.get("metadata") or {}
         headers = table.get("headers") or []
         rows = table.get("sample_rows") or []
-
         bbox = table.get("bbox") or {}
         mode = table.get("mode")
-        header_rows = int(table.get("header_rows") or 0)
-        header_cols = int(table.get("header_cols") or 0)
-
-        total_rows_est = 0
-        try:
-            height = int(bbox.get("bottom") - bbox.get("top") + 1)
-            width = int(bbox.get("right") - bbox.get("left") + 1)
-            if mode == "table":
-                total_rows_est = max(0, height - max(1, header_rows))
-            elif mode == "transposed":
-                total_rows_est = max(0, width - max(1, header_cols))
-            elif mode == "property":
-                total_rows_est = len(table.get("key_values") or [])
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at bff/services/funnel_client.py:742", exc_info=True)
-            total_rows_est = 0
+        total_rows_est = FunnelClient._estimate_total_rows(table)
 
         return {
             "source_metadata": {

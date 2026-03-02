@@ -22,13 +22,13 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **265**
-- Deprecated endpoints: **0**
+- Total documented endpoints: **258**
+- Deprecated endpoints: **1**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 156 |
+| `v1` | 149 |
 | `v2` | 109 |
 
 | Top Domains (first path segment) | Endpoint Count |
@@ -38,12 +38,12 @@
 | `pipelines` | 30 |
 | `databases` | 25 |
 | `datasets` | 19 |
-| `admin` | 13 |
+| `admin` | 12 |
 | `orchestration` | 11 |
 | `lineage` | 10 |
-| `monitoring` | 10 |
 | `config` | 9 |
 | `context7` | 7 |
+| `monitoring` | 7 |
 | `objectify` | 7 |
 | `schema-changes` | 7 |
 | `graph-query` | 5 |
@@ -62,17 +62,16 @@
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/admin/cleanup-old-replays` | Cleanup Old Replay Results | `v1` | no | no | `cleanup_old_replay_results_api_v1_admin_cleanup_old_replays_post` |
-| `POST` | `/api/v1/admin/databases/{db_name}/rebuild-index` | Rebuild Instance Index Endpoint | `v1` | no | no | `rebuild_instance_index_endpoint_api_v1_admin_databases__db_name__rebuild_index_post` |
-| `GET` | `/api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status` | Get Rebuild Status | `v1` | no | no | `get_rebuild_status_api_v1_admin_databases__db_name__rebuild_index__task_id__status_get` |
+| `POST` | `/api/v1/admin/databases/{db_name}/rebuild-index` | Migrate ES index mappings (alias-swap rebuild) | `v1` | no | no | `rebuild_instance_index_endpoint_api_v1_admin_databases__db_name__rebuild_index_post` |
+| `GET` | `/api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status` | Check rebuild index task status | `v1` | no | no | `get_rebuild_status_api_v1_admin_databases__db_name__rebuild_index__task_id__status_get` |
 | `GET` | `/api/v1/admin/lakefs/credentials` | List Lakefs Credentials | `v1` | no | no | `list_lakefs_credentials_api_v1_admin_lakefs_credentials_get` |
 | `POST` | `/api/v1/admin/lakefs/credentials` | Upsert Lakefs Credentials | `v1` | no | no | `upsert_lakefs_credentials_api_v1_admin_lakefs_credentials_post` |
-| `POST` | `/api/v1/admin/recompute-projection` | Recompute Projection | `v1` | no | no | `recompute_projection_api_v1_admin_recompute_projection_post` |
-| `GET` | `/api/v1/admin/recompute-projection/{task_id}/result` | Get Recompute Projection Result | `v1` | no | no | `get_recompute_projection_result_api_v1_admin_recompute_projection__task_id__result_get` |
+| `POST` | `/api/v1/admin/recompute-projection` | Replay S3 events to rebuild a projection | `v1` | no | no | `recompute_projection_api_v1_admin_recompute_projection_post` |
+| `GET` | `/api/v1/admin/recompute-projection/{task_id}/result` | Get recompute projection task result | `v1` | no | no | `get_recompute_projection_result_api_v1_admin_recompute_projection__task_id__result_get` |
 | `POST` | `/api/v1/admin/reindex-instances` | Reindex all instances for a database (dataset-primary rebuild) | `v1` | no | no | `reindex_instances_endpoint_api_v1_admin_reindex_instances_post` |
-| `POST` | `/api/v1/admin/replay-instance-state` | Replay Instance State | `v1` | no | no | `replay_instance_state_api_v1_admin_replay_instance_state_post` |
-| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get Replay Result | `v1` | no | no | `get_replay_result_api_v1_admin_replay_instance_state__task_id__result_get` |
-| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get Replay Trace | `v1` | no | no | `get_replay_trace_api_v1_admin_replay_instance_state__task_id__trace_get` |
-| `GET` | `/api/v1/admin/system-health` | Get System Health | `v1` | no | no | `get_system_health_api_v1_admin_system_health_get` |
+| `POST` | `/api/v1/admin/replay-instance-state` | Replay single instance event history (debugging) | `v1` | no | no | `replay_instance_state_api_v1_admin_replay_instance_state_post` |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get instance replay result | `v1` | no | no | `get_replay_result_api_v1_admin_replay_instance_state__task_id__result_get` |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get instance replay trace with audit/lineage | `v1` | no | no | `get_replay_trace_api_v1_admin_replay_instance_state__task_id__trace_get` |
 
 ### Agent
 
@@ -87,7 +86,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/ai/intent` | Ai Intent | `v1` | no | no | `ai_intent_api_v1_ai_intent_post` |
 | `POST` | `/api/v1/ai/query/{db_name}` | Ai Query | `v1` | no | no | `ai_query_api_v1_ai_query__db_name__post` |
-| `POST` | `/api/v1/ai/translate/query-plan/{db_name}` | Translate Query Plan | `v1` | no | no | `translate_query_plan_api_v1_ai_translate_query_plan__db_name__post` |
+| `POST` | `/api/v1/ai/translate/query-plan/{db_name}` | Translate Query Plan | `v1` | no | yes | `translate_query_plan_api_v1_ai_translate_query_plan__db_name__post` |
 
 ### Async Instance Management
 
@@ -334,13 +333,6 @@
 | `GET` | `/api/v1/graph-query/{db_name}/paths` | Find Relationship Paths | `v1` | no | no | `find_relationship_paths_api_v1_graph_query__db_name__paths_get` |
 | `POST` | `/api/v1/graph-query/{db_name}/simple` | Execute Simple Graph Query | `v1` | no | no | `execute_simple_graph_query_api_v1_graph_query__db_name__simple_post` |
 
-### Health
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/` | Root | `v1` | no | no | `root_api_v1__get` |
-| `GET` | `/api/v1/health` | Health Check | `v1` | no | no | `health_check_api_v1_health_get` |
-
 ### Label Mappings
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
@@ -370,24 +362,21 @@
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/monitoring/background-tasks/active` | Active Background Tasks | `v1` | no | no | `get_active_background_tasks_api_v1_monitoring_background_tasks_active_get` |
 | `GET` | `/api/v1/monitoring/background-tasks/health` | Background Task System Health | `v1` | no | no | `get_background_task_health_api_v1_monitoring_background_tasks_health_get` |
-| `GET` | `/api/v1/monitoring/background-tasks/metrics` | Background Task Metrics | `v1` | no | no | `get_background_task_metrics_api_v1_monitoring_background_tasks_metrics_get` |
 | `GET` | `/api/v1/monitoring/config` | Configuration Overview | `v1` | no | no | `get_configuration_overview_api_v1_monitoring_config_get` |
 | `GET` | `/api/v1/monitoring/health` | Basic Health Check | `v1` | no | no | `basic_health_check_api_v1_monitoring_health_get` |
 | `GET` | `/api/v1/monitoring/health/detailed` | Detailed Health Check | `v1` | no | no | `detailed_health_check_api_v1_monitoring_health_detailed_get` |
 | `GET` | `/api/v1/monitoring/health/liveness` | Kubernetes Liveness Probe | `v1` | no | no | `liveness_probe_api_v1_monitoring_health_liveness_get` |
 | `GET` | `/api/v1/monitoring/health/readiness` | Kubernetes Readiness Probe | `v1` | no | no | `readiness_probe_api_v1_monitoring_health_readiness_get` |
 | `GET` | `/api/v1/monitoring/metrics` | Service Metrics | `v1` | no | no | `get_service_metrics_api_v1_monitoring_metrics_get` |
-| `GET` | `/api/v1/monitoring/status` | Service Status Overview | `v1` | no | no | `get_service_status_api_v1_monitoring_status_get` |
 
 ### Objectify
 
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships` | Detect FK relationships in a dataset | `v1` | no | no | `detect_relationships_api_v1_objectify_databases__db_name__datasets__dataset_id__detect_relationships_post` |
-| `POST` | `/api/v1/objectify/databases/{db_name}/run-dag` | Run Objectify Dag | `v1` | no | no | `run_objectify_dag_api_v1_objectify_databases__db_name__run_dag_post` |
-| `POST` | `/api/v1/objectify/datasets/{dataset_id}/run` | Run Objectify | `v1` | no | no | `run_objectify_api_v1_objectify_datasets__dataset_id__run_post` |
+| `POST` | `/api/v1/objectify/databases/{db_name}/run-dag` | Orchestrate objectify across multiple ontology classes (DAG) | `v1` | no | no | `run_objectify_dag_api_v1_objectify_databases__db_name__run_dag_post` |
+| `POST` | `/api/v1/objectify/datasets/{dataset_id}/run` | Run objectify for a single dataset | `v1` | no | no | `run_objectify_api_v1_objectify_datasets__dataset_id__run_post` |
 | `GET` | `/api/v1/objectify/mapping-specs` | List Mapping Specs | `v1` | no | no | `list_mapping_specs_api_v1_objectify_mapping_specs_get` |
 | `POST` | `/api/v1/objectify/mapping-specs` | Create Mapping Spec | `v1` | no | no | `create_mapping_spec_api_v1_objectify_mapping_specs_post` |
 | `POST` | `/api/v1/objectify/mapping-specs/{mapping_spec_id}/trigger-incremental` | Trigger incremental objectify | `v1` | no | no | `trigger_incremental_objectify_api_v1_objectify_mapping_specs__mapping_spec_id__trigger_incremental_post` |
@@ -416,12 +405,6 @@
 | Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
 | --- | --- | --- | --- | --- | --- | --- |
 | `POST` | `/api/v1/databases/{db_name}/ontology` | Create Ontology | `v1` | no | no | `create_ontology_api_v1_databases__db_name__ontology_post` |
-
-### Ops
-
-| Method | Path | Summary | Version | Auth | Deprecated | Operation ID |
-| --- | --- | --- | --- | --- | --- | --- |
-| `GET` | `/api/v1/ops/status` | Ops Status | `v1` | no | no | `ops_status_api_v1_ops_status_get` |
 
 ### Pipeline Builder
 

@@ -16,7 +16,7 @@ This page is auto-generated from the live BFF OpenAPI schema.
 Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 :::
 
-**Total v1 endpoints: 156**
+**Total v1 endpoints: 149**
 
 ### Object Types & Schema (25 endpoints)
 
@@ -53,8 +53,8 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `POST` | `/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships` | Detect FK relationships in a dataset | No |
-| `POST` | `/api/v1/objectify/databases/{db_name}/run-dag` | Run Objectify Dag | No |
-| `POST` | `/api/v1/objectify/datasets/{dataset_id}/run` | Run Objectify | No |
+| `POST` | `/api/v1/objectify/databases/{db_name}/run-dag` | Orchestrate objectify across multiple ontology classes (DAG) | No |
+| `POST` | `/api/v1/objectify/datasets/{dataset_id}/run` | Run objectify for a single dataset | No |
 | `GET` | `/api/v1/objectify/mapping-specs` | List Mapping Specs | No |
 | `POST` | `/api/v1/objectify/mapping-specs` | Create Mapping Spec | No |
 | `POST` | `/api/v1/objectify/mapping-specs/{mapping_spec_id}/trigger-incremental` | Trigger incremental objectify | No |
@@ -83,7 +83,7 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/agent/pipeline-runs/stream` | Stream Pipeline Run | No |
 | `POST` | `/api/v1/ai/intent` | Ai Intent | No |
 | `POST` | `/api/v1/ai/query/{db_name}` | Ai Query | No |
-| `POST` | `/api/v1/ai/translate/query-plan/{db_name}` | Translate Query Plan | No |
+| `POST` | `/api/v1/ai/translate/query-plan/{db_name}` | Translate Query Plan ~~deprecated~~ | No |
 | `POST` | `/api/v1/context-tools/datasets/describe` | Describe Datasets | No |
 | `POST` | `/api/v1/context-tools/ontology/snapshot` | Snapshot Ontology | No |
 | `POST` | `/api/v1/context7/analyze/ontology` | Analyze Ontology | No |
@@ -110,25 +110,24 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `POST` | `/api/v1/schema-changes/subscriptions` | Create Subscription | No |
 | `DELETE` | `/api/v1/schema-changes/subscriptions/{subscription_id}` | Delete Subscription | No |
 
-### Admin (13 endpoints)
+### Admin (12 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
 | `POST` | `/api/v1/admin/ci/ci-results` | Ingest Ci Result | No |
 | `POST` | `/api/v1/admin/cleanup-old-replays` | Cleanup Old Replay Results | No |
-| `POST` | `/api/v1/admin/databases/{db_name}/rebuild-index` | Rebuild Instance Index Endpoint | No |
-| `GET` | `/api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status` | Get Rebuild Status | No |
+| `POST` | `/api/v1/admin/databases/{db_name}/rebuild-index` | Migrate ES index mappings (alias-swap rebuild) | No |
+| `GET` | `/api/v1/admin/databases/{db_name}/rebuild-index/{task_id}/status` | Check rebuild index task status | No |
 | `GET` | `/api/v1/admin/lakefs/credentials` | List Lakefs Credentials | No |
 | `POST` | `/api/v1/admin/lakefs/credentials` | Upsert Lakefs Credentials | No |
-| `POST` | `/api/v1/admin/recompute-projection` | Recompute Projection | No |
-| `GET` | `/api/v1/admin/recompute-projection/{task_id}/result` | Get Recompute Projection Result | No |
+| `POST` | `/api/v1/admin/recompute-projection` | Replay S3 events to rebuild a projection | No |
+| `GET` | `/api/v1/admin/recompute-projection/{task_id}/result` | Get recompute projection task result | No |
 | `POST` | `/api/v1/admin/reindex-instances` | Reindex all instances for a database (dataset-primary rebuild) | No |
-| `POST` | `/api/v1/admin/replay-instance-state` | Replay Instance State | No |
-| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get Replay Result | No |
-| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get Replay Trace | No |
-| `GET` | `/api/v1/admin/system-health` | Get System Health | No |
+| `POST` | `/api/v1/admin/replay-instance-state` | Replay single instance event history (debugging) | No |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/result` | Get instance replay result | No |
+| `GET` | `/api/v1/admin/replay-instance-state/{task_id}/trace` | Get instance replay trace with audit/lineage | No |
 
-### Health & Monitoring (20 endpoints)
+### Health & Monitoring (16 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
@@ -141,17 +140,13 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `GET` | `/api/v1/config/config/report` | Configuration Report | No |
 | `GET` | `/api/v1/config/config/security-audit` | Security Audit | No |
 | `GET` | `/api/v1/config/config/validation` | Configuration Validation | No |
-| `GET` | `/api/v1/health` | Health Check | No |
-| `GET` | `/api/v1/monitoring/background-tasks/active` | Active Background Tasks | No |
 | `GET` | `/api/v1/monitoring/background-tasks/health` | Background Task System Health | No |
-| `GET` | `/api/v1/monitoring/background-tasks/metrics` | Background Task Metrics | No |
 | `GET` | `/api/v1/monitoring/config` | Configuration Overview | No |
 | `GET` | `/api/v1/monitoring/health` | Basic Health Check | No |
 | `GET` | `/api/v1/monitoring/health/detailed` | Detailed Health Check | No |
 | `GET` | `/api/v1/monitoring/health/liveness` | Kubernetes Liveness Probe | No |
 | `GET` | `/api/v1/monitoring/health/readiness` | Kubernetes Readiness Probe | No |
 | `GET` | `/api/v1/monitoring/metrics` | Service Metrics | No |
-| `GET` | `/api/v1/monitoring/status` | Service Status Overview | No |
 
 ### Tasks (5 endpoints)
 
@@ -163,17 +158,10 @@ Do not edit manually. Run `python scripts/generate_portal_api_reference.py`.
 | `DELETE` | `/api/v1/tasks/{task_id}` | Cancel Task | No |
 | `GET` | `/api/v1/tasks/{task_id}/result` | Get Task Result | No |
 
-### Operations (1 endpoints)
+### Other (49 endpoints)
 
 | Method | Path | Summary | Auth |
 |--------|------|---------|------|
-| `GET` | `/api/v1/ops/status` | Ops Status | No |
-
-### Other (50 endpoints)
-
-| Method | Path | Summary | Auth |
-|--------|------|---------|------|
-| `GET` | `/api/v1/` | Root | No |
 | `GET` | `/api/v1/access-policies` | List Access Policies | No |
 | `POST` | `/api/v1/access-policies` | Upsert Access Policy | No |
 | `POST` | `/api/v1/auth/login` | Login | No |

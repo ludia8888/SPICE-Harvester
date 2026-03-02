@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Health"])
 
 
-@router.get("/")
+@router.get("/", include_in_schema=False)
 @trace_endpoint("bff.health.root")
 async def root():
     """
@@ -31,7 +31,7 @@ async def root():
     }
 
 
-@router.get("/health")
+@router.get("/health", include_in_schema=False)
 @trace_endpoint("bff.health.health_check")
 async def health_check(oms_client: OMSClient = Depends(get_oms_client)):
     """

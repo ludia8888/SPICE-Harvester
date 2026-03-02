@@ -29,6 +29,8 @@ router = APIRouter(tags=["Admin Operations"])
 @router.post(
     "/databases/{db_name}/rebuild-index",
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Migrate ES index mappings (alias-swap rebuild)",
+    description="Creates a new versioned ES index, copies existing docs with updated mappings, then performs atomic alias swap. Does NOT re-derive from source data.",
 )
 @trace_endpoint("bff.admin.rebuild_instance_index_endpoint")
 async def rebuild_instance_index_endpoint(
@@ -101,7 +103,10 @@ async def rebuild_instance_index_endpoint(
     }
 
 
-@router.get("/databases/{db_name}/rebuild-index/{task_id}/status")
+@router.get(
+    "/databases/{db_name}/rebuild-index/{task_id}/status",
+    summary="Check rebuild index task status",
+)
 @trace_endpoint("bff.admin.get_rebuild_status")
 async def get_rebuild_status(
     db_name: str,

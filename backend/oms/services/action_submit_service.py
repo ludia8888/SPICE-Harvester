@@ -113,7 +113,7 @@ async def submit_action_request(
         request_correlation_id = str(request_payload.get("correlation_id") or "").strip()
 
         # Prefer body base_branch; allow query alias for backward compatibility.
-        resolved_base_branch = request_base_branch or "master"
+        resolved_base_branch = request_base_branch or "main"
         if base_branch_alias:
             resolved_base_branch = str(base_branch_alias).strip() or resolved_base_branch
 

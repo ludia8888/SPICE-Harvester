@@ -83,18 +83,30 @@ async def _check_service_instance(instance: Any) -> Dict[str, Any]:
 
 @router.get("/health", 
            summary="Basic Health Check",
-           description="Basic health check endpoint for load balancers")
+           description="Readiness/liveness signal for traffic routing")
 async def basic_health_check():
     """
-    Basic health check endpoint
-    
-    Returns simple OK status for load balancers and basic monitoring.
+    Readiness/liveness health endpoint for routing decisions.
+
+    This endpoint is intentionally lightweight:
+    - no per-service lazy initialization
+    - no not_initialized noise
+    - returns only whether this process should receive traffic
     """
-    return {
-        "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "spice-harvester"
-    }
+    container = await get_container()
+    ready = bool(container.is_initialized)
+    status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ok" if ready else "unready",
+            "alive": True,
+            "ready": ready,
+            "accepting_traffic": ready,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "service": "spice-harvester",
+        },
+    )
 
 
 @router.get("/health/detailed",
@@ -117,13 +129,15 @@ async def detailed_health_check(
     checked = 0
     unhealthy = 0
 
-    # Container internals are used intentionally (monitoring-only) so we can access created instances.
+    # Container internals are used intentionally (monitoring-only) so we can access instantiated services.
     registrations = getattr(container, "_services", {})  # noqa: SLF001
     for name, registration in registrations.items():
+        instantiated = getattr(registration, "instance", None) is not None
         meta = {
             "type": getattr(getattr(registration, "service_type", None), "__name__", None),
             "singleton": bool(getattr(registration, "singleton", True)),
-            "created": getattr(registration, "instance", None) is not None,
+            "instantiated": instantiated,
+            "created": instantiated,
             "initialized": bool(getattr(registration, "initialized", False)),
         }
 
@@ -152,7 +166,7 @@ async def detailed_health_check(
             "unhealthy_services": unhealthy,
         },
         "services": services,
-        "note": "This endpoint checks only initialized services. Uninitialized services are reported as not_initialized.",
+        "note": "This endpoint checks only initialized services. Uninstantiated services are reported as not_initialized.",
     }
 
     if include_metrics:
@@ -245,9 +259,10 @@ async def get_service_metrics(
     )
 
 
-@router.get("/status", 
+@router.get("/status",
            summary="Service Status Overview",
-           description="Current status of all services")
+           description="Current status of all services",
+           include_in_schema=False)
 async def get_service_status(
     container: ServiceContainer = Depends(get_container)
 ):
@@ -258,14 +273,15 @@ async def get_service_status(
     for all managed services.
     """
     service_info = container.get_service_info()
-    created = sum(1 for meta in service_info.values() if meta.get("created"))
+    instantiated = sum(1 for meta in service_info.values() if meta.get("instantiated"))
 
     return {
         "status": "ok" if container.is_initialized else "unhealthy",
         "container_initialized": bool(container.is_initialized),
         "summary": {
             "registered_services": len(service_info),
-            "created_services": created,
+            "instantiated_services": instantiated,
+            "created_services": instantiated,
         },
         "services": service_info,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -379,7 +395,8 @@ async def get_service_dependencies(
 
 @router.get("/background-tasks/metrics",
            summary="Background Task Metrics",
-           description="Get metrics for background task execution")
+           description="Get metrics for background task execution",
+           include_in_schema=False)
 async def get_background_task_metrics(
     request: Request,
     task_manager: InitializedBackgroundTaskManagerDep,
@@ -444,7 +461,8 @@ async def get_background_task_metrics(
 
 @router.get("/background-tasks/active",
            summary="Active Background Tasks",
-           description="List all currently active background tasks")
+           description="List all currently active background tasks",
+           include_in_schema=False)
 async def get_active_background_tasks(
     request: Request,
     limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),

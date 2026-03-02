@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-01T01:50:36+09:00
+> Generated: 2026-03-03T02:00:56+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -363,8 +363,8 @@
 
 ### `backend/bff/routers/admin_instance_rebuild.py`
 - **Functions**
-  - `async rebuild_instance_index_endpoint(db_name, background_tasks, branch, task_manager, redis_service, elasticsearch_service)` (line 34): Trigger an async instance index rebuild for a database.
-  - `async get_rebuild_status(db_name, task_id, task_manager, redis_service)` (line 106): Check the status of a rebuild task.
+  - `async rebuild_instance_index_endpoint(db_name, background_tasks, branch, task_manager, redis_service, elasticsearch_service)` (line 36): Trigger an async instance index rebuild for a database.
+  - `async get_rebuild_status(db_name, task_id, task_manager, redis_service)` (line 111): Check the status of a rebuild task.
 
 ### `backend/bff/routers/admin_lakefs.py`
 - **Functions**
@@ -375,16 +375,16 @@
 
 ### `backend/bff/routers/admin_recompute_projection.py`
 - **Functions**
-  - `async recompute_projection(http_request, request, background_tasks, task_manager, redis_service, audit_store, lineage_store, elasticsearch_service)` (line 39): no docstring
-  - `async get_recompute_projection_result(task_id, task_manager, redis_service)` (line 64): no docstring
-  - `async reindex_instances_endpoint(db_name, branch, delete_index_first, dataset_registry, objectify_registry, job_queue, elasticsearch_service)` (line 84): Rebuild the ES instances index by re-running all active objectify jobs.
+  - `async recompute_projection(http_request, request, background_tasks, task_manager, redis_service, audit_store, lineage_store, elasticsearch_service)` (line 41): no docstring
+  - `async get_recompute_projection_result(task_id, task_manager, redis_service)` (line 69): no docstring
+  - `async reindex_instances_endpoint(db_name, branch, delete_index_first, dataset_registry, objectify_registry, job_queue, elasticsearch_service)` (line 90): Rebuild the ES instances index by re-running all active objectify jobs.
 
 ### `backend/bff/routers/admin_replay.py`
 - **Functions**
-  - `async replay_instance_state(request, background_tasks, storage_service, task_manager, redis_service)` (line 30): no docstring
-  - `async get_replay_result(task_id, task_manager, redis_service)` (line 49): no docstring
-  - `async get_replay_trace(task_id, command_id, include_audit, audit_limit, include_lineage, lineage_direction, lineage_max_depth, lineage_max_nodes, lineage_max_edges, timeline_limit, task_manager, redis_service, audit_store, lineage_store)` (line 63): no docstring
-  - `async cleanup_old_replay_results(older_than_hours, redis_service)` (line 103): no docstring
+  - `async replay_instance_state(request, background_tasks, storage_service, task_manager, redis_service)` (line 35): no docstring
+  - `async get_replay_result(task_id, task_manager, redis_service)` (line 57): no docstring
+  - `async get_replay_trace(task_id, command_id, include_audit, audit_limit, include_lineage, lineage_direction, lineage_max_depth, lineage_max_nodes, lineage_max_edges, timeline_limit, task_manager, redis_service, audit_store, lineage_store)` (line 74): no docstring
+  - `async cleanup_old_replay_results(older_than_hours, redis_service)` (line 114): no docstring
 
 ### `backend/bff/routers/admin_system.py`
 - **Functions**
@@ -402,8 +402,8 @@
 ### `backend/bff/routers/ai.py`
 - **Functions**
   - `async ai_intent(body, request, llm, redis_service, audit_store, sessions, dataset_registry)` (line 32): no docstring
-  - `async translate_query_plan(db_name, body, request, llm, redis_service, audit_store, oms, sessions, dataset_registry)` (line 56): no docstring
-  - `async ai_query(db_name, body, request, llm, redis_service, audit_store, lineage_store, oms, mapper, query_service, sessions, dataset_registry)` (line 83): no docstring
+  - `async translate_query_plan(db_name, body, request, llm, redis_service, audit_store, oms, sessions, dataset_registry)` (line 56): Deprecated: use ``POST /ai/query/{db_name}?dry_run=true`` instead.
+  - `async ai_query(db_name, body, request, dry_run, llm, redis_service, audit_store, lineage_store, oms, mapper, query_service, sessions, dataset_registry)` (line 84): no docstring
 
 ### `backend/bff/routers/audit.py`
 - **Functions**
@@ -434,7 +434,8 @@
 
 ### `backend/bff/routers/command_status.py`
 - **Functions**
-  - `async get_command_status(command_id, oms)` (line 28): Proxy OMS: `GET /api/v1/commands/{command_id}/status`.
+  - `_map_upstream_status_to_error_code(status_code)` (line 26): no docstring
+  - `async get_command_status(command_id, oms)` (line 54): Proxy OMS: `GET /api/v1/commands/{command_id}/status`.
 
 ### `backend/bff/routers/context7.py`
 - **Functions**
@@ -832,11 +833,11 @@
   - `async get_timeseries_first_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7371): Get the first (earliest) point of a time series property.
   - `async get_timeseries_last_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7429): Get the last (most recent) point of a time series property.
   - `async stream_timeseries_points_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7488): Stream all points of a time series property with optional range filter.
-  - `async upload_attachment_v2(request, filename, sdk_package_rid, sdk_version, oms_client)` (line 7553): Upload an attachment payload (Foundry v2 shape).
-  - `async list_attachment_property_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7589): List attachment metadata for a property (single or multiple).
-  - `async get_attachment_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7647): Get metadata for a specific attachment by its RID.
-  - `async get_attachment_content_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7709): Get the content of a single-valued attachment property.
-  - `async get_attachment_content_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7771): Get the content of an attachment by its RID.
+  - `async upload_attachment_v2(request, filename, sdk_package_rid, sdk_version, oms_client)` (line 7562): Upload an attachment payload (Foundry v2 shape).
+  - `async list_attachment_property_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7598): List attachment metadata for a property (single or multiple).
+  - `async get_attachment_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7656): Get metadata for a specific attachment by its RID.
+  - `async get_attachment_content_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7718): Get the content of a single-valued attachment property.
+  - `async get_attachment_content_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7780): Get the content of an attachment by its RID.
 - **Classes**
   - `OntologyNotFoundError` (line 107): no docstring
   - `PermissionDeniedError` (line 111): no docstring
@@ -1015,7 +1016,7 @@
 
 ### `backend/bff/routers/objectify_dag.py`
 - **Functions**
-  - `async run_objectify_dag(db_name, body, request, dataset_registry, objectify_registry, job_queue, oms_client)` (line 28): no docstring
+  - `async run_objectify_dag(db_name, body, request, dataset_registry, objectify_registry, job_queue, oms_client)` (line 33): no docstring
 
 ### `backend/bff/routers/objectify_deps.py`
 - **Functions**
@@ -1045,7 +1046,7 @@
 
 ### `backend/bff/routers/objectify_runs.py`
 - **Functions**
-  - `async run_objectify(dataset_id, body, request, dataset_registry, objectify_registry, job_queue, pipeline_registry, oms_client)` (line 34): no docstring
+  - `async run_objectify(dataset_id, body, request, dataset_registry, objectify_registry, job_queue, pipeline_registry, oms_client)` (line 39): no docstring
 
 ### `backend/bff/routers/ontology.py`
 
@@ -1128,14 +1129,14 @@
 
 ### `backend/bff/routers/pipeline_datasets_ops_lakefs.py`
 - **Functions**
-  - `async _acquire_lakefs_commit_lock(repository, branch, job_id)` (line 26): no docstring
-  - `async _release_lakefs_commit_lock(redis_service, lock_key, token)` (line 64): no docstring
-  - `_lakefs_commit_retry_delay(attempt)` (line 77): no docstring
-  - `async _resolve_lakefs_commit_from_head(lakefs_client, lakefs_storage_service, repository, branch, object_key, expected_checksum, attempts)` (line 81): no docstring
-  - `_resolve_lakefs_raw_repository()` (line 126): no docstring
-  - `async _ensure_lakefs_branch_exists(lakefs_client, repository, branch, source_branch)` (line 131): no docstring
-  - `_extract_lakefs_ref_from_artifact_key(artifact_key)` (line 152): no docstring
-  - `async _commit_lakefs_with_predicate_fallback(lakefs_client, lakefs_storage_service, repository, branch, message, metadata, object_key, expected_checksum)` (line 163): no docstring
+  - `async _acquire_lakefs_commit_lock(repository, branch, job_id)` (line 27): no docstring
+  - `async _release_lakefs_commit_lock(redis_service, lock_key, token)` (line 65): no docstring
+  - `_lakefs_commit_retry_delay(attempt)` (line 78): no docstring
+  - `async _resolve_lakefs_commit_from_head(lakefs_client, lakefs_storage_service, repository, branch, object_key, expected_checksum, attempts)` (line 82): no docstring
+  - `_resolve_lakefs_raw_repository()` (line 127): no docstring
+  - `async _ensure_lakefs_branch_exists(lakefs_client, repository, branch, source_branch)` (line 132): Thin wrapper preserved for backward-compatible ``ops._ensure_lakefs_branch_exists()`` calls.
+  - `_extract_lakefs_ref_from_artifact_key(artifact_key)` (line 150): no docstring
+  - `async _commit_lakefs_with_predicate_fallback(lakefs_client, lakefs_storage_service, repository, branch, message, metadata, object_key, expected_checksum)` (line 161): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_ops_objectify.py`
 - **Functions**
@@ -1381,9 +1382,6 @@
   - `TriggerIncrementalRequest` (line 77): no docstring
 
 ### `backend/bff/schemas/ontology_extensions_requests.py`
-- **Classes**
-  - `OntologyResourceRequest` (line 13): no docstring
-  - `OntologyDeploymentRecordRequest` (line 23): no docstring
 
 ### `backend/bff/schemas/ontology_requests.py`
 - **Classes**
@@ -1552,27 +1550,26 @@
 
 ### `backend/bff/services/database_error_policy.py`
 - **Functions**
-  - `_code_for_status(status_code)` (line 15): no docstring
-  - `apply_message_error_policies(exc, logger, log_message, policies, default_status_code, default_detail)` (line 44): no docstring
+  - `apply_message_error_policies(exc, logger, log_message, policies, default_status_code, default_detail)` (line 27): no docstring
 - **Classes**
-  - `MessageErrorPolicy` (line 34): no docstring
-    - `matches(self, normalized_message)` (line 40): no docstring
+  - `MessageErrorPolicy` (line 17): no docstring
+    - `matches(self, normalized_message)` (line 23): no docstring
 
 ### `backend/bff/services/database_service.py`
 - **Functions**
-  - `_is_dev_mode()` (line 42): no docstring
-  - `async _get_expected_seq_for_database(db_name)` (line 46): no docstring
-  - `_coerce_db_entry(entry)` (line 71): no docstring
-  - `_database_not_found_policy(db_name)` (line 85): no docstring
-  - `_enrich_db_entry(entry, actor_type, actor_id, actor_name, access_rows)` (line 93): no docstring
-  - `async list_databases(request, oms, dataset_registry)` (line 142): 데이터베이스 목록 조회
-  - `async create_database(body, http_request, oms)` (line 197): 데이터베이스 생성
-  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 281): 데이터베이스 삭제
-  - `async get_database(db_name, oms)` (line 357): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 381): Resolve the current `expected_seq` for database (aggregate) operations.
-  - `async list_classes(db_name, type, limit, oms)` (line 405): 데이터베이스의 클래스 목록 조회
-  - `async create_class(db_name, class_data, oms)` (line 457): 데이터베이스에 새 클래스 생성
-  - `async get_class(db_name, class_id, oms)` (line 525): 특정 클래스 조회
+  - `_is_dev_mode()` (line 43): no docstring
+  - `async _get_expected_seq_for_database(db_name)` (line 47): no docstring
+  - `_coerce_db_entry(entry)` (line 72): no docstring
+  - `_database_not_found_policy(db_name)` (line 86): no docstring
+  - `_enrich_db_entry(entry, actor_type, actor_id, actor_name, access_rows)` (line 94): no docstring
+  - `async list_databases(request, oms, dataset_registry)` (line 143): 데이터베이스 목록 조회
+  - `async create_database(body, http_request, oms)` (line 198): 데이터베이스 생성
+  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 282): 데이터베이스 삭제
+  - `async get_database(db_name, oms)` (line 358): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 382): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_classes(db_name, type, limit, oms)` (line 406): 데이터베이스의 클래스 목록 조회
+  - `async create_class(db_name, class_data, oms)` (line 458): 데이터베이스에 새 클래스 생성
+  - `async get_class(db_name, class_id, oms)` (line 518): 특정 클래스 조회
 
 ### `backend/bff/services/dataset_ingest_commit_service.py`
 - **Functions**
@@ -1618,10 +1615,11 @@
     - `_select_primary_table(structure)` (line 352): Choose a single "primary" table for schema suggestion.
     - `_select_requested_table(cls, structure, table_id, table_bbox)` (line 386): Select a table from structure analysis output.
     - `_normalize_bbox_dict(bbox)` (line 434): no docstring
-    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 445): no docstring
-    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 498): no docstring
-    - `async __aenter__(self)` (line 548): no docstring
-    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 551): no docstring
+    - `_estimate_total_rows(table)` (line 445): Estimate the total data rows from a table structure's bounding box.
+    - `_structure_table_to_preview(structure, table, sheet_url, worksheet_name)` (line 465): no docstring
+    - `_structure_table_to_excel_preview(structure, table, file_name, sheet_name)` (line 502): no docstring
+    - `async __aenter__(self)` (line 536): no docstring
+    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 539): no docstring
 
 ### `backend/bff/services/governance_service.py`
 - **Functions**
@@ -1945,8 +1943,7 @@
 
 ### `backend/bff/services/oms_error_policy.py`
 - **Functions**
-  - `_code_for_status(status_code)` (line 16): no docstring
-  - `raise_oms_boundary_exception(exc, action, logger, custom_http_status_details)` (line 34): no docstring
+  - `raise_oms_boundary_exception(exc, action, logger, custom_http_status_details)` (line 17): no docstring
 
 ### `backend/bff/services/ontology_class_id_service.py`
 - **Functions**
@@ -2372,11 +2369,15 @@
 
 ### `backend/bff/tests/test_command_status_router.py`
 - **Functions**
-  - `async test_command_status_proxies_to_api_v1_commands_status_path()` (line 22): no docstring
+  - `async test_command_status_proxies_to_api_v1_commands_status_path()` (line 37): no docstring
+  - `async test_command_status_maps_upstream_404_to_resource_not_found()` (line 44): no docstring
 - **Classes**
-  - `DummyOMSClient` (line 6): no docstring
-    - `__init__(self)` (line 7): no docstring
-    - `async get(self, path, **kwargs)` (line 10): no docstring
+  - `DummyOMSClient` (line 9): no docstring
+    - `__init__(self)` (line 10): no docstring
+    - `async get(self, path, **kwargs)` (line 13): no docstring
+  - `ErrorOMSClient` (line 24): no docstring
+    - `__init__(self, status_code, payload)` (line 25): no docstring
+    - `async get(self, path, **kwargs)` (line 29): no docstring
 
 ### `backend/bff/tests/test_context_tools_router.py`
 - **Functions**
@@ -3699,7 +3700,7 @@
 
 ### `backend/mcp_servers/pipeline_mcp_helpers.py`
 - **Functions**
-  - `normalize_string_list(value)` (line 6): no docstring
+  - `coerce_to_string_list(value)` (line 6): no docstring
   - `normalize_aggregates(value)` (line 18): Normalize aggregates list and return (aggregates, warnings).
   - `extract_spark_error_details(run)` (line 43): Extract error details from a pipeline run's output_json.
   - `trim_preview_payload(preview, max_rows)` (line 92): no docstring
@@ -4215,16 +4216,16 @@
   - `_attachment_v2_response(att)` (line 150): Format a single AttachmentV2 response.
   - `async _find_instance_by_pk(es, db_name, branch, object_type, primary_key)` (line 160): Resolve a single instance by its primary key via ES term search.
   - `_extract_attachment_property(source, property_name)` (line 188): Extract attachment property value from an instance ES document.
-  - `async upload_attachment(request, filename, storage)` (line 218): Upload a file as a temporary attachment.
-  - `async list_property_attachments(ontology, objectType, primaryKey, property, request, branch, es)` (line 281): List attachment metadata for a property (single or multiple).
-  - `async get_attachment_content(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 358): Get the content of a single-valued attachment property.
-  - `async get_attachment_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es)` (line 449): Get metadata for a single attachment by its RID.
-  - `async get_attachment_content_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es, storage)` (line 525): Get the content of an attachment by its RID.
+  - `async upload_attachment(request, filename, storage)` (line 226): Upload a file as a temporary attachment.
+  - `async list_property_attachments(ontology, objectType, primaryKey, property, request, branch, es)` (line 289): List attachment metadata for a property (single or multiple).
+  - `async get_attachment_content(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 366): Get the content of a single-valued attachment property.
+  - `async get_attachment_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es)` (line 457): Get metadata for a single attachment by its RID.
+  - `async get_attachment_content_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es, storage)` (line 533): Get the content of an attachment by its RID.
 
 ### `backend/oms/routers/command_status.py`
 - **Functions**
   - `async _fallback_from_registry(command_uuid, registry)` (line 30): no docstring
-  - `async get_command_status(command_id, command_status_service, processed_event_registry, event_store)` (line 75): Get command execution status/result.
+  - `async get_command_status(command_id, command_status_service, processed_event_registry, event_store)` (line 83): Get command execution status/result.
 
 ### `backend/oms/routers/database.py`
 - **Functions**
@@ -4292,24 +4293,21 @@
 
 ### `backend/oms/routers/ontology_extensions.py`
 - **Functions**
-  - `_normalize_resource_payload(payload)` (line 62): no docstring
-  - `_extract_value_type_spec(payload)` (line 82): no docstring
-  - `_validate_value_type_immutability(existing, incoming)` (line 90): no docstring
-  - `_resource_validation_strict()` (line 109): no docstring
-  - `_ensure_branch_writable(branch)` (line 113): no docstring
-  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 125): no docstring
-  - `_normalize_occ_branch_token(branch)` (line 130): no docstring
-  - `async _assert_expected_head_commit(db_name, branch, expected_head_commit, strict_mode)` (line 137): no docstring
-  - `async record_deployment(db_name, payload)` (line 206): no docstring
-  - `async list_resources(db_name, resource_type, branch, limit, offset)` (line 242): no docstring
-  - `async list_resources_by_type(db_name, resource_type, branch, limit, offset)` (line 284): no docstring
-  - `async create_resource(db_name, resource_type, payload, branch, expected_head_commit)` (line 302): no docstring
-  - `async get_resource(db_name, resource_type, resource_id, branch)` (line 382): no docstring
-  - `async update_resource(db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 427): no docstring
-  - `async delete_resource(db_name, resource_type, resource_id, branch, expected_head_commit)` (line 511): no docstring
-- **Classes**
-  - `OntologyResourceRequest` (line 41): no docstring
-  - `OntologyDeploymentRecordRequest` (line 51): no docstring
+  - `_normalize_resource_payload(payload)` (line 44): no docstring
+  - `_extract_value_type_spec(payload)` (line 64): no docstring
+  - `_validate_value_type_immutability(existing, incoming)` (line 72): no docstring
+  - `_resource_validation_strict()` (line 91): no docstring
+  - `_ensure_branch_writable(branch)` (line 95): no docstring
+  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 107): no docstring
+  - `_normalize_occ_branch_token(branch)` (line 112): no docstring
+  - `async _assert_expected_head_commit(db_name, branch, expected_head_commit, strict_mode)` (line 119): no docstring
+  - `async record_deployment(db_name, payload)` (line 188): no docstring
+  - `async list_resources(db_name, resource_type, branch, limit, offset)` (line 224): no docstring
+  - `async list_resources_by_type(db_name, resource_type, branch, limit, offset)` (line 266): no docstring
+  - `async create_resource(db_name, resource_type, payload, branch, expected_head_commit)` (line 284): no docstring
+  - `async get_resource(db_name, resource_type, resource_id, branch)` (line 364): no docstring
+  - `async update_resource(db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 409): no docstring
+  - `async delete_resource(db_name, resource_type, resource_id, branch, expected_head_commit)` (line 493): no docstring
 
 ### `backend/oms/routers/query.py`
 - **Functions**
@@ -4684,7 +4682,7 @@
 ### `backend/oms/validators/relationship_validator.py`
 - **Classes**
   - `ValidationSeverity` (line 16): 검증 결과 심각도
-  - `ValidationResult` (line 25): 검증 결과
+  - `RelationshipValidationResult` (line 25): 검증 결과
   - `RelationshipValidator` (line 35): 🔥 THINK ULTRA! 고급 관계 검증기
     - `__init__(self, existing_ontologies)` (line 47): no docstring
     - `validate_relationship(self, relationship, source_class)` (line 77): 단일 관계 검증
@@ -5678,11 +5676,11 @@
 
 ### `backend/shared/dependencies/container.py`
 - **Functions**
-  - `async get_container()` (line 335): Get the global service container
-  - `async initialize_container(settings)` (line 353): Initialize the global service container (thread-safe)
-  - `async shutdown_container()` (line 379): Shutdown the global service container
-  - `async container_lifespan(settings)` (line 394): Async context manager for container lifecycle
-  - `get_settings_from_container()` (line 416): Get settings from the global container (synchronous)
+  - `async get_container()` (line 337): Get the global service container
+  - `async initialize_container(settings)` (line 355): Initialize the global service container (thread-safe)
+  - `async shutdown_container()` (line 381): Shutdown the global service container
+  - `async container_lifespan(settings)` (line 396): Async context manager for container lifecycle
+  - `get_settings_from_container()` (line 418): Get settings from the global container (synchronous)
 - **Classes**
   - `ServiceLifecycle` (line 29): Protocol for services that have lifecycle management
     - `async initialize(self)` (line 32): Initialize the service
@@ -5703,7 +5701,7 @@
     - `async health_check_all(self)` (line 254): Perform health check on all created services
     - `async shutdown_all(self)` (line 280): Shutdown all created services gracefully
     - `get_service_info(self)` (line 305): Get information about registered services
-    - `async initialize_container(self)` (line 322): Initialize the container and mark as ready
+    - `async initialize_container(self)` (line 324): Initialize the container and mark as ready
 
 ### `backend/shared/dependencies/providers.py`
 - **Functions**
@@ -5798,6 +5796,10 @@
 ### `backend/shared/errors/external_codes.py`
 - **Classes**
   - `ExternalErrorCode` (line 6): no docstring
+
+### `backend/shared/errors/http_error_mapper.py`
+- **Functions**
+  - `code_for_http_status(status_code)` (line 16): Map an HTTP status code to the most appropriate ``ErrorCode``.
 
 ### `backend/shared/errors/runtime_exception_policy.py`
 - **Functions**
@@ -6424,26 +6426,33 @@
   - `async perform_security_audit(monitor)` (line 224): Perform security audit of configuration
   - `async get_configuration_report(monitor)` (line 269): Get comprehensive configuration report
   - `async check_configuration_changes(background_tasks, monitor)` (line 309): Manually trigger configuration change detection
-  - `async analyze_environment_drift(compare_environment, monitor)` (line 339): Analyze configuration drift between environments
-  - `async analyze_configuration_health_impact(monitor)` (line 446): Analyze configuration health impact
-  - `async get_monitoring_status(monitor)` (line 539): Get configuration monitoring system status
+  - `async analyze_environment_drift(compare_environment, monitor)` (line 345): Analyze configuration drift between environments
+  - `async analyze_configuration_health_impact(monitor)` (line 452): Analyze configuration health impact
+  - `async get_monitoring_status(monitor)` (line 545): Get configuration monitoring system status
 
 ### `backend/shared/routers/monitoring.py`
 - **Functions**
   - `_resolve_service_name(request)` (line 33): no docstring
   - `async _check_service_instance(instance)` (line 41): Best-effort, runtime-validated service health check.
-  - `async basic_health_check()` (line 87): Basic health check endpoint
-  - `async detailed_health_check(include_metrics, settings, container)` (line 103): Detailed health check with comprehensive service information
-  - `async readiness_probe(container)` (line 167): Kubernetes readiness probe
-  - `async liveness_probe(container)` (line 189): Kubernetes liveness probe
-  - `async get_service_metrics(service_name)` (line 224): Get comprehensive service metrics
-  - `async get_service_status(container)` (line 251): Get current status of all services
-  - `async get_configuration_overview(include_sensitive, settings)` (line 278): Get current application configuration
-  - `async restart_service(service_name, _)` (line 343): Restart a specific service
-  - `async get_service_dependencies(_)` (line 364): Get service dependency information
-  - `async get_background_task_metrics(request, task_manager)` (line 383): Get background task execution metrics
-  - `async get_active_background_tasks(request, limit, task_manager)` (line 448): Get list of all active background tasks
-  - `async get_background_task_health(request, task_manager)` (line 526): Get health status of background task processing system
+  - `async basic_health_check()` (line 87): Readiness/liveness health endpoint for routing decisions.
+  - `async detailed_health_check(include_metrics, settings, container)` (line 115): Detailed health check with comprehensive service information
+  - `async readiness_probe(container)` (line 181): Kubernetes readiness probe
+  - `async liveness_probe(container)` (line 203): Kubernetes liveness probe
+  - `async get_service_metrics(service_name)` (line 238): Get comprehensive service metrics
+  - `async get_service_status(container)` (line 266): Get current status of all services
+  - `async get_configuration_overview(include_sensitive, settings)` (line 294): Get current application configuration
+  - `async restart_service(service_name, _)` (line 359): Restart a specific service
+  - `async get_service_dependencies(_)` (line 380): Get service dependency information
+  - `async get_background_task_metrics(request, task_manager)` (line 400): Get background task execution metrics
+  - `async get_active_background_tasks(request, limit, task_manager)` (line 466): Get list of all active background tasks
+  - `async get_background_task_health(request, task_manager)` (line 544): Get health status of background task processing system
+
+### `backend/shared/schemas/__init__.py`
+
+### `backend/shared/schemas/ontology_extension_requests.py`
+- **Classes**
+  - `OntologyResourceRequest` (line 14): no docstring
+  - `OntologyDeploymentRecordRequest` (line 24): no docstring
 
 ### `backend/shared/security/__init__.py`
 
@@ -6717,21 +6726,20 @@
 
 ### `backend/shared/services/core/command_status_service.py`
 - **Classes**
-  - `CommandStatus` (line 19): Command execution status enumeration.
-  - `CommandStatusService` (line 29): Service for tracking command execution status.
-    - `__init__(self, redis_service)` (line 41): no docstring
-    - `async create_command_status(self, command_id, command_type, aggregate_id, payload, user_id)` (line 45): Create initial command status entry.
-    - `async update_status(self, command_id, status, message, error, progress)` (line 87): Update command status.
-    - `async start_processing(self, command_id, worker_id)` (line 166): Mark command as being processed.
-    - `async complete_command(self, command_id, result, message)` (line 191): Mark command as completed with result.
-    - `async fail_command(self, command_id, error, retry_count)` (line 219): Mark command as failed.
-    - `async cancel_command(self, command_id, reason)` (line 247): Cancel a pending or processing command.
-    - `async get_command_details(self, command_id)` (line 282): Get complete command details including status and result.
-    - `async list_user_commands(self, user_id, status_filter, limit)` (line 315): List commands for a specific user.
-    - `async cleanup_old_commands(self, days)` (line 362): Clean up commands older than specified days.
-    - `async set_command_status(self, command_id, status, metadata)` (line 378): Compatibility method for setting command status.
-    - `async get_command_status(self, command_id)` (line 421): Compatibility method for getting command status.
-    - `async get_command_result(self, command_id)` (line 448): Compatibility method for getting command result.
+  - `CommandStatusService` (line 19): Service for tracking command execution status.
+    - `__init__(self, redis_service)` (line 31): no docstring
+    - `async create_command_status(self, command_id, command_type, aggregate_id, payload, user_id)` (line 35): Create initial command status entry.
+    - `async update_status(self, command_id, status, message, error, progress)` (line 77): Update command status.
+    - `async start_processing(self, command_id, worker_id)` (line 156): Mark command as being processed.
+    - `async complete_command(self, command_id, result, message)` (line 181): Mark command as completed with result.
+    - `async fail_command(self, command_id, error, retry_count)` (line 209): Mark command as failed.
+    - `async cancel_command(self, command_id, reason)` (line 237): Cancel a pending or processing command.
+    - `async get_command_details(self, command_id)` (line 272): Get complete command details including status and result.
+    - `async list_user_commands(self, user_id, status_filter, limit)` (line 305): List commands for a specific user.
+    - `async cleanup_old_commands(self, days)` (line 352): Clean up commands older than specified days.
+    - `async set_command_status(self, command_id, status, metadata)` (line 368): Compatibility method for setting command status.
+    - `async get_command_status(self, command_id)` (line 411): Compatibility method for getting command status.
+    - `async get_command_result(self, command_id)` (line 438): Compatibility method for getting command result.
 
 ### `backend/shared/services/core/connector_ingest_service.py`
 - **Functions**
@@ -8529,89 +8537,89 @@
 
 ### `backend/shared/services/registries/pipeline_registry.py`
 - **Functions**
-  - `_ensure_json_string(value)` (line 66): no docstring
-  - `_normalize_output_list(value, field_name)` (line 72): no docstring
-  - `_is_production_env()` (line 85): no docstring
-  - `_lakefs_credentials_source()` (line 89): no docstring
-  - `_lakefs_service_principal()` (line 97): no docstring
-  - `_lakefs_fernet()` (line 111): no docstring
-  - `_encrypt_secret(secret_access_key)` (line 124): no docstring
-  - `_decrypt_secret(encrypted)` (line 131): no docstring
-  - `_normalize_pipeline_role(value)` (line 149): no docstring
-  - `_normalize_principal_type(value)` (line 158): no docstring
-  - `_role_allows(required, assigned)` (line 165): no docstring
-  - `_definition_object_key(db_name, pipeline_name)` (line 171): no docstring
-  - `_row_to_pipeline_record(row)` (line 189): no docstring
-  - `_row_to_pipeline_artifact(row)` (line 342): no docstring
+  - `_ensure_json_string(value)` (line 67): no docstring
+  - `_normalize_output_list(value, field_name)` (line 73): no docstring
+  - `_is_production_env()` (line 86): no docstring
+  - `_lakefs_credentials_source()` (line 90): no docstring
+  - `_lakefs_service_principal()` (line 98): no docstring
+  - `_lakefs_fernet()` (line 112): no docstring
+  - `_encrypt_secret(secret_access_key)` (line 125): no docstring
+  - `_decrypt_secret(encrypted)` (line 132): no docstring
+  - `_normalize_pipeline_role(value)` (line 150): no docstring
+  - `_normalize_principal_type(value)` (line 159): no docstring
+  - `_role_allows(required, assigned)` (line 166): no docstring
+  - `_definition_object_key(db_name, pipeline_name)` (line 172): no docstring
+  - `_row_to_pipeline_record(row)` (line 190): no docstring
+  - `_row_to_pipeline_artifact(row)` (line 343): no docstring
 - **Classes**
-  - `PipelineMergeNotSupportedError` (line 34): no docstring
-  - `PipelineOCCConflictError` (line 38): Raised when optimistic concurrency control detects a version conflict.
-    - `__init__(self, pipeline_id, expected_version, actual_version)` (line 41): no docstring
-  - `PipelineAlreadyExistsError` (line 58): no docstring
-    - `__init__(self, db_name, name, branch)` (line 59): no docstring
-  - `LakeFSCredentials` (line 179): no docstring
-  - `PipelineRecord` (line 229): no docstring
-  - `PipelineVersionRecord` (line 267): no docstring
-  - `PipelineUdfRecord` (line 277): no docstring
-  - `PipelineUdfVersionRecord` (line 288): no docstring
-  - `PipelineArtifactRecord` (line 297): no docstring
-  - `PromotionManifestRecord` (line 321): no docstring
-  - `PipelineRegistry` (line 367): no docstring
-    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 368): no docstring
-    - `async _get_lakefs_credentials(self, principal_type, principal_id)` (line 387): no docstring
-    - `async upsert_lakefs_credentials(self, principal_type, principal_id, access_key_id, secret_access_key, created_by)` (line 425): no docstring
-    - `async list_lakefs_credentials(self)` (line 470): no docstring
-    - `async resolve_lakefs_credentials(self, user_id)` (line 493): no docstring
-    - `async get_lakefs_client(self, user_id)` (line 530): no docstring
-    - `async get_lakefs_storage(self, user_id)` (line 541): no docstring
-    - `async ensure_lakefs_branch(self, repository, branch, source, user_id)` (line 551): Ensure the target lakeFS branch exists before attempting S3-gateway writes.
-    - `_resolve_repository(self, pipeline)` (line 585): no docstring
-    - `async _ensure_tables(self, conn)` (line 592): no docstring
-    - `async list_dependencies(self, pipeline_id)` (line 1120): no docstring
-    - `async replace_dependencies(self, pipeline_id, dependencies)` (line 1139): no docstring
-    - `async grant_permission(self, pipeline_id, principal_type, principal_id, role)` (line 1177): no docstring
-    - `async revoke_permission(self, pipeline_id, principal_type, principal_id)` (line 1208): no docstring
-    - `async list_permissions(self, pipeline_id)` (line 1233): no docstring
-    - `async has_any_permissions(self, pipeline_id)` (line 1258): no docstring
-    - `async get_permission_role(self, pipeline_id, principal_type, principal_id)` (line 1274): no docstring
-    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 1303): no docstring
-    - `async create_pipeline(self, db_name, name, description, pipeline_type, location, status, branch, lakefs_repository, proposal_status, proposal_title, proposal_description, proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle, schedule_interval_seconds, schedule_cron, pipeline_id)` (line 1320): no docstring
-    - `async list_pipelines(self, db_name, branch)` (line 1407): no docstring
-    - `async list_proposals(self, db_name, branch, status)` (line 1510): no docstring
-    - `async submit_proposal(self, pipeline_id, title, description, proposal_bundle)` (line 1563): no docstring
-    - `async review_proposal(self, pipeline_id, status, review_comment)` (line 1607): no docstring
-    - `async merge_branch(self, pipeline_id, from_branch, to_branch, user_id)` (line 1645): no docstring
-    - `async get_pipeline(self, pipeline_id)` (line 1741): no docstring
-    - `async get_pipeline_by_name(self, db_name, name, branch)` (line 1766): no docstring
-    - `async update_pipeline(self, pipeline_id, name, description, location, status, schedule_interval_seconds, schedule_cron, branch, lakefs_repository, proposal_status, proposal_title, proposal_description, proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle, expected_version)` (line 1799): Update pipeline with Optimistic Concurrency Control.
-    - `async add_version(self, pipeline_id, branch, definition_json, version_id, user_id)` (line 1918): no docstring
-    - `async get_latest_version(self, pipeline_id, branch)` (line 2040): no docstring
-    - `async get_version(self, pipeline_id, lakefs_commit_id, branch)` (line 2078): no docstring
-    - `async record_preview(self, pipeline_id, status, row_count, sample_json, job_id, node_id)` (line 2115): no docstring
-    - `async record_run(self, pipeline_id, job_id, mode, status, node_id, row_count, sample_json, output_json, pipeline_spec_commit_id, pipeline_spec_hash, input_lakefs_commits, output_lakefs_commit_id, spark_conf, code_version, started_at, finished_at)` (line 2159): no docstring
-    - `async upsert_artifact(self, pipeline_id, job_id, mode, status, run_id, artifact_id, definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id, inputs, lakefs_repository, lakefs_branch, lakefs_commit_id, outputs, declared_outputs, sampling_strategy, error)` (line 2268): no docstring
-    - `async get_artifact(self, artifact_id)` (line 2386): no docstring
-    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 2407): no docstring
-    - `async list_artifacts(self, pipeline_id, limit, mode)` (line 2443): no docstring
-    - `async list_runs(self, pipeline_id, limit)` (line 2477): no docstring
-    - `async get_run(self, pipeline_id, job_id)` (line 2526): no docstring
-    - `async get_watermarks(self, pipeline_id, branch)` (line 2572): no docstring
-    - `async upsert_watermarks(self, pipeline_id, branch, watermarks)` (line 2592): no docstring
-    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id)` (line 2627): no docstring
-    - `async record_promotion_manifest(self, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, lakefs_repository, lakefs_commit_id, ontology_commit_id, mapping_spec_id, mapping_spec_version, mapping_spec_target_class_id, promoted_dataset_version_id, promoted_dataset_name, target_branch, promoted_by, metadata, manifest_id, promoted_at)` (line 2659): no docstring
-    - `async list_scheduled_pipelines(self)` (line 2780): no docstring
-    - `async record_schedule_tick(self, pipeline_id, scheduled_at)` (line 2834): no docstring
-    - `async list_pipeline_branches(self, db_name)` (line 2849): no docstring
-    - `async get_pipeline_branch(self, db_name, branch)` (line 2876): no docstring
-    - `async archive_pipeline_branch(self, db_name, branch)` (line 2902): no docstring
-    - `async restore_pipeline_branch(self, db_name, branch)` (line 2939): no docstring
-    - `async create_branch(self, pipeline_id, new_branch, user_id)` (line 2976): no docstring
-    - `async create_udf(self, db_name, name, code, description)` (line 3065): no docstring
-    - `async create_udf_version(self, udf_id, code)` (line 3124): no docstring
-    - `async list_udfs(self, db_name)` (line 3185): List all UDFs for a database.
-    - `async get_udf(self, udf_id)` (line 3207): no docstring
-    - `async get_udf_version(self, udf_id, version)` (line 3227): no docstring
-    - `async get_udf_latest_version(self, udf_id)` (line 3254): no docstring
+  - `PipelineMergeNotSupportedError` (line 35): no docstring
+  - `PipelineOCCConflictError` (line 39): Raised when optimistic concurrency control detects a version conflict.
+    - `__init__(self, pipeline_id, expected_version, actual_version)` (line 42): no docstring
+  - `PipelineAlreadyExistsError` (line 59): no docstring
+    - `__init__(self, db_name, name, branch)` (line 60): no docstring
+  - `LakeFSCredentials` (line 180): no docstring
+  - `PipelineRecord` (line 230): no docstring
+  - `PipelineVersionRecord` (line 268): no docstring
+  - `PipelineUdfRecord` (line 278): no docstring
+  - `PipelineUdfVersionRecord` (line 289): no docstring
+  - `PipelineArtifactRecord` (line 298): no docstring
+  - `PromotionManifestRecord` (line 322): no docstring
+  - `PipelineRegistry` (line 368): no docstring
+    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 369): no docstring
+    - `async _get_lakefs_credentials(self, principal_type, principal_id)` (line 388): no docstring
+    - `async upsert_lakefs_credentials(self, principal_type, principal_id, access_key_id, secret_access_key, created_by)` (line 426): no docstring
+    - `async list_lakefs_credentials(self)` (line 471): no docstring
+    - `async resolve_lakefs_credentials(self, user_id)` (line 494): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 531): no docstring
+    - `async get_lakefs_storage(self, user_id)` (line 542): no docstring
+    - `async ensure_lakefs_branch(self, repository, branch, source, user_id)` (line 552): Ensure the target lakeFS branch exists before attempting S3-gateway writes.
+    - `_resolve_repository(self, pipeline)` (line 587): no docstring
+    - `async _ensure_tables(self, conn)` (line 594): no docstring
+    - `async list_dependencies(self, pipeline_id)` (line 1122): no docstring
+    - `async replace_dependencies(self, pipeline_id, dependencies)` (line 1141): no docstring
+    - `async grant_permission(self, pipeline_id, principal_type, principal_id, role)` (line 1179): no docstring
+    - `async revoke_permission(self, pipeline_id, principal_type, principal_id)` (line 1210): no docstring
+    - `async list_permissions(self, pipeline_id)` (line 1235): no docstring
+    - `async has_any_permissions(self, pipeline_id)` (line 1260): no docstring
+    - `async get_permission_role(self, pipeline_id, principal_type, principal_id)` (line 1276): no docstring
+    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 1305): no docstring
+    - `async create_pipeline(self, db_name, name, description, pipeline_type, location, status, branch, lakefs_repository, proposal_status, proposal_title, proposal_description, proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle, schedule_interval_seconds, schedule_cron, pipeline_id)` (line 1322): no docstring
+    - `async list_pipelines(self, db_name, branch)` (line 1409): no docstring
+    - `async list_proposals(self, db_name, branch, status)` (line 1512): no docstring
+    - `async submit_proposal(self, pipeline_id, title, description, proposal_bundle)` (line 1565): no docstring
+    - `async review_proposal(self, pipeline_id, status, review_comment)` (line 1609): no docstring
+    - `async merge_branch(self, pipeline_id, from_branch, to_branch, user_id)` (line 1647): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 1743): no docstring
+    - `async get_pipeline_by_name(self, db_name, name, branch)` (line 1768): no docstring
+    - `async update_pipeline(self, pipeline_id, name, description, location, status, schedule_interval_seconds, schedule_cron, branch, lakefs_repository, proposal_status, proposal_title, proposal_description, proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle, expected_version)` (line 1801): Update pipeline with Optimistic Concurrency Control.
+    - `async add_version(self, pipeline_id, branch, definition_json, version_id, user_id)` (line 1920): no docstring
+    - `async get_latest_version(self, pipeline_id, branch)` (line 2042): no docstring
+    - `async get_version(self, pipeline_id, lakefs_commit_id, branch)` (line 2080): no docstring
+    - `async record_preview(self, pipeline_id, status, row_count, sample_json, job_id, node_id)` (line 2117): no docstring
+    - `async record_run(self, pipeline_id, job_id, mode, status, node_id, row_count, sample_json, output_json, pipeline_spec_commit_id, pipeline_spec_hash, input_lakefs_commits, output_lakefs_commit_id, spark_conf, code_version, started_at, finished_at)` (line 2161): no docstring
+    - `async upsert_artifact(self, pipeline_id, job_id, mode, status, run_id, artifact_id, definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id, inputs, lakefs_repository, lakefs_branch, lakefs_commit_id, outputs, declared_outputs, sampling_strategy, error)` (line 2270): no docstring
+    - `async get_artifact(self, artifact_id)` (line 2388): no docstring
+    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 2409): no docstring
+    - `async list_artifacts(self, pipeline_id, limit, mode)` (line 2445): no docstring
+    - `async list_runs(self, pipeline_id, limit)` (line 2479): no docstring
+    - `async get_run(self, pipeline_id, job_id)` (line 2528): no docstring
+    - `async get_watermarks(self, pipeline_id, branch)` (line 2574): no docstring
+    - `async upsert_watermarks(self, pipeline_id, branch, watermarks)` (line 2594): no docstring
+    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id)` (line 2629): no docstring
+    - `async record_promotion_manifest(self, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, lakefs_repository, lakefs_commit_id, ontology_commit_id, mapping_spec_id, mapping_spec_version, mapping_spec_target_class_id, promoted_dataset_version_id, promoted_dataset_name, target_branch, promoted_by, metadata, manifest_id, promoted_at)` (line 2661): no docstring
+    - `async list_scheduled_pipelines(self)` (line 2782): no docstring
+    - `async record_schedule_tick(self, pipeline_id, scheduled_at)` (line 2836): no docstring
+    - `async list_pipeline_branches(self, db_name)` (line 2851): no docstring
+    - `async get_pipeline_branch(self, db_name, branch)` (line 2878): no docstring
+    - `async archive_pipeline_branch(self, db_name, branch)` (line 2904): no docstring
+    - `async restore_pipeline_branch(self, db_name, branch)` (line 2941): no docstring
+    - `async create_branch(self, pipeline_id, new_branch, user_id)` (line 2978): no docstring
+    - `async create_udf(self, db_name, name, code, description)` (line 3067): no docstring
+    - `async create_udf_version(self, udf_id, code)` (line 3126): no docstring
+    - `async list_udfs(self, db_name)` (line 3187): List all UDFs for a database.
+    - `async get_udf(self, udf_id)` (line 3209): no docstring
+    - `async get_udf_version(self, udf_id, version)` (line 3229): no docstring
+    - `async get_udf_latest_version(self, udf_id)` (line 3256): no docstring
 
 ### `backend/shared/services/registries/postgres_schema_registry.py`
 - **Classes**
@@ -8734,7 +8742,7 @@
 
 ### `backend/shared/services/storage/lakefs_branch_utils.py`
 - **Functions**
-  - `async ensure_lakefs_branch(lakefs_client, repository, branch, source)` (line 10): no docstring
+  - `async ensure_lakefs_branch(lakefs_client, repository, branch, source, sanitize, skip_if_source_matches)` (line 21): Create ``branch`` from ``source`` in *repository*, swallowing "already exists".
 
 ### `backend/shared/services/storage/lakefs_client.py`
 - **Functions**
@@ -10953,6 +10961,14 @@
 - **Functions**
   - `_checklist_section(text)` (line 32): no docstring
   - `test_architecture_quality_checklist_is_auto_rendered_with_ratios(doc_path)` (line 47): no docstring
+
+### `backend/tests/unit/openapi/test_contract_drift_response_docs.py`
+- **Functions**
+  - `_response_codes(schema, path, method)` (line 11): no docstring
+  - `test_bff_command_status_openapi_includes_404_and_503()` (line 18): no docstring
+  - `test_oms_command_status_openapi_includes_404_and_503()` (line 28): no docstring
+  - `test_v2_attachments_upload_openapi_includes_400_for_bff_and_oms()` (line 38): no docstring
+  - `test_config_drift_analysis_openapi_includes_400()` (line 53): no docstring
 
 ### `backend/tests/unit/openapi/test_foundry_contract_manifest.py`
 - **Functions**

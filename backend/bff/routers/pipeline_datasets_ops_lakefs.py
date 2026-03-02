@@ -16,6 +16,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.config.settings import get_settings
 from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
+from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch as _shared_ensure_lakefs_branch
 from shared.services.storage.redis_service import create_redis_service
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import parse_s3_uri
@@ -135,18 +136,15 @@ async def _ensure_lakefs_branch_exists(
     branch: str,
     source_branch: str = "main",
 ) -> None:
-    resolved_branch = safe_lakefs_ref(branch)
-    resolved_source = safe_lakefs_ref(source_branch)
-    if resolved_branch == resolved_source:
-        return
-    try:
-        await lakefs_client.create_branch(
-            repository=repository,
-            name=resolved_branch,
-            source=resolved_source,
-        )
-    except LakeFSConflictError:
-        return
+    """Thin wrapper preserved for backward-compatible ``ops._ensure_lakefs_branch_exists()`` calls."""
+    await _shared_ensure_lakefs_branch(
+        lakefs_client=lakefs_client,
+        repository=repository,
+        branch=branch,
+        source=source_branch,
+        sanitize=True,
+        skip_if_source_matches=True,
+    )
 
 
 def _extract_lakefs_ref_from_artifact_key(artifact_key: str) -> str:

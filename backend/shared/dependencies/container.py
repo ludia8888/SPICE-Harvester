@@ -311,10 +311,12 @@ class ServiceContainer:
         """
         info = {}
         for service_name, registration in self._services.items():
+            instantiated = registration.instance is not None
             info[service_name] = {
                 'type': registration.service_type.__name__,
                 'singleton': registration.singleton,
-                'created': registration.instance is not None,
+                'instantiated': instantiated,
+                'created': instantiated,
                 'initialized': registration.initialized
             }
         return info

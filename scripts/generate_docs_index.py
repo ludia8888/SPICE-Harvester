@@ -44,6 +44,11 @@ ONBOARDING_KO_DOCS = [
     "onboarding/ko/LEARNING-ROADMAP",
 ]
 
+HIDDEN_DOCS = [
+    "reference/_generated/API_DUPLICATE_LEGACY_AUDIT",
+    "verification/API_CONTRACT_DRIFT_TICKETS_2026-03-03",
+]
+
 
 def _render() -> str:
     lines: list[str] = []
@@ -86,6 +91,13 @@ def _render() -> str:
     lines.append(":caption: Onboarding (한국어)")
     lines.append("")
     lines.extend(ONBOARDING_KO_DOCS)
+    lines.append("```")
+    lines.append("")
+
+    lines.append("```{toctree}")
+    lines.append(":hidden:")
+    lines.append("")
+    lines.extend(HIDDEN_DOCS)
     lines.append("```")
     lines.append("")
 

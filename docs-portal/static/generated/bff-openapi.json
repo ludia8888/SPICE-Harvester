@@ -2948,7 +2948,7 @@
                 "type": "null"
               }
             ],
-            "description": "Resource id (optional)",
+            "description": "Resource id (optional; auto-generated from label if omitted)",
             "title": "Id"
           },
           "label": {
@@ -4900,51 +4900,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/": {
-      "get": {
-        "description": "루트 엔드포인트\n\n서비스 기본 정보를 반환합니다.",
-        "operationId": "root_api_v1__get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Root",
-        "tags": [
-          "Health"
-        ]
-      }
-    },
     "/api/v1/access-policies": {
       "get": {
         "operationId": "list_access_policies_api_v1_access_policies_get",
@@ -5286,7 +5241,7 @@
     },
     "/api/v1/admin/databases/{db_name}/rebuild-index": {
       "post": {
-        "description": "Trigger an async instance index rebuild for a database.\n\nCreates a new versioned ES index, reindexes all existing documents with\nup-to-date mappings, then performs an atomic alias swap.",
+        "description": "Creates a new versioned ES index, copies existing docs with updated mappings, then performs atomic alias swap. Does NOT re-derive from source data.",
         "operationId": "rebuild_instance_index_endpoint_api_v1_admin_databases__db_name__rebuild_index_post",
         "parameters": [
           {
@@ -5356,7 +5311,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Rebuild Instance Index Endpoint",
+        "summary": "Migrate ES index mappings (alias-swap rebuild)",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -5434,7 +5389,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Rebuild Status",
+        "summary": "Check rebuild index task status",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -5559,6 +5514,7 @@
     },
     "/api/v1/admin/recompute-projection": {
       "post": {
+        "description": "Replays LakeFS/S3 immutable events within a time range to reconstruct instances or ontologies projection.",
         "operationId": "recompute_projection_api_v1_admin_recompute_projection_post",
         "parameters": [
           {
@@ -5617,7 +5573,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Recompute Projection",
+        "summary": "Replay S3 events to rebuild a projection",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -5685,7 +5641,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Recompute Projection Result",
+        "summary": "Get recompute projection task result",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -5694,7 +5650,7 @@
     },
     "/api/v1/admin/reindex-instances": {
       "post": {
-        "description": "Rebuild the ES instances index by re-running all active objectify jobs.\n\nUnlike ontology projection rebuild (which replays S3 events), this endpoint\nre-executes objectify from source datasets — following the Palantir principle\nthat dataset artifacts are the source of truth for instances.",
+        "description": "Re-executes ALL objectify jobs from source datasets. This is the nuclear rebuild option.",
         "operationId": "reindex_instances_endpoint_api_v1_admin_reindex_instances_post",
         "parameters": [
           {
@@ -5789,6 +5745,7 @@
     },
     "/api/v1/admin/replay-instance-state": {
       "post": {
+        "description": "Replays the full event history of one specific instance for debugging and state inspection.",
         "operationId": "replay_instance_state_api_v1_admin_replay_instance_state_post",
         "parameters": [
           {
@@ -5847,7 +5804,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Replay Instance State",
+        "summary": "Replay single instance event history (debugging)",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -5915,7 +5872,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Replay Result",
+        "summary": "Get instance replay result",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -6104,56 +6061,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Replay Trace",
-        "tags": [
-          "Admin Operations",
-          "Admin Operations"
-        ]
-      }
-    },
-    "/api/v1/admin/system-health": {
-      "get": {
-        "operationId": "get_system_health_api_v1_admin_system_health_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get System Health Api V1 Admin System Health Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get System Health",
+        "summary": "Get instance replay trace with audit/lineage",
         "tags": [
           "Admin Operations",
           "Admin Operations"
@@ -6372,6 +6280,18 @@
             }
           },
           {
+            "description": "When true, return only the query plan without executing (same as translate/query-plan).",
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When true, return only the query plan without executing (same as translate/query-plan).",
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
             "in": "query",
             "name": "lang",
@@ -6435,6 +6355,8 @@
     },
     "/api/v1/ai/translate/query-plan/{db_name}": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated: use ``POST /ai/query/{db_name}?dry_run=true`` instead.",
         "operationId": "translate_query_plan_api_v1_ai_translate_query_plan__db_name__post",
         "parameters": [
           {
@@ -7046,6 +6968,12 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "Invalid command_id"
+          },
+          "404": {
+            "description": "Command not found"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7055,6 +6983,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "description": "Upstream command status unavailable"
           }
         },
         "summary": "Get Command Status",
@@ -7347,6 +7278,9 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "Request validation failed"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7356,6 +7290,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "500": {
+            "description": "Environment drift analysis failed"
           }
         },
         "summary": "Environment Drift Analysis",
@@ -11224,51 +11161,6 @@
         ]
       }
     },
-    "/api/v1/health": {
-      "get": {
-        "description": "헬스체크 엔드포인트\n\n서비스와 데이터베이스 연결 상태를 확인합니다.",
-        "operationId": "health_check_api_v1_health_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Health Check",
-        "tags": [
-          "Health"
-        ]
-      }
-    },
     "/api/v1/key-specs": {
       "get": {
         "operationId": "list_key_specs_api_v1_key_specs_get",
@@ -13340,75 +13232,6 @@
         ]
       }
     },
-    "/api/v1/monitoring/background-tasks/active": {
-      "get": {
-        "description": "List all currently active background tasks",
-        "operationId": "get_active_background_tasks_api_v1_monitoring_background_tasks_active_get",
-        "parameters": [
-          {
-            "description": "Maximum tasks to return",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "description": "Maximum tasks to return",
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Active Background Tasks",
-        "tags": [
-          "Monitoring"
-        ]
-      }
-    },
     "/api/v1/monitoring/background-tasks/health": {
       "get": {
         "description": "Check health of background task processing system",
@@ -13449,51 +13272,6 @@
           }
         },
         "summary": "Background Task System Health",
-        "tags": [
-          "Monitoring"
-        ]
-      }
-    },
-    "/api/v1/monitoring/background-tasks/metrics": {
-      "get": {
-        "description": "Get metrics for background task execution",
-        "operationId": "get_background_task_metrics_api_v1_monitoring_background_tasks_metrics_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Background Task Metrics",
         "tags": [
           "Monitoring"
         ]
@@ -13568,7 +13346,7 @@
     },
     "/api/v1/monitoring/health": {
       "get": {
-        "description": "Basic health check endpoint for load balancers",
+        "description": "Readiness/liveness signal for traffic routing",
         "operationId": "basic_health_check_api_v1_monitoring_health_get",
         "parameters": [
           {
@@ -13841,51 +13619,6 @@
         ]
       }
     },
-    "/api/v1/monitoring/status": {
-      "get": {
-        "description": "Current status of all services",
-        "operationId": "get_service_status_api_v1_monitoring_status_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Service Status Overview",
-        "tags": [
-          "Monitoring"
-        ]
-      }
-    },
     "/api/v1/objectify/databases/{db_name}/datasets/{dataset_id}/detect-relationships": {
       "post": {
         "description": "Analyzes dataset columns to detect potential foreign key relationships based on naming conventions and value overlap.",
@@ -13989,6 +13722,7 @@
     },
     "/api/v1/objectify/databases/{db_name}/run-dag": {
       "post": {
+        "description": "Resolves dependency graph and fans out objectify jobs for all specified classes. Use this for full batch processing.",
         "operationId": "run_objectify_dag_api_v1_objectify_databases__db_name__run_dag_post",
         "parameters": [
           {
@@ -14058,7 +13792,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Run Objectify Dag",
+        "summary": "Orchestrate objectify across multiple ontology classes (DAG)",
         "tags": [
           "Objectify",
           "Objectify"
@@ -14067,6 +13801,7 @@
     },
     "/api/v1/objectify/datasets/{dataset_id}/run": {
       "post": {
+        "description": "Executes objectify for one specific dataset with explicit mapping spec control.",
         "operationId": "run_objectify_api_v1_objectify_datasets__dataset_id__run_post",
         "parameters": [
           {
@@ -14136,7 +13871,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Run Objectify",
+        "summary": "Run objectify for a single dataset",
         "tags": [
           "Objectify",
           "Objectify"
@@ -14530,54 +14265,6 @@
         "summary": "Run ontology agent",
         "tags": [
           "Ontology Agent"
-        ]
-      }
-    },
-    "/api/v1/ops/status": {
-      "get": {
-        "operationId": "ops_status_api_v1_ops_status_get",
-        "parameters": [
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Ops Status Api V1 Ops Status Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Ops Status",
-        "tags": [
-          "Ops"
         ]
       }
     },
@@ -21399,6 +21086,15 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "description": "InvalidArgument"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "PermissionDenied"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21408,6 +21104,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal error"
           }
         },
         "summary": "Upload Attachment V2",
