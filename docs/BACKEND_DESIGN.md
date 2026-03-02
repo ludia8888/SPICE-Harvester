@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T02:57:40+09:00
+> Generated: 2026-03-03T03:40:01+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **1016**
-- Modules with module docstring: **546/1016**
-- Modules with broad `except Exception`: **278**
+- Modules scanned: **1007**
+- Modules with module docstring: **538/1007**
+- Modules with broad `except Exception`: **274**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **253647**
+- Total code lines (non-empty, non-comment): **252216**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2431 |
 | `agent` | 10 | 4/10 (40%) | 3 | 16 | 16 | 16 | 2846 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 223 | 168/223 (75%) | 78 | 363 | 1152 | 796 | 60502 |
+| `bff` | 214 | 160/214 (74%) | 74 | 357 | 1085 | 778 | 59042 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -30,7 +30,7 @@
 | `funnel` | 14 | 12/14 (85%) | 4 | 32 | 15 | 23 | 3588 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 216 |
 | `instance_worker` | 2 | 2/2 (100%) | 1 | 38 | 28 | 2 | 2385 |
-| `mcp_servers` | 18 | 6/18 (33%) | 10 | 50 | 125 | 31 | 6815 |
+| `mcp_servers` | 18 | 6/18 (33%) | 10 | 50 | 126 | 33 | 6841 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
 | `objectify_worker` | 4 | 4/4 (100%) | 2 | 33 | 51 | 7 | 4621 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
 | `shared` | 309 | 208/309 (67%) | 106 | 386 | 872 | 1145 | 80723 |
-| `tests` | 308 | 53/308 (17%) | 20 | 154 | 1654 | 1507 | 54538 |
+| `tests` | 308 | 53/308 (17%) | 20 | 154 | 1654 | 1507 | 54541 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
@@ -110,10 +110,10 @@
 | 14 | `backend/oms/routers/ontology_extensions.py` | API contract surface, ontology model contract |
 | 15 | `backend/bff/routers/ontology_agent.py` | API contract surface, ontology model contract |
 | 16 | `backend/bff/routers/ontology_extensions.py` | API contract surface, ontology model contract |
-| 17 | `backend/bff/routers/ontology_crud.py` | API contract surface, ontology model contract |
-| 18 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
-| 19 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
-| 20 | `backend/bff/main.py` | entrypoint lifecycle |
+| 17 | `backend/bff/routers/ontology_ops.py` | API contract surface, ontology model contract |
+| 18 | `backend/bff/routers/ontology.py` | API contract surface, ontology model contract |
+| 19 | `backend/bff/main.py` | entrypoint lifecycle |
+| 20 | `backend/message_relay/main.py` | entrypoint lifecycle |
 
 ## action_outbox_worker
 
@@ -837,13 +837,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=922 | code_lines=791 | risk_score=42
-- API surface: public=11 | top-level functions=32 | classes=1 | methods=0
-- Runtime signals: async_functions=12 | try=20 | raise=8 | broad_except=6 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=6/32 (18%) | classes=0/1 (0%) | methods=0/0 (n/a)
-- Internal imports (13): bff.dependencies; bff.routers.pipeline_deps; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.foundry.auth; shared.foundry.errors; shared.foundry.rids (+5 more)
+- Source footprint: total_lines=1095 | code_lines=948 | risk_score=47
+- API surface: public=12 | top-level functions=33 | classes=1 | methods=0
+- Runtime signals: async_functions=13 | try=21 | raise=9 | broad_except=7 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=7/33 (21%) | classes=0/1 (0%) | methods=0/0 (n/a)
+- Internal imports (17): bff.dependencies; bff.routers.pipeline_deps; bff.routers.pipeline_ops; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.foundry.auth; shared.foundry.errors (+9 more)
 - External imports (6): dataclasses; fastapi; logging; types; typing; uuid
-- Public API names: cancel_build_v2; create_build_v2; create_schedule_v2; delete_schedule_v2; get_build_v2; get_builds_batch_v2; get_schedule_v2; list_build_jobs_v2; list_schedule_runs_v2; pause_schedule_v2; unpause_schedule_v2
+- Public API names: cancel_build_v2; create_build_v2; create_schedule_v2; delete_schedule_v2; deploy_build_v2; get_build_v2; get_builds_batch_v2; get_schedule_v2; list_build_jobs_v2; list_schedule_runs_v2; pause_schedule_v2; unpause_schedule_v2
 
 ### `backend/bff/routers/governance.py`
 - Module summary: Governance endpoints (BFF).
@@ -1141,11 +1141,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=18 | code_lines=11 | risk_score=0
+- Source footprint: total_lines=12 | code_lines=8 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (1): bff.routers.ontology_crud
+- Internal imports (0): not documented
 - External imports (1): fastapi
 - Public API names: not documented
 
@@ -1164,22 +1164,6 @@
 - Internal imports (12): bff.services.pipeline_agent_autonomous_loop; shared.config.settings; shared.errors.error_types; shared.models.pipeline_plan; shared.models.requests; shared.observability.tracing; shared.security.auth_utils; shared.services.agent.llm_gateway (+4 more)
 - External imports (4): fastapi; logging; pydantic; typing
 - Public API names: OntologyAgentRunRequest; run_ontology_agent
-
-### `backend/bff/routers/ontology_crud.py`
-- Module summary: Ontology CRUD endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=51 | code_lines=43 | risk_score=0
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (8): bff.dependencies; bff.routers.role_deps; bff.services; bff.services.oms_client; shared.models.ontology; shared.models.responses; shared.observability.tracing; shared.security.database_access
-- External imports (1): fastapi
-- Public API names: create_ontology
 
 ### `backend/bff/routers/ontology_extensions.py`
 - Module summary: Ontology extension endpoints (BFF).
@@ -1237,7 +1221,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=36 | code_lines=25 | risk_score=0
+- Source footprint: total_lines=34 | code_lines=23 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -1269,11 +1253,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=48 | code_lines=38 | risk_score=0
+- Source footprint: total_lines=33 | code_lines=23 | risk_score=0
 - API surface: public=0 | top-level functions=0 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (5): bff.routers; bff.routers.pipeline_datasets_ingest; bff.routers.pipeline_datasets_ops; bff.routers.pipeline_datasets_uploads; bff.routers.pipeline_datasets_versions
+- Internal imports (2): bff.routers; bff.routers.pipeline_datasets_ops
 - External imports (1): fastapi
 - Public API names: not documented
 
@@ -1308,22 +1292,6 @@
 - Internal imports (1): bff.routers.objectify_job_queue_deps
 - External imports (0): not documented
 - Public API names: not documented
-
-### `backend/bff/routers/pipeline_datasets_ingest.py`
-- Module summary: Pipeline dataset ingest request endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=95 | code_lines=85 | risk_score=10
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=4 | raise=9 | broad_except=2 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (9): bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; bff.schemas.pipeline_datasets; shared.errors.error_types; shared.models.requests; shared.observability.tracing; shared.security.auth_utils; shared.security.input_sanitizer (+1 more)
-- External imports (3): fastapi; logging; typing
-- Public API names: approve_dataset_schema; get_dataset_ingest_request
 
 ### `backend/bff/routers/pipeline_datasets_ops.py`
 - Module summary: Pipeline datasets helpers (BFF).
@@ -1421,86 +1389,6 @@
 - External imports (6): csv; fastapi; hashlib; io; logging; typing
 - Public API names: not documented
 
-### `backend/bff/routers/pipeline_datasets_uploads.py`
-- Module summary: Pipeline dataset upload endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=32 | code_lines=23 | risk_score=0
-- API surface: public=0 | top-level functions=0 | classes=0 | methods=0
-- Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (4): bff.routers; bff.routers.pipeline_datasets_uploads_csv; bff.routers.pipeline_datasets_uploads_excel; bff.routers.pipeline_datasets_uploads_media
-- External imports (1): fastapi
-- Public API names: not documented
-
-### `backend/bff/routers/pipeline_datasets_uploads_csv.py`
-- Module summary: Pipeline dataset CSV upload endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=176 | code_lines=159 | risk_score=5
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=1 | raise=6 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (14): bff.routers.pipeline_datasets_deps; bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; bff.services.pipeline_dataset_upload_context; bff.services.pipeline_tabular_upload_facade; shared.config.settings; shared.dependencies.providers; shared.errors.error_types (+6 more)
-- External imports (4): asyncio; fastapi; logging; typing
-- Public API names: upload_csv_dataset
-
-### `backend/bff/routers/pipeline_datasets_uploads_excel.py`
-- Module summary: Pipeline dataset Excel upload endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=198 | code_lines=178 | risk_score=5
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=3 | raise=6 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (14): bff.routers.pipeline_datasets_deps; bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; bff.services.pipeline_dataset_upload_context; bff.services.pipeline_tabular_upload_facade; shared.config.settings; shared.dependencies.providers; shared.errors.error_types (+6 more)
-- External imports (5): asyncio; fastapi; io; logging; typing
-- Public API names: upload_excel_dataset
-
-### `backend/bff/routers/pipeline_datasets_uploads_media.py`
-- Module summary: Pipeline dataset media upload endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=55 | code_lines=48 | risk_score=0
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
-- Runtime signals: async_functions=1 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (11): bff.routers.pipeline_datasets_deps; bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; bff.services; shared.dependencies.providers; shared.models.requests; shared.observability.tracing; shared.services.events.objectify_job_queue (+3 more)
-- External imports (2): fastapi; typing
-- Public API names: upload_media_dataset
-
-### `backend/bff/routers/pipeline_datasets_versions.py`
-- Module summary: Pipeline dataset write/version endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=120 | code_lines=108 | risk_score=15
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=2 | try=3 | raise=5 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (16): bff.routers.pipeline_datasets_deps; bff.routers.pipeline_datasets_ops; bff.routers.pipeline_deps; bff.services; shared.config.app_config; shared.dependencies.providers; shared.errors.error_types; shared.models.requests (+8 more)
-- External imports (5): asyncpg; fastapi; logging; typing; uuid
-- Public API names: create_dataset; create_dataset_version
-
 ### `backend/bff/routers/pipeline_deps.py`
 - Module summary: Pipeline Builder dependency providers.
 - Responsibilities: not documented
@@ -1532,22 +1420,6 @@
 - Internal imports (8): bff.routers.pipeline_deps; bff.services; shared.dependencies.providers; shared.models.requests; shared.observability.tracing; shared.services.registries.dataset_registry; shared.services.registries.pipeline_registry; shared.services.storage.event_store
 - External imports (3): fastapi; logging; typing
 - Public API names: get_pipeline; get_pipeline_readiness; update_pipeline
-
-### `backend/bff/routers/pipeline_execution.py`
-- Module summary: Pipeline execution endpoints (BFF).
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: HTTP contract/endpoint routing
-- Source footprint: total_lines=140 | code_lines=125 | risk_score=0
-- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=yes | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
-- Internal imports (14): bff.dependencies; bff.routers.pipeline_deps; bff.routers.pipeline_ops; bff.services; bff.services.oms_client; shared.dependencies.providers; shared.models.requests; shared.observability.tracing (+6 more)
-- External imports (3): fastapi; logging; typing
-- Public API names: build_pipeline; deploy_pipeline; preview_pipeline
 
 ### `backend/bff/routers/pipeline_history.py`
 - Module summary: Pipeline run/artifact endpoints (BFF).
@@ -3325,22 +3197,6 @@
 - External imports (5): __future__; datetime; fastapi; pytest; types
 - Public API names: test_context_tools_dataset_describe_constrains_allowed_dataset_ids; test_context_tools_dataset_describe_enforces_db_policy; test_context_tools_ontology_snapshot_enforces_policy
 
-### `backend/bff/tests/test_dataset_ingest_idempotency.py`
-- Module summary: no docstring
-- Responsibilities: not documented
-- Invariants: not documented
-- Failure modes: not documented
-- Extension points: not documented
-- Dependencies (doc): not documented
-- Inferred role: general backend module
-- Source footprint: total_lines=345 | code_lines=297 | risk_score=0
-- API surface: public=1 | top-level functions=3 | classes=9 | methods=20
-- Runtime signals: async_functions=19 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/9 (0%) | methods=0/20 (0%)
-- Internal imports (2): bff.routers; bff.routers.pipeline_datasets
-- External imports (8): __future__; dataclasses; fastapi; io; pytest; starlette; typing; uuid
-- Public API names: test_csv_upload_idempotency_key_reuses_version
-
 ### `backend/bff/tests/test_document_bundles_router.py`
 - Module summary: no docstring
 - Responsibilities: not documented
@@ -3701,11 +3557,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=157 | code_lines=124 | risk_score=0
+- Source footprint: total_lines=167 | code_lines=132 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=6 | methods=11
-- Runtime signals: async_functions=10 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=12 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/6 (0%) | methods=0/11 (0%)
-- Internal imports (1): bff.routers.pipeline_datasets
+- Internal imports (1): bff.services.pipeline_dataset_version_service
 - External imports (5): __future__; dataclasses; datetime; pytest; typing
 - Public API names: test_create_dataset_version_materializes_manual_sample_to_artifact
 
@@ -3749,11 +3605,11 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=802 | code_lines=673 | risk_score=0
+- Source footprint: total_lines=813 | code_lines=686 | risk_score=0
 - API surface: public=11 | top-level functions=14 | classes=11 | methods=33
 - Runtime signals: async_functions=43 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/14 (0%) | classes=0/11 (0%) | methods=0/33 (0%)
-- Internal imports (1): bff.routers.pipeline_execution
+- Internal imports (1): bff.services.pipeline_execution_service
 - External imports (5): __future__; dataclasses; fastapi; pytest; typing
 - Public API names: lakefs_merge_stub; test_build_enqueues_job_and_records_run; test_build_postgres_profile_uses_branch_ref_when_head_commit_unavailable; test_preview_defaults_to_foundry_limit_and_preview_meta_flags; test_preview_enqueues_job_with_node_id_and_records_preview_and_run; test_promote_build_allows_breaking_schema_changes_with_replay_flag; test_promote_build_blocks_deploy_when_expectations_failed; test_promote_build_merges_build_branch_to_main_and_registers_version; test_promote_build_rejects_non_staged_artifact_key; test_promote_build_requires_replay_for_breaking_schema_changes; test_promote_build_surfaces_build_errors_when_build_failed
 
@@ -3797,13 +3653,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=737 | code_lines=628 | risk_score=0
-- API surface: public=9 | top-level functions=10 | classes=6 | methods=33
-- Runtime signals: async_functions=46 | try=0 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=2/10 (20%) | classes=2/6 (33%) | methods=0/33 (0%)
-- Internal imports (2): bff.routers; shared.services.registries.dataset_registry
-- External imports (6): dataclasses; datetime; io; pytest; starlette; types
-- Public API names: test_approve_dataset_schema_updates_dataset; test_get_ingest_request_includes_tabular_analysis; test_get_ingest_request_tabular_analysis_returns_string_columns; test_maybe_enqueue_objectify_job; test_pipeline_helpers_normalize_inputs; test_upload_csv_dataset_all_columns_string_type; test_upload_csv_dataset_creates_version; test_upload_excel_dataset_commits_preview; test_upload_media_dataset_stores_files
+- Source footprint: total_lines=96 | code_lines=76 | risk_score=0
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Runtime signals: async_functions=6 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Internal imports (1): bff.routers
+- External imports (2): pytest; types
+- Public API names: test_maybe_enqueue_objectify_job; test_pipeline_helpers_normalize_inputs
 
 ### `backend/bff/tests/test_query_foundry_adapter.py`
 - Module summary: no docstring
@@ -4727,13 +4583,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=15 | code_lines=8 | risk_score=0
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Source footprint: total_lines=21 | code_lines=12 | risk_score=0
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=1/3 (33%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): shared.config.settings
 - External imports (2): __future__; typing
-- Public API names: bff_admin_token; bff_api_base_url
+- Public API names: bff_admin_token; bff_api_base_url; bff_api_v2_base_url
 
 ### `backend/mcp_servers/context7_development.py`
 - Module summary: Context7 Development Helper
@@ -4823,13 +4679,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=142 | code_lines=124 | risk_score=5
-- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
-- Runtime signals: async_functions=3 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=3/6 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=171 | code_lines=151 | risk_score=5
+- API surface: public=6 | top-level functions=7 | classes=0 | methods=0
+- Runtime signals: async_functions=4 | try=1 | raise=1 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=4/7 (57%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): mcp_servers.bff_auth
 - External imports (6): __future__; httpx; logging; os; typing; uuid
-- Public API names: bff_headers; bff_json; http_json; oms_api_base_url; oms_json
+- Public API names: bff_headers; bff_json; bff_v2_json; http_json; oms_api_base_url; oms_json
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - Module summary: Pipeline MCP Server
@@ -4935,10 +4791,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=653 | code_lines=600 | risk_score=18
-- API surface: public=1 | top-level functions=13 | classes=0 | methods=0
+- Source footprint: total_lines=652 | code_lines=595 | risk_score=18
+- API surface: public=1 | top-level functions=11 | classes=0 | methods=0
 - Runtime signals: async_functions=8 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/13 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/11 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (9): mcp_servers.pipeline_mcp_errors; mcp_servers.pipeline_mcp_helpers; mcp_servers.pipeline_mcp_http; shared.errors.error_types; shared.errors.external_codes; shared.models.pipeline_plan; shared.observability.tracing; shared.services.pipeline.pipeline_preview_inspector (+1 more)
 - External imports (4): __future__; asyncio; logging; typing
 - Public API names: build_pipeline_tool_handlers
@@ -12991,7 +12847,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1062 | code_lines=923 | risk_score=6
+- Source footprint: total_lines=1066 | code_lines=926 | risk_score=6
 - API surface: public=32 | top-level functions=34 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=6 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/34 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)

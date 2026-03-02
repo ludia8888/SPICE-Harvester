@@ -10,12 +10,16 @@ from fastapi.responses import JSONResponse
 from bff.dependencies import get_oms_client
 from bff.routers.pipeline_deps import (
     get_dataset_registry,
+    get_objectify_registry,
     get_pipeline_job_queue,
     get_pipeline_registry,
 )
+from bff.routers.pipeline_ops import _acquire_pipeline_publish_lock, _release_pipeline_publish_lock
 from bff.services import pipeline_execution_service
 from bff.services.oms_client import OMSClient
-from shared.dependencies.providers import AuditLogStoreDep
+from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
+from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid, parse_rid
@@ -23,6 +27,7 @@ from shared.observability.tracing import trace_endpoint
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.storage.event_store import event_store as _event_store
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -224,6 +229,7 @@ class _ResolvedCreateBuildInput:
     retry_backoff_duration: str
     abort_on_failure: bool
     created_by: str
+    mode: str = "build"
 
 
 def _resolve_create_build_input(payload: dict[str, Any], *, request: Request) -> _ResolvedCreateBuildInput:
@@ -288,6 +294,10 @@ def _resolve_create_build_input(payload: dict[str, Any], *, request: Request) ->
 
     created_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
 
+    mode = str(payload.get("mode") or "build").strip().lower()
+    if mode not in {"build", "preview"}:
+        raise ValueError("mode must be 'build' or 'preview'")
+
     return _ResolvedCreateBuildInput(
         pipeline_id=pipeline_id,
         target_rid=target_rid,
@@ -298,6 +308,7 @@ def _resolve_create_build_input(payload: dict[str, Any], *, request: Request) ->
         retry_backoff_duration=retry_backoff_duration,
         abort_on_failure=abort_on_failure,
         created_by=created_by,
+        mode=mode,
     )
 
 
@@ -396,21 +407,33 @@ async def create_build_v2(
 
     try:
         service_request = _request_with_internal_idempotency(request)
-        response = await pipeline_execution_service.build_pipeline(
-            pipeline_id=resolved.pipeline_id,
-            payload=resolved.build_payload,
-            request=service_request,
-            audit_store=audit_store,
-            pipeline_registry=pipeline_registry,
-            pipeline_job_queue=pipeline_job_queue,
-            dataset_registry=dataset_registry,
-            oms_client=oms_client,
-            emit_pipeline_control_plane_event=lambda **_: None,
-        )
+        if resolved.mode == "preview":
+            response = await pipeline_execution_service.preview_pipeline(
+                pipeline_id=resolved.pipeline_id,
+                payload=resolved.build_payload,
+                request=service_request,
+                audit_store=audit_store,
+                pipeline_registry=pipeline_registry,
+                pipeline_job_queue=pipeline_job_queue,
+                dataset_registry=dataset_registry,
+                event_store=_event_store,
+            )
+        else:
+            response = await pipeline_execution_service.build_pipeline(
+                pipeline_id=resolved.pipeline_id,
+                payload=resolved.build_payload,
+                request=service_request,
+                audit_store=audit_store,
+                pipeline_registry=pipeline_registry,
+                pipeline_job_queue=pipeline_job_queue,
+                dataset_registry=dataset_registry,
+                oms_client=oms_client,
+                emit_pipeline_control_plane_event=lambda **_: None,
+            )
         data = response.get("data") if isinstance(response, dict) else {}
         job_id = str(data.get("job_id") or "").strip()
         if not job_id:
-            raise ValueError("build job_id is missing")
+            raise ValueError(f"{resolved.mode} job_id is missing")
 
         run = await pipeline_registry.get_run(pipeline_id=resolved.pipeline_id, job_id=job_id)
         branch_name = _extract_build_branch(
@@ -654,6 +677,156 @@ async def cancel_build_v2(
         finished_at=utcnow(),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Deploy — Foundry Orchestration Deploy API v2
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builds/{buildRid}/deploy")
+@trace_endpoint("bff.foundry_v2_orchestration.deploy_build")
+async def deploy_build_v2(
+    buildRid: str,
+    payload: Dict[str, Any],
+    request: Request,
+    audit_store: AuditLogStoreDep,
+    *,
+    lineage_store: LineageStoreDep,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    oms_client: OMSClient = Depends(get_oms_client),
+    _: None = require_scopes(["api:orchestration-write"]),
+):
+    """POST /v2/orchestration/builds/{buildRid}/deploy — Deploy a successful build."""
+    # Resolve pipeline_id and job_id from buildRid
+    job_id = _job_id_from_build_rid(buildRid)
+    if not job_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="InvalidBuildRid",
+            parameters={"buildRid": buildRid},
+        )
+
+    pipeline_id = _pipeline_id_from_build_job_id(job_id)
+    if not pipeline_id:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="UnsupportedBuildRidFormat",
+            parameters={"buildRid": buildRid},
+        )
+
+    # Translate Foundry-style payload to internal deploy format
+    node_id = str(payload.get("nodeId") or payload.get("node_id") or "").strip()
+    output_spec = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    db_name = str(output_spec.get("dbName") or output_spec.get("db_name") or "").strip()
+    dataset_name = str(output_spec.get("datasetName") or output_spec.get("dataset_name") or "").strip()
+    branch_name = str(
+        payload.get("branchName") or payload.get("branch") or ""
+    ).strip() or None
+
+    if not node_id or not db_name or not dataset_name:
+        return _foundry_error(
+            status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_ARGUMENT",
+            error_name="MissingRequiredFields",
+            parameters={"message": "nodeId, output.dbName, and output.datasetName are required"},
+        )
+
+    deploy_payload: Dict[str, Any] = {
+        "promote_build": True,
+        "build_job_id": job_id,
+        "node_id": node_id,
+        "output": {"db_name": db_name, "dataset_name": dataset_name},
+        "replay_on_deploy": bool(payload.get("replayOnDeploy") or payload.get("replay_on_deploy") or False),
+    }
+    definition_json = payload.get("definitionJson") or payload.get("definition_json")
+    if isinstance(definition_json, dict):
+        deploy_payload["definition_json"] = definition_json
+    artifact_id = str(payload.get("artifactId") or payload.get("artifact_id") or "").strip() or None
+    if artifact_id:
+        deploy_payload["artifact_id"] = artifact_id
+    if branch_name:
+        deploy_payload["branch"] = branch_name
+
+    try:
+        service_request = _request_with_internal_idempotency(request)
+        response = await pipeline_execution_service.deploy_pipeline(
+            pipeline_id=pipeline_id,
+            payload=deploy_payload,
+            request=service_request,
+            pipeline_registry=pipeline_registry,
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+            oms_client=oms_client,
+            lineage_store=lineage_store,
+            audit_store=audit_store,
+            emit_pipeline_control_plane_event=emit_pipeline_control_plane_event,
+            _acquire_pipeline_publish_lock=_acquire_pipeline_publish_lock,
+            _release_pipeline_publish_lock=_release_pipeline_publish_lock,
+        )
+        data = response.get("data") if isinstance(response, dict) else {}
+        return {
+            "buildRid": buildRid,
+            "status": "DEPLOYED",
+            "pipelineId": data.get("pipeline_id") or pipeline_id,
+            "jobId": data.get("job_id") or job_id,
+            "deployedCommitId": data.get("deployed_commit_id"),
+            "artifactId": data.get("artifact_id"),
+            "outputs": data.get("outputs") or [],
+        }
+    except HTTPException as exc:
+        detail = exc.detail
+        # Map known v1 error codes to Foundry error envelope
+        if isinstance(detail, dict):
+            code = str(detail.get("code") or "").strip()
+            if code == "BUILD_NOT_SUCCESS":
+                return _foundry_error(
+                    status.HTTP_409_CONFLICT,
+                    error_code="BUILD_NOT_SUCCESS",
+                    error_name="BuildNotSuccessful",
+                    parameters={
+                        "message": detail.get("message") or "Build is not successful yet",
+                        "buildStatus": detail.get("build_status") or detail.get("buildStatus"),
+                    },
+                )
+            if code == "DEFINITION_MISMATCH":
+                return _foundry_error(
+                    status.HTTP_409_CONFLICT,
+                    error_code="DEFINITION_MISMATCH",
+                    error_name="DefinitionMismatch",
+                    parameters={"message": detail.get("message") or str(detail)},
+                )
+            if code == "REPLAY_REQUIRED":
+                return _foundry_error(
+                    status.HTTP_409_CONFLICT,
+                    error_code="REPLAY_REQUIRED",
+                    error_name="ReplayRequired",
+                    parameters={
+                        "message": detail.get("message") or "Replay is required to deploy",
+                        "hint": "Retry with replayOnDeploy=true or deploy to a new datasetName.",
+                    },
+                )
+        message = detail.get("message") if isinstance(detail, dict) else str(detail or "Deploy failed")
+        error_code = "PERMISSION_DENIED" if exc.status_code == status.HTTP_403_FORBIDDEN else "UPSTREAM_ERROR"
+        error_name = "PermissionDenied" if exc.status_code == status.HTTP_403_FORBIDDEN else "DeployFailed"
+        return _foundry_error(
+            exc.status_code,
+            error_code=error_code,
+            error_name=error_name,
+            parameters={"message": message},
+        )
+    except Exception as exc:
+        logger.error("Failed to deploy Foundry orchestration build: %s", exc)
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"message": "Failed to deploy build"},
+        )
 
 
 # ---------------------------------------------------------------------------

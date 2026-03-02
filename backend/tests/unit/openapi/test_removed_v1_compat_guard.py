@@ -129,6 +129,10 @@ REMOVED_V1_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve"),
     # Phase 1 v2 migration: ontology create hidden (replaced by /api/v2/ontologies/*/objectTypes)
     ("post", "/api/v1/databases/{db_name}/ontology"),
+    # Phase 2 v2 migration: pipeline execution deleted (replaced by /api/v2/orchestration/builds/*)
+    ("post", "/api/v1/pipelines/{pipeline_id}/preview"),
+    ("post", "/api/v1/pipelines/{pipeline_id}/build"),
+    ("post", "/api/v1/pipelines/{pipeline_id}/deploy"),
 )
 
 _BROKEN_OFFICIAL_DOC_URLS: tuple[str, ...] = (

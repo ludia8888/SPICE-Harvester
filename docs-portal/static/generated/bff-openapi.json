@@ -14453,246 +14453,6 @@
         ]
       }
     },
-    "/api/v1/pipelines/{pipeline_id}/build": {
-      "post": {
-        "deprecated": true,
-        "description": "Deprecated: use POST /api/v2/orchestration/builds/create instead.",
-        "operationId": "build_pipeline_api_v1_pipelines__pipeline_id__build_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Build pipeline (deprecated)",
-        "tags": [
-          "Pipeline Builder",
-          "Pipeline Builder"
-        ]
-      }
-    },
-    "/api/v1/pipelines/{pipeline_id}/deploy": {
-      "post": {
-        "deprecated": true,
-        "description": "Deprecated: use POST /api/v2/orchestration/builds/create instead.",
-        "operationId": "deploy_pipeline_api_v1_pipelines__pipeline_id__deploy_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Deploy pipeline (deprecated)",
-        "tags": [
-          "Pipeline Builder",
-          "Pipeline Builder"
-        ]
-      }
-    },
-    "/api/v1/pipelines/{pipeline_id}/preview": {
-      "post": {
-        "deprecated": true,
-        "description": "Deprecated: use POST /api/v2/orchestration/builds/create instead.",
-        "operationId": "preview_pipeline_api_v1_pipelines__pipeline_id__preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pipeline_id",
-            "required": true,
-            "schema": {
-              "title": "Pipeline Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-            "in": "query",
-            "name": "lang",
-            "required": false,
-            "schema": {
-              "enum": [
-                "en",
-                "ko"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-            "in": "header",
-            "name": "Accept-Language",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Preview pipeline (deprecated)",
-        "tags": [
-          "Pipeline Builder",
-          "Pipeline Builder"
-        ]
-      }
-    },
     "/api/v1/pipelines/{pipeline_id}/proposals": {
       "post": {
         "operationId": "submit_pipeline_proposal_api_v1_pipelines__pipeline_id__proposals_post",
@@ -24154,6 +23914,59 @@
           }
         },
         "summary": "Cancel Build V2",
+        "tags": [
+          "Foundry Orchestration v2"
+        ]
+      }
+    },
+    "/api/v2/orchestration/builds/{buildRid}/deploy": {
+      "post": {
+        "description": "POST /v2/orchestration/builds/{buildRid}/deploy — Deploy a successful build.",
+        "operationId": "deploy_build_v2_api_v2_orchestration_builds__buildRid__deploy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "buildRid",
+            "required": true,
+            "schema": {
+              "title": "Buildrid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deploy Build V2",
         "tags": [
           "Foundry Orchestration v2"
         ]

@@ -1,4 +1,4 @@
-### v2 Endpoints (109)
+### v2 Endpoints (110)
 
 | Category | Endpoints | Base Path |
 |----------|-----------|-----------|
@@ -10,9 +10,9 @@
 | Interface Types | 2 | `/api/v2/ontologies/{ontology}/interfaceTypes` |
 | Shared Property Types | 2 | `/api/v2/ontologies/{ontology}/sharedPropertyTypes` |
 | Value Types | 2 | `/api/v2/ontologies/{ontology}/valueTypes` |
-| Other v2 Endpoints | 61 | `/api/v2/...` |
+| Other v2 Endpoints | 62 | `/api/v2/...` |
 
-### v1 Endpoints (141)
+### v1 Endpoints (138)
 
 v1 routes are internal SPICE-specific/compatibility surfaces and may not map to Foundry public APIs.
 For Foundry-style contracts, prefer [v2 reference pages](./auto-v2-reference).

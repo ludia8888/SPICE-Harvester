@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T02:57:40+09:00
+> Generated: 2026-03-03T03:40:01+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -854,40 +854,41 @@
 
 ### `backend/bff/routers/foundry_orchestration_v2.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 33): no docstring
-  - `_pipeline_id_from_target_rid(target_rid)` (line 48): no docstring
-  - `_job_id_from_build_rid(build_rid)` (line 61): no docstring
-  - `_pipeline_id_from_build_job_id(job_id)` (line 74): no docstring
-  - `_build_rid(job_id)` (line 87): no docstring
-  - `_job_rid(job_id)` (line 91): no docstring
-  - `_to_int(value, field_name, minimum)` (line 95): no docstring
-  - `_iso_timestamp(value)` (line 105): no docstring
-  - `_normalize_build_status(run_status)` (line 113): no docstring
-  - `_normalize_job_status(run_status)` (line 124): no docstring
-  - `_extract_created_by(run, fallback)` (line 139): no docstring
-  - `_extract_build_branch(run, pipeline_branch, requested_branch)` (line 148): no docstring
-  - `_extract_job_outputs(run)` (line 170): no docstring
-  - `_resolve_create_build_input(payload, request)` (line 229): no docstring
-  - `_request_with_internal_idempotency(request)` (line 304): no docstring
-  - `_build_response(job_id, run, branch_name, created_by, fallback_branches, retry_count, retry_backoff_duration, abort_on_failure, pipeline)` (line 312): no docstring
-  - `async _load_build_run(build_rid, pipeline_registry)` (line 349): no docstring
-  - `async create_build_v2(payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, _)` (line 368): no docstring
-  - `async get_build_v2(buildRid, pipeline_registry, _)` (line 455): no docstring
-  - `async get_builds_batch_v2(payload, pipeline_registry, _)` (line 502): no docstring
-  - `async list_build_jobs_v2(buildRid, pageSize, pageToken, pipeline_registry, _)` (line 553): no docstring
-  - `async cancel_build_v2(buildRid, pipeline_registry, _)` (line 607): no docstring
-  - `_schedule_rid(pipeline_id)` (line 664): no docstring
-  - `_pipeline_id_from_schedule_rid(schedule_rid)` (line 668): no docstring
-  - `_schedule_response(pipeline)` (line 681): no docstring
-  - `_has_schedule(pipeline)` (line 712): no docstring
-  - `async create_schedule_v2(payload, request, pipeline_registry, _)` (line 720): POST /v2/orchestration/schedules — Create a schedule.
-  - `async get_schedule_v2(scheduleRid, pipeline_registry, _)` (line 764): GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule.
-  - `async delete_schedule_v2(scheduleRid, pipeline_registry, _)` (line 786): DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule.
-  - `async pause_schedule_v2(scheduleRid, pipeline_registry, _)` (line 815): POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule.
-  - `async unpause_schedule_v2(scheduleRid, pipeline_registry, _)` (line 840): POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule.
-  - `async list_schedule_runs_v2(scheduleRid, pageSize, pageToken, pipeline_registry, _)` (line 865): GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs.
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 38): no docstring
+  - `_pipeline_id_from_target_rid(target_rid)` (line 53): no docstring
+  - `_job_id_from_build_rid(build_rid)` (line 66): no docstring
+  - `_pipeline_id_from_build_job_id(job_id)` (line 79): no docstring
+  - `_build_rid(job_id)` (line 92): no docstring
+  - `_job_rid(job_id)` (line 96): no docstring
+  - `_to_int(value, field_name, minimum)` (line 100): no docstring
+  - `_iso_timestamp(value)` (line 110): no docstring
+  - `_normalize_build_status(run_status)` (line 118): no docstring
+  - `_normalize_job_status(run_status)` (line 129): no docstring
+  - `_extract_created_by(run, fallback)` (line 144): no docstring
+  - `_extract_build_branch(run, pipeline_branch, requested_branch)` (line 153): no docstring
+  - `_extract_job_outputs(run)` (line 175): no docstring
+  - `_resolve_create_build_input(payload, request)` (line 235): no docstring
+  - `_request_with_internal_idempotency(request)` (line 315): no docstring
+  - `_build_response(job_id, run, branch_name, created_by, fallback_branches, retry_count, retry_backoff_duration, abort_on_failure, pipeline)` (line 323): no docstring
+  - `async _load_build_run(build_rid, pipeline_registry)` (line 360): no docstring
+  - `async create_build_v2(payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, _)` (line 379): no docstring
+  - `async get_build_v2(buildRid, pipeline_registry, _)` (line 478): no docstring
+  - `async get_builds_batch_v2(payload, pipeline_registry, _)` (line 525): no docstring
+  - `async list_build_jobs_v2(buildRid, pageSize, pageToken, pipeline_registry, _)` (line 576): no docstring
+  - `async cancel_build_v2(buildRid, pipeline_registry, _)` (line 630): no docstring
+  - `async deploy_build_v2(buildRid, payload, request, audit_store, lineage_store, pipeline_registry, dataset_registry, objectify_registry, oms_client, _)` (line 689): POST /v2/orchestration/builds/{buildRid}/deploy — Deploy a successful build.
+  - `_schedule_rid(pipeline_id)` (line 837): no docstring
+  - `_pipeline_id_from_schedule_rid(schedule_rid)` (line 841): no docstring
+  - `_schedule_response(pipeline)` (line 854): no docstring
+  - `_has_schedule(pipeline)` (line 885): no docstring
+  - `async create_schedule_v2(payload, request, pipeline_registry, _)` (line 893): POST /v2/orchestration/schedules — Create a schedule.
+  - `async get_schedule_v2(scheduleRid, pipeline_registry, _)` (line 937): GET /v2/orchestration/schedules/{scheduleRid} — Get a schedule.
+  - `async delete_schedule_v2(scheduleRid, pipeline_registry, _)` (line 959): DELETE /v2/orchestration/schedules/{scheduleRid} — Remove schedule.
+  - `async pause_schedule_v2(scheduleRid, pipeline_registry, _)` (line 988): POST /v2/orchestration/schedules/{scheduleRid}/pause — Pause schedule.
+  - `async unpause_schedule_v2(scheduleRid, pipeline_registry, _)` (line 1013): POST /v2/orchestration/schedules/{scheduleRid}/unpause — Unpause schedule.
+  - `async list_schedule_runs_v2(scheduleRid, pageSize, pageToken, pipeline_registry, _)` (line 1038): GET /v2/orchestration/schedules/{scheduleRid}/runs — List schedule runs.
 - **Classes**
-  - `_ResolvedCreateBuildInput` (line 217): no docstring
+  - `_ResolvedCreateBuildInput` (line 222): no docstring
 
 ### `backend/bff/routers/governance.py`
 - **Functions**
@@ -1059,10 +1060,6 @@
 - **Classes**
   - `OntologyAgentRunRequest` (line 35): Request body for ontology agent runs.
 
-### `backend/bff/routers/ontology_crud.py`
-- **Functions**
-  - `async create_ontology(db_name, ontology, request, branch, mapper, oms_client)` (line 36): no docstring
-
 ### `backend/bff/routers/ontology_extensions.py`
 - **Functions**
   - `async _require_domain_role(request, db_name)` (line 21): no docstring
@@ -1099,11 +1096,6 @@
   - `async get_dataset_raw_file(dataset_id, file_name, file_index, request, pipeline_registry, dataset_registry)` (line 135): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_deps.py`
-
-### `backend/bff/routers/pipeline_datasets_ingest.py`
-- **Functions**
-  - `async get_dataset_ingest_request(ingest_request_id, request, dataset_registry)` (line 30): no docstring
-  - `async approve_dataset_schema(ingest_request_id, payload, request, dataset_registry)` (line 62): no docstring
 
 ### `backend/bff/routers/pipeline_datasets_ops.py`
 
@@ -1152,25 +1144,6 @@
   - `_parse_csv_file(file_obj, delimiter, has_header, preview_limit)` (line 137): no docstring
   - `_parse_csv_content(content, delimiter, has_header, preview_limit)` (line 205): no docstring
 
-### `backend/bff/routers/pipeline_datasets_uploads.py`
-
-### `backend/bff/routers/pipeline_datasets_uploads_csv.py`
-- **Functions**
-  - `async upload_csv_dataset(db_name, branch, file, dataset_name, description, delimiter, has_header, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 42): no docstring
-
-### `backend/bff/routers/pipeline_datasets_uploads_excel.py`
-- **Functions**
-  - `async upload_excel_dataset(db_name, branch, file, dataset_name, description, sheet_name, table_id, table_top, table_left, table_bottom, table_right, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 43): no docstring
-
-### `backend/bff/routers/pipeline_datasets_uploads_media.py`
-- **Functions**
-  - `async upload_media_dataset(db_name, branch, files, dataset_name, description, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 27): no docstring
-
-### `backend/bff/routers/pipeline_datasets_versions.py`
-- **Functions**
-  - `async create_dataset(payload, dataset_registry)` (line 36): no docstring
-  - `async create_dataset_version(dataset_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, lineage_store)` (line 99): no docstring
-
 ### `backend/bff/routers/pipeline_deps.py`
 - **Functions**
   - `async get_pipeline_executor()` (line 23): no docstring
@@ -1181,12 +1154,6 @@
   - `async get_pipeline(pipeline_id, pipeline_registry, branch, preview_node_id, request)` (line 29): no docstring
   - `async get_pipeline_readiness(pipeline_id, branch, pipeline_registry, dataset_registry, request)` (line 47): no docstring
   - `async update_pipeline(pipeline_id, payload, audit_store, pipeline_registry, dataset_registry, request)` (line 65): no docstring
-
-### `backend/bff/routers/pipeline_execution.py`
-- **Functions**
-  - `async preview_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, request)` (line 46): no docstring
-  - `async build_pipeline(pipeline_id, payload, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, request)` (line 75): no docstring
-  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store)` (line 106): no docstring
 
 ### `backend/bff/routers/pipeline_history.py`
 - **Functions**
@@ -2397,42 +2364,6 @@
     - `__init__(self)` (line 66): no docstring
     - `async get(self, path, params)` (line 69): no docstring
 
-### `backend/bff/tests/test_dataset_ingest_idempotency.py`
-- **Functions**
-  - `async _noop_flush_outbox(*args, **kwargs)` (line 264): no docstring
-  - `_build_upload(content)` (line 268): no docstring
-  - `async test_csv_upload_idempotency_key_reuses_version(monkeypatch)` (line 277): no docstring
-- **Classes**
-  - `_FakeLakeFSStorage` (line 16): no docstring
-    - `async save_bytes(self, *args, **kwargs)` (line 17): no docstring
-    - `async save_json(self, *args, **kwargs)` (line 20): no docstring
-  - `_FakeLakeFSClient` (line 24): no docstring
-    - `__init__(self)` (line 25): no docstring
-    - `async commit(self, *args, **kwargs)` (line 28): no docstring
-    - `async create_branch(self, *args, **kwargs)` (line 32): no docstring
-  - `_FakePipelineRegistry` (line 36): no docstring
-    - `__init__(self)` (line 37): no docstring
-    - `async get_lakefs_storage(self, *args, **kwargs)` (line 41): no docstring
-    - `async get_lakefs_client(self, *args, **kwargs)` (line 44): no docstring
-  - `_Request` (line 49): no docstring
-  - `_Dataset` (line 54): no docstring
-  - `_IngestRequest` (line 63): no docstring
-  - `_IngestTransaction` (line 84): no docstring
-  - `_DatasetVersion` (line 94): no docstring
-  - `_FakeDatasetRegistry` (line 105): no docstring
-    - `__init__(self)` (line 106): no docstring
-    - `async get_dataset_by_name(self, db_name, name, branch)` (line 113): no docstring
-    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 116): no docstring
-    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 137): no docstring
-    - `async get_ingest_transaction(self, ingest_request_id)` (line 174): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id)` (line 177): no docstring
-    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 185): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 197): no docstring
-    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 211): no docstring
-    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 214): no docstring
-    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 251): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 257): no docstring
-
 ### `backend/bff/tests/test_document_bundles_router.py`
 - **Functions**
   - `_principal(tenant_id)` (line 40): no docstring
@@ -2915,65 +2846,65 @@
 
 ### `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - **Functions**
-  - `_set_postgres_backend(monkeypatch)` (line 16): no docstring
-  - `async _noop_publish_lock(*args, **kwargs)` (line 51): no docstring
-  - `async _noop_emit_event(*args, **kwargs)` (line 55): no docstring
-  - `lakefs_merge_stub(monkeypatch)` (line 297): no docstring
-  - `async test_build_enqueues_job_and_records_run()` (line 302): no docstring
+  - `_set_postgres_backend(monkeypatch)` (line 15): no docstring
+  - `async _noop_publish_lock(*args, **kwargs)` (line 50): no docstring
+  - `async _noop_emit_event(*args, **kwargs)` (line 54): no docstring
+  - `lakefs_merge_stub(monkeypatch)` (line 296): no docstring
+  - `async test_build_enqueues_job_and_records_run()` (line 301): no docstring
   - `async test_build_postgres_profile_uses_branch_ref_when_head_commit_unavailable(monkeypatch)` (line 345): no docstring
-  - `async test_preview_enqueues_job_with_node_id_and_records_preview_and_run(monkeypatch)` (line 376): no docstring
+  - `async test_preview_enqueues_job_with_node_id_and_records_preview_and_run(monkeypatch)` (line 377): no docstring
   - `async test_preview_defaults_to_foundry_limit_and_preview_meta_flags(monkeypatch)` (line 432): no docstring
-  - `async test_promote_build_merges_build_branch_to_main_and_registers_version(lakefs_merge_stub, monkeypatch)` (line 477): no docstring
-  - `async test_promote_build_rejects_non_staged_artifact_key()` (line 549): no docstring
-  - `async test_promote_build_surfaces_build_errors_when_build_failed()` (line 601): no docstring
-  - `async test_promote_build_blocks_deploy_when_expectations_failed()` (line 639): no docstring
-  - `async test_promote_build_requires_replay_for_breaking_schema_changes(lakefs_merge_stub)` (line 676): no docstring
-  - `async test_promote_build_allows_breaking_schema_changes_with_replay_flag(lakefs_merge_stub, monkeypatch)` (line 739): no docstring
+  - `async test_promote_build_merges_build_branch_to_main_and_registers_version(lakefs_merge_stub)` (line 476): no docstring
+  - `async test_promote_build_rejects_non_staged_artifact_key()` (line 548): no docstring
+  - `async test_promote_build_surfaces_build_errors_when_build_failed()` (line 603): no docstring
+  - `async test_promote_build_blocks_deploy_when_expectations_failed()` (line 644): no docstring
+  - `async test_promote_build_requires_replay_for_breaking_schema_changes(lakefs_merge_stub)` (line 684): no docstring
+  - `async test_promote_build_allows_breaking_schema_changes_with_replay_flag(lakefs_merge_stub)` (line 750): no docstring
 - **Classes**
-  - `_Request` (line 21): no docstring
-  - `_Pipeline` (line 26): no docstring
-  - `_Dataset` (line 35): no docstring
-  - `_DatasetVersion` (line 44): no docstring
-  - `_PipelineRegistry` (line 59): no docstring
-    - `__init__(self, pipeline, build_run, lakefs_merge_calls)` (line 60): no docstring
-    - `async get_pipeline(self, pipeline_id)` (line 77): no docstring
-    - `async get_pipeline_branch(self, db_name, branch)` (line 82): no docstring
-    - `async get_latest_version(self, pipeline_id, branch)` (line 85): no docstring
-    - `async get_run(self, pipeline_id, job_id)` (line 92): no docstring
-    - `async has_any_permissions(self, pipeline_id)` (line 97): no docstring
-    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 100): no docstring
-    - `async record_run(self, pipeline_id, job_id, mode, status, output_json, sample_json, finished_at, **kwargs)` (line 103): no docstring
-    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id, **kwargs)` (line 127): no docstring
-    - `async record_preview(self, **kwargs)` (line 145): no docstring
-    - `async replace_dependencies(self, **kwargs)` (line 149): no docstring
-    - `async update_pipeline(self, **kwargs)` (line 152): no docstring
-    - `async get_lakefs_client(self, user_id)` (line 155): no docstring
-    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 165): no docstring
-    - `async record_promotion_manifest(self, **kwargs)` (line 168): no docstring
-  - `_PipelineJobQueue` (line 173): no docstring
-    - `__init__(self)` (line 174): no docstring
-    - `async publish(self, job, **kwargs)` (line 177): no docstring
-  - `_DatasetRegistry` (line 182): no docstring
-    - `__init__(self)` (line 183): no docstring
-    - `async get_dataset(self, dataset_id)` (line 187): no docstring
-    - `async get_dataset_by_name(self, db_name, name, branch)` (line 193): no docstring
-    - `async get_latest_version(self, dataset_id)` (line 196): no docstring
-    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 207): no docstring
-    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, promoted_from_artifact_id)` (line 218): no docstring
-    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 246): no docstring
-    - `async create_key_spec(self, **kwargs)` (line 249): no docstring
-  - `_ObjectifyRegistry` (line 253): no docstring
-    - `async get_active_mapping_spec(self, dataset_id, dataset_branch, target_class_id, artifact_output_name, schema_hash)` (line 254): no docstring
-  - `_OMSClient` (line 266): no docstring
-    - `__init__(self, head_commit_id)` (line 267): no docstring
-    - `async get_version_head(self, db_name, branch)` (line 270): no docstring
-  - `_AuditStore` (line 274): no docstring
-    - `__init__(self)` (line 275): no docstring
-    - `async log(self, **kwargs)` (line 278): no docstring
-  - `_LineageStore` (line 282): no docstring
-    - `node_aggregate(kind, aggregate_id)` (line 284): no docstring
-    - `node_artifact(kind, *parts)` (line 288): no docstring
-    - `async record_link(self, **kwargs)` (line 292): no docstring
+  - `_Request` (line 20): no docstring
+  - `_Pipeline` (line 25): no docstring
+  - `_Dataset` (line 34): no docstring
+  - `_DatasetVersion` (line 43): no docstring
+  - `_PipelineRegistry` (line 58): no docstring
+    - `__init__(self, pipeline, build_run, lakefs_merge_calls)` (line 59): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 76): no docstring
+    - `async get_pipeline_branch(self, db_name, branch)` (line 81): no docstring
+    - `async get_latest_version(self, pipeline_id, branch)` (line 84): no docstring
+    - `async get_run(self, pipeline_id, job_id)` (line 91): no docstring
+    - `async has_any_permissions(self, pipeline_id)` (line 96): no docstring
+    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 99): no docstring
+    - `async record_run(self, pipeline_id, job_id, mode, status, output_json, sample_json, finished_at, **kwargs)` (line 102): no docstring
+    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id, **kwargs)` (line 126): no docstring
+    - `async record_preview(self, **kwargs)` (line 144): no docstring
+    - `async replace_dependencies(self, **kwargs)` (line 148): no docstring
+    - `async update_pipeline(self, **kwargs)` (line 151): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 154): no docstring
+    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 164): no docstring
+    - `async record_promotion_manifest(self, **kwargs)` (line 167): no docstring
+  - `_PipelineJobQueue` (line 172): no docstring
+    - `__init__(self)` (line 173): no docstring
+    - `async publish(self, job, **kwargs)` (line 176): no docstring
+  - `_DatasetRegistry` (line 181): no docstring
+    - `__init__(self)` (line 182): no docstring
+    - `async get_dataset(self, dataset_id)` (line 186): no docstring
+    - `async get_dataset_by_name(self, db_name, name, branch)` (line 192): no docstring
+    - `async get_latest_version(self, dataset_id)` (line 195): no docstring
+    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 206): no docstring
+    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, promoted_from_artifact_id)` (line 217): no docstring
+    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 245): no docstring
+    - `async create_key_spec(self, **kwargs)` (line 248): no docstring
+  - `_ObjectifyRegistry` (line 252): no docstring
+    - `async get_active_mapping_spec(self, dataset_id, dataset_branch, target_class_id, artifact_output_name, schema_hash)` (line 253): no docstring
+  - `_OMSClient` (line 265): no docstring
+    - `__init__(self, head_commit_id)` (line 266): no docstring
+    - `async get_version_head(self, db_name, branch)` (line 269): no docstring
+  - `_AuditStore` (line 273): no docstring
+    - `__init__(self)` (line 274): no docstring
+    - `async log(self, **kwargs)` (line 277): no docstring
+  - `_LineageStore` (line 281): no docstring
+    - `node_aggregate(kind, aggregate_id)` (line 283): no docstring
+    - `node_artifact(kind, *parts)` (line 287): no docstring
+    - `async record_link(self, **kwargs)` (line 291): no docstring
 
 ### `backend/bff/tests/test_pipeline_proposal_governance.py`
 - **Functions**
@@ -3015,56 +2946,8 @@
 
 ### `backend/bff/tests/test_pipeline_router_uploads.py`
 - **Functions**
-  - `_build_request(headers)` (line 347): no docstring
-  - `test_pipeline_helpers_normalize_inputs(monkeypatch)` (line 357): no docstring
-  - `async test_upload_csv_dataset_creates_version(monkeypatch)` (line 386): no docstring
-  - `async test_upload_csv_dataset_all_columns_string_type(monkeypatch)` (line 431): Foundry style: CSV upload produces all-string schema without FunnelClient.
-  - `async test_upload_excel_dataset_commits_preview(monkeypatch)` (line 477): no docstring
-  - `async test_approve_dataset_schema_updates_dataset()` (line 525): no docstring
-  - `async test_get_ingest_request_includes_tabular_analysis(monkeypatch)` (line 563): no docstring
-  - `async test_get_ingest_request_tabular_analysis_returns_string_columns(monkeypatch)` (line 600): Foundry style: tabular analysis returns all-string columns without FunnelClient.
-  - `async test_upload_media_dataset_stores_files(monkeypatch)` (line 638): no docstring
-  - `async test_maybe_enqueue_objectify_job()` (line 678): no docstring
-- **Classes**
-  - `_FakeLakeFSStorage` (line 19): no docstring
-    - `__init__(self)` (line 20): no docstring
-    - `async save_fileobj(self, repo, key, fileobj, content_type, metadata, checksum)` (line 23): no docstring
-    - `async save_bytes(self, repo, key, content, content_type, metadata)` (line 36): no docstring
-  - `_FakeLakeFSClient` (line 48): no docstring
-    - `__init__(self)` (line 49): no docstring
-    - `async commit(self, repository, branch, message, metadata)` (line 53): no docstring
-    - `async create_branch(self, repository, name, source)` (line 66): no docstring
-  - `_FakePipelineRegistry` (line 70): no docstring
-    - `__init__(self)` (line 71): no docstring
-    - `async get_lakefs_storage(self, user_id)` (line 75): no docstring
-    - `async get_lakefs_client(self, user_id)` (line 78): no docstring
-  - `_FakeDatasetRegistry` (line 82): no docstring
-    - `__init__(self, ingest_status)` (line 83): no docstring
-    - `async get_dataset_by_name(self, db_name, name, branch)` (line 91): no docstring
-    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 94): no docstring
-    - `async get_dataset(self, dataset_id)` (line 112): no docstring
-    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 115): no docstring
-    - `async get_ingest_request(self, ingest_request_id)` (line 154): no docstring
-    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 157): no docstring
-    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 182): no docstring
-    - `async get_version(self, version_id)` (line 185): no docstring
-    - `async get_ingest_transaction(self, ingest_request_id)` (line 191): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id)` (line 194): no docstring
-    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 211): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 217): no docstring
-    - `async update_ingest_request_payload(self, ingest_request_id, sample_json, row_count)` (line 223): no docstring
-    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 229): no docstring
-    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 265): no docstring
-    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 298): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 303): no docstring
-  - `_FakeFunnelClient` (line 309): Mock FunnelClient for Excel structure analysis tests.
-    - `async __aenter__(self)` (line 317): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 320): no docstring
-    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 323): no docstring
-  - `_FailingFunnelClient` (line 334): Mock FunnelClient that raises on any call.
-    - `async __aenter__(self)` (line 337): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 340): no docstring
-    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 343): no docstring
+  - `test_pipeline_helpers_normalize_inputs(monkeypatch)` (line 8): no docstring
+  - `async test_maybe_enqueue_objectify_job()` (line 37): no docstring
 
 ### `backend/bff/tests/test_query_foundry_adapter.py`
 - **Functions**
@@ -3631,7 +3514,8 @@
 ### `backend/mcp_servers/bff_auth.py`
 - **Functions**
   - `bff_api_base_url()` (line 8): no docstring
-  - `bff_admin_token()` (line 13): no docstring
+  - `bff_api_v2_base_url()` (line 13): Base URL for v2 BFF API endpoints (e.g. /api/v2/orchestration/...).
+  - `bff_admin_token()` (line 19): no docstring
 
 ### `backend/mcp_servers/context7_development.py`
 - **Functions**
@@ -3711,9 +3595,10 @@
   - `async http_json(method, url, headers, json_body, params, timeout_seconds, error_prefix, error_path)` (line 14): no docstring
   - `bff_headers(db_name, principal_id, principal_type)` (line 44): no docstring
   - `async bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 75): no docstring
-  - `oms_api_base_url()` (line 104): Get OMS API base URL from environment.
-  - `_oms_admin_token()` (line 109): Resolve OMS admin token from environment (same fallback as OMSClient).
-  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 118): Make an HTTP request to OMS API and return JSON response.
+  - `async bff_v2_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 104): Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create).
+  - `oms_api_base_url()` (line 133): Get OMS API base URL from environment.
+  - `_oms_admin_token()` (line 138): Resolve OMS admin token from environment (same fallback as OMSClient).
+  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 147): Make an HTTP request to OMS API and return JSON response.
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - **Functions**
@@ -3782,18 +3667,16 @@
 ### `backend/mcp_servers/pipeline_tools/pipeline_tools.py`
 - **Functions**
   - `_run_status(run)` (line 27): no docstring
-  - `async _pipeline_wait_for_mode(server, pipeline_id, mode, enqueue_path, output_builder, enqueue_job_id_extractor, timeout_message, arguments)` (line 31): no docstring
-  - `_preview_job_id(resp)` (line 167): no docstring
-  - `_build_job_id(resp)` (line 175): no docstring
-  - `_preview_output(selected_run, job_id, reused_existing)` (line 180): no docstring
-  - `_build_output(selected_run, job_id, reused_existing)` (line 195): no docstring
-  - `async _preview_inspect(_server, arguments)` (line 213): no docstring
-  - `async _pipeline_create_from_plan(_server, arguments)` (line 228): no docstring
-  - `async _pipeline_update_from_plan(_server, arguments)` (line 378): no docstring
-  - `async _pipeline_preview_wait(server, arguments)` (line 442): no docstring
-  - `async _pipeline_build_wait(server, arguments)` (line 465): no docstring
-  - `async _pipeline_deploy_promote_build(server, arguments)` (line 488): no docstring
-  - `build_pipeline_tool_handlers()` (line 652): no docstring
+  - `async _pipeline_wait_for_mode(server, pipeline_id, mode, output_builder, timeout_message, arguments)` (line 31): no docstring
+  - `_preview_output(selected_run, job_id, reused_existing)` (line 177): no docstring
+  - `_build_output(selected_run, job_id, reused_existing)` (line 192): no docstring
+  - `async _preview_inspect(_server, arguments)` (line 210): no docstring
+  - `async _pipeline_create_from_plan(_server, arguments)` (line 225): no docstring
+  - `async _pipeline_update_from_plan(_server, arguments)` (line 375): no docstring
+  - `async _pipeline_preview_wait(server, arguments)` (line 439): no docstring
+  - `async _pipeline_build_wait(server, arguments)` (line 460): no docstring
+  - `async _pipeline_deploy_promote_build(server, arguments)` (line 481): no docstring
+  - `build_pipeline_tool_handlers()` (line 651): no docstring
 
 ### `backend/mcp_servers/pipeline_tools/plan_tools.py`
 - **Functions**
@@ -11132,40 +11015,40 @@
 
 ### `backend/tests/unit/openapi/test_removed_v1_compat_guard.py`
 - **Functions**
-  - `_build_schema()` (line 174): no docstring
-  - `_param_names(paths, path, method)` (line 180): no docstring
-  - `test_removed_v1_compat_operations_absent_from_openapi()` (line 196): no docstring
-  - `test_removed_v1_compat_operations_absent_from_full_bff_openapi()` (line 204): no docstring
-  - `test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract()` (line 217): no docstring
-  - `test_removed_v1_query_path_not_allowlisted_for_agent_tools()` (line 384): no docstring
-  - `test_removed_v1_query_path_not_present_in_seed_allowlist_script()` (line 434): no docstring
-  - `test_agent_runtime_and_migrated_e2e_scripts_do_not_reference_v1_pipelines_prefix()` (line 442): no docstring
-  - `test_pipeline_e2e_suites_route_legacy_v1_calls_through_v2_adapter()` (line 465): no docstring
-  - `test_removed_v1_compat_path_literals_absent_from_runtime_code()` (line 493): no docstring
-  - `test_architecture_guard_covers_legacy_action_and_funnel_path_literals()` (line 614): no docstring
-  - `test_removed_bff_legacy_branch_and_merge_path_literals_absent_from_runtime_code()` (line 643): no docstring
-  - `test_funnel_runtime_does_not_call_bff_google_sheets_v1_paths()` (line 669): no docstring
-  - `test_action_worker_direct_undo_literal_absent_from_runtime()` (line 693): no docstring
-  - `test_oms_action_apply_runtime_not_coupled_to_internal_simulation_registry()` (line 711): no docstring
-  - `test_migration_docs_synced_to_code_deleted_status()` (line 722): no docstring
-  - `test_legacy_link_types_router_composition_shim_deleted()` (line 732): no docstring
-  - `test_legacy_link_type_and_objectify_helper_shims_deleted()` (line 742): no docstring
-  - `test_legacy_actions_and_query_router_shims_deleted()` (line 753): no docstring
-  - `test_legacy_data_connector_sheet_tools_router_deleted()` (line 772): no docstring
-  - `test_legacy_ontology_suggest_and_import_router_shims_deleted()` (line 784): no docstring
-  - `test_legacy_ontology_metadata_router_shim_deleted()` (line 801): no docstring
-  - `test_legacy_instances_sample_values_router_deleted()` (line 811): no docstring
-  - `test_legacy_pipeline_compile_and_simulation_router_shims_deleted()` (line 824): no docstring
-  - `test_external_funnel_service_artifacts_deleted()` (line 849): no docstring
-  - `test_legacy_oms_pull_request_modules_deleted()` (line 874): no docstring
-  - `test_legacy_action_simulation_registry_module_deleted()` (line 890): no docstring
-  - `test_migration_docs_do_not_reintroduce_fullmetadata_preview_contradiction()` (line 897): no docstring
-  - `test_foundry_reference_docs_use_current_urls()` (line 905): no docstring
-  - `test_legacy_version_head_endpoint_literal_is_only_in_visibility_guard()` (line 919): no docstring
-  - `test_legacy_branch_endpoint_literals_are_only_in_visibility_guard()` (line 940): no docstring
-  - `test_legacy_version_history_diff_literals_are_only_in_visibility_guard(needle)` (line 968): no docstring
-  - `test_removed_v1_paths_absent_from_generated_api_docs()` (line 992): no docstring
-  - `test_tabular_ingest_response_schema_uses_tabular_analysis_key_only()` (line 1056): no docstring
+  - `_build_schema()` (line 178): no docstring
+  - `_param_names(paths, path, method)` (line 184): no docstring
+  - `test_removed_v1_compat_operations_absent_from_openapi()` (line 200): no docstring
+  - `test_removed_v1_compat_operations_absent_from_full_bff_openapi()` (line 208): no docstring
+  - `test_foundry_v2_openapi_parameter_surface_matches_official_docs_contract()` (line 221): no docstring
+  - `test_removed_v1_query_path_not_allowlisted_for_agent_tools()` (line 388): no docstring
+  - `test_removed_v1_query_path_not_present_in_seed_allowlist_script()` (line 438): no docstring
+  - `test_agent_runtime_and_migrated_e2e_scripts_do_not_reference_v1_pipelines_prefix()` (line 446): no docstring
+  - `test_pipeline_e2e_suites_route_legacy_v1_calls_through_v2_adapter()` (line 469): no docstring
+  - `test_removed_v1_compat_path_literals_absent_from_runtime_code()` (line 497): no docstring
+  - `test_architecture_guard_covers_legacy_action_and_funnel_path_literals()` (line 618): no docstring
+  - `test_removed_bff_legacy_branch_and_merge_path_literals_absent_from_runtime_code()` (line 647): no docstring
+  - `test_funnel_runtime_does_not_call_bff_google_sheets_v1_paths()` (line 673): no docstring
+  - `test_action_worker_direct_undo_literal_absent_from_runtime()` (line 697): no docstring
+  - `test_oms_action_apply_runtime_not_coupled_to_internal_simulation_registry()` (line 715): no docstring
+  - `test_migration_docs_synced_to_code_deleted_status()` (line 726): no docstring
+  - `test_legacy_link_types_router_composition_shim_deleted()` (line 736): no docstring
+  - `test_legacy_link_type_and_objectify_helper_shims_deleted()` (line 746): no docstring
+  - `test_legacy_actions_and_query_router_shims_deleted()` (line 757): no docstring
+  - `test_legacy_data_connector_sheet_tools_router_deleted()` (line 776): no docstring
+  - `test_legacy_ontology_suggest_and_import_router_shims_deleted()` (line 788): no docstring
+  - `test_legacy_ontology_metadata_router_shim_deleted()` (line 805): no docstring
+  - `test_legacy_instances_sample_values_router_deleted()` (line 815): no docstring
+  - `test_legacy_pipeline_compile_and_simulation_router_shims_deleted()` (line 828): no docstring
+  - `test_external_funnel_service_artifacts_deleted()` (line 853): no docstring
+  - `test_legacy_oms_pull_request_modules_deleted()` (line 878): no docstring
+  - `test_legacy_action_simulation_registry_module_deleted()` (line 894): no docstring
+  - `test_migration_docs_do_not_reintroduce_fullmetadata_preview_contradiction()` (line 901): no docstring
+  - `test_foundry_reference_docs_use_current_urls()` (line 909): no docstring
+  - `test_legacy_version_head_endpoint_literal_is_only_in_visibility_guard()` (line 923): no docstring
+  - `test_legacy_branch_endpoint_literals_are_only_in_visibility_guard()` (line 944): no docstring
+  - `test_legacy_version_history_diff_literals_are_only_in_visibility_guard(needle)` (line 972): no docstring
+  - `test_removed_v1_paths_absent_from_generated_api_docs()` (line 996): no docstring
+  - `test_tabular_ingest_response_schema_uses_tabular_analysis_key_only()` (line 1060): no docstring
 
 ### `backend/tests/unit/openapi/test_wip_hidden.py`
 - **Functions**

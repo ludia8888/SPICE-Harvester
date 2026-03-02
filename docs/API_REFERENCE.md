@@ -22,24 +22,24 @@
 
 ## Endpoint Coverage Summary
 
-- Total documented endpoints: **250**
-- Deprecated endpoints: **4**
+- Total documented endpoints: **248**
+- Deprecated endpoints: **1**
 - Security-enabled endpoints: **0**
 
 | API Version | Endpoint Count |
 | --- | --- |
-| `v1` | 141 |
-| `v2` | 109 |
+| `v1` | 138 |
+| `v2` | 110 |
 
 | Top Domains (first path segment) | Endpoint Count |
 | --- | --- |
 | `ontologies` | 48 |
 | `connectivity` | 31 |
 | `databases` | 24 |
-| `pipelines` | 23 |
+| `pipelines` | 20 |
 | `datasets` | 19 |
 | `admin` | 12 |
-| `orchestration` | 11 |
+| `orchestration` | 12 |
 | `lineage` | 10 |
 | `config` | 9 |
 | `context7` | 7 |
@@ -301,6 +301,7 @@
 | `POST` | `/api/v2/orchestration/builds/getBatch` | Get Builds Batch V2 | `v2` | no | no | `get_builds_batch_v2_api_v2_orchestration_builds_getBatch_post` |
 | `GET` | `/api/v2/orchestration/builds/{buildRid}` | Get Build V2 | `v2` | no | no | `get_build_v2_api_v2_orchestration_builds__buildRid__get` |
 | `POST` | `/api/v2/orchestration/builds/{buildRid}/cancel` | Cancel Build V2 | `v2` | no | no | `cancel_build_v2_api_v2_orchestration_builds__buildRid__cancel_post` |
+| `POST` | `/api/v2/orchestration/builds/{buildRid}/deploy` | Deploy Build V2 | `v2` | no | no | `deploy_build_v2_api_v2_orchestration_builds__buildRid__deploy_post` |
 | `GET` | `/api/v2/orchestration/builds/{buildRid}/jobs` | List Build Jobs V2 | `v2` | no | no | `list_build_jobs_v2_api_v2_orchestration_builds__buildRid__jobs_get` |
 | `POST` | `/api/v2/orchestration/schedules` | Create Schedule V2 | `v2` | no | no | `create_schedule_v2_api_v2_orchestration_schedules_post` |
 | `GET` | `/api/v2/orchestration/schedules/{scheduleRid}` | Get Schedule V2 | `v2` | no | no | `get_schedule_v2_api_v2_orchestration_schedules__scheduleRid__get` |
@@ -419,9 +420,6 @@
 | `PUT` | `/api/v1/pipelines/{pipeline_id}` | Update Pipeline | `v1` | no | no | `update_pipeline_api_v1_pipelines__pipeline_id__put` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts` | List Pipeline Artifacts | `v1` | no | no | `list_pipeline_artifacts_api_v1_pipelines__pipeline_id__artifacts_get` |
 | `GET` | `/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}` | Get Pipeline Artifact | `v1` | no | no | `get_pipeline_artifact_api_v1_pipelines__pipeline_id__artifacts__artifact_id__get` |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/build` | Build pipeline (deprecated) | `v1` | no | yes | `build_pipeline_api_v1_pipelines__pipeline_id__build_post` |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/deploy` | Deploy pipeline (deprecated) | `v1` | no | yes | `deploy_pipeline_api_v1_pipelines__pipeline_id__deploy_post` |
-| `POST` | `/api/v1/pipelines/{pipeline_id}/preview` | Preview pipeline (deprecated) | `v1` | no | yes | `preview_pipeline_api_v1_pipelines__pipeline_id__preview_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals` | Submit Pipeline Proposal | `v1` | no | no | `submit_pipeline_proposal_api_v1_pipelines__pipeline_id__proposals_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/approve` | Approve Pipeline Proposal | `v1` | no | no | `approve_pipeline_proposal_api_v1_pipelines__pipeline_id__proposals_approve_post` |
 | `POST` | `/api/v1/pipelines/{pipeline_id}/proposals/reject` | Reject Pipeline Proposal | `v1` | no | no | `reject_pipeline_proposal_api_v1_pipelines__pipeline_id__proposals_reject_post` |

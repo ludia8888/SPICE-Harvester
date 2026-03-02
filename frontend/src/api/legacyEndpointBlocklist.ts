@@ -19,8 +19,10 @@ const LEGACY_ENDPOINT_BLOCKLIST_REGEX_SOURCES = [
   '^/api/v1/pipelines/datasets/[^/]+/versions(?:/|$)',
   // Phase 1 v2 migration: ontology create replaced by /api/v2/ontologies/*/objectTypes
   '^/api/v1/databases/[^/]+/ontology/?$',
-  // Phase 1 v2 migration: pipeline preview replaced by /api/v2/orchestration/builds/create
+  // Phase 2 v2 migration: pipeline execution replaced by /api/v2/orchestration/builds/*
   '^/api/v1/pipelines/[^/]+/preview(?:/|$)',
+  '^/api/v1/pipelines/[^/]+/build(?:/|$)',
+  '^/api/v1/pipelines/[^/]+/deploy(?:/|$)',
   '^/api/v1/agent/pipeline-runs(?:/|$)',
 ] as const
 

@@ -15,7 +15,7 @@ from mcp_servers.pipeline_mcp_helpers import (
     trim_build_output,
     trim_preview_payload,
 )
-from mcp_servers.pipeline_mcp_http import bff_json
+from mcp_servers.pipeline_mcp_http import bff_json, bff_v2_json
 from mcp_servers.pipeline_mcp_errors import tool_error
 from shared.errors.error_types import ErrorCategory, ErrorCode
 
@@ -33,9 +33,7 @@ async def _pipeline_wait_for_mode(
     *,
     pipeline_id: str,
     mode: str,
-    enqueue_path: str,
     output_builder: Callable[[Dict[str, Any], str, bool], Dict[str, Any]],
-    enqueue_job_id_extractor: Callable[[Dict[str, Any]], str],
     timeout_message: str,
     arguments: Dict[str, Any],
 ) -> Any:
@@ -89,23 +87,35 @@ async def _pipeline_wait_for_mode(
                     break
 
     if not job_id:
-        enqueue_body: Dict[str, Any] = {"limit": limit}
+        # Enqueue via v2 orchestration API
+        v2_payload: Dict[str, Any] = {
+            "target": {"targetRids": [f"pipeline://{pipeline_id}"]},
+            "mode": mode,
+            "parameters": {"limit": limit},
+        }
         if node_id:
-            enqueue_body["node_id"] = node_id
+            v2_payload["parameters"]["nodeId"] = node_id
         if branch:
-            enqueue_body["branch"] = branch
-        resp = await bff_json(
+            v2_payload["branchName"] = branch
+        resp = await bff_v2_json(
             "POST",
-            enqueue_path,
+            "/v2/orchestration/builds/create",
             db_name=db_name,
             principal_id=principal_id,
             principal_type=principal_type,
-            json_body=enqueue_body,
+            json_body=v2_payload,
             timeout_seconds=30.0,
         )
         if resp.get("error"):
             return resp
-        job_id = enqueue_job_id_extractor(resp)
+        # Extract job_id from v2 build RID (format: "build://build-{pipeline_uuid}-{job_uuid}")
+        rid = str(resp.get("rid") or "").strip()
+        if rid.startswith("build://"):
+            job_id = rid[len("build://"):]
+        if not job_id:
+            # Fallback: try v1 response format
+            data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+            job_id = str(data.get("job_id") or "").strip()
         if not job_id:
             return {"error": f"{mode} enqueue did not return job_id", "response": resp}
 
@@ -162,19 +172,6 @@ async def _pipeline_wait_for_mode(
         "last_status": last_status,
         "message": timeout_message,
     }
-
-
-def _preview_job_id(resp: Dict[str, Any]) -> str:
-    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-    job_id = str(data.get("job_id") or "").strip()
-    if not job_id and isinstance(data.get("sample"), dict):
-        job_id = str((data.get("sample") or {}).get("job_id") or "").strip()
-    return job_id
-
-
-def _build_job_id(resp: Dict[str, Any]) -> str:
-    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-    return str(data.get("job_id") or "").strip()
 
 
 def _preview_output(selected_run: Dict[str, Any], job_id: str, reused_existing: bool) -> Dict[str, Any]:
@@ -453,9 +450,7 @@ async def _pipeline_preview_wait(server: Any, arguments: Dict[str, Any]) -> Any:
         server,
         pipeline_id=pipeline_id,
         mode="preview",
-        enqueue_path=f"/pipelines/{pipeline_id}/preview",
         output_builder=_preview_output,
-        enqueue_job_id_extractor=_preview_job_id,
         timeout_message="preview still running",
         arguments=arguments,
     )
@@ -476,9 +471,7 @@ async def _pipeline_build_wait(server: Any, arguments: Dict[str, Any]) -> Any:
         server,
         pipeline_id=pipeline_id,
         mode="build",
-        enqueue_path=f"/pipelines/{pipeline_id}/build",
         output_builder=_build_output,
-        enqueue_job_id_extractor=_build_job_id,
         timeout_message="build still running",
         arguments=arguments,
     )
@@ -552,44 +545,50 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     exc,
                 )
 
-    payload: Dict[str, Any] = {
-        "promote_build": True,
-        "build_job_id": build_job_id,
-        "node_id": node_id,
-        "output": {"db_name": db_name, "dataset_name": dataset_name},
-        "replay_on_deploy": bool(arguments.get("replay_on_deploy") or False),
+    # Build v2 deploy payload (Foundry-style camelCase)
+    v2_deploy_payload: Dict[str, Any] = {
+        "nodeId": node_id,
+        "output": {"dbName": db_name, "datasetName": dataset_name},
+        "replayOnDeploy": bool(arguments.get("replay_on_deploy") or False),
     }
     if definition_json:
-        payload["definition_json"] = definition_json
+        v2_deploy_payload["definitionJson"] = definition_json
     artifact_id = str(arguments.get("artifact_id") or "").strip() or None
     if artifact_id:
-        payload["artifact_id"] = artifact_id
+        v2_deploy_payload["artifactId"] = artifact_id
     if branch:
-        payload["branch"] = branch
+        v2_deploy_payload["branchName"] = branch
 
-    resp = await bff_json(
+    # Construct buildRid from build_job_id
+    deploy_build_rid = f"build://{build_job_id}"
+
+    resp = await bff_v2_json(
         "POST",
-        f"/pipelines/{pipeline_id}/deploy",
+        f"/v2/orchestration/builds/{deploy_build_rid}/deploy",
         db_name=db_name,
         principal_id=principal_id,
         principal_type=principal_type,
-        json_body=payload,
+        json_body=v2_deploy_payload,
         timeout_seconds=60.0,
     )
     if resp.get("error"):
-        # Common and expected race: deploy called before build completes.
-        if resp.get("status_code") == 409 and isinstance(resp.get("response"), dict):
-            detail = resp.get("response", {}).get("detail")
-            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == "BUILD_NOT_SUCCESS":
+        # Map v2 Foundry error envelope to MCP-friendly format
+        status_code = resp.get("status_code")
+        response_body = resp.get("response") if isinstance(resp.get("response"), dict) else {}
+        error_code = str(response_body.get("errorCode") or "").strip()
+        error_params = response_body.get("parameters") if isinstance(response_body.get("parameters"), dict) else {}
+
+        if status_code == 409:
+            if error_code == "BUILD_NOT_SUCCESS":
                 return {
                     "status": "not_ready",
                     "pipeline_id": pipeline_id,
                     "build_job_id": build_job_id,
-                    "build_status": detail.get("build_status") or detail.get("buildStatus"),
-                    "errors": detail.get("errors"),
-                    "message": detail.get("message") or "Build is not successful yet",
+                    "build_status": error_params.get("buildStatus"),
+                    "errors": error_params.get("errors"),
+                    "message": error_params.get("message") or "Build is not successful yet",
                 }
-            if isinstance(detail, dict) and str(detail.get("code") or "").strip() == ExternalErrorCode.REPLAY_REQUIRED.value:
+            if error_code == "REPLAY_REQUIRED" or error_code == ExternalErrorCode.REPLAY_REQUIRED.value:
                 return {
                     "status": "replay_required",
                     "pipeline_id": pipeline_id,
@@ -598,21 +597,21 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
                     "db_name": db_name,
                     "dataset_name": dataset_name,
                     "code": ExternalErrorCode.REPLAY_REQUIRED.value,
-                    "message": detail.get("message") or resp.get("error") or "Replay is required to deploy",
-                    "detail": detail,
+                    "message": error_params.get("message") or resp.get("error") or "Replay is required to deploy",
+                    "detail": error_params,
                     "hint": "Retry with replay_on_deploy=true OR deploy to a new dataset_name.",
                 }
-            if isinstance(detail, str) and "definition" in detail.lower() and "match" in detail.lower():
+            if error_code == "DEFINITION_MISMATCH" or error_code == ExternalErrorCode.DEFINITION_MISMATCH.value:
                 return {
                     "status": "conflict",
                     "pipeline_id": pipeline_id,
                     "code": ExternalErrorCode.DEFINITION_MISMATCH.value,
-                    "message": detail,
+                    "message": error_params.get("message") or "Definition mismatch",
                     "hint": "Pass definition_json (exact build snapshot) or pipeline_spec_commit_id from the build output.",
                 }
         return resp
-    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-    outputs = data.get("outputs") or []
+    # v2 deploy returns flat response
+    outputs = resp.get("outputs") or []
 
     dataset_ids = []
     dataset_version_ids = []
@@ -627,10 +626,10 @@ async def _pipeline_deploy_promote_build(server: Any, arguments: Dict[str, Any])
 
     return {
         "status": "success",
-        "pipeline_id": data.get("pipeline_id") or pipeline_id,
-        "job_id": data.get("job_id"),
-        "deployed_commit_id": data.get("deployed_commit_id"),
-        "artifact_id": data.get("artifact_id"),
+        "pipeline_id": resp.get("pipelineId") or pipeline_id,
+        "job_id": resp.get("jobId"),
+        "deployed_commit_id": resp.get("deployedCommitId"),
+        "artifact_id": resp.get("artifactId"),
         "outputs": outputs,
         "dataset_ids": dataset_ids,
         "dataset_version_ids": dataset_version_ids,

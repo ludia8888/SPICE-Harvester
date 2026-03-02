@@ -6,8 +6,7 @@ from typing import Any, Optional
 import pytest
 from fastapi import HTTPException, status
 
-import bff.routers.pipeline_execution as pipeline_router
-from bff.routers.pipeline_execution import build_pipeline, deploy_pipeline, preview_pipeline
+from bff.services.pipeline_execution_service import build_pipeline, deploy_pipeline, preview_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -317,6 +316,7 @@ async def test_build_enqueues_job_and_records_run() -> None:
         dataset_registry=_DatasetRegistry(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),
+        emit_pipeline_control_plane_event=_noop_emit_event,
     )
 
     assert response["status"] == "success"
@@ -363,6 +363,7 @@ async def test_build_postgres_profile_uses_branch_ref_when_head_commit_unavailab
         dataset_registry=_DatasetRegistry(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),
+        emit_pipeline_control_plane_event=_noop_emit_event,
     )
 
     assert response["status"] == "success"
@@ -381,9 +382,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
         async def append_event(self, event: Any) -> None:
             return None
 
-    import bff.routers.pipeline_execution as pipeline_router
-
-    monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
+    _event_store = _EventStore()
 
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
@@ -402,6 +401,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
         pipeline_job_queue=queue,
         dataset_registry=_DatasetRegistry(),
         audit_store=_AuditStore(),
+        event_store=_event_store,
     )
 
     assert response["status"] == "success"
@@ -437,9 +437,7 @@ async def test_preview_defaults_to_foundry_limit_and_preview_meta_flags(monkeypa
         async def append_event(self, event: Any) -> None:
             return None
 
-    import bff.routers.pipeline_execution as pipeline_router
-
-    monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
+    _event_store = _EventStore()
 
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
@@ -457,6 +455,7 @@ async def test_preview_defaults_to_foundry_limit_and_preview_meta_flags(monkeypa
         pipeline_job_queue=queue,
         dataset_registry=_DatasetRegistry(),
         audit_store=_AuditStore(),
+        event_store=_event_store,
     )
 
     assert response["status"] == "success"
@@ -476,10 +475,7 @@ async def test_preview_defaults_to_foundry_limit_and_preview_meta_flags(monkeypa
 @pytest.mark.asyncio
 async def test_promote_build_merges_build_branch_to_main_and_registers_version(
     lakefs_merge_stub: list[dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pipeline_router, "_acquire_pipeline_publish_lock", _noop_publish_lock)
-    monkeypatch.setattr(pipeline_router, "emit_pipeline_control_plane_event", _noop_emit_event)
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-123"
     node_id = "node-1"
@@ -525,6 +521,9 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
         oms_client=_OMSClient(head_commit_id="c-main"),
         lineage_store=_LineageStore(),
         audit_store=_AuditStore(),
+        emit_pipeline_control_plane_event=_noop_emit_event,
+        _acquire_pipeline_publish_lock=_noop_publish_lock,
+        _release_pipeline_publish_lock=_noop_publish_lock,
     )
 
     assert response["status"] == "success"
@@ -591,6 +590,9 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
+            emit_pipeline_control_plane_event=_noop_emit_event,
+            _acquire_pipeline_publish_lock=_noop_publish_lock,
+            _release_pipeline_publish_lock=_noop_publish_lock,
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
@@ -627,6 +629,9 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
+            emit_pipeline_control_plane_event=_noop_emit_event,
+            _acquire_pipeline_publish_lock=_noop_publish_lock,
+            _release_pipeline_publish_lock=_noop_publish_lock,
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
@@ -665,6 +670,9 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
+            emit_pipeline_control_plane_event=_noop_emit_event,
+            _acquire_pipeline_publish_lock=_noop_publish_lock,
+            _release_pipeline_publish_lock=_noop_publish_lock,
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
@@ -728,6 +736,9 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
             lineage_store=None,
             oms_client=_OMSClient(head_commit_id="c-main"),
             audit_store=_AuditStore(),
+            emit_pipeline_control_plane_event=_noop_emit_event,
+            _acquire_pipeline_publish_lock=_noop_publish_lock,
+            _release_pipeline_publish_lock=_noop_publish_lock,
         )
 
     assert exc_info.value.status_code == status.HTTP_409_CONFLICT
@@ -738,10 +749,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
 @pytest.mark.asyncio
 async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
     lakefs_merge_stub: list[dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pipeline_router, "_acquire_pipeline_publish_lock", _noop_publish_lock)
-    monkeypatch.setattr(pipeline_router, "emit_pipeline_control_plane_event", _noop_emit_event)
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-breaking-allow"
     node_id = "node-1"
@@ -794,6 +802,9 @@ async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
         lineage_store=_LineageStore(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),
+        emit_pipeline_control_plane_event=_noop_emit_event,
+        _acquire_pipeline_publish_lock=_noop_publish_lock,
+        _release_pipeline_publish_lock=_noop_publish_lock,
     )
 
     assert response["status"] == "success"

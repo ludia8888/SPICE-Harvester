@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from bff.routers.pipeline_datasets import create_dataset_version
+from bff.services.pipeline_dataset_version_service import create_dataset_version
 
 
 @dataclass
@@ -132,6 +132,12 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
         "rows": [{"id": "1", "name": "A"}],
     }
 
+    async def _noop_flush(**_: Any) -> None:
+        return None
+
+    async def _noop_build_event(**_: Any) -> dict[str, Any]:
+        return {}
+
     response = await create_dataset_version(
         dataset_id=dataset.dataset_id,
         payload={
@@ -141,7 +147,11 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
         request=_Request(headers={"X-DB-Name": "testdb"}),
         pipeline_registry=pipeline_registry,  # type: ignore[arg-type]
         dataset_registry=registry,
+        objectify_registry=None,
+        objectify_job_queue=None,
         lineage_store=_LineageStore(),  # type: ignore[arg-type]
+        flush_dataset_ingest_outbox=_noop_flush,
+        build_dataset_event_payload=_noop_build_event,
     )
 
     assert response["status"] == "success"

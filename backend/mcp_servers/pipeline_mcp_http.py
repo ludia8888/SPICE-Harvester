@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from mcp_servers.bff_auth import bff_admin_token as _bff_admin_token
-from mcp_servers.bff_auth import bff_api_base_url
+from mcp_servers.bff_auth import bff_api_base_url, bff_api_v2_base_url
 import logging
 
 
@@ -97,6 +97,35 @@ async def bff_json(
         params=params,
         timeout_seconds=timeout_seconds,
         error_prefix="BFF",
+        error_path=path,
+    )
+
+
+async def bff_v2_json(
+    method: str,
+    path: str,
+    *,
+    db_name: str,
+    principal_id: Optional[str],
+    principal_type: Optional[str],
+    json_body: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    timeout_seconds: float = 30.0,
+) -> Dict[str, Any]:
+    """Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create)."""
+    base = bff_api_v2_base_url()
+    url = f"{base}{path}"
+    headers = bff_headers(db_name=db_name, principal_id=principal_id, principal_type=principal_type)
+    if method.upper() in {"POST", "PUT", "PATCH"} and "Idempotency-Key" not in headers:
+        headers["Idempotency-Key"] = f"mcp-{uuid.uuid4()}"
+    return await http_json(
+        method,
+        url,
+        headers=headers,
+        json_body=json_body,
+        params=params,
+        timeout_seconds=timeout_seconds,
+        error_prefix="BFF-v2",
         error_path=path,
     )
 
