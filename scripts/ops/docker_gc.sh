@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/_common.sh"
 MODE="safe" # safe|aggressive
 WITH_VOLUMES="false"
 BUILDER_UNTIL="24h"
+DOCKER_DF_TIMEOUT="${DOCKER_DF_TIMEOUT:-10}"
 
 usage() {
   cat <<'USAGE'
@@ -26,6 +27,9 @@ Flags:
   --aggressive          Also prune all unused images + all unused builder cache
   --with-volumes        Prune unused volumes (destructive; requires CONFIRM=YES)
   --builder-until DUR   Builder cache age filter (default: 24h). Use "0" to disable the filter.
+
+Env:
+  DOCKER_DF_TIMEOUT     Timeout seconds for `docker system df` snapshots (default: 10)
 USAGE
 }
 
@@ -33,6 +37,37 @@ truthy() {
   local v
   v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
   [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" || "${v}" == "on" ]]
+}
+
+run_with_timeout() {
+  local timeout_s="$1"
+  shift
+
+  "$@" &
+  local cmd_pid=$!
+  local elapsed=0
+
+  while kill -0 "${cmd_pid}" >/dev/null 2>&1; do
+    if (( elapsed >= timeout_s )); then
+      kill -TERM "${cmd_pid}" >/dev/null 2>&1 || true
+      sleep 1
+      kill -KILL "${cmd_pid}" >/dev/null 2>&1 || true
+      wait "${cmd_pid}" >/dev/null 2>&1 || true
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "${cmd_pid}"
+}
+
+log_docker_system_df() {
+  local phase="$1"
+  log "docker system df (${phase})"
+  if ! run_with_timeout "${DOCKER_DF_TIMEOUT}" docker system df; then
+    log "docker system df (${phase}) timed out after ${DOCKER_DF_TIMEOUT}s; skipping"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -61,8 +96,7 @@ done
 
 require_cmd docker
 
-log "docker system df (before)"
-docker system df || true
+log_docker_system_df "before"
 
 log "pruning stopped containers"
 docker container prune -f >/dev/null 2>&1 || true
@@ -95,5 +129,4 @@ if truthy "${WITH_VOLUMES}"; then
   docker volume prune -f >/dev/null 2>&1 || true
 fi
 
-log "docker system df (after)"
-docker system df || true
+log_docker_system_df "after"

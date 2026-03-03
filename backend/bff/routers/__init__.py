@@ -22,6 +22,7 @@ __all__ = [
     "agent_proxy",
     "summary",
     "pipeline",
+    "pipeline_execution",
     "objectify",
     "governance",
     "object_types",

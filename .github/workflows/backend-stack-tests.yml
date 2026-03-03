@@ -47,8 +47,8 @@ jobs:
 
       - name: Start docker stack
         run: |
-          docker compose -f docker-compose.full.yml up -d --build
-          docker compose -f docker-compose.full.yml ps
+          docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d --build
+          docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml ps
 
       - name: Run production test suite
         run: |
@@ -62,10 +62,10 @@ jobs:
       - name: Dump docker logs (on failure)
         if: failure()
         run: |
-          docker compose -f docker-compose.full.yml ps
-          docker compose -f docker-compose.full.yml logs --no-color --timestamps | tail -n 5000
+          docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml ps
+          docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml logs --no-color --timestamps | tail -n 5000
 
       - name: Stop docker stack
         if: always()
         run: |
-          docker compose -f docker-compose.full.yml down --remove-orphans
+          docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml down --remove-orphans

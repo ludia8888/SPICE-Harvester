@@ -25,6 +25,7 @@ AUTO_DOCKER_GC="${AUTO_DOCKER_GC:-true}"
 DOCKER_GC_MODE="${DOCKER_GC_MODE:-safe}"
 DOCKER_GC_BUILDER_UNTIL="${DOCKER_GC_BUILDER_UNTIL:-24h}"
 DOCKER_GC_WITH_VOLUMES="${DOCKER_GC_WITH_VOLUMES:-false}"
+DEBUG_PORTS_HINT_PRINTED="false"
 
 trim_trailing_slash() {
   local value="${1:-}"
@@ -125,9 +126,11 @@ Options:
 
 Notes:
 - Tests live under `backend/tests/` (run from `backend/`).
-- Full suite expects local ports from docker compose:
+- Full suite expects local ports from docker compose debug overlay:
   OMS 8000, BFF 8002.
   Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 39092.
+  Start command:
+  docker compose -f ../docker-compose.full.yml -f ./docker-compose.debug-ports.yml up -d --build
   If you use repo root `.env` port overrides (recommended), this script will auto-detect them.
 USAGE
 }
@@ -331,6 +334,12 @@ wait_for_url() {
   done
 
   echo "❌ Timed out waiting for $name: $url (timeout=${timeout_s}s)" >&2
+  if [[ "$DEBUG_PORTS_HINT_PRINTED" != "true" && ( "$url" == http://127.0.0.1* || "$url" == http://localhost* ) ]]; then
+    DEBUG_PORTS_HINT_PRINTED="true"
+    echo "💡 Internal ports may be closed by secure-default compose." >&2
+    echo "   For Gate execution, start with debug overlay:" >&2
+    echo "   docker compose -f ${REPO_ROOT}/docker-compose.full.yml -f ${REPO_ROOT}/backend/docker-compose.debug-ports.yml up -d --build" >&2
+  fi
   return 1
 }
 

@@ -12,6 +12,7 @@ from bff.routers import (
     pipeline_catalog,
     pipeline_datasets,
     pipeline_detail,
+    pipeline_execution,
     pipeline_history,
     pipeline_proposals,
     pipeline_udfs,
@@ -32,3 +33,4 @@ router.include_router(pipeline_history.router, prefix=_PIPELINES_PREFIX)
 
 # Detail routes include `GET /{pipeline_id}` (dynamic catch for one segment), include last.
 router.include_router(pipeline_detail.router, prefix=_PIPELINES_PREFIX)
+router.include_router(pipeline_execution.router, prefix=_PIPELINES_PREFIX)

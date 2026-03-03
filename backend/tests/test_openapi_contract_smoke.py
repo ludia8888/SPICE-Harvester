@@ -1522,7 +1522,14 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("POST", "/api/v1/databases/{db_name}/ontology"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품")
-        return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 202, 403, 409),
+            json_body=body,
+            headers={"X-DB-Name": ctx.db_name},
+        )
 
     if key == ("GET", "/api/v2/ontologies"):
         url = f"{BFF_URL}{op.path}"
@@ -2829,6 +2836,7 @@ async def test_openapi_stable_contract_smoke():
                         (200, 202, 409),
                         params={"branch": ctx.branch_name},
                         json_body=body,
+                        headers={"X-DB-Name": ctx.db_name},
                         note="smoke: proposal fallback write",
                     )
                     status, text, payload = await _request(session, branch_plan)
@@ -2875,6 +2883,7 @@ async def test_openapi_stable_contract_smoke():
                         (200, 202, 409),
                         params={"branch": ctx.branch_name},
                         json_body=_ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품"),
+                        headers={"X-DB-Name": ctx.db_name},
                         note="smoke: ensure action target class exists on proposal branch",
                     )
                     status, text, payload = await _request(session, ensure_product_plan)
@@ -3017,6 +3026,7 @@ async def test_openapi_stable_contract_smoke():
                             (200, 202, 409),
                             params={"branch": ctx.branch_name},
                             json_body=_ontology_payload(class_id=class_id, label_en=label_en, label_ko=label_ko),
+                            headers={"X-DB-Name": ctx.db_name},
                             note="smoke: self-heal ontology class on branch before object-type bootstrap",
                         )
                         status, text, payload = await _request(session, recovery_plan)

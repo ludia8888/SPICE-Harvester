@@ -3,9 +3,35 @@
 #   docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
 #   docker compose -f backend/docker-compose.yml -f backend/docker-compose.debug-ports.yml up -d
 services:
+  postgres:
+    ports:
+      - "${POSTGRES_PORT_HOST:-5433}:5432"
+  redis:
+    ports:
+      - "${REDIS_PORT_HOST:-6379}:6379"
+  elasticsearch:
+    ports:
+      - "${ELASTICSEARCH_PORT_HOST:-9200}:9200"
+  kafka:
+    ports:
+      - "${KAFKA_PORT_HOST:-39092}:9092"
+      - "29092:29092"
+  zookeeper:
+    ports:
+      - "${ZOOKEEPER_PORT_HOST:-2181}:2181"
+  minio:
+    ports:
+      - "${MINIO_PORT_HOST:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT_HOST:-9001}:9001"
+  lakefs:
+    ports:
+      - "${LAKEFS_PORT_HOST:-48080}:8000"
   oms:
     ports:
-      - "8000:8000"
+      - "${OMS_PORT_HOST:-8000}:8000"
   agent:
     ports:
-      - "8004:8004"
+      - "${AGENT_PORT_HOST:-8004}:8004"
+  ingest-reconciler-worker:
+    ports:
+      - "${INGEST_RECONCILER_PORT_HOST:-8012}:8012"
