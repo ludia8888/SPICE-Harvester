@@ -20,8 +20,6 @@ services:
     extends:
       file: backend/docker-compose.yml
       service: oms
-    ports:
-      - "8000:8000"
     environment:
       # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
       # Set to true in environments that require proposal workflow on protected branches (main/prod).

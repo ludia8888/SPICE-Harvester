@@ -10,8 +10,8 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-    ports:
-      - "${POSTGRES_PORT_HOST:-5433}:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
@@ -49,8 +49,8 @@ services:
     image: redis:7-alpine
     container_name: spice_redis
     command: redis-server --requirepass ${REDIS_PASSWORD:-spicepass123}
-    ports:
-      - "${REDIS_PORT_HOST:-6379}:6379"
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     networks:
@@ -89,8 +89,8 @@ services:
       memlock:
         soft: -1
         hard: -1
-    ports:
-      - "${ELASTICSEARCH_PORT_HOST:-9200}:9200"
+    expose:
+      - "9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
@@ -127,8 +127,9 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-    ports:
-      - "${KAFKA_PORT_HOST:-39092}:9092"
+    expose:
+      - "9092"
+      - "29092"
     depends_on:
       - zookeeper
     networks:
@@ -147,8 +148,8 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "${ZOOKEEPER_PORT_HOST:-2181}:2181"
+    expose:
+      - "2181"
     networks:
       - spice_network
     healthcheck:
@@ -164,9 +165,9 @@ services:
     environment:
       - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin123}
-    ports:
-      - "${MINIO_PORT_HOST:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT_HOST:-9001}:9001"
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - minio_data:/data
     networks:
@@ -209,8 +210,8 @@ services:
       - LAKEFS_BLOCKSTORE_S3_REGION=us-east-1
       - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:-minioadmin}
       - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:-minioadmin123}
-    ports:
-      - "${LAKEFS_PORT_HOST:-48080}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8000/api/v1/healthcheck >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -355,8 +356,8 @@ services:
         condition: service_healthy
     networks:
       - spice_network
-    ports:
-      - "${OMS_PORT_HOST:-8000}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -528,8 +529,8 @@ services:
       - minio
     networks:
       - spice_network
-    ports:
-      - "${AGENT_PORT_HOST:-8004}:8004"
+    expose:
+      - "8004"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 30s
@@ -731,8 +732,8 @@ services:
       - INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD=${INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD:-1}
       - INGEST_RECONCILER_ALERT_ON_ERROR=${INGEST_RECONCILER_ALERT_ON_ERROR:-true}
       - INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS=${INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS:-300}
-    ports:
-      - "${INGEST_RECONCILER_PORT_HOST:-8012}:8012"
+    expose:
+      - "8012"
     depends_on:
       - postgres
     networks:

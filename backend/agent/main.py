@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from agent.middleware.auth import ensure_agent_auth_configured, install_agent_auth_middleware
 from agent.routers.agent import router as agent_router
 from shared.config.settings import get_settings
 from shared.middleware.rate_limiter import RateLimiter
+from shared.security.startup_guard import ensure_startup_security
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.agent_registry import AgentRegistry
 from shared.services.registries.agent_session_registry import AgentSessionRegistry
@@ -24,6 +26,8 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize dependencies."""
+    ensure_startup_security("agent")
+    ensure_agent_auth_configured()
     require_event_store = get_settings().agent.require_event_store
     try:
         await event_store.connect()
@@ -90,7 +94,11 @@ app = create_fastapi_service(
     custom_lifespan=lifespan,
     include_health_check=True,
     include_logging_middleware=True,
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
 )
+install_agent_auth_middleware(app)
 
 app.include_router(agent_router, prefix="/api/v1")
 

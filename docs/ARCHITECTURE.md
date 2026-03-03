@@ -41,26 +41,26 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **639**, functions **6098**, classes **883**, internal cross-imports **1515**
+- Population: files **643**, functions **6114**, classes **884**, internal cross-imports **1520**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1515 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1520 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
-| 3 | I/O와 Core 직접 연결 | 3/92 (3.26%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
+| 3 | I/O와 Core 직접 연결 | 4/93 (4.30%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 3/22 (13.64%) | <= 15.00% | **PASS** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 51/639 (7.98%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 58/639 (9.08%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 330/6098 (5.41%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/883 (1.70%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 738/6098 (12.10%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 419/6098 (6.87%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 51/643 (7.93%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 58/643 (9.02%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 330/6114 (5.40%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/884 (1.70%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 738/6114 (12.07%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 419/6114 (6.85%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
 - Layer leaks: none detected
 - Dependency cycles: none detected
-- I/O-core direct links (sample): `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
+- I/O-core direct links (sample): `shared/services/core/agent_internal_client.py`, `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
 - Longest functions: `mcp_servers/pipeline_mcp_server.py:202` (1321 lines), `mcp_servers/pipeline_mcp_server.py:204` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:684` (1009 lines)
 - Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:684` (CC=296), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1437` (CC=247)
 
@@ -68,18 +68,15 @@ python scripts/check_docs.py
 
 | Service | Published Ports |
 | --- | --- |
-| `agent` | ${AGENT_PORT_HOST:-8004}:8004 |
 | `alertmanager` | 19093:9093 |
 | `bff` | 8002:8002 |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 |
 | `grafana` | 13000:3000 |
-| `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 |
 | `jaeger` | 16686:16686 |
 | `kafka` | ${KAFKA_PORT_HOST:-39092}:9092<br/>${KAFKA_PORT_INTERNAL_HOST:-29092}:29092 |
 | `kafka-ui` | ${KAFKA_UI_PORT_HOST:-8080}:8080 |
 | `lakefs` | ${LAKEFS_PORT_HOST:-48080}:8000 |
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 |
-| `oms` | ${OMS_PORT_HOST:-8000}:8000<br/>8000:8000 |
 | `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 |
 | `postgres` | ${POSTGRES_PORT_HOST:-5433}:5432 |
 | `prometheus` | 19090:9090 |
@@ -94,7 +91,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | --- | --- | --- |
 | `action-outbox-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
 | `action-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
-| `agent` | ${AGENT_PORT_HOST:-8004}:8004 | bff<br/>postgres<br/>minio<br/>otel-collector |
+| `agent` | - | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `alertmanager` | 19093:9093 | - |
 | `bff` | 8002:8002 | db-migrations<br/>oms<br/>postgres<br/>redis<br/>elasticsearch<br/>kafka<br/>minio<br/>lakefs<br/>otel-collector |
 | `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
@@ -102,7 +99,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `db-migrations` | - | postgres |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 | - |
 | `grafana` | 13000:3000 | prometheus |
-| `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
+| `ingest-reconciler-worker` | - | postgres<br/>otel-collector |
 | `instance-worker` | - | kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
 | `jaeger` | 16686:16686 | - |
 | `kafka` | ${KAFKA_PORT_HOST:-39092}:9092<br/>${KAFKA_PORT_INTERNAL_HOST:-29092}:29092 | zookeeper |
@@ -113,7 +110,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
 | `minio-init` | - | minio |
 | `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
-| `oms` | ${OMS_PORT_HOST:-8000}:8000<br/>8000:8000 | db-migrations<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `oms` | - | db-migrations<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
 | `ontology-worker` | - | kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
 | `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 | jaeger |
 | `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |
