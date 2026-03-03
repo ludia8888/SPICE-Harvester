@@ -136,7 +136,7 @@ async def test_foundry_orchestration_create_build_returns_foundry_build_shape(
 
     class _PipelineRegistry:
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
-            return SimpleNamespace(branch="master", pipeline_id=pipeline_id)
+            return SimpleNamespace(branch="main", pipeline_id=pipeline_id)
 
         async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
             return {
@@ -170,7 +170,7 @@ async def test_foundry_orchestration_create_build_returns_foundry_build_shape(
             "/api/v2/orchestration/builds/create",
             json={
                 "target": {"targetRids": [f"ri.foundry.main.pipeline.{pipeline_id}"]},
-                "branchName": "master",
+                "branchName": "main",
             },
             headers={"X-User-ID": "user-123"},
         )
@@ -178,7 +178,7 @@ async def test_foundry_orchestration_create_build_returns_foundry_build_shape(
     assert response.status_code == 200
     payload = response.json()
     assert payload["rid"] == "ri.foundry.main.build.build-test-1"
-    assert payload["branchName"] == "master"
+    assert payload["branchName"] == "main"
     assert payload["createdBy"] == "user-123"
     assert payload["jobRids"] == ["ri.foundry.main.job.build-test-1"]
     assert payload["status"] == "RUNNING"
@@ -193,7 +193,7 @@ async def test_foundry_orchestration_get_batch_jobs_and_cancel_flow():
 
     class _PipelineRegistry:
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
-            return SimpleNamespace(branch="master", pipeline_id=pipeline_id)
+            return SimpleNamespace(branch="main", pipeline_id=pipeline_id)
 
         async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
             return {
@@ -364,7 +364,7 @@ async def test_foundry_connectivity_connection_scoped_table_import_create(
                 "destination": {
                     "ontology": "sales_db",
                     "objectType": "Order",
-                    "branchName": "master",
+                    "branchName": "main",
                 },
             },
         )
@@ -853,7 +853,7 @@ async def test_foundry_schedule_create_get_pause_unpause_delete():
         async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
             return SimpleNamespace(
                 pipeline_id=pipeline_id,
-                branch="master",
+                branch="main",
                 status=self._status,
                 schedule_cron=self._schedule_cron,
                 schedule_interval_seconds=self._schedule_interval,

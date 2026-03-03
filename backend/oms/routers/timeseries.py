@@ -301,7 +301,7 @@ async def get_first_point(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
@@ -383,7 +383,7 @@ async def get_last_point(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
@@ -466,7 +466,7 @@ async def stream_points(
     property: str,
     request: Request,
     payload: Dict[str, Any] = Body(default={}),
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
 ) -> Union[StreamingResponse, JSONResponse]:

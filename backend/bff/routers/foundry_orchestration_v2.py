@@ -169,7 +169,7 @@ def _extract_build_branch(
         text = str(pipeline_branch).strip()
         if text:
             return text
-    return "master"
+    return "main"
 
 
 def _extract_job_outputs(run: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -256,7 +256,7 @@ def _resolve_create_build_input(payload: dict[str, Any], *, request: Request) ->
         or payload.get("branch")
         or target.get("branchName")
         or ""
-    ).strip() or "master"
+    ).strip() or "main"
     build_payload["branch"] = branch_name
 
     parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
@@ -874,7 +874,7 @@ def _schedule_response(pipeline: Any) -> dict[str, Any]:
         "trigger": trigger,
         "action": {
             "type": "build",
-            "branchName": str(branch or "master"),
+            "branchName": str(branch or "main"),
         },
         "status": schedule_status,
         "createdTime": _iso_timestamp(getattr(pipeline, "created_at", None) or (pipeline.get("created_at") if isinstance(pipeline, dict) else None)),

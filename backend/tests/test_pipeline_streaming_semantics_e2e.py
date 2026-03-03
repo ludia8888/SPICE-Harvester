@@ -295,8 +295,8 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()
     try:
-        out_a = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_a", branch="master")
-        out_b = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_b", branch="master")
+        out_a = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_a", branch="main")
+        out_b = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_b", branch="main")
         assert out_a and out_b
         ver_a = await dataset_registry.get_latest_version(dataset_id=out_a.dataset_id)
         ver_b = await dataset_registry.get_latest_version(dataset_id=out_b.dataset_id)
@@ -424,8 +424,8 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()
     try:
-        out_ok = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_ok", branch="master")
-        out_bad = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_bad", branch="master")
+        out_ok = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_ok", branch="main")
+        out_bad = await dataset_registry.get_dataset_by_name(db_name=db_name, name="out_bad", branch="main")
         assert out_ok is None
         assert out_bad is None
     finally:

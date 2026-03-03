@@ -298,7 +298,7 @@ async def test_foundry_apply_batch_v2_routes_to_spark_when_threshold_exceeded(
     transport = ASGITransport(app=app_with_router)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v2/ontologies/demo/actions/ApproveTicket/applyBatch?branch=master",
+            "/v2/ontologies/demo/actions/ApproveTicket/applyBatch?branch=main",
             json={
                 "requests": [
                     {"parameters": {"ticket": {"class_id": "Ticket", "instance_id": "t1"}}},

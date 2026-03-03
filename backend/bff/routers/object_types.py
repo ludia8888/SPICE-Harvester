@@ -257,7 +257,7 @@ async def create_object_type_contract(
     db_name: str,
     body: ObjectTypeContractRequest,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     expected_head_commit: Optional[str] = Query(
         default=None,
         description="Optimistic concurrency guard (defaults to branch head)",
@@ -286,7 +286,7 @@ async def update_object_type_contract(
     class_id: str,
     body: ObjectTypeContractUpdate,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     expected_head_commit: Optional[str] = Query(
         default=None,
         description="Optimistic concurrency guard (defaults to branch head)",

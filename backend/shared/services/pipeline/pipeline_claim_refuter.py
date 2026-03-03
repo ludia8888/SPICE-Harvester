@@ -943,7 +943,7 @@ async def refute_pipeline_plan_claims(
         executor = PipelineExecutor(dataset_registry)
         definition_for_run = dict(definition_json)
         preview_meta = dict(definition_for_run.get("__preview_meta__") or {})
-        preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "master")
+        preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
         try:
             preview_meta["sample_limit"] = max(1, min(int(sample_limit or 0), 1200))
         except (TypeError, ValueError):

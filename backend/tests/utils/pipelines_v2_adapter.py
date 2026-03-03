@@ -28,9 +28,9 @@ _TERMINAL_BUILD_STATUSES = {"SUCCEEDED", "FAILED", "CANCELED", "CANCELLED"}
 def _normalize_branch(branch: Optional[str]) -> str:
     text = str(branch or "").strip()
     if not text:
-        return "master"
+        return "main"
     if text.lower() == "main":
-        return "master"
+        return "main"
     return text
 
 
@@ -460,7 +460,7 @@ class PipelinesV2AdapterClient:
         excel: bool,
     ) -> httpx.Response:
         db_name = str(params.get("db_name") or self._client.headers.get("X-DB-Name") or "").strip()
-        branch = _normalize_branch(params.get("branch") or "master")
+        branch = _normalize_branch(params.get("branch") or "main")
         dataset_name = str(data.get("dataset_name") or "").strip()
         description = str(data.get("description") or "").strip()
         file_entry = files.get("file")
@@ -567,7 +567,7 @@ class PipelinesV2AdapterClient:
         name = str(payload.get("name") or "").strip()
         description = str(payload.get("description") or "").strip()
         location = str(payload.get("location") or "e2e").strip() or "e2e"
-        branch = _normalize_branch(payload.get("branch") or "master")
+        branch = _normalize_branch(payload.get("branch") or "main")
         pipeline_type = str(payload.get("pipeline_type") or "batch").strip() or "batch"
         definition_json = payload.get("definition_json") if isinstance(payload.get("definition_json"), dict) else {}
 
@@ -619,7 +619,7 @@ class PipelinesV2AdapterClient:
             return _response("POST", url, status_code=409, payload={"detail": "pipeline has no version"})
 
         node_id = str(payload.get("node_id") or payload.get("nodeId") or "").strip() or None
-        branch = _normalize_branch(payload.get("branch") or pipeline.branch or "master")
+        branch = _normalize_branch(payload.get("branch") or pipeline.branch or "main")
         preview_limit = payload.get("limit")
         try:
             preview_limit_value = int(preview_limit) if preview_limit is not None else None
@@ -674,7 +674,7 @@ class PipelinesV2AdapterClient:
         if latest is None:
             return _response("POST", url, status_code=409, payload={"detail": "pipeline has no version"})
 
-        branch = _normalize_branch(payload.get("branch") or payload.get("branchName") or pipeline.branch or "master")
+        branch = _normalize_branch(payload.get("branch") or payload.get("branchName") or pipeline.branch or "main")
         node_id = str(payload.get("node_id") or payload.get("nodeId") or "").strip() or None
         limit_raw = payload.get("limit")
         try:
@@ -723,7 +723,7 @@ class PipelinesV2AdapterClient:
         payload: dict[str, Any],
         headers: Optional[dict[str, str]],
     ) -> httpx.Response:
-        branch = _normalize_branch(payload.get("branch") or payload.get("branchName") or "master")
+        branch = _normalize_branch(payload.get("branch") or payload.get("branchName") or "main")
         node_id = str(payload.get("node_id") or payload.get("nodeId") or "").strip()
         limit = payload.get("limit")
         pipeline_registry = await self._get_pipeline_registry()
@@ -909,7 +909,7 @@ class PipelinesV2AdapterClient:
             db_name = str(json_payload.get("db_name") or self._client.headers.get("X-DB-Name") or "").strip()
             name = str(json_payload.get("name") or "").strip()
             description = str(json_payload.get("description") or "").strip()
-            branch = _normalize_branch(json_payload.get("branch") or params.get("branch") or "master")
+            branch = _normalize_branch(json_payload.get("branch") or params.get("branch") or "main")
             schema_json = json_payload.get("schema_json") if isinstance(json_payload.get("schema_json"), dict) else None
             return await self._create_dataset_v2(
                 url=url,
@@ -924,7 +924,7 @@ class PipelinesV2AdapterClient:
         dataset_version_match = re.fullmatch(r"/api/v1/pipelines/datasets/([^/]+)/versions", path)
         if dataset_version_match:
             dataset_id = dataset_version_match.group(1)
-            branch = _normalize_branch(json_payload.get("branch") or params.get("branch") or "master")
+            branch = _normalize_branch(json_payload.get("branch") or params.get("branch") or "main")
             sample_json = json_payload.get("sample_json") if isinstance(json_payload.get("sample_json"), dict) else {}
             schema_json = json_payload.get("schema_json") if isinstance(json_payload.get("schema_json"), dict) else {}
             return await self._create_dataset_version_v2(
@@ -983,7 +983,7 @@ class PipelinesV2AdapterClient:
                 fixed_payload.get("branch")
                 or fixed_payload.get("branchName")
                 or params.get("branch")
-                or "master"
+                or "main"
             )
             fixed_payload["branch"] = branch
             if "branchName" in fixed_payload:
@@ -1051,7 +1051,7 @@ class PipelinesV2AdapterClient:
             if isinstance(payload.get("definition_json"), dict):
                 await pipeline_registry.add_version(
                     pipeline_id=pipeline_id,
-                    branch=str(update_fields.get("branch") or pipeline.branch or "master"),
+                    branch=str(update_fields.get("branch") or pipeline.branch or "main"),
                     definition_json=payload.get("definition_json") or {},
                     user_id=str(self._client.headers.get("X-User-ID") or "system"),
                 )

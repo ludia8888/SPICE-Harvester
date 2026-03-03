@@ -55,11 +55,11 @@ async def test_function_categories_row_aggregation_generator_are_distinct_and_wo
     dataset_id = "ds-demo-fn-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="master",
+        branch="main",
         schema_json={
             "columns": [
                 {"name": "group", "type": "xsd:string"},

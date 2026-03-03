@@ -226,7 +226,7 @@ async def record_deployment(
 async def list_resources(
     db_name: str,
     resource_type: Optional[str] = Query(None, description="Resource type filter"),
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -269,7 +269,7 @@ async def list_resources(
 async def list_resources_by_type(
     db_name: str,
     resource_type: str,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -370,7 +370,7 @@ async def get_resource(
     db_name: str,
     resource_type: str,
     resource_id: str,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
 ):
     try:
         db_name = validate_db_name(db_name)

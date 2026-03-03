@@ -461,7 +461,7 @@ class PipelineExecutor:
         sample_limit: Optional[int] = None,
     ) -> PipelineTable:
         metadata = node.get("metadata") or {}
-        selection = normalize_dataset_selection(metadata, default_branch=branch or "master")
+        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
         resolution = await resolve_dataset_version(
             self._dataset_registry,
             db_name=db_name,
@@ -589,7 +589,7 @@ class PipelineExecutor:
             metadata["datasetName"] = dataset_name
         if branch:
             metadata["datasetBranch"] = branch
-        selection = normalize_dataset_selection(metadata, default_branch=branch or "master")
+        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
         resolution = await resolve_dataset_version(
             self._dataset_registry,
             db_name=db_name,
@@ -654,7 +654,7 @@ class PipelineExecutor:
                 reference.get("branch")
                 or exp.get("branch")
                 or branch
-                or "master"
+                or "main"
             )
             allow_nulls = exp.get("allow_nulls") if "allow_nulls" in exp else exp.get("allowNulls")
             allow_nulls = True if allow_nulls is None else bool(allow_nulls)

@@ -9,7 +9,7 @@ def test_pipeline_helpers_normalize_inputs(monkeypatch):
     monkeypatch.setenv("PIPELINE_PROTECTED_BRANCHES", "main, release")
     monkeypatch.setenv("PIPELINE_REQUIRE_PROPOSALS", "true")
 
-    assert pipeline_ops._resolve_pipeline_protected_branches() == {"main", "master", "release"}
+    assert pipeline_ops._resolve_pipeline_protected_branches() == {"main", "main", "release"}
     assert pipeline_ops._pipeline_requires_proposal("main") is True
     assert pipeline_ops._pipeline_requires_proposal("feature") is False
 

@@ -3,9 +3,11 @@ from shared.observability.tracing import trace_endpoint
 import logging
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.errors.http_error_mapper import code_for_http_status
 from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep
@@ -79,7 +81,7 @@ async def describe_datasets(
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     db_name = validate_db_name(str(payload.get("db_name") or "").strip())
-    branch = str(payload.get("branch") or "master").strip() or "master"
+    branch = str(payload.get("branch") or "main").strip() or "main"
 
     allowed_db_names = _policy_set(data_policies.get("allowed_db_names"))
     _enforce_policy_value(allowed=allowed_db_names, value=db_name)
@@ -139,7 +141,7 @@ async def snapshot_ontology(
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     db_name = validate_db_name(str(payload.get("db_name") or "").strip())
-    branch = str(payload.get("branch") or "master").strip() or "master"
+    branch = str(payload.get("branch") or "main").strip() or "main"
     ontology_id = str(payload.get("ontology_id") or "").strip()
     if not ontology_id:
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "ontology_id is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
@@ -156,6 +158,19 @@ async def snapshot_ontology(
             f"/api/v1/database/{db_name}/ontology/{ontology_id}",
             params={"branch": branch},
         )
+    except httpx.HTTPStatusError as exc:
+        response = getattr(exc, "response", None)
+        status_code = int(getattr(response, "status_code", 502) or 502)
+        detail = ""
+        if response is not None:
+            detail = str(getattr(response, "text", "") or "").strip()
+        if not detail:
+            detail = str(exc)
+        raise classified_http_exception(
+            status_code,
+            detail,
+            code=code_for_http_status(status_code),
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

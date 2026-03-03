@@ -468,6 +468,7 @@ class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
             status_code = int(response.status_code)
             content_type = response.headers.get("content-type", "") or "application/octet-stream"
             wire_headers = _as_str_dict(response.headers)
+            wire_headers.setdefault("x-spice-stream-mode", "bridge-http")
 
             if status_code >= 400:
                 body = await response.aread()

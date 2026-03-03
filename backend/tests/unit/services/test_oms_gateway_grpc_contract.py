@@ -187,6 +187,60 @@ async def test_get_database_returns_404_when_missing(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_database_exists_returns_true_when_found(monkeypatch: pytest.MonkeyPatch):
+    servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
+    try:
+        async def _fake_dispatch(*, context, method, path, request):  # noqa: ANN001
+            _ = context
+            _ = request
+            assert method == "GET"
+            assert path == "/api/v1/database/list"
+            return oms_gateway_pb2.OmsResponse(
+                status_code=200,
+                json_body=json.dumps({"data": {"databases": [{"name": "qa_db"}]}}),
+                headers={"content-type": "application/json"},
+                content_type="application/json",
+            )
+
+        monkeypatch.setattr(servicer, "_dispatch", _fake_dispatch)
+
+        response = await servicer.DatabaseExists(oms_gateway_pb2.OmsRequest(db_name="qa_db"), _FakeContext())
+        payload = json.loads(response.json_body)
+        assert response.status_code == 200
+        assert payload["data"]["exists"] is True
+        assert payload["data"]["name"] == "qa_db"
+    finally:
+        await servicer.close()
+
+
+@pytest.mark.asyncio
+async def test_database_exists_returns_false_when_missing(monkeypatch: pytest.MonkeyPatch):
+    servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
+    try:
+        async def _fake_dispatch(*, context, method, path, request):  # noqa: ANN001
+            _ = context
+            _ = method
+            _ = path
+            _ = request
+            return oms_gateway_pb2.OmsResponse(
+                status_code=200,
+                json_body=json.dumps({"data": {"databases": [{"name": "other_db"}]}}),
+                headers={"content-type": "application/json"},
+                content_type="application/json",
+            )
+
+        monkeypatch.setattr(servicer, "_dispatch", _fake_dispatch)
+
+        response = await servicer.DatabaseExists(oms_gateway_pb2.OmsRequest(db_name="missing_db"), _FakeContext())
+        payload = json.loads(response.json_body)
+        assert response.status_code == 200
+        assert payload["data"]["exists"] is False
+        assert payload["data"]["name"] == "missing_db"
+    finally:
+        await servicer.close()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_stream_emits_multiple_chunks(monkeypatch: pytest.MonkeyPatch):
     servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
     try:
@@ -216,6 +270,7 @@ async def test_dispatch_stream_emits_multiple_chunks(monkeypatch: pytest.MonkeyP
         data_chunks = [c for c in chunks if c.chunk]
         assert len(data_chunks) == 2
         assert data_chunks[0].headers.get("content-type") == "application/x-ndjson"
+        assert data_chunks[0].headers.get("x-spice-stream-mode") == "bridge-http"
         assert chunks[-1].eof is True
     finally:
         await servicer.close()

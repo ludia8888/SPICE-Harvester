@@ -347,7 +347,7 @@ def test_foundry_v2_strict_compat_env_gate(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.unit
 def test_foundry_v2_full_metadata_branch_contract():
-    assert foundry_ontology_v2._full_metadata_branch_contract(branch="master") == {"rid": "master"}
+    assert foundry_ontology_v2._full_metadata_branch_contract(branch="main") == {"rid": "main"}
 
 
 @pytest.mark.unit
@@ -459,11 +459,11 @@ async def test_foundry_v2_route_full_metadata_applies_required_fields(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master&preview=true")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main&preview=true")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["branch"] == {"rid": "master"}
+    assert body["branch"] == {"rid": "main"}
     object_contract = body["objectTypes"]["Order"]["objectType"]
     assert object_contract["apiName"] == "Order"
     assert object_contract["displayName"] == "Order"
@@ -500,7 +500,7 @@ async def test_foundry_v2_load_object_set_objects_routes_to_object_search(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=master&transactionId=txn_1",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=main&transactionId=txn_1",
             json={
                 "objectSet": {"objectType": "Order"},
                 "select": ["id", "status"],
@@ -516,7 +516,7 @@ async def test_foundry_v2_load_object_set_objects_routes_to_object_search(
     called_params = oms_client.post.await_args.kwargs["params"]
     called_payload = oms_client.post.await_args.kwargs["json"]
     assert called_path == "/api/v2/ontologies/sales_db/objects/Order/search"
-    assert called_params == {"branch": "master"}
+    assert called_params == {"branch": "main"}
     assert called_payload["pageSize"] == 25
     assert called_payload["select"] == ["id", "status"]
 
@@ -543,7 +543,7 @@ async def test_foundry_v2_load_object_set_objects_requires_object_set(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=master",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjects?branch=main",
             json={},
         )
 
@@ -576,7 +576,7 @@ async def test_foundry_v2_count_objects_routes_to_oms_count(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objects/Order/count?branch=master&sdkPackageRid=ri.pkg.1&sdkVersion=2.0.0",
+            "/api/v2/ontologies/sales_db/objects/Order/count?branch=main&sdkPackageRid=ri.pkg.1&sdkVersion=2.0.0",
         )
 
     assert response.status_code == 200
@@ -585,7 +585,7 @@ async def test_foundry_v2_count_objects_routes_to_oms_count(
     called_path = oms_client.post.await_args.args[0]
     called_params = oms_client.post.await_args.kwargs["params"]
     assert called_path == "/api/v2/ontologies/sales_db/objects/Order/count"
-    assert called_params == {"branch": "master", "sdkPackageRid": "ri.pkg.1", "sdkVersion": "2.0.0"}
+    assert called_params == {"branch": "main", "sdkPackageRid": "ri.pkg.1", "sdkVersion": "2.0.0"}
 
 
 @pytest.mark.unit
@@ -610,7 +610,7 @@ async def test_foundry_v2_load_object_set_multiple_object_types_requires_preview
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadObjectsMultipleObjectTypes?branch=master",
+            "/api/v2/ontologies/sales_db/objectSets/loadObjectsMultipleObjectTypes?branch=main",
             json={
                 "objectSet": {"objectType": "Order"},
                 "select": ["id"],
@@ -645,7 +645,7 @@ async def test_foundry_v2_load_object_set_links_requires_preview(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=master",
+            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=main",
             json={
                 "objectSet": {"objectType": "Order"},
                 "links": ["owned_by"],
@@ -708,7 +708,7 @@ async def test_foundry_v2_load_object_set_links_returns_locator_payload(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=master&preview=true",
+            "/api/v2/ontologies/sales_db/objectSets/loadLinks?branch=main&preview=true",
             json={
                 "objectSet": {"objectType": "Order"},
                 "links": ["owned_by"],
@@ -778,7 +778,7 @@ async def test_foundry_v2_aggregate_object_set_returns_metrics(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=master",
+            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=main",
             json={
                 "objectSet": {"objectType": "Order"},
                 "aggregation": [
@@ -842,7 +842,7 @@ async def test_foundry_v2_aggregate_object_set_delegates_to_oms(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=master",
+            "/api/v2/ontologies/sales_db/objectSets/aggregate?branch=main",
             json={
                 "objectSet": {"objectType": "Order"},
                 "aggregation": [
@@ -898,7 +898,7 @@ async def test_foundry_v2_aggregate_objects_route_returns_metrics(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/api/v2/ontologies/sales_db/objects/Order/aggregate?branch=master",
+            "/api/v2/ontologies/sales_db/objects/Order/aggregate?branch=main",
             json={
                 "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
                 "aggregation": [{"type": "sum", "field": "amount", "name": "amountSum"}],
@@ -995,11 +995,11 @@ async def test_foundry_v2_route_full_metadata_keeps_branch_rid_contract(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master&preview=true")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main&preview=true")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["branch"] == {"rid": "master"}
+    assert body["branch"] == {"rid": "main"}
     object_contract = body["objectTypes"]["Order"]["objectType"]
     assert object_contract["apiName"] == "Order"
     assert object_contract["displayName"] == "Order"
@@ -1040,7 +1040,7 @@ async def test_foundry_v2_route_full_metadata_requires_preview_flag(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=master")
+        response = await client.get("/api/v2/ontologies/sales_db/fullMetadata?branch=main")
 
     assert response.status_code == 400
     body = response.json()
@@ -1053,13 +1053,13 @@ async def test_foundry_v2_route_full_metadata_requires_preview_flag(
 @pytest.mark.parametrize(
     "path",
     [
-        "/api/v2/ontologies/sales_db/interfaceTypes?branch=master",
-        "/api/v2/ontologies/sales_db/interfaceTypes/BaseInterface?branch=master",
-        "/api/v2/ontologies/sales_db/sharedPropertyTypes?branch=master",
-        "/api/v2/ontologies/sales_db/sharedPropertyTypes/sharedName?branch=master",
+        "/api/v2/ontologies/sales_db/interfaceTypes?branch=main",
+        "/api/v2/ontologies/sales_db/interfaceTypes/BaseInterface?branch=main",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes?branch=main",
+        "/api/v2/ontologies/sales_db/sharedPropertyTypes/sharedName?branch=main",
         "/api/v2/ontologies/sales_db/valueTypes",
         "/api/v2/ontologies/sales_db/valueTypes/string",
-        "/api/v2/ontologies/sales_db/objectTypes/Order/fullMetadata?branch=master",
+        "/api/v2/ontologies/sales_db/objectTypes/Order/fullMetadata?branch=main",
     ],
 )
 async def test_foundry_v2_preview_routes_require_preview_flag(
@@ -1118,7 +1118,7 @@ async def test_foundry_v2_route_list_object_types_strict_on_applies_required_fie
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes?branch=master&pageSize=100")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes?branch=main&pageSize=100")
 
     assert response.status_code == 200
     body = response.json()
@@ -1164,7 +1164,7 @@ async def test_foundry_v2_route_get_object_type_applies_required_fields(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=master")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=main")
 
     assert response.status_code == 200
     object_contract = response.json()
@@ -1207,7 +1207,7 @@ async def test_foundry_v2_route_get_object_type_strict_on_applies_required_field
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=master")
+        response = await client.get("/api/v2/ontologies/sales_db/objectTypes/Order?branch=main")
 
     assert response.status_code == 200
     object_contract = response.json()
@@ -1250,7 +1250,7 @@ async def test_foundry_v2_route_get_outgoing_link_type_strict_on_unresolved_retu
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=master"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=main"
         )
 
     assert response.status_code == 404
@@ -1287,7 +1287,7 @@ async def test_foundry_v2_route_get_outgoing_link_type_unresolved_returns_not_fo
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=master"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes/orderedBy?branch=main"
         )
 
     assert response.status_code == 404
@@ -1332,7 +1332,7 @@ async def test_foundry_v2_route_list_outgoing_link_types_strict_on_drops_unresol
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get(
-            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes?branch=master&pageSize=100"
+            "/api/v2/ontologies/sales_db/objectTypes/Order/outgoingLinkTypes?branch=main&pageSize=100"
         )
 
     assert response.status_code == 200

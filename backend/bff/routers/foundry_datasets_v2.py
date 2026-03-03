@@ -256,7 +256,7 @@ def _normalize_dataset_object_key(dataset: Any, object_key: str) -> str:
     if parsed:
         _, parsed_key = parsed
         key = parsed_key.lstrip("/")
-        branch_prefix = f"{(dataset.branch or 'master').strip('/')}/"
+        branch_prefix = f"{(dataset.branch or 'main').strip('/')}/"
         if key.startswith(branch_prefix):
             key = key[len(branch_prefix):]
     else:
@@ -276,7 +276,7 @@ def _artifact_s3_uri(*, repository: str, branch: str, object_key: str | None) ->
     normalized_key = str(object_key or "").strip().lstrip("/")
     if not normalized_key:
         return None
-    normalized_branch = str(branch or "master").strip().strip("/") or "master"
+    normalized_branch = str(branch or "main").strip().strip("/") or "main"
     return f"s3://{repository}/{normalized_branch}/{normalized_key}"
 
 
@@ -429,7 +429,7 @@ async def create_dataset_v2(
             parameters={"parentFolderRid": parent_folder_rid},
         )
 
-    branch = "master"
+    branch = "main"
     description = body.get("description")
 
     try:
@@ -496,7 +496,7 @@ async def get_dataset_v2(
 async def get_dataset_schema_v2(
     datasetRid: str,
     preview: bool = Query(..., alias="preview"),
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     versionId: str = Query(default="", alias="versionId"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -531,7 +531,7 @@ async def get_dataset_schema_v2(
             parameters={"datasetRid": datasetRid},
         )
 
-    normalized_branch = str(branchName or "").strip() or "master"
+    normalized_branch = str(branchName or "").strip() or "main"
     try:
         validate_branch_name(normalized_branch)
     except SecurityViolationError as exc:
@@ -576,7 +576,7 @@ async def put_dataset_schema_v2(
     datasetRid: str,
     request: Request,
     preview: bool = Query(..., alias="preview"),
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     _: None = require_scopes(
         ["api:datasets-write"],
@@ -614,7 +614,7 @@ async def put_dataset_schema_v2(
     except _DATASETS_JSON_EXCEPTIONS:
         return _datasets_invalid_json_response()
 
-    normalized_branch = str(branchName or "master").strip() or "master"
+    normalized_branch = str(branchName or "main").strip() or "main"
     try:
         validate_branch_name(normalized_branch)
     except SecurityViolationError as exc:
@@ -798,9 +798,9 @@ async def list_branches_v2(
         branches = await lakefs_client.list_branches(repository=repo)
     except LakeFSError as exc:
         logger.warning("Failed to list lakeFS branches: %s", exc)
-        branches = [{"name": dataset.branch or "master"}]
+        branches = [{"name": dataset.branch or "main"}]
     except _DATASETS_HANDLED_EXCEPTIONS:
-        branches = [{"name": dataset.branch or "master"}]
+        branches = [{"name": dataset.branch or "main"}]
 
     sliced = branches[int(offset) : int(offset) + int(pageSize) + 1]
     has_next = len(sliced) > int(pageSize)
@@ -878,7 +878,7 @@ async def create_branch_v2(
             parameters={"branchName": branch_name},
         )
 
-    source_branch = str(body.get("sourceBranchName") or "master").strip() or "master"
+    source_branch = str(body.get("sourceBranchName") or "main").strip() or "main"
     try:
         source_branch = validate_branch_name(source_branch)
     except SecurityViolationError as exc:
@@ -1031,12 +1031,12 @@ async def delete_branch_v2(
             parameters={"branchName": normalized_branch},
         )
 
-    if normalized_branch == "master":
+    if normalized_branch == "main":
         return foundry_error(
             400,
             error_code="INVALID_ARGUMENT",
             error_name="CannotDeleteMasterBranch",
-            parameters={"branchName": "master"},
+            parameters={"branchName": "main"},
         )
 
     repo = _resolve_lakefs_raw_repository()
@@ -1073,7 +1073,7 @@ async def delete_branch_v2(
 async def create_transaction_v2(
     datasetRid: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     _: None = require_scopes(
         ["api:datasets-write"],
@@ -1112,7 +1112,7 @@ async def create_transaction_v2(
             parameters={"message": "transactionType must be APPEND or UPDATE"},
         )
 
-    branch_name = str(branchName or "master").strip() or "master"
+    branch_name = str(branchName or "main").strip() or "main"
     try:
         branch_name = validate_branch_name(branch_name)
     except SecurityViolationError as exc:
@@ -1165,7 +1165,7 @@ async def create_transaction_v2(
 async def list_transactions_v2(
     datasetRid: str,
     preview: bool = Query(..., alias="preview"),
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     pageSize: int = Query(default=100, ge=1, le=1000, alias="pageSize"),
     pageToken: str = Query(default="", alias="pageToken"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -1200,7 +1200,7 @@ async def list_transactions_v2(
             parameters={"datasetRid": datasetRid},
         )
 
-    normalized_branch = str(branchName or "").strip() or "master"
+    normalized_branch = str(branchName or "").strip() or "main"
     try:
         normalized_branch = validate_branch_name(normalized_branch)
     except SecurityViolationError as exc:
@@ -1282,7 +1282,7 @@ async def list_transactions_v2(
 async def get_transaction_v2(
     datasetRid: str,
     transactionRid: str,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     _: None = require_scopes(
         ["api:datasets-read"],
@@ -1335,7 +1335,7 @@ async def get_transaction_v2(
             parameters={"transactionRid": transactionRid},
         )
 
-    normalized_branch = str(branchName or "master").strip() or "master"
+    normalized_branch = str(branchName or "main").strip() or "main"
     try:
         normalized_branch = validate_branch_name(normalized_branch)
     except SecurityViolationError as exc:
@@ -1444,7 +1444,7 @@ async def commit_transaction_v2(
             parameters={"transactionRid": transactionRid, "datasetRid": datasetRid, "message": "Ingest request not found"},
         )
 
-    branch = str(getattr(ingest_request, "branch", "") or "").strip() or "master"
+    branch = str(getattr(ingest_request, "branch", "") or "").strip() or "main"
     # Commit to lakeFS
     repo = _resolve_lakefs_raw_repository()
     try:
@@ -1669,7 +1669,7 @@ async def abort_transaction_v2(
 async def list_files_v2(
     datasetRid: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     startTransactionRid: str = Query(default="", alias="startTransactionRid"),
     endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     prefix: str = Query(default="", alias="prefix"),
@@ -1701,7 +1701,7 @@ async def list_files_v2(
         )
 
     repo = _resolve_lakefs_raw_repository()
-    ref = str(branchName or "").strip() or "master"
+    ref = str(branchName or "").strip() or "main"
     try:
         ref = validate_branch_name(ref)
     except SecurityViolationError as exc:
@@ -1809,7 +1809,7 @@ async def get_file_content_v2(
     datasetRid: str,
     filePath: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     startTransactionRid: str = Query(default="", alias="startTransactionRid"),
     endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -1838,7 +1838,7 @@ async def get_file_content_v2(
         )
 
     repo = _resolve_lakefs_raw_repository()
-    branch = str(branchName or "").strip() or (dataset.branch or "master")
+    branch = str(branchName or "").strip() or (dataset.branch or "main")
     if startTransactionRid and not _transaction_id_from_rid(startTransactionRid):
         return foundry_error(
             400,
@@ -1914,7 +1914,7 @@ async def upload_file_v2(
     datasetRid: str,
     filePath: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     transactionRid: str = Query(default="", alias="transactionRid"),
     byteOffset: int | None = Query(default=None, alias="byteOffset"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -1988,9 +1988,9 @@ async def upload_file_v2(
                 error_name="TransactionNotFound",
                 parameters={"transactionRid": transactionRid},
             )
-        branch = str(getattr(ingest_request, "branch", "") or "").strip() or "master"
+        branch = str(getattr(ingest_request, "branch", "") or "").strip() or "main"
     else:
-        branch = str(branchName or "").strip() or "master"
+        branch = str(branchName or "").strip() or "main"
         try:
             branch = validate_branch_name(branch)
         except SecurityViolationError as exc:
@@ -2109,7 +2109,7 @@ async def get_file_v2(
     datasetRid: str,
     filePath: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     startTransactionRid: str = Query(default="", alias="startTransactionRid"),
     endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -2146,7 +2146,7 @@ async def get_file_v2(
             parameters={"message": "filePath is required"},
         )
 
-    branch = str(branchName or "").strip() or (dataset.branch or "master")
+    branch = str(branchName or "").strip() or (dataset.branch or "main")
     try:
         branch = validate_branch_name(branch)
     except SecurityViolationError as exc:
@@ -2238,7 +2238,7 @@ async def get_file_v2(
 async def read_table_v2(
     datasetRid: str,
     request: Request,
-    branchName: str = Query(default="master", alias="branchName"),
+    branchName: str = Query(default="main", alias="branchName"),
     startTransactionRid: str = Query(default="", alias="startTransactionRid"),
     endTransactionRid: str = Query(default="", alias="endTransactionRid"),
     format: str = Query(..., alias="format"),
@@ -2269,7 +2269,7 @@ async def read_table_v2(
             parameters={"datasetRid": datasetRid},
         )
 
-    normalized_branch = str(branchName or "").strip() or "master"
+    normalized_branch = str(branchName or "").strip() or "main"
     try:
         normalized_branch = validate_branch_name(normalized_branch)
     except SecurityViolationError as exc:

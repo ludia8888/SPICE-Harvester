@@ -97,7 +97,7 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
         query={},
         body={
             "target": {"targetRids": ["ri.foundry.main.pipeline.11111111-1111-1111-1111-111111111111"]},
-            "branchName": "master",
+            "branchName": "main",
         },
         headers={},
         data_scope={},

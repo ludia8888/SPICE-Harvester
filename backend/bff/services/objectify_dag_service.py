@@ -75,7 +75,7 @@ class _ObjectifyDagOrchestrator:
         self.job_queue = job_queue
         self.oms_client = oms_client
 
-        self.branch = validate_branch_name(body.branch or "master")
+        self.branch = validate_branch_name(body.branch or "main")
         self.include_dependencies = bool(body.include_dependencies)
         self.max_depth = int(body.max_depth or 0)
         self.run_id = uuid4().hex
@@ -117,7 +117,7 @@ class _ObjectifyDagOrchestrator:
         backing_source: Dict[str, Any],
     ) -> tuple[Any, str, str]:
         dataset_id = str(backing_source.get("dataset_id") or "").strip()
-        dataset_branch = str(backing_source.get("branch") or "master").strip() or "master"
+        dataset_branch = str(backing_source.get("branch") or "main").strip() or "main"
         schema_hash = str(backing_source.get("schema_hash") or backing_source.get("schemaHash") or "").strip() or None
         if not dataset_id:
             raise classified_http_exception(
@@ -129,8 +129,8 @@ class _ObjectifyDagOrchestrator:
 
         branch_candidates: list[str] = [dataset_branch]
         if dataset_branch == "main":
-            branch_candidates.append("master")
-        elif dataset_branch == "master":
+            branch_candidates.append("main")
+        elif dataset_branch == "main":
             branch_candidates.append("main")
 
         mapping_spec = None

@@ -73,7 +73,7 @@ class _DatasetRegistry:
             source_type=kwargs.get("source_type", "foundry_api"),
             source_ref=kwargs.get("source_ref"),
             schema_json=kwargs.get("schema_json") or {},
-            branch=kwargs.get("branch", "master"),
+            branch=kwargs.get("branch", "main"),
             created_at=utcnow(),
             updated_at=utcnow(),
         )
@@ -311,11 +311,11 @@ class _DatasetRegistry:
 class _MockLakeFSClient:
     async def list_branches(self, repository: str, **kwargs: Any) -> list[dict[str, Any]]:  # noqa: ANN401
         return [
-            {"name": "master", "commit_id": "abc123"},
+            {"name": "main", "commit_id": "abc123"},
             {"name": "dev", "commit_id": "def456"},
         ]
 
-    async def create_branch(self, repository: str, name: str, source: str = "master") -> dict[str, str]:
+    async def create_branch(self, repository: str, name: str, source: str = "main") -> dict[str, str]:
         return {"id": name}
 
     async def get_branch_head_commit_id(self, repository: str, branch: str) -> str:
@@ -520,7 +520,7 @@ async def test_foundry_datasets_schema_get_and_update(
         # GET schema
         get_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/getSchema",
-            params={"preview": True, "branchName": "master"},
+            params={"preview": True, "branchName": "main"},
         )
 
     assert get_resp.status_code == 200
@@ -542,7 +542,7 @@ async def test_foundry_datasets_schema_get_and_update(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         put_resp = await client.put(
             f"/api/v2/datasets/{dataset_rid}/putSchema",
-            params={"preview": True, "branchName": "master"},
+            params={"preview": True, "branchName": "main"},
             json={"fieldSchemaList": new_field_list},
         )
 
@@ -587,14 +587,14 @@ async def test_foundry_datasets_branch_operations(
         branches = list_resp.json()["data"]
         assert len(branches) == 2
         branch_names = {b["branchName"] for b in branches}
-        assert "master" in branch_names
+        assert "main" in branch_names
         assert "dev" in branch_names
         assert all(b["datasetRid"] == dataset_rid for b in branches)
 
         # Create branch
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/branches",
-            json={"name": "feature-x", "sourceBranchName": "master"},
+            json={"name": "feature-x", "sourceBranchName": "main"},
             headers={"X-User-ID": "user-1"},
         )
         assert create_resp.status_code == 200
@@ -604,12 +604,12 @@ async def test_foundry_datasets_branch_operations(
 
         # Get branch
         get_resp = await client.get(
-            f"/api/v2/datasets/{dataset_rid}/branches/master",
+            f"/api/v2/datasets/{dataset_rid}/branches/main",
             headers={"X-User-ID": "user-1"},
         )
         assert get_resp.status_code == 200
         get_body = get_resp.json()
-        assert get_body["branchName"] == "master"
+        assert get_body["branchName"] == "main"
         assert get_body["latestCommitId"] == "abc123"
 
         # Delete branch
@@ -619,9 +619,9 @@ async def test_foundry_datasets_branch_operations(
         )
         assert del_resp.status_code == 204
 
-        # Cannot delete master branch
+        # Cannot delete main branch
         del_main_resp = await client.delete(
-            f"/api/v2/datasets/{dataset_rid}/branches/master",
+            f"/api/v2/datasets/{dataset_rid}/branches/main",
             headers={"X-User-ID": "user-1"},
         )
         assert del_main_resp.status_code == 400
@@ -656,7 +656,7 @@ async def test_foundry_datasets_transaction_lifecycle(
         # Create a transaction
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -685,7 +685,7 @@ async def test_foundry_datasets_transaction_lifecycle(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp2 = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -728,7 +728,7 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -738,7 +738,7 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
         csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
         upload_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/files/source.csv/upload",
-            params={"transactionRid": txn_rid, "branchName": "master"},
+            params={"transactionRid": txn_rid, "branchName": "main"},
             content=csv_payload,
             headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
         )
@@ -753,7 +753,7 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
 
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
         assert read_resp.status_code == 200
         parsed = list(csv.reader(io.StringIO(read_resp.text)))
@@ -765,7 +765,7 @@ async def test_foundry_datasets_transaction_commit_materializes_uploaded_csv_ver
 
     latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
     assert latest_version is not None
-    assert latest_version.artifact_key == f"s3://raw-datasets/master/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
     assert latest_version.row_count == 2
     assert latest_version.sample_json["rows"] == [
         ["order-1", "10.5", "OPEN"],
@@ -800,7 +800,7 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -810,12 +810,12 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
         csv_payload = b"id,amount,status\norder-1,10.5,OPEN\norder-2,20.0,HOLD\n"
         upload_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/files/orders_snapshot.csv/upload",
-            params={"transactionRid": txn_rid, "branchName": "master"},
+            params={"transactionRid": txn_rid, "branchName": "main"},
             content=csv_payload,
             headers={"X-User-ID": "user-1", "Content-Type": "text/csv"},
         )
         assert upload_resp.status_code == 200
-        assert storage.objects.get(f"master/commerce_db/{ds.dataset_id}/orders/source.csv") == csv_payload
+        assert storage.objects.get(f"main/commerce_db/{ds.dataset_id}/orders/source.csv") == csv_payload
 
         commit_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions/{txn_rid}/commit",
@@ -826,7 +826,7 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
 
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
         assert read_resp.status_code == 200
         parsed = list(csv.reader(io.StringIO(read_resp.text)))
@@ -838,7 +838,7 @@ async def test_foundry_datasets_transaction_commit_materializes_non_source_csv_w
 
     latest_version = await dr.get_latest_version(dataset_id=ds.dataset_id)
     assert latest_version is not None
-    assert latest_version.artifact_key == f"s3://raw-datasets/master/commerce_db/{ds.dataset_id}/orders/source.csv"
+    assert latest_version.artifact_key == f"s3://raw-datasets/main/commerce_db/{ds.dataset_id}/orders/source.csv"
     assert latest_version.row_count == 2
 
 
@@ -865,7 +865,7 @@ async def test_foundry_datasets_transaction_commit_lakefs_failure_keeps_open(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         create_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/transactions",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             json={"transactionType": "APPEND"},
             headers={"X-User-ID": "user-1"},
         )
@@ -929,7 +929,7 @@ async def test_foundry_datasets_file_operations(
         upload_data = b"id,name\n1,Alice\n2,Bob\n"
         upload_resp = await client.post(
             f"/api/v2/datasets/{dataset_rid}/files/data/upload.csv/upload",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             content=upload_data,
             headers={
                 "X-User-ID": "user-1",
@@ -942,16 +942,16 @@ async def test_foundry_datasets_file_operations(
         assert upload_body["transactionRid"].startswith("ri.foundry.main.transaction.")
 
         # Verify the data was written to storage
-        expected_key = f"master/commerce_db/{ds.dataset_id}/orders/data/upload.csv"
+        expected_key = f"main/commerce_db/{ds.dataset_id}/orders/data/upload.csv"
         assert storage.objects.get(expected_key) == upload_data
 
         # Get file content (pre-populate storage for this path)
-        content_key = f"master/commerce_db/{ds.dataset_id}/orders/readme.txt"
+        content_key = f"main/commerce_db/{ds.dataset_id}/orders/readme.txt"
         storage.objects[content_key] = b"Hello, World!"
 
         content_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/files/readme.txt/content",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             headers={"X-User-ID": "user-1"},
         )
         assert content_resp.status_code == 200
@@ -981,7 +981,7 @@ async def test_foundry_datasets_list_files_returns_503_when_lakefs_unavailable(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         list_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/files",
-            params={"branchName": "master"},
+            params={"branchName": "main"},
             headers={"X-User-ID": "user-1"},
         )
 
@@ -1037,7 +1037,7 @@ async def test_foundry_datasets_read_table(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 100, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 100, "branchName": "main", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
@@ -1092,7 +1092,7 @@ async def test_foundry_datasets_read_table_with_column_selection(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"columns": ["id", "status"], "rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"columns": ["id", "status"], "rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
@@ -1121,7 +1121,7 @@ async def test_foundry_datasets_read_table_uses_version_artifact_key_fallback(
     ds = await dr.create_dataset(db_name="commerce_db", name="orders")
     dataset_rid = f"ri.spice.main.dataset.{ds.dataset_id}"
     custom_artifact_key = f"commerce_db/{ds.dataset_id}/orders/custom/path/orders_snapshot.csv"
-    storage.objects[f"master/{custom_artifact_key}"] = b"id,status\norder-1,OPEN\norder-2,HOLD\n"
+    storage.objects[f"main/{custom_artifact_key}"] = b"id,status\norder-1,OPEN\norder-2,HOLD\n"
 
     dr.versions[ds.dataset_id] = SimpleNamespace(
         version_id=str(uuid.uuid4()),
@@ -1135,7 +1135,7 @@ async def test_foundry_datasets_read_table_uses_version_artifact_key_fallback(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
@@ -1173,7 +1173,7 @@ async def test_foundry_datasets_read_table_no_version_returns_empty(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
 
     assert read_resp.status_code == 200
@@ -1215,7 +1215,7 @@ async def test_foundry_datasets_read_table_lakefs_error_returns_unavailable(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         read_resp = await client.get(
             f"/api/v2/datasets/{dataset_rid}/readTable",
-            params={"rowLimit": 10, "branchName": "master", "format": "CSV"},
+            params={"rowLimit": 10, "branchName": "main", "format": "CSV"},
         )
 
     assert read_resp.status_code == 500

@@ -34,7 +34,7 @@ async def get_class_instances(
     class_id: str = ...,
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
     search: Optional[str] = Query(default=None, description="Search query"),
 ) -> Dict[str, Any]:
     """
@@ -129,7 +129,7 @@ async def get_instance(
     db_name: str = Depends(ValidatedDatabaseName),
     instance_id: str = ...,
     class_id: Optional[str] = Query(default=None, description="Optional class ID for validation"),
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
 ) -> Dict[str, Any]:
     """
     개별 인스턴스를 효율적으로 조회
@@ -189,7 +189,7 @@ async def get_class_instance_count(
     es: ElasticsearchServiceDep,
     db_name: str = Depends(ValidatedDatabaseName),
     class_id: str = ...,
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
 ) -> Dict[str, Any]:
     """
     특정 클래스의 인스턴스 개수를 효율적으로 조회

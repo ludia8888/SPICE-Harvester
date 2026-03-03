@@ -91,7 +91,7 @@ _ACTION_TYPE_SPEC_HINT_FIELDS = {
 
 _ONTOLOGY_READ = require_scopes(["api:ontologies-read"])
 _ONTOLOGY_WRITE = require_scopes(["api:ontologies-write"])
-_QUERY_TYPE_PRIMARY_BRANCH = "master"
+_QUERY_TYPE_PRIMARY_BRANCH = "main"
 _QUERY_TYPE_FALLBACK_BRANCH = "main"
 
 
@@ -280,7 +280,7 @@ def _service_http_error_response(
 
 
 def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "master"
+    normalized = str(branch or "").strip() or "main"
     if normalized.lower().startswith("branch:"):
         return normalized
     return f"branch:{normalized}"
@@ -3267,7 +3267,7 @@ async def get_full_metadata_v2(
     ontologyRid: str,
     request: Request,
     preview: bool = Query(False, description="Must be true for preview endpoints"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -3451,7 +3451,7 @@ async def list_action_types_v2(
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     ontology = ontologyRid
@@ -3516,7 +3516,7 @@ async def get_action_type_v2(
     ontologyRid: str,
     actionTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     ontology = ontologyRid
@@ -3603,7 +3603,7 @@ async def get_action_type_by_rid_v2(
     ontologyRid: str,
     actionTypeRid: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     ontology = ontologyRid
@@ -3807,7 +3807,7 @@ async def apply_action_v2(
     actionApiName: str,
     body: ApplyActionRequestV2,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
@@ -3891,7 +3891,7 @@ async def apply_action_batch_v2(
     actionApiName: str,
     body: BatchApplyActionRequestV2,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -4261,7 +4261,7 @@ async def list_interface_types_v2(
     preview: bool = Query(False),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -4324,7 +4324,7 @@ async def get_interface_type_v2(
     interfaceTypeApiName: str,
     request: Request,
     preview: bool = Query(False),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -4408,7 +4408,7 @@ async def list_shared_property_types_v2(
     preview: bool = Query(False),
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -4471,7 +4471,7 @@ async def get_shared_property_type_v2(
     sharedPropertyTypeApiName: str,
     request: Request,
     preview: bool = Query(False),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -4573,7 +4573,7 @@ async def list_value_types_v2(
     try:
         resources = await _list_all_resources_for_type(
             db_name=db_name,
-            branch="master",
+            branch="main",
             resource_type="value_type",
             oms_client=oms_client,
         )
@@ -4635,7 +4635,7 @@ async def get_value_type_v2(
             db_name,
             resource_type="value_type",
             resource_id=value_type,
-            branch="master",
+            branch="main",
         )
         resource = _extract_ontology_resource(payload)
         if not resource:
@@ -4684,7 +4684,7 @@ async def list_object_types_v2(
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -4770,7 +4770,7 @@ async def create_object_type_v2(
     ontologyRid: str,
     body: ObjectTypeContractCreateRequestV2,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -4861,7 +4861,7 @@ async def update_object_type_v2(
     objectTypeApiName: str,
     body: ObjectTypeContractUpdateRequestV2,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     expected_head_commit: str | None = Query(default=None, alias="expectedHeadCommit"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
@@ -4971,7 +4971,7 @@ async def get_object_type_v2(
     ontologyRid: str,
     objectTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -5045,7 +5045,7 @@ async def get_object_type_full_metadata_v2(
     ontologyRid: str,
     objectTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -5165,7 +5165,7 @@ async def list_outgoing_link_types_v2(
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -5315,7 +5315,7 @@ async def get_outgoing_link_type_v2(
     objectTypeApiName: str,
     linkTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -5450,7 +5450,7 @@ async def list_incoming_link_types_v2(
     request: Request,
     page_size: int = Query(500, alias="pageSize", ge=1, le=1000),
     page_token: str | None = Query(default=None, alias="pageToken"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -5566,7 +5566,7 @@ async def get_incoming_link_type_v2(
     objectTypeApiName: str,
     linkTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
     strict_compat = False
@@ -5667,7 +5667,7 @@ async def search_objects_v2(
     objectTypeApiName: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -5732,7 +5732,7 @@ async def count_objects_v2(
     ontologyRid: str,
     objectTypeApiName: str,
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -5796,7 +5796,7 @@ async def aggregate_objects_v2(
     objectTypeApiName: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -5859,7 +5859,7 @@ async def load_object_set_objects_v2(
     ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -5961,7 +5961,7 @@ async def load_object_set_links_v2(
     ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -6171,7 +6171,7 @@ async def load_object_set_multiple_object_types_v2(
     ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
@@ -6306,7 +6306,7 @@ async def load_object_set_objects_or_interfaces_v2(
     ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     preview: bool = Query(False),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -6434,7 +6434,7 @@ async def aggregate_object_set_v2(
     ontologyRid: str,
     payload: Dict[str, Any],
     request: Request,
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
@@ -6569,7 +6569,7 @@ async def list_objects_v2(
     order_by: str | None = Query(default=None, alias="orderBy"),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -6650,7 +6650,7 @@ async def get_object_v2(
     request: Request,
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -6796,7 +6796,7 @@ async def list_linked_objects_v2(
     order_by: str | None = Query(default=None, alias="orderBy"),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
     snapshot: bool | None = Query(default=None),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7078,7 +7078,7 @@ async def get_linked_object_v2(
     request: Request,
     select: list[str] | None = Query(default=None),
     exclude_rid: bool | None = Query(default=None, alias="excludeRid"),
-    branch: str = Query("master", description="Ontology branch name or branch RID"),
+    branch: str = Query("main", description="Ontology branch name or branch RID"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7374,7 +7374,7 @@ async def get_timeseries_first_point_v2(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7432,7 +7432,7 @@ async def get_timeseries_last_point_v2(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7491,7 +7491,7 @@ async def stream_timeseries_points_v2(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7601,7 +7601,7 @@ async def list_attachment_property_v2(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7660,7 +7660,7 @@ async def get_attachment_by_rid_v2(
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7721,7 +7721,7 @@ async def get_attachment_content_v2(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
@@ -7784,7 +7784,7 @@ async def get_attachment_content_by_rid_v2(
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,

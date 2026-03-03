@@ -58,7 +58,7 @@ def spark() -> SparkSession:
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
     builder = (
-        SparkSession.builder.master("local[1]")
+        SparkSession.builder.main("local[1]")
         .appName("pipeline-worker-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.executorEnv.PYTHONPATH", os.environ.get("PYTHONPATH", ""))

@@ -36,7 +36,7 @@ async def trigger_incremental_objectify(
     mapping_spec_id: str,
     request: Request,
     body: TriggerIncrementalRequest = TriggerIncrementalRequest(),
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ) -> Dict[str, Any]:
@@ -180,7 +180,7 @@ async def trigger_incremental_objectify(
 async def get_mapping_spec_watermark(
     mapping_spec_id: str,
     request: Request,
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ) -> Dict[str, Any]:
     """Get watermark state for incremental objectify."""

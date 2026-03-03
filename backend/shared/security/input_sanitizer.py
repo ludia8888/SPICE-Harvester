@@ -795,20 +795,26 @@ class InputSanitizer:
         if not branch_name or not isinstance(branch_name, str):
             raise SecurityViolationError("Branch name must be a non-empty string")
 
+        normalized = branch_name.strip()
+        if not normalized:
+            raise SecurityViolationError("Branch name must be a non-empty string")
+        if normalized.lower() == "master":
+            raise SecurityViolationError("Branch 'master' is no longer supported; use 'main'")
+
         # Foundry branch parameter accepts branch names and RID-like identifiers.
         # Allow dots for RID segments (e.g. ri.ontology.main.branch.<id>).
-        if not re.match(r"^[a-zA-Z0-9._/-]+$", branch_name):
+        if not re.match(r"^[a-zA-Z0-9._/-]+$", normalized):
             raise SecurityViolationError("Branch name contains invalid characters")
 
-        if len(branch_name) > 100:
+        if len(normalized) > 100:
             raise SecurityViolationError("Branch name too long")
 
         # 예약된 이름 확인
         reserved_names = {"head", "refs", "objects", "info", "hooks"}
-        if branch_name.lower() in reserved_names:
-            raise SecurityViolationError(f"'{branch_name}' is a reserved branch name")
+        if normalized.lower() in reserved_names:
+            raise SecurityViolationError(f"'{normalized}' is a reserved branch name")
 
-        return branch_name
+        return normalized
 
     def validate_instance_id(self, instance_id: str) -> str:
         """인스턴스 ID 검증"""

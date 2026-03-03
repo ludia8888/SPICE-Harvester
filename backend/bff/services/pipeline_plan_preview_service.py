@@ -117,7 +117,7 @@ async def preview_plan(
 
     preview_definition = dict(validation.plan.definition_json)
     preview_meta = dict(preview_definition.get("__preview_meta__") or {})
-    preview_meta.setdefault("branch", str(branch or "") or "master")
+    preview_meta.setdefault("branch", str(branch or "") or "main")
     sample_limit = max(limit, run_table_limit) if include_run_tables else limit
 
     join_count = _definition_join_count(preview_definition)
@@ -239,7 +239,7 @@ async def inspect_plan_preview(
         limit = int(body.limit or 500)
         preview_definition = dict(validation.plan.definition_json)
         preview_meta = dict(preview_definition.get("__preview_meta__") or {})
-        preview_meta.setdefault("branch", str(branch or "") or "master")
+        preview_meta.setdefault("branch", str(branch or "") or "main")
         if _definition_has_join(preview_definition):
             preview_meta["sample_limit"] = max(limit, _JOIN_SAMPLE_MIN_ROWS)
         preview_definition["__preview_meta__"] = preview_meta
@@ -318,7 +318,7 @@ async def evaluate_joins(
             **dict(validation.plan.definition_json),
             "__preview_meta__": {
                 **dict((validation.plan.definition_json or {}).get("__preview_meta__") or {}),
-                "branch": str(branch or "") or "master",
+                "branch": str(branch or "") or "main",
             },
         },
         db_name=db_name,

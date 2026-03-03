@@ -34,7 +34,7 @@ async def detect_relationships(
     dataset_id: str,
     request: Request,
     body: DetectRelationshipsRequest = DetectRelationshipsRequest(),
-    branch: str = Query(default="master"),
+    branch: str = Query(default="main"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     """Detect potential FK relationships in a dataset."""

@@ -1105,7 +1105,7 @@
         {
           "name": "protected_branches",
           "type": "str",
-          "default": "master",
+          "default": "main",
           "description": "Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
           "env_vars": [
             "PROTECTED_BRANCHES"
@@ -1115,7 +1115,7 @@
         {
           "name": "fallback_branches",
           "type": "str",
-          "default": "master",
+          "default": "main",
           "description": "Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
           "env_vars": [
             "FALLBACK_BRANCHES"
@@ -1472,7 +1472,7 @@
         {
           "name": "protected_branches",
           "type": "str",
-          "default": "main,master,production,prod",
+          "default": "main,production,prod",
           "description": "Protected branches (ONTOLOGY_PROTECTED_BRANCHES)",
           "env_vars": [
             "PROTECTED_BRANCHES"
@@ -3610,7 +3610,7 @@
         {
           "name": "base_branch",
           "type": "str",
-          "default": "master",
+          "default": "main",
           "description": "Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
           "env_vars": [
             "BASE_BRANCH"
@@ -4741,7 +4741,7 @@
         {
           "name": "base_branch",
           "type": "str",
-          "default": "master",
+          "default": "main",
           "description": "Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
           "env_vars": [
             "BASE_BRANCH"

@@ -208,7 +208,7 @@ def _inject_fk_join_check(
         return None
     allow_nulls = fk_spec.get("allow_nulls") if "allow_nulls" in fk_spec else fk_spec.get("allowNulls")
     allow_nulls = True if allow_nulls is None else bool(allow_nulls)
-    ref_branch = reference.get("branch") or fk_spec.get("branch") or default_branch or "master"
+    ref_branch = reference.get("branch") or fk_spec.get("branch") or default_branch or "main"
     dataset_id = (
         reference.get("datasetId")
         or reference.get("dataset_id")
@@ -538,7 +538,7 @@ async def augment_definition_with_casts(
         if all(_is_cast_transform(node_by_id.get(target_id, {})) for target_id in targets):
             continue
 
-        selection = normalize_dataset_selection(node.get("metadata") or {}, default_branch=branch or "master")
+        selection = normalize_dataset_selection(node.get("metadata") or {}, default_branch=branch or "main")
         try:
             resolution = await resolve_dataset_version(
                 dataset_registry,

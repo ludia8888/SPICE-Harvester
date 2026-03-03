@@ -180,7 +180,7 @@ class OMSClient(ManagedAsyncClient):
     async def get_database(self, db_name: str) -> Dict[str, Any]:
         response = await self._call_unary(
             "GetDatabase",
-            path_for_error=f"/api/v1/database/exists/{db_name}",
+            path_for_error=f"/api/v1/database/{db_name}",
             db_name=db_name,
         )
         self._raise_for_status(response)

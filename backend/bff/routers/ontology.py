@@ -33,7 +33,7 @@ async def create_ontology_compat(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
     request: Request,
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     oms_client: OMSClient = OMSClientDep,
 ):

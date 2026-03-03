@@ -68,7 +68,7 @@ def _strip_text_if_not_none(raw: Any) -> Optional[str]:
 
 
 def _normalize_base_branch(raw: Any) -> str:
-    return str(raw or "").strip() or "master"
+    return str(raw or "").strip() or "main"
 
 
 def _clamp_flush_timeout_seconds(raw: Any, *, default: float = 10.0) -> float:
@@ -997,11 +997,11 @@ class PipelineSettings(BaseSettings):
         description="Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS)",
     )
     protected_branches: str = Field(
-        default="master",
+        default="main",
         description="Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
     )
     fallback_branches: str = Field(
-        default="master",
+        default="main",
         description="Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
     )
 
@@ -1264,17 +1264,17 @@ class PipelineSettings(BaseSettings):
 
     @property
     def protected_branches_set(self) -> set[str]:
-        raw = str(self.protected_branches or "").strip() or "master"
+        raw = str(self.protected_branches or "").strip() or "main"
         branches = {branch.strip() for branch in raw.split(",") if branch.strip()}
-        branches.add("master")
+        branches.add("main")
         return branches
 
     @property
     def fallback_branches_list(self) -> List[str]:
-        raw = str(self.fallback_branches or "").strip() or "master"
+        raw = str(self.fallback_branches or "").strip() or "main"
         branches = [branch.strip() for branch in raw.split(",") if branch.strip()]
-        if "master" not in branches:
-            branches.append("master")
+        if "main" not in branches:
+            branches.append("main")
         return branches
 
 
@@ -1290,7 +1290,7 @@ class OntologySettings(BaseSettings):
     )
 
     protected_branches: str = Field(
-        default="main,master,production,prod",
+        default="main,production,prod",
         description="Protected branches (ONTOLOGY_PROTECTED_BRANCHES)",
     )
     require_proposals: bool = Field(
@@ -1366,7 +1366,7 @@ class OntologySettings(BaseSettings):
     @field_validator("protected_branches", mode="before")
     @classmethod
     def strip_protected_branches(cls, v):  # noqa: ANN001
-        return str(v or "").strip() or "main,master,production,prod"
+        return str(v or "").strip() or "main,production,prod"
 
     @field_validator("allow_implicit_primary_key", "allow_implicit_title_key", mode="before")
     @classmethod
@@ -1398,7 +1398,7 @@ class OntologySettings(BaseSettings):
     def protected_branches_set(self) -> set[str]:
         raw = str(self.protected_branches or "").strip()
         branches = {b.strip() for b in raw.split(",") if b.strip()}
-        return branches or {"main", "master", "production", "prod"}
+        return branches or {"main", "production", "prod"}
 
     def allow_implicit_primary_key_effective(self, *, is_production: bool, branch: Optional[str] = None) -> bool:
         if self.allow_implicit_primary_key is not None:
@@ -2705,7 +2705,7 @@ class BranchVirtualizationSettings(BaseSettings):
     )
 
     base_branch: str = Field(
-        default="master",
+        default="main",
         description="Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
     )
     _normalize_base_branch = field_validator("base_branch", mode="before")(_normalize_base_branch)
@@ -3745,7 +3745,7 @@ class WritebackMaterializerSettings(BaseSettings):
     )
 
     base_branch: str = Field(
-        default="master",
+        default="main",
         description="Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
     )
     interval_seconds: float = Field(

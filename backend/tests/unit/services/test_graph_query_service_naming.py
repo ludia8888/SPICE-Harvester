@@ -119,13 +119,13 @@ async def test_execute_simple_graph_query_uses_foundry_naming() -> None:
         request=None,  # unused by implementation
         graph_service=_GraphServiceSimpleStub(),
         dataset_registry=_DatasetRegistryStub(),
-        base_branch="master",
+        base_branch="main",
         overlay_branch=None,
         branch=None,
     )
 
-    assert result["graph_branch"] == "master"
-    assert result["read_model_base_branch"] == "master"
+    assert result["graph_branch"] == "main"
+    assert result["read_model_base_branch"] == "main"
     assert "terminus_branch" not in result
     assert "es_base_branch" not in result
     assert "es_overlay_branch" not in result
@@ -146,14 +146,14 @@ async def test_execute_multi_hop_query_uses_foundry_naming() -> None:
         request=None,  # unused by implementation
         graph_service=_GraphServiceMultiHopStub(),
         dataset_registry=_DatasetRegistryStub(),
-        base_branch="master",
+        base_branch="main",
         overlay_branch=None,
         branch=None,
     )
 
     data = payload["data"]
-    assert data["graph_branch"] == "master"
-    assert data["read_model_base_branch"] == "master"
+    assert data["graph_branch"] == "main"
+    assert data["read_model_base_branch"] == "main"
     assert "terminus_branch" not in data
     assert "es_base_branch" not in data
     assert "es_overlay_branch" not in data
@@ -178,12 +178,12 @@ async def test_execute_graph_query_provenance_uses_graph_key() -> None:
         lineage_store=_LineageStoreStub(),
         graph_service=_GraphServiceWithProvenanceStub(),
         dataset_registry=_DatasetRegistryStub(),
-        base_branch="master",
+        base_branch="main",
         overlay_branch=None,
         branch=None,
     )
 
-    assert response.query.get("graph_branch") == "master"
+    assert response.query.get("graph_branch") == "main"
     assert "terminus_branch" not in response.query
     assert response.nodes
     provenance = response.nodes[0].provenance or {}
@@ -219,7 +219,7 @@ def test_resolve_graph_branches_keeps_virtualization_for_document_queries() -> N
     )
 
     assert ctx.graph_branch == "main"
-    assert ctx.read_model_base_branch == "master"
+    assert ctx.read_model_base_branch == "main"
     assert ctx.read_model_overlay_branch == "main"
     assert ctx.branch_virtualization_active is True
     assert ctx.overlay_required is True

@@ -26,7 +26,7 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
 
 
 def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "master"
+    normalized = str(branch or "").strip() or "main"
     if normalized.lower().startswith("branch:"):
         return normalized
     return f"branch:{normalized}"
@@ -38,7 +38,7 @@ async def list_resources(
     db_name: str,
     request: Request,
     resource_type: Optional[str] = Query(None, description="Resource type filter"),
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     oms_client: OMSClient = OMSClientDep,
@@ -60,7 +60,7 @@ async def list_resources_by_type(
     db_name: str,
     resource_type: str,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     oms_client: OMSClient = OMSClientDep,
@@ -83,7 +83,7 @@ async def create_resource(
     resource_type: str,
     payload: OntologyResourceRequest,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     expected_head_commit: Optional[str] = Query(None, description="Optimistic concurrency guard token"),
     oms_client: OMSClient = OMSClientDep,
 ):
@@ -105,7 +105,7 @@ async def get_resource(
     resource_type: str,
     resource_id: str,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     oms_client: OMSClient = OMSClientDep,
 ):
     await _require_domain_role(request, db_name=db_name)
@@ -126,7 +126,7 @@ async def update_resource(
     resource_id: str,
     payload: OntologyResourceRequest,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     expected_head_commit: Optional[str] = Query(None, description="Optimistic concurrency guard token"),
     oms_client: OMSClient = OMSClientDep,
 ):
@@ -149,7 +149,7 @@ async def delete_resource(
     resource_type: str,
     resource_id: str,
     request: Request,
-    branch: str = Query("master", description="Target branch"),
+    branch: str = Query("main", description="Target branch"),
     expected_head_commit: Optional[str] = Query(None, description="Optimistic concurrency guard token"),
     oms_client: OMSClient = OMSClientDep,
 ):

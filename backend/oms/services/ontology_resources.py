@@ -281,7 +281,7 @@ class OntologyResourceService:
     @staticmethod
     def _normalize_branch_for_write(branch: str) -> str:
         normalized = _strip_branch_ref(branch)
-        return normalized or "master"
+        return normalized or "main"
 
     async def _resolve_deployed_target_branch(
         self,
@@ -316,7 +316,7 @@ class OntologyResourceService:
         return resolved or None
 
     async def _resolve_read_branches(self, *, db_name: str, branch: str) -> List[str]:
-        raw_branch = str(branch or "").strip() or "master"
+        raw_branch = str(branch or "").strip() or "main"
         candidates: List[str] = []
 
         def _add(value: Optional[str]) -> None:

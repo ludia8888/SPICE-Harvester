@@ -107,7 +107,7 @@ async def _fallback_from_registry(
 
 
 def _derive_ordering_key(command: InstanceCommand) -> str:
-    branch = validate_branch_name(command.branch or "master")
+    branch = validate_branch_name(command.branch or "main")
     if isinstance(command.metadata, dict):
         value = str(command.metadata.get("ordering_key") or "").strip()
         if value:
@@ -214,7 +214,7 @@ class BulkInstanceUpdateRequest(BaseModel):
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: InstanceCreateRequest = ...,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
@@ -303,7 +303,7 @@ async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: InstanceUpdateRequest = ...,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
@@ -391,7 +391,7 @@ async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: Optional[InstanceDeleteRequest] = None,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
@@ -477,7 +477,7 @@ async def delete_instance_async(
 async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
@@ -574,7 +574,7 @@ async def bulk_create_instances_async(
 async def bulk_update_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceUpdateRequest = ...,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
@@ -828,7 +828,7 @@ async def _track_bulk_create_progress(
 async def bulk_create_instances_with_tracking(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    branch: str = Query("master", description="Target branch (default: master)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,

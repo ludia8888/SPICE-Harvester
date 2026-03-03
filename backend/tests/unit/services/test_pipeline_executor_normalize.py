@@ -50,11 +50,11 @@ async def test_normalize_transform_trims_and_nulls() -> None:
     dataset_id = "ds-demo-norm-main"
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, dataset_name, "master")] = _Dataset(
+    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
         dataset_id=dataset_id,
         db_name=db_name,
         name=dataset_name,
-        branch="master",
+        branch="main",
         schema_json={"columns": [{"name": "name", "type": "xsd:string"}, {"name": "code", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[dataset_id] = _Version(

@@ -817,8 +817,8 @@ def _extract_destination(payload: Dict[str, Any]) -> tuple[str | None, str | Non
         payload.get("branchName")
         or destination.get("branchName")
         or destination.get("branch")
-        or "master"
-    ).strip() or "master"
+        or "main"
+    ).strip() or "main"
     object_type = str(
         payload.get("objectType")
         or payload.get("classLabel")
@@ -890,7 +890,7 @@ async def _resolve_dataset_context(
         raise LookupError("datasetRid not found")
 
     resolved_dataset_rid = _dataset_rid(dataset.dataset_id)
-    dataset_branch = str(dataset.branch or "").strip() or "master"
+    dataset_branch = str(dataset.branch or "").strip() or "main"
     dataset_db_name = str(dataset.db_name or "").strip() or None
     return resolved_dataset_rid, dataset_db_name, dataset_branch
 
@@ -1010,7 +1010,7 @@ async def _resolve_output_dataset_rid(
             db_name=target_db,
             source_type="connector",
             source_ref=f"{source.source_type}:{source.source_id}",
-            branch=target_branch or "master",
+            branch=target_branch or "main",
         )
         if dataset is not None:
             return _dataset_rid(dataset.dataset_id)
@@ -1362,7 +1362,7 @@ async def _ensure_table_import_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "master"
+    branch = str(mapping.target_branch or "").strip() or "main"
     pipeline_name = f"table_import_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1394,7 +1394,7 @@ async def _ensure_file_import_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "master"
+    branch = str(mapping.target_branch or "").strip() or "main"
     pipeline_name = f"file_import_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1426,7 +1426,7 @@ async def _ensure_virtual_table_pipeline(
         return pipeline_id
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "master"
+    branch = str(mapping.target_branch or "").strip() or "main"
     pipeline_name = f"virtual_table_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
@@ -1488,7 +1488,7 @@ async def create_table_import_v2(
 
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db or dataset_db_name
-    resolved_branch = destination_branch or dataset_branch or "master"
+    resolved_branch = destination_branch or dataset_branch or "main"
 
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
@@ -2120,7 +2120,7 @@ async def execute_table_import_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "master"
+    branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     table_import_rid = _table_import_rid(source.source_id)
@@ -2250,7 +2250,7 @@ async def create_file_import_v2(
     connector_kind = _connection_kind_from_source(connection)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db
-    resolved_branch = destination_branch or "master"
+    resolved_branch = destination_branch or "main"
 
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
@@ -2301,7 +2301,7 @@ async def create_file_import_v2(
         )
     if not resolved_db:
         resolved_db = dataset_db_name
-    if dataset_branch and destination_branch == "master":
+    if dataset_branch and destination_branch == "main":
         resolved_branch = dataset_branch
 
     await connector_registry.upsert_source(
@@ -2774,7 +2774,7 @@ async def execute_file_import_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "master"
+    branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     file_import_rid = _file_import_rid(source.source_id)
@@ -2958,7 +2958,7 @@ async def execute_virtual_table_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
-    branch_name = str(mapping.target_branch or "").strip() or "master"
+    branch_name = str(mapping.target_branch or "").strip() or "main"
     requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
     connection_rid = _connection_rid(connection_id)
     virtual_table_rid = _virtual_table_rid(source.source_id)
@@ -3090,7 +3090,7 @@ async def create_virtual_table_v2(
     connector_kind = _connection_kind_from_source(connection)
     destination_db, destination_branch, destination_object_type = _extract_destination(payload)
     resolved_db = destination_db
-    resolved_branch = destination_branch or "master"
+    resolved_branch = destination_branch or "main"
     if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(resolved_db):
         return _foundry_error(
             status.HTTP_403_FORBIDDEN,
@@ -3132,7 +3132,7 @@ async def create_virtual_table_v2(
         )
     if not resolved_db:
         resolved_db = dataset_db_name
-    if dataset_branch and destination_branch == "master":
+    if dataset_branch and destination_branch == "main":
         resolved_branch = dataset_branch
 
     await connector_registry.upsert_source(

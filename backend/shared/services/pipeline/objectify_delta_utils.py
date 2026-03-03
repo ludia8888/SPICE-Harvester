@@ -67,7 +67,7 @@ class WatermarkState:
 
         return cls(
             mapping_spec_id=data["mapping_spec_id"],
-            dataset_branch=data.get("dataset_branch", "master"),
+            dataset_branch=data.get("dataset_branch", "main"),
             watermark_column=data["watermark_column"],
             watermark_value=data["watermark_value"],
             lakefs_commit_id=data.get("lakefs_commit_id"),

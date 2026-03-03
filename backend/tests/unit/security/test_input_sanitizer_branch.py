@@ -20,17 +20,22 @@ def test_validate_branch_name_rejects_reserved_head() -> None:
         validate_branch_name("HEAD")
 
 
-def test_sanitize_input_accepts_master_branch_value() -> None:
+def test_validate_branch_name_rejects_legacy_master() -> None:
+    with pytest.raises(SecurityViolationError):
+        validate_branch_name("master")
+
+
+def test_sanitize_input_accepts_main_branch_value() -> None:
     payload = {
         "spec": {
             "backing_source": {
                 "dataset_id": "dataset_123",
-                "branch": "master",
+                "branch": "main",
             }
         }
     }
     sanitized = sanitize_input(payload)
-    assert sanitized["spec"]["backing_source"]["branch"] == "master"
+    assert sanitized["spec"]["backing_source"]["branch"] == "main"
 
 
 def test_sql_detector_still_matches_information_schema_keyword() -> None:

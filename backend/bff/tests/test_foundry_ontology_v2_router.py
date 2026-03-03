@@ -828,7 +828,7 @@ async def test_list_object_types_v2_returns_foundry_raw_shape():
             request=request,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -889,7 +889,7 @@ async def test_create_object_type_v2_routes_to_contract_service_with_backing_sou
                 backingSources=[{"dataset_id": "ds-1"}],
             ),
             request=request,
-            branch="master",
+            branch="main",
             expected_head_commit=None,
             oms_client=oms_client,
             dataset_registry=SimpleNamespace(),
@@ -905,7 +905,7 @@ async def test_create_object_type_v2_routes_to_contract_service_with_backing_sou
     assert captured_body.class_id == "Order"
     assert captured_body.status == "DRAFT"
     assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
-    assert captured["expected_head_commit"] == "branch:master"
+    assert captured["expected_head_commit"] == "branch:main"
 
 
 @pytest.mark.asyncio
@@ -944,7 +944,7 @@ async def test_update_object_type_v2_routes_to_contract_service():
                 backingSource={"dataset_id": "ds-1"},
             ),
             request=request,
-            branch="master",
+            branch="main",
             expected_head_commit=None,
             oms_client=oms_client,
             dataset_registry=SimpleNamespace(),
@@ -961,7 +961,7 @@ async def test_update_object_type_v2_routes_to_contract_service():
     assert captured_body.status == "ACTIVE"
     assert captured_body.pk_spec == {"primary_key": ["order_id"], "title_key": ["order_id"]}
     assert captured_body.backing_sources == [{"dataset_id": "ds-1"}]
-    assert captured["expected_head_commit"] == "branch:master"
+    assert captured["expected_head_commit"] == "branch:main"
 
 
 @pytest.mark.asyncio
@@ -1113,7 +1113,7 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
             ontologyRid="test_db",
             request=request,
             preview=True,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1121,7 +1121,7 @@ async def test_get_full_metadata_v2_returns_foundry_full_metadata_shape():
 
     assert isinstance(response, dict)
     assert response["ontology"]["apiName"] == "test_db"
-    assert response["branch"]["rid"] == "master"
+    assert response["branch"]["rid"] == "main"
 
     assert "Account" in response["objectTypes"]
     account_full_metadata = response["objectTypes"]["Account"]
@@ -1151,7 +1151,7 @@ async def test_get_full_metadata_v2_requires_preview_true():
             ontologyRid="test_db",
             request=request,
             preview=False,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1174,7 +1174,7 @@ async def test_get_full_metadata_v2_omits_partial_entities_when_upstream_unavail
             ontologyRid="test_db",
             request=request,
             preview=True,
-            branch="master",
+            branch="main",
             oms_client=_FullMetadataPartialFailureOMSClient(),
         )
     finally:
@@ -1197,7 +1197,7 @@ async def test_list_action_types_v2_returns_foundry_raw_shape():
             request=request,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1223,7 +1223,7 @@ async def test_list_action_types_v2_falls_back_to_legacy_action_rows() -> None:
             request=request,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1244,7 +1244,7 @@ async def test_get_action_type_v2_returns_foundry_raw_shape():
             ontologyRid="test_db",
             actionTypeApiName="ApproveAccount",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1268,7 +1268,7 @@ async def test_get_action_type_v2_falls_back_to_legacy_action_rows() -> None:
             ontologyRid="test_db",
             actionTypeApiName="HoldOrder",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1289,7 +1289,7 @@ async def test_get_action_type_by_rid_v2_returns_foundry_raw_shape():
             ontologyRid="test_db",
             actionTypeRid="ri.action-type.approve-account",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1310,7 +1310,7 @@ async def test_get_action_type_by_rid_v2_falls_back_to_legacy_action_rows() -> N
             ontologyRid="test_db",
             actionTypeRid="ri.action-type.hold-order",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_LegacyActionResourceOnlyOMSClient(),
         )
     finally:
@@ -1342,7 +1342,7 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
                 parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
             ),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1364,7 +1364,7 @@ async def test_apply_action_v2_forwards_to_oms_v2_apply_with_foundry_path():
     assert submit_payload["options"]["mode"] == "VALIDATE_AND_EXECUTE"
     assert submit_payload["metadata"]["user_id"] == "alice"
     assert submit_payload["metadata"]["user_type"] == "service"
-    assert fake_client.last_post[1]["params"]["branch"] == "master"
+    assert fake_client.last_post[1]["params"]["branch"] == "main"
     assert "preview" not in fake_client.last_post[1]["params"]
     assert "validate" not in fake_client.last_post[1]["params"]
 
@@ -1392,7 +1392,7 @@ async def test_apply_action_v2_validate_only_maps_to_oms_v2_apply():
                 parameters={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
             ),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1436,7 +1436,7 @@ async def test_apply_action_v2_emits_standardized_action_evidence_fields():
             actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1476,7 +1476,7 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
                 ]
             ),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1492,7 +1492,7 @@ async def test_apply_action_batch_v2_forwards_requests_to_submit_batch():
     assert submit_payload["requests"][0]["parameters"]["ticket"]["instance_id"] == "t1"
     assert submit_payload["requests"][1]["parameters"]["ticket"]["instance_id"] == "t2"
     assert submit_payload["metadata"]["user_id"] == "alice"
-    assert fake_client.last_post[1]["params"]["branch"] == "master"
+    assert fake_client.last_post[1]["params"]["branch"] == "main"
     assert "preview" not in fake_client.last_post[1]["params"]
 
 
@@ -1519,7 +1519,7 @@ async def test_apply_action_batch_v2_forwards_return_edits_option():
                 requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
             ),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1585,7 +1585,7 @@ async def test_apply_action_v2_normalizes_non_foundry_validation_error():
             actionApiName="ApproveAccount",
             body=router_v2.ApplyActionRequestV2(parameters={"ticket": {"instance_id": "t1"}}),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             transaction_id=None,
@@ -1631,7 +1631,7 @@ async def test_apply_action_batch_v2_normalizes_non_foundry_validation_error():
                 requests=[router_v2.BatchApplyActionRequestItemV2(parameters={"ticket": {"instance_id": "t1"}})],
             ),
             request=request,
-            branch="master",
+            branch="main",
             sdk_package_rid=None,
             sdk_version=None,
             oms_client=fake_client,
@@ -1835,7 +1835,7 @@ async def test_list_interface_types_v2_requires_preview_true():
             preview=False,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1860,7 +1860,7 @@ async def test_list_interface_types_v2_returns_foundry_raw_shape_with_preview():
             preview=True,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1883,7 +1883,7 @@ async def test_list_shared_property_types_v2_requires_preview_true():
             preview=False,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1908,7 +1908,7 @@ async def test_list_shared_property_types_v2_returns_foundry_raw_shape_with_prev
             preview=True,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1931,7 +1931,7 @@ async def test_get_shared_property_type_v2_returns_foundry_raw_shape_with_previe
             sharedPropertyTypeApiName="TenantScope",
             request=request,
             preview=True,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -1953,7 +1953,7 @@ async def test_get_shared_property_type_v2_missing_returns_not_found():
             sharedPropertyTypeApiName="MissingShared",
             request=request,
             preview=True,
-            branch="master",
+            branch="main",
             oms_client=_MissingSharedPropertyOMSClient(),
         )
     finally:
@@ -2039,7 +2039,7 @@ async def test_get_object_type_v2_returns_foundry_raw_shape():
             ontologyRid="test_db",
             objectTypeApiName="Account",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2061,7 +2061,7 @@ async def test_get_object_type_full_metadata_v2_returns_foundry_shape():
             ontologyRid="test_db",
             objectTypeApiName="Account",
             request=request,
-            branch="master",
+            branch="main",
             preview=True,
             oms_client=_FakeOMSClient(),
         )
@@ -2086,7 +2086,7 @@ async def test_get_object_type_full_metadata_v2_missing_returns_object_type_not_
             ontologyRid="test_db",
             objectTypeApiName="MissingType",
             request=request,
-            branch="master",
+            branch="main",
             preview=True,
             oms_client=_MissingObjectTypeOMSClient(),
         )
@@ -2110,7 +2110,7 @@ async def test_get_object_type_v2_missing_returns_object_type_not_found():
             ontologyRid="test_db",
             objectTypeApiName="MissingType",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_MissingObjectTypeOMSClient(),
         )
     finally:
@@ -2160,7 +2160,7 @@ async def test_list_outgoing_link_types_v2_filters_before_pagination():
             request=request,
             page_size=2,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=client,
         )
         second = await router_v2.list_outgoing_link_types_v2(
@@ -2169,7 +2169,7 @@ async def test_list_outgoing_link_types_v2_filters_before_pagination():
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="master",
+            branch="main",
             oms_client=client,
         )
     finally:
@@ -2194,7 +2194,7 @@ async def test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_cha
             request=request,
             page_size=1,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=client,
         )
         second = await router_v2.list_outgoing_link_types_v2(
@@ -2203,7 +2203,7 @@ async def test_list_outgoing_link_types_v2_rejects_page_token_when_page_size_cha
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="master",
+            branch="main",
             oms_client=client,
         )
     finally:
@@ -2226,7 +2226,7 @@ async def test_get_outgoing_link_type_v2_returns_foundry_raw_shape():
             objectTypeApiName="Account",
             linkTypeApiName="owned_by",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2249,7 +2249,7 @@ async def test_get_outgoing_link_type_v2_missing_returns_link_type_not_found():
             objectTypeApiName="Account",
             linkTypeApiName="unknown_link",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2284,7 +2284,7 @@ async def test_list_incoming_link_types_v2_returns_foundry_shape():
             request=request,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2309,7 +2309,7 @@ async def test_list_incoming_link_types_v2_excludes_non_matching():
             request=request,
             page_size=10,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2334,7 +2334,7 @@ async def test_list_incoming_link_types_v2_filters_before_pagination():
             request=request,
             page_size=2,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=client,
         )
         second = await router_v2.list_incoming_link_types_v2(
@@ -2343,7 +2343,7 @@ async def test_list_incoming_link_types_v2_filters_before_pagination():
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="master",
+            branch="main",
             oms_client=client,
         )
     finally:
@@ -2366,7 +2366,7 @@ async def test_get_incoming_link_type_v2_returns_foundry_shape():
             objectTypeApiName="User",
             linkTypeApiName="owned_by",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2391,7 +2391,7 @@ async def test_get_incoming_link_type_v2_wrong_target_returns_not_found():
             objectTypeApiName="Account",
             linkTypeApiName="owned_by",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2415,7 +2415,7 @@ async def test_get_incoming_link_type_v2_unknown_link_returns_not_found():
             objectTypeApiName="User",
             linkTypeApiName="nonexistent_link",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2439,7 +2439,7 @@ async def test_search_objects_v2_passthrough_foundry_shape():
             objectTypeApiName="Account",
             payload={"where": {"type": "eq", "field": "status", "value": "ACTIVE"}, "pageSize": 10},
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2467,7 +2467,7 @@ async def test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse():
             order_by="properties.account_id:desc,p.name:asc",
             exclude_rid=True,
             snapshot=False,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
     finally:
@@ -2478,7 +2478,7 @@ async def test_list_objects_v2_passthrough_foundry_shape_and_orderby_parse():
     assert response["data"][0]["account_id"] == "acc-1"
     assert fake.last_post is not None
     _, kwargs = fake.last_post
-    assert kwargs["params"]["branch"] == "master"
+    assert kwargs["params"]["branch"] == "main"
     assert kwargs["json"]["pageSize"] == 10
     assert kwargs["json"]["pageToken"] == "MTA"
     assert kwargs["json"]["select"] == ["account_id", "name"]
@@ -2506,7 +2506,7 @@ async def test_get_object_v2_returns_foundry_raw_shape():
             request=request,
             select=["account_id", "name"],
             exclude_rid=True,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2530,7 +2530,7 @@ async def test_get_object_v2_not_found_returns_foundry_error():
             request=request,
             select=None,
             exclude_rid=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2563,7 +2563,7 @@ async def test_list_linked_objects_v2_returns_foundry_raw_shape():
             order_by="properties.user_id:asc",
             exclude_rid=True,
             snapshot=False,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
     finally:
@@ -2596,7 +2596,7 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
         second = await router_v2.list_linked_objects_v2(
@@ -2611,7 +2611,7 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
         third = await router_v2.list_linked_objects_v2(
@@ -2626,7 +2626,7 @@ async def test_list_linked_objects_v2_paginates_after_dedup_link_filter():
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
     finally:
@@ -2659,7 +2659,7 @@ async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes(
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
         second = await router_v2.list_linked_objects_v2(
@@ -2674,7 +2674,7 @@ async def test_list_linked_objects_v2_rejects_page_token_when_page_size_changes(
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
     finally:
@@ -2704,7 +2704,7 @@ async def test_list_linked_objects_v2_missing_link_type_returns_link_type_not_fo
             order_by=None,
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2732,7 +2732,7 @@ async def test_get_linked_object_v2_returns_foundry_raw_shape():
             request=request,
             select=["user_id", "name"],
             exclude_rid=True,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2759,7 +2759,7 @@ async def test_get_linked_object_v2_not_found_returns_foundry_error():
             request=request,
             select=None,
             exclude_rid=None,
-            branch="master",
+            branch="main",
             oms_client=fake,
         )
     finally:
@@ -2804,7 +2804,7 @@ async def test_load_object_set_objects_v2_supports_search_around(
                 "pageSize": 10,
             },
             request=request,
-            branch="master",
+            branch="main",
             transaction_id=None,
             sdk_package_rid=None,
             sdk_version=None,
@@ -2853,7 +2853,7 @@ async def test_load_object_set_objects_v2_search_around_routes_to_spark_on_thres
                 "pageSize": 10,
             },
             request=request,
-            branch="master",
+            branch="main",
             transaction_id=None,
             sdk_package_rid=None,
             sdk_version=None,
@@ -2914,7 +2914,7 @@ async def test_v2_invalid_ontology_returns_foundry_error_envelope():
         request=request,
         page_size=10,
         page_token=None,
-        branch="master",
+        branch="main",
         oms_client=_FakeOMSClient(),
     )
 
@@ -2943,7 +2943,7 @@ async def test_list_objects_v2_rejects_invalid_orderby_expression():
             order_by="account_id:desc",
             exclude_rid=None,
             snapshot=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -2996,7 +2996,7 @@ async def test_list_object_types_v2_rejects_expired_page_token():
         request=request,
         page_size=10,
         page_token=expired_token,
-        branch="master",
+        branch="main",
         oms_client=_FakeOMSClient(),
     )
 
@@ -3016,7 +3016,7 @@ async def test_list_object_types_v2_rejects_page_token_scope_mismatch():
         request=request,
         page_size=10,
         page_token=mismatched_scope_token,
-        branch="master",
+        branch="main",
         oms_client=_FakeOMSClient(),
     )
 
@@ -3037,7 +3037,7 @@ async def test_list_object_types_v2_rejects_page_token_when_page_size_changes():
             request=request,
             page_size=1,
             page_token=None,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
         second = await router_v2.list_object_types_v2(
@@ -3045,7 +3045,7 @@ async def test_list_object_types_v2_rejects_page_token_when_page_size_changes():
             request=request,
             page_size=2,
             page_token=first.get("nextPageToken"),
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -3076,7 +3076,7 @@ async def test_timeseries_first_point_v2_requires_domain_role_and_returns_payloa
             primaryKey="sensor-001",
             property="temperature",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:
@@ -3111,7 +3111,7 @@ async def test_timeseries_first_point_v2_forwards_actor_headers_to_oms():
             primaryKey="sensor-001",
             property="temperature",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=oms_client,
         )
     finally:
@@ -3186,7 +3186,7 @@ async def test_attachment_property_v2_requires_domain_role_and_returns_payload()
             primaryKey="emp-001",
             property="resume",
             request=request,
-            branch="master",
+            branch="main",
             oms_client=_FakeOMSClient(),
         )
     finally:

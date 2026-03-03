@@ -89,7 +89,7 @@ async def get_recompute_projection_result(
 @trace_endpoint("bff.admin.reindex_instances_endpoint")
 async def reindex_instances_endpoint(
     db_name: str = Query(..., description="Database name"),
-    branch: str = Query(default="master", description="Branch"),
+    branch: str = Query(default="main", description="Branch"),
     delete_index_first: bool = Query(default=False, description="Delete ES index before rebuild"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),

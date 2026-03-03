@@ -836,7 +836,7 @@ async def compute_pipeline_preflight(
                 schema_by_node[node_id] = _schema_for_external_input_read(read_config)
                 continue
 
-            selection = normalize_dataset_selection(metadata, default_branch=branch or "master")
+            selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
             resolution = await resolve_dataset_version(
                 dataset_registry,
                 db_name=db_name,
@@ -1729,7 +1729,7 @@ async def compute_schema_by_node(
             if not dataset_id and not dataset_name:
                 schema_by_node[node_id] = _schema_for_external_input_read(read_config)
                 continue
-            selection = normalize_dataset_selection(metadata, default_branch=branch or "master")
+            selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
             resolution = await resolve_dataset_version(
                 dataset_registry,
                 db_name=db_name,

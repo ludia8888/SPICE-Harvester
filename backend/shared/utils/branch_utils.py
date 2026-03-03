@@ -16,7 +16,7 @@ def protected_branch_write_message() -> str:
 def get_protected_branches(
     *,
     env_key: str = "ONTOLOGY_PROTECTED_BRANCHES",
-    defaults: Iterable[str] = ("main", "master", "production", "prod"),
+    defaults: Iterable[str] = ("main", "production", "prod"),
 ) -> Set[str]:
     settings = get_settings()
     if env_key == "ONTOLOGY_PROTECTED_BRANCHES":

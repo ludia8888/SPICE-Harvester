@@ -229,8 +229,8 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
 | `require_proposals` | `bool` | `False` | `REQUIRE_PROPOSALS` | Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS) |
-| `protected_branches` | `str` | `master` | `PROTECTED_BRANCHES` | Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES) |
-| `fallback_branches` | `str` | `master` | `FALLBACK_BRANCHES` | Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES) |
+| `protected_branches` | `str` | `main` | `PROTECTED_BRANCHES` | Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES) |
+| `fallback_branches` | `str` | `main` | `FALLBACK_BRANCHES` | Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES) |
 | `locks_enabled` | `bool` | `True` | `LOCKS_ENABLED` | Enable pipeline locks (PIPELINE_LOCKS_ENABLED) |
 | `locks_required` | `bool` | `True` | `LOCKS_REQUIRED` | Require lock acquisition (PIPELINE_LOCKS_REQUIRED) |
 | `lock_ttl_seconds` | `int` | `3600` | `LOCK_TTL_SECONDS` | Lock TTL seconds (PIPELINE_LOCK_TTL_SECONDS) |
@@ -274,7 +274,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `protected_branches` | `str` | `main,master,production,prod` | `PROTECTED_BRANCHES` | Protected branches (ONTOLOGY_PROTECTED_BRANCHES) |
+| `protected_branches` | `str` | `main,production,prod` | `PROTECTED_BRANCHES` | Protected branches (ONTOLOGY_PROTECTED_BRANCHES) |
 | `require_proposals` | `bool` | `True` | `REQUIRE_PROPOSALS` | Require proposals on protected branches (ONTOLOGY_REQUIRE_PROPOSALS) |
 | `validate_relationships` | `bool` | `True` | `VALIDATE_RELATIONSHIPS` | Validate relationship structure (ONTOLOGY_VALIDATE_RELATIONSHIPS) |
 | `resource_strict` | `bool` | `True` | `RESOURCE_STRICT` | Strict resource checks (ONTOLOGY_RESOURCE_STRICT) |
@@ -603,7 +603,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `base_branch` | `str` | `master` | `BASE_BRANCH` | Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH) |
+| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH) |
 
 ## InstanceWorkerSettings
 
@@ -827,7 +827,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
-| `base_branch` | `str` | `master` | `BASE_BRANCH` | Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH) |
+| `base_branch` | `str` | `main` | `BASE_BRANCH` | Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH) |
 | `interval_seconds` | `float` | **required** | `INTERVAL_SECONDS` | Run interval seconds (WRITEBACK_MATERIALIZER_INTERVAL_SECONDS) |
 | `run_once` | `bool` | `False` | `RUN_ONCE` | Run once and exit (WRITEBACK_MATERIALIZER_RUN_ONCE) |
 | `db_names` | `Optional[str]` | **required** | `DB_NAMES` | Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES) |

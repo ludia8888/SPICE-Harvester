@@ -86,18 +86,18 @@ async def test_executor_parses_quoted_csv_headers_and_joins_correctly() -> None:
     ).encode("utf-8")
 
     registry = _DatasetRegistry()
-    registry.datasets_by_name[(db_name, left_name, "master")] = _Dataset(
+    registry.datasets_by_name[(db_name, left_name, "main")] = _Dataset(
         dataset_id=left_id,
         db_name=db_name,
         name=left_name,
-        branch="master",
+        branch="main",
         schema_json={"columns": [{"name": "customer_id", "type": "xsd:string"}, {"name": "order_id", "type": "xsd:string"}]},
     )
-    registry.datasets_by_name[(db_name, right_name, "master")] = _Dataset(
+    registry.datasets_by_name[(db_name, right_name, "main")] = _Dataset(
         dataset_id=right_id,
         db_name=db_name,
         name=right_name,
-        branch="master",
+        branch="main",
         schema_json={"columns": [{"name": "customer_id", "type": "xsd:string"}, {"name": "customer_unique_id", "type": "xsd:string"}]},
     )
     registry.versions_by_dataset_id[left_id] = _Version(

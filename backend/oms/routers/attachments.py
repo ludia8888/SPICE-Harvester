@@ -292,7 +292,7 @@ async def list_property_attachments(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
     """List attachment metadata for a property (single or multiple)."""
@@ -369,7 +369,7 @@ async def get_attachment_content(
     primaryKey: str,
     property: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
 ) -> Response:
@@ -461,7 +461,7 @@ async def get_attachment_by_rid(
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
 ) -> JSONResponse:
     """Get metadata for a single attachment by its RID."""
@@ -537,7 +537,7 @@ async def get_attachment_content_by_rid(
     property: str,
     attachmentRid: str,
     request: Request,
-    branch: str = Query("master"),
+    branch: str = Query("main"),
     es: ElasticsearchServiceDep = ...,  # type: ignore[assignment]
     storage: StorageServiceDep = ...,  # type: ignore[assignment]
 ) -> Response:

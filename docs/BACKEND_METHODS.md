@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T16:24:07+09:00
+> Generated: 2026-03-03T19:08:12+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -463,14 +463,14 @@
 
 ### `backend/bff/routers/context_tools.py`
 - **Functions**
-  - `_policy_set(value)` (line 25): no docstring
-  - `_enforce_policy_value(allowed, value)` (line 35): no docstring
-  - `_filter_dataset_ids(dataset_ids, allowed_dataset_ids)` (line 52): no docstring
-  - `async describe_datasets(body, request, dataset_registry, policy_registry)` (line 69): no docstring
-  - `async snapshot_ontology(body, request, oms_client, policy_registry)` (line 129): no docstring
+  - `_policy_set(value)` (line 27): no docstring
+  - `_enforce_policy_value(allowed, value)` (line 37): no docstring
+  - `_filter_dataset_ids(dataset_ids, allowed_dataset_ids)` (line 54): no docstring
+  - `async describe_datasets(body, request, dataset_registry, policy_registry)` (line 71): no docstring
+  - `async snapshot_ontology(body, request, oms_client, policy_registry)` (line 131): no docstring
 - **Classes**
-  - `OntologySnapshotRequest` (line 40): no docstring
-  - `DatasetDescribeRequest` (line 46): no docstring
+  - `OntologySnapshotRequest` (line 42): no docstring
+  - `DatasetDescribeRequest` (line 48): no docstring
 
 ### `backend/bff/routers/data_connector_deps.py`
 - **Functions**
@@ -4095,15 +4095,15 @@
     - `async GetTimeseriesLastPoint(self, request, context)` (line 410): no docstring
     - `async StreamTimeseriesPoints(self, request, context)` (line 420): no docstring
     - `async _dispatch_stream(self, context, method, path, request, chunk_size)` (line 431): no docstring
-    - `async UploadAttachment(self, request, context)` (line 523): no docstring
-    - `async ListPropertyAttachments(self, request, context)` (line 534): no docstring
-    - `async GetAttachmentByRid(self, request, context)` (line 544): no docstring
-    - `async GetAttachmentContent(self, request, context)` (line 554): no docstring
-    - `async GetAttachmentContentByRid(self, request, context)` (line 564): no docstring
-  - `OMSGrpcServer` (line 575): no docstring
-    - `__init__(self, app)` (line 576): no docstring
-    - `async start(self)` (line 581): no docstring
-    - `async stop(self, grace)` (line 646): no docstring
+    - `async UploadAttachment(self, request, context)` (line 524): no docstring
+    - `async ListPropertyAttachments(self, request, context)` (line 535): no docstring
+    - `async GetAttachmentByRid(self, request, context)` (line 545): no docstring
+    - `async GetAttachmentContent(self, request, context)` (line 555): no docstring
+    - `async GetAttachmentContentByRid(self, request, context)` (line 565): no docstring
+  - `OMSGrpcServer` (line 576): no docstring
+    - `__init__(self, app)` (line 577): no docstring
+    - `async start(self)` (line 582): no docstring
+    - `async stop(self, grace)` (line 647): no docstring
 
 ### `backend/oms/main.py`
 - **Functions**
@@ -5112,6 +5112,29 @@
   - `test_bulk_import_simulation()` (line 71): Bulk import 시뮬레이션 (이전 방식)
   - `test_single_service_need()` (line 96): 실제 서비스에서 ElasticsearchService 하나만 필요한 경우
   - `main()` (line 109): 메인 테스트 실행
+
+### `backend/scripts/migrate_branch_master_to_main.py`
+- **Functions**
+  - `_quote_ident(value)` (line 108): no docstring
+  - `_table_name(schema, table)` (line 112): no docstring
+  - `_decode_json_value(raw)` (line 116): no docstring
+  - `_replace_branch_values(payload, parent_key)` (line 131): no docstring
+  - `async _list_primary_key_columns(conn, table_schema, table_name)` (line 162): no docstring
+  - `async _list_unique_key_columns_including(conn, table_schema, table_name, target_column)` (line 187): no docstring
+  - `async _prune_conflicting_master_rows(conn, table_schema, table_name, branch_column, unique_sets)` (line 217): no docstring
+  - `async _rowwise_update_text_column(conn, table_schema, table_name, column_name, pk_columns)` (line 254): no docstring
+  - `async _migrate_text_columns(conn, apply, audit)` (line 293): no docstring
+  - `async _migrate_json_columns(conn, apply, audit)` (line 392): no docstring
+  - `async _list_lakefs_repositories(api_url, access_key, secret_key, timeout_seconds)` (line 478): no docstring
+  - `async _migrate_lakefs_branches(apply, audit)` (line 512): no docstring
+  - `async run(apply, report_path)` (line 609): no docstring
+  - `parse_args()` (line 630): no docstring
+  - `main()` (line 645): no docstring
+- **Classes**
+  - `ColumnChange` (line 38): no docstring
+  - `LakeFSChange` (line 48): no docstring
+  - `MigrationAudit` (line 55): no docstring
+    - `render_markdown(self)` (line 62): no docstring
 
 ### `backend/scripts/migrations/create_minio_bucket.py`
 
@@ -6581,13 +6604,13 @@
 
 ### `backend/shared/security/input_sanitizer.py`
 - **Functions**
-  - `sanitize_input(data)` (line 836): 전역 입력 정화 함수
-  - `sanitize_label_input(data)` (line 848): Sanitize a label-keyed payload (BFF).
-  - `validate_db_name(db_name)` (line 867): 데이터베이스 이름 검증 함수
-  - `validate_class_id(class_id)` (line 872): 클래스 ID 검증 함수
-  - `validate_branch_name(branch_name)` (line 877): 브랜치 이름 검증 함수
-  - `validate_instance_id(instance_id)` (line 882): 인스턴스 ID 검증 함수
-  - `sanitize_es_query(query)` (line 887): Elasticsearch 쿼리 문자열 정제
+  - `sanitize_input(data)` (line 842): 전역 입력 정화 함수
+  - `sanitize_label_input(data)` (line 854): Sanitize a label-keyed payload (BFF).
+  - `validate_db_name(db_name)` (line 873): 데이터베이스 이름 검증 함수
+  - `validate_class_id(class_id)` (line 878): 클래스 ID 검증 함수
+  - `validate_branch_name(branch_name)` (line 883): 브랜치 이름 검증 함수
+  - `validate_instance_id(instance_id)` (line 888): 인스턴스 ID 검증 함수
+  - `sanitize_es_query(query)` (line 893): Elasticsearch 쿼리 문자열 정제
 - **Classes**
   - `SecurityViolationError` (line 16): 보안 위반 시 발생하는 예외
   - `InputSanitizer` (line 22): 포괄적인 입력 데이터 보안 검증 및 정화 클래스
@@ -6615,7 +6638,7 @@
     - `validate_database_name(self, db_name)` (line 742): 데이터베이스 이름 검증 - 엄격한 규칙 적용
     - `validate_class_id(self, class_id)` (line 779): 클래스 ID 검증
     - `validate_branch_name(self, branch_name)` (line 793): 브랜치 이름/RID 검증
-    - `validate_instance_id(self, instance_id)` (line 813): 인스턴스 ID 검증
+    - `validate_instance_id(self, instance_id)` (line 819): 인스턴스 ID 검증
 
 ### `backend/shared/security/principal_utils.py`
 - **Functions**
@@ -11270,6 +11293,12 @@
   - `async test_foundry_virtual_table_execute_rejects_invalid_runtime_config_before_pipeline(monkeypatch)` (line 1974): no docstring
   - `async test_foundry_connection_create_jdbc_kinds(monkeypatch, connection_config, expected_type, expected_source_type, secret_payload)` (line 2106): no docstring
 
+### `backend/tests/unit/openapi/test_no_master_defaults_guard.py`
+- **Functions**
+  - `_iter_branch_defaults(openapi)` (line 9): no docstring
+  - `test_openapi_branch_defaults_do_not_use_master()` (line 25): no docstring
+  - `test_runtime_code_has_no_branch_master_default_literals()` (line 30): no docstring
+
 ### `backend/tests/unit/openapi/test_ontology_resource_routes.py`
 - **Functions**
   - `test_ontology_resource_crud_routes_are_exposed()` (line 8): no docstring
@@ -11528,8 +11557,9 @@
 - **Functions**
   - `test_validate_branch_name_accepts_foundry_branch_rid()` (line 13): no docstring
   - `test_validate_branch_name_rejects_reserved_head()` (line 18): no docstring
-  - `test_sanitize_input_accepts_master_branch_value()` (line 23): no docstring
-  - `test_sql_detector_still_matches_information_schema_keyword()` (line 36): no docstring
+  - `test_validate_branch_name_rejects_legacy_master()` (line 23): no docstring
+  - `test_sanitize_input_accepts_main_branch_value()` (line 28): no docstring
+  - `test_sql_detector_still_matches_information_schema_keyword()` (line 41): no docstring
 
 ### `backend/tests/unit/security/test_internal_service_docs_visibility.py`
 - **Functions**
@@ -12279,7 +12309,9 @@
   - `test_gateway_call_metadata_includes_service_and_delegated_auth()` (line 127): no docstring
   - `async test_get_database_returns_selected_row(monkeypatch)` (line 137): no docstring
   - `async test_get_database_returns_404_when_missing(monkeypatch)` (line 165): no docstring
-  - `async test_dispatch_stream_emits_multiple_chunks(monkeypatch)` (line 190): no docstring
+  - `async test_database_exists_returns_true_when_found(monkeypatch)` (line 190): no docstring
+  - `async test_database_exists_returns_false_when_missing(monkeypatch)` (line 217): no docstring
+  - `async test_dispatch_stream_emits_multiple_chunks(monkeypatch)` (line 244): no docstring
 - **Classes**
   - `_AbortCalled` (line 14): no docstring
   - `_FakeContext` (line 18): no docstring
@@ -13068,6 +13100,13 @@
   - `_DummyLineageStore` (line 8): no docstring
     - `__init__(self, should_fail)` (line 9): no docstring
     - `async initialize(self)` (line 12): no docstring
+
+### `backend/tests/unit/shared/security/test_branch_policy_main_only.py`
+- **Functions**
+  - `test_normalize_base_branch_defaults_to_main()` (line 9): no docstring
+  - `test_validate_branch_name_rejects_master()` (line 14): no docstring
+  - `test_pipeline_branch_defaults_are_main_only()` (line 19): no docstring
+  - `test_ontology_protected_branches_default_excludes_master()` (line 25): no docstring
 
 ### `backend/tests/unit/utils/__init__.py`
 
