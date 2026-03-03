@@ -24,6 +24,7 @@ ELASTICSEARCH_URL = os.getenv(
 
 HTTPX_TIMEOUT = float(os.getenv("WORKFLOW_HTTP_TIMEOUT", "180") or 180)
 ES_TIMEOUT_SECONDS = int(os.getenv("WORKFLOW_ES_TIMEOUT_SECONDS", "240") or 240)
+WORKFLOW_BRANCH = str(os.getenv("WORKFLOW_BRANCH") or "main").strip() or "main"
 
 
 async def _grant_db_role_http(
@@ -112,7 +113,7 @@ async def _wait_for_ontology(
     *,
     db_name: str,
     class_id: str,
-    branch: str = "master",
+    branch: str = WORKFLOW_BRANCH,
     timeout_seconds: int = 90,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
@@ -173,7 +174,7 @@ async def _upsert_object_type_contract(
                 "spec": {
                     "backing_source": {
                         "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
-                        "branch": str(branch or "master").strip() or "master",
+                        "branch": str(branch or WORKFLOW_BRANCH).strip() or WORKFLOW_BRANCH,
                         **(
                             {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
                             if str(contract_payload.get("dataset_version_id") or "").strip()
@@ -197,7 +198,7 @@ async def _upsert_object_type_contract(
             "spec": {
                 "backing_source": {
                     "dataset_id": str(contract_payload.get("backing_dataset_id") or "").strip(),
-                    "branch": str(branch or "master").strip() or "master",
+                    "branch": str(branch or WORKFLOW_BRANCH).strip() or WORKFLOW_BRANCH,
                     **(
                         {"dataset_version_id": str(contract_payload.get("dataset_version_id"))}
                         if str(contract_payload.get("dataset_version_id") or "").strip()
@@ -318,7 +319,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         tx_excel_idem = f"idem-tx-excel-{suffix}"
         tx_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/excel-upload",
-            params={"db_name": db_name, "branch": "master"},
+            params={"db_name": db_name, "branch": WORKFLOW_BRANCH},
             headers={**headers, "Idempotency-Key": tx_excel_idem},
             data={"dataset_name": "kb_bank_transactions_2026q1", "description": "bank tx"},
             files={
@@ -354,7 +355,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         tx_csv_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "master"},
+            params={"db_name": db_name, "branch": WORKFLOW_BRANCH},
             headers={**headers, "Idempotency-Key": f"idem-tx-csv-{suffix}"},
             data={
                 "dataset_name": "kb_bank_transactions_2026q1_csv",
@@ -383,7 +384,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         owners_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "master"},
+            params={"db_name": db_name, "branch": WORKFLOW_BRANCH},
             headers={**headers, "Idempotency-Key": f"idem-owners-{suffix}"},
             data={"dataset_name": "account_owners", "description": "owners", "delimiter": ",", "has_header": "true"},
             files={"file": ("account_owners.csv", owners_csv, "text/csv")},
@@ -407,7 +408,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         calls_resp = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload",
-            params={"db_name": db_name, "branch": "master"},
+            params={"db_name": db_name, "branch": WORKFLOW_BRANCH},
             headers={**headers, "Idempotency-Key": f"idem-calls-{suffix}"},
             data={"dataset_name": "telecom_calls", "description": "calls", "delimiter": ",", "has_header": "true"},
             files={"file": ("telecom_records_202601.csv", calls_csv, "text/csv")},
@@ -477,11 +478,11 @@ async def test_financial_investigation_workflow_e2e() -> None:
         for cls in classes:
             resp = await client.post(
                 f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
-                params={"branch": "master"},
+                params={"branch": WORKFLOW_BRANCH},
                 json={**cls, "metadata": {"source": "financial_investigation_workflow_e2e"}},
             )
             resp.raise_for_status()
-            await _wait_for_ontology(client, db_name=db_name, class_id=str(cls["id"]), branch="master")
+            await _wait_for_ontology(client, db_name=db_name, class_id=str(cls["id"]), branch=WORKFLOW_BRANCH)
 
         # Phase 3: Object types (pk specs)
         object_types = [
@@ -495,7 +496,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
                 client,
                 db_name=db_name,
                 class_id=class_id,
-                branch="master",
+                branch=WORKFLOW_BRANCH,
                 contract_payload={
                     "backing_dataset_id": backing_dataset_id,
                     "pk_spec": pk_spec,
@@ -518,7 +519,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
                     "dataset_id": dataset_id,
                     "artifact_output_name": artifact_output_name,
                     "target_class_id": target_class_id,
-                    "options": {"ontology_branch": "master"},
+                    "options": {"ontology_branch": WORKFLOW_BRANCH},
                     "mappings": mappings,
                 },
             )
@@ -580,7 +581,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
             f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
             json_payload={
                 "class_ids": ["Transaction", "PhoneCall"],
-                "branch": "master",
+                "branch": WORKFLOW_BRANCH,
                 "include_dependencies": True,
                 "dry_run": True,
             },
@@ -599,7 +600,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
             f"{BFF_URL}/api/v1/objectify/databases/{db_name}/run-dag",
             json_payload={
                 "class_ids": ["Transaction", "PhoneCall"],
-                "branch": "master",
+                "branch": WORKFLOW_BRANCH,
                 "include_dependencies": True,
                 "dry_run": False,
             },
@@ -610,7 +611,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         dag_run = dag_run_resp.json().get("data") or {}
         assert dag_run.get("jobs"), dag_run
 
-        index_name = get_instances_index_name(db_name, branch="master")
+        index_name = get_instances_index_name(db_name, branch=WORKFLOW_BRANCH)
         await _wait_for_es_doc(client, index_name=index_name, doc_id="010-1234-5678")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="010-2222-3333")
         await _wait_for_es_doc(client, index_name=index_name, doc_id="110-123-4567")
@@ -624,7 +625,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
         # Phase 5: Graph queries (reverse traversal + multi-hop)
         query_accounts = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "master"},
+            params={"base_branch": WORKFLOW_BRANCH},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},
@@ -654,7 +655,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         query_flow = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "master"},
+            params={"base_branch": WORKFLOW_BRANCH},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},
@@ -681,7 +682,7 @@ async def test_financial_investigation_workflow_e2e() -> None:
 
         query_calls = await client.post(
             f"{BFF_URL}/api/v1/graph-query/{db_name}",
-            params={"base_branch": "master"},
+            params={"base_branch": WORKFLOW_BRANCH},
             json={
                 "start_class": "Person",
                 "filters": {"phone": "010-1234-5678"},

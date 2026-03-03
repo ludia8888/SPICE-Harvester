@@ -449,7 +449,9 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         self.http = OMSGrpcHttpCompatClient()
 
-        # MappingSpecResolver: OMS-first, PostgreSQL-fallback (gRPC bridge transport)
+        # MappingSpecResolver: OMS-first, PostgreSQL-fallback (gRPC bridge transport).
+        # For OMSGrpcHttpCompatClient, URLs are treated as already-normalized API paths,
+        # so oms_base_url intentionally stays empty.
         oms_base = ""
         oms_token = ""
         self.mapping_resolver = MappingSpecResolver(

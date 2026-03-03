@@ -24,6 +24,7 @@ message OmsRequest {
   string expected_seq = 10;
   string expected_head_commit = 11;
   string filename = 12;
+  reserved 13 to 19;
 
   // Generic fields for payload passthrough
   string path = 20;

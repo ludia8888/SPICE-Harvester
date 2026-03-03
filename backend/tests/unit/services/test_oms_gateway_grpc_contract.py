@@ -32,6 +32,44 @@ class _FakeContext:
         raise _AbortCalled()
 
 
+class _DummyStreamResponse:
+    def __init__(self, *, status_code: int, headers: dict[str, str], chunks: list[bytes]) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self._chunks = chunks
+
+    async def aiter_bytes(self, chunk_size: int = 65536):
+        _ = chunk_size
+        for chunk in self._chunks:
+            yield chunk
+
+    async def aread(self) -> bytes:
+        return b"".join(self._chunks)
+
+
+class _DummyStreamContext:
+    def __init__(self, response: _DummyStreamResponse) -> None:
+        self._response = response
+
+    async def __aenter__(self) -> _DummyStreamResponse:
+        return self._response
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
+class _DummyHttpClient:
+    def __init__(self, response: _DummyStreamResponse) -> None:
+        self._response = response
+
+    def stream(self, **kwargs):  # noqa: ANN003
+        _ = kwargs
+        return _DummyStreamContext(self._response)
+
+    async def aclose(self) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_grpc_authorize_rejects_invalid_service_token():
     servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=("token-ok",))
@@ -93,3 +131,91 @@ def test_gateway_call_metadata_includes_service_and_delegated_auth():
     metadata = client._call_metadata(headers={"X-Delegated-Authorization": "Bearer user-jwt"})  # type: ignore[attr-defined]
     assert ("x-service-token", "svc-token") in metadata
     assert ("x-delegated-authorization", "Bearer user-jwt") in metadata
+
+
+@pytest.mark.asyncio
+async def test_get_database_returns_selected_row(monkeypatch: pytest.MonkeyPatch):
+    servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
+    try:
+        async def _fake_dispatch(*, context, method, path, request):  # noqa: ANN001
+            _ = context
+            _ = request
+            assert method == "GET"
+            assert path == "/api/v1/database/list"
+            return oms_gateway_pb2.OmsResponse(
+                status_code=200,
+                json_body=json.dumps({"data": {"databases": [{"name": "qa_db", "description": "demo"}]}}),
+                headers={"content-type": "application/json"},
+                content_type="application/json",
+            )
+
+        monkeypatch.setattr(servicer, "_dispatch", _fake_dispatch)
+
+        response = await servicer.GetDatabase(oms_gateway_pb2.OmsRequest(db_name="qa_db"), _FakeContext())
+        payload = json.loads(response.json_body)
+        assert response.status_code == 200
+        assert payload["status"] == "success"
+        assert payload["data"]["name"] == "qa_db"
+        assert payload["data"]["description"] == "demo"
+    finally:
+        await servicer.close()
+
+
+@pytest.mark.asyncio
+async def test_get_database_returns_404_when_missing(monkeypatch: pytest.MonkeyPatch):
+    servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
+    try:
+        async def _fake_dispatch(*, context, method, path, request):  # noqa: ANN001
+            _ = context
+            _ = method
+            _ = path
+            _ = request
+            return oms_gateway_pb2.OmsResponse(
+                status_code=200,
+                json_body=json.dumps({"data": {"databases": [{"name": "other_db"}]}}),
+                headers={"content-type": "application/json"},
+                content_type="application/json",
+            )
+
+        monkeypatch.setattr(servicer, "_dispatch", _fake_dispatch)
+
+        response = await servicer.GetDatabase(oms_gateway_pb2.OmsRequest(db_name="missing_db"), _FakeContext())
+        assert response.status_code == 404
+        assert "missing_db" in response.detail
+    finally:
+        await servicer.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_stream_emits_multiple_chunks(monkeypatch: pytest.MonkeyPatch):
+    servicer = OmsGatewayServicer(FastAPI(), require_mtls=False, expected_service_tokens=())
+    try:
+        async def _allow(_context):  # noqa: ANN001
+            return None
+
+        monkeypatch.setattr(servicer, "_authorize", _allow)
+        servicer._http = _DummyHttpClient(
+            _DummyStreamResponse(
+                status_code=200,
+                headers={"content-type": "application/x-ndjson"},
+                chunks=[b'{"a":1}\n', b'{"a":2}\n'],
+            )
+        )
+
+        request = oms_gateway_pb2.OmsRequest()
+        chunks = []
+        async for chunk in servicer._dispatch_stream(
+            context=_FakeContext(),
+            method="POST",
+            path="/api/v2/ontologies/db/objects/O/1/timeseries/p/streamPoints",
+            request=request,
+            chunk_size=4,
+        ):
+            chunks.append(chunk)
+
+        data_chunks = [c for c in chunks if c.chunk]
+        assert len(data_chunks) == 2
+        assert data_chunks[0].headers.get("content-type") == "application/x-ndjson"
+        assert chunks[-1].eof is True
+    finally:
+        await servicer.close()

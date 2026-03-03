@@ -50,14 +50,14 @@ jobs:
           PYTHON=python scripts/grpc/generate_proto.sh
           git diff --exit-code backend/shared/generated/grpc
 
-      - name: Check SDK generated code drift
-        run: |
-          scripts/sdk/check_sdk_drift.sh
-
       - name: Start docker stack
         run: |
           docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d --build
           docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml ps
+
+      - name: Check SDK generated code drift
+        run: |
+          scripts/sdk/check_sdk_drift.sh
 
       - name: Run production test suite
         run: |

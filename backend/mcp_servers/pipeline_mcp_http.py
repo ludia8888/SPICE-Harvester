@@ -14,6 +14,10 @@ from mcp_servers.bff_auth import bff_api_base_url, bff_api_v2_base_url
 import logging
 
 
+_OMS_GRPC_COMPAT_CLIENT: Optional[OMSGrpcHttpCompatClient] = None
+_OMS_GRPC_COMPAT_CLIENT_LOCK = asyncio.Lock()
+
+
 async def http_json(
     method: str,
     url: str,
@@ -156,7 +160,7 @@ async def oms_json(
     if token:
         headers["X-Admin-Token"] = token
 
-    compat = OMSGrpcHttpCompatClient()
+    compat = await _get_oms_grpc_compat_client()
     try:
         method_upper = method.upper()
         class_fetch_match = re.fullmatch(r"/api/v1/database/([^/]+)/ontology/([^/]+)", str(path))
@@ -196,8 +200,6 @@ async def oms_json(
             "status_code": 502,
             "response": {},
         }
-    finally:
-        await compat.aclose()
 
     try:
         payload = resp.json()
@@ -214,3 +216,22 @@ async def oms_json(
             "response": payload,
         }
     return payload if isinstance(payload, dict) else {"response": payload}
+
+
+async def _get_oms_grpc_compat_client() -> OMSGrpcHttpCompatClient:
+    global _OMS_GRPC_COMPAT_CLIENT
+    if _OMS_GRPC_COMPAT_CLIENT is not None:
+        return _OMS_GRPC_COMPAT_CLIENT
+    async with _OMS_GRPC_COMPAT_CLIENT_LOCK:
+        if _OMS_GRPC_COMPAT_CLIENT is None:
+            _OMS_GRPC_COMPAT_CLIENT = OMSGrpcHttpCompatClient()
+    return _OMS_GRPC_COMPAT_CLIENT
+
+
+async def close_oms_grpc_compat_client() -> None:
+    global _OMS_GRPC_COMPAT_CLIENT
+    async with _OMS_GRPC_COMPAT_CLIENT_LOCK:
+        client = _OMS_GRPC_COMPAT_CLIENT
+        _OMS_GRPC_COMPAT_CLIENT = None
+    if client is not None:
+        await client.aclose()

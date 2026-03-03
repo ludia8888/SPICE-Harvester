@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T09:12:18+09:00
+> Generated: 2026-03-03T13:53:26+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **279**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **256146**
+- Total code lines (non-empty, non-comment): **256424**
 
 ## Package Scoreboard
 
@@ -30,19 +30,19 @@
 | `funnel` | 14 | 12/14 (85%) | 4 | 32 | 15 | 23 | 3588 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 221 |
 | `instance_worker` | 2 | 2/2 (100%) | 1 | 38 | 28 | 2 | 2376 |
-| `mcp_servers` | 18 | 6/18 (33%) | 10 | 52 | 126 | 32 | 6885 |
+| `mcp_servers` | 18 | 6/18 (33%) | 10 | 52 | 128 | 33 | 6900 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
-| `objectify_worker` | 4 | 4/4 (100%) | 2 | 33 | 51 | 7 | 4623 |
-| `oms` | 53 | 38/53 (71%) | 18 | 93 | 201 | 195 | 16434 |
+| `objectify_worker` | 4 | 4/4 (100%) | 2 | 34 | 51 | 7 | 4639 |
+| `oms` | 53 | 38/53 (71%) | 18 | 93 | 202 | 195 | 16557 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1192 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
 | `pipeline_worker` | 10 | 5/10 (50%) | 5 | 50 | 90 | 12 | 8100 |
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
-| `shared` | 320 | 211/320 (65%) | 107 | 387 | 884 | 1154 | 82587 |
-| `tests` | 317 | 54/317 (17%) | 20 | 154 | 1667 | 1531 | 55178 |
+| `shared` | 320 | 211/320 (65%) | 107 | 387 | 884 | 1154 | 82594 |
+| `tests` | 317 | 54/317 (17%) | 20 | 154 | 1678 | 1534 | 55295 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
@@ -54,7 +54,7 @@
 | `backend/bff/main.py` | 208 | 39 | 0 | 0 | 41 | 28 | 818 |
 | `backend/instance_worker/main.py` | 190 | 38 | 0 | 0 | 46 | 73 | 2372 |
 | `backend/shared/observability/tracing.py` | 174 | 29 | 0 | 0 | 30 | 1 | 521 |
-| `backend/objectify_worker/main.py` | 156 | 31 | 0 | 0 | 43 | 42 | 4178 |
+| `backend/objectify_worker/main.py` | 162 | 32 | 0 | 0 | 44 | 42 | 4194 |
 | `backend/funnel/services/structure_analysis.py` | 144 | 24 | 0 | 0 | 24 | 0 | 2642 |
 | `backend/ontology_worker/main.py` | 142 | 28 | 0 | 0 | 30 | 28 | 1192 |
 | `backend/shared/observability/metrics.py` | 140 | 23 | 0 | 0 | 26 | 1 | 884 |
@@ -79,7 +79,7 @@
 | `backend/ingest_reconciler_worker/main.py` | 5 | 3 | 5 | 1 | 220 |
 | `backend/instance_worker/main.py` | 28 | 38 | 46 | 73 | 2372 |
 | `backend/message_relay/main.py` | 10 | 13 | 22 | 10 | 664 |
-| `backend/objectify_worker/main.py` | 44 | 31 | 43 | 42 | 4178 |
+| `backend/objectify_worker/main.py` | 44 | 32 | 44 | 42 | 4194 |
 | `backend/oms/main.py` | 16 | 13 | 13 | 5 | 507 |
 | `backend/ontology_worker/main.py` | 15 | 28 | 30 | 28 | 1192 |
 | `backend/pipeline_scheduler/main.py` | 1 | 0 | 0 | 0 | 26 |
@@ -4823,13 +4823,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=216 | code_lines=195 | risk_score=17
-- API surface: public=5 | top-level functions=6 | classes=0 | methods=0
-- Runtime signals: async_functions=4 | try=3 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=3/6 (50%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=237 | code_lines=210 | risk_score=17
+- API surface: public=6 | top-level functions=8 | classes=0 | methods=0
+- Runtime signals: async_functions=6 | try=3 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=3/8 (37%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): mcp_servers.bff_auth; shared.services.grpc.oms_gateway_client
 - External imports (8): __future__; asyncio; httpx; logging; os; re; typing; uuid
-- Public API names: bff_headers; bff_json; bff_v2_json; http_json; oms_json
+- Public API names: bff_headers; bff_json; bff_v2_json; close_oms_grpc_compat_client; http_json; oms_json
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - Module summary: Pipeline MCP Server
@@ -5069,9 +5069,9 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=4528 | code_lines=4178 | risk_score=156
+- Source footprint: total_lines=4544 | code_lines=4194 | risk_score=162
 - API surface: public=3 | top-level functions=4 | classes=2 | methods=67
-- Runtime signals: async_functions=44 | try=43 | raise=42 | broad_except=31 | bare_except=0 | finally_return=0
+- Runtime signals: async_functions=44 | try=44 | raise=42 | broad_except=32 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=3/4 (75%) | classes=1/2 (50%) | methods=4/67 (5%)
 - Internal imports (45): objectify_worker.validation_codes; objectify_worker.write_paths; shared.config.app_config; shared.config.search_config; shared.config.settings; shared.errors.error_envelope; shared.errors.error_types; shared.errors.runtime_exception_policy (+37 more)
 - External imports (15): __future__; asyncio; confluent_kafka; csv; datetime; hashlib; httpx; io (+7 more)
@@ -5295,10 +5295,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=498 | code_lines=430 | risk_score=0
-- API surface: public=2 | top-level functions=3 | classes=2 | methods=40
-- Runtime signals: async_functions=38 | try=1 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/40 (0%)
+- Source footprint: total_lines=632 | code_lines=553 | risk_score=0
+- API surface: public=2 | top-level functions=3 | classes=2 | methods=41
+- Runtime signals: async_functions=39 | try=4 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/41 (0%)
 - Internal imports (2): shared.config.settings; shared.generated.grpc.spice.oms.v1
 - External imports (9): __future__; fastapi; google; grpc; httpx; json; logging; os (+1 more)
 - Public API names: OMSGrpcServer; OmsGatewayServicer
@@ -6071,7 +6071,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service entrypoint and lifecycle wiring
-- Source footprint: total_lines=5957 | code_lines=5582 | risk_score=221
+- Source footprint: total_lines=5959 | code_lines=5582 | risk_score=221
 - API surface: public=2 | top-level functions=4 | classes=4 | methods=156
 - Runtime signals: async_functions=78 | try=57 | raise=46 | broad_except=42 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/4 (0%) | classes=0/4 (0%) | methods=5/156 (3%)
@@ -8861,7 +8861,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=277 | code_lines=236 | risk_score=5
+- Source footprint: total_lines=281 | code_lines=240 | risk_score=5
 - API surface: public=2 | top-level functions=5 | classes=2 | methods=17
 - Runtime signals: async_functions=11 | try=1 | raise=3 | broad_except=1 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=1/2 (50%) | methods=0/17 (0%)
@@ -9757,7 +9757,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=334 | code_lines=281 | risk_score=18
+- Source footprint: total_lines=338 | code_lines=284 | risk_score=18
 - API surface: public=6 | top-level functions=6 | classes=2 | methods=3
 - Runtime signals: async_functions=4 | try=3 | raise=0 | broad_except=3 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=5/6 (83%) | classes=2/2 (100%) | methods=2/3 (66%)
@@ -11935,7 +11935,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=705 | code_lines=640 | risk_score=0
+- Source footprint: total_lines=706 | code_lines=641 | risk_score=0
 - API surface: public=1 | top-level functions=10 | classes=0 | methods=0
 - Runtime signals: async_functions=9 | try=2 | raise=10 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/10 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -12687,7 +12687,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=79 | code_lines=61 | risk_score=0
+- Source footprint: total_lines=96 | code_lines=76 | risk_score=0
 - API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -14575,13 +14575,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=95 | code_lines=75 | risk_score=1
-- API surface: public=4 | top-level functions=4 | classes=2 | methods=4
-- Runtime signals: async_functions=3 | try=2 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/2 (0%) | methods=0/4 (0%)
+- Source footprint: total_lines=221 | code_lines=176 | risk_score=4
+- API surface: public=7 | top-level functions=7 | classes=5 | methods=13
+- Runtime signals: async_functions=14 | try=5 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/5 (0%) | methods=0/13 (0%)
 - Internal imports (3): oms.grpc.server; shared.generated.grpc.spice.oms.v1; shared.services.grpc.oms_gateway_client
 - External imports (5): __future__; fastapi; grpc; json; pytest
-- Public API names: test_gateway_build_request_and_response_mapping_roundtrip; test_gateway_call_metadata_includes_service_and_delegated_auth; test_grpc_authorize_rejects_invalid_service_token; test_grpc_authorize_requires_mtls_when_enabled
+- Public API names: test_dispatch_stream_emits_multiple_chunks; test_gateway_build_request_and_response_mapping_roundtrip; test_gateway_call_metadata_includes_service_and_delegated_auth; test_get_database_returns_404_when_missing; test_get_database_returns_selected_row; test_grpc_authorize_rejects_invalid_service_token; test_grpc_authorize_requires_mtls_when_enabled
 
 ### `backend/tests/unit/services/test_ontology_class_id_service.py`
 - Module summary: no docstring

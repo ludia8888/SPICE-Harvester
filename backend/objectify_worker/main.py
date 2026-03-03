@@ -2547,13 +2547,29 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if not self.http:
             return {}
         branch = job.ontology_branch or job.dataset_branch or "main"
-        resp = await self.http.get_ontology_typed(
-            db_name=job.db_name,
-            class_id=job.target_class_id,
-            branch=branch,
-        )
-        resp.raise_for_status()
-        return resp.json() if resp.text else {}
+        try:
+            resp = await self.http.get_ontology_typed(
+                db_name=job.db_name,
+                class_id=job.target_class_id,
+                branch=branch,
+            )
+            if resp.status_code == 200:
+                return resp.json() if resp.text else {}
+            logger.debug(
+                "OMS ontology fetch returned %d for %s/%s",
+                resp.status_code,
+                job.db_name,
+                job.target_class_id,
+            )
+            return {}
+        except Exception as exc:
+            logger.debug(
+                "OMS ontology fetch failed for %s/%s: %s",
+                job.db_name,
+                job.target_class_id,
+                exc,
+            )
+            return {}
 
     async def _fetch_object_type_contract(self, job: ObjectifyJob) -> Dict[str, Any]:
         if not self.http:

@@ -136,14 +136,18 @@ class OMSGatewayGrpcClient:
                 metadata.append(("x-delegated-authorization", str(delegated)))
         return metadata
 
-    async def call_unary(self, rpc_name: str, request: oms_gateway_pb2.OmsRequest) -> oms_gateway_pb2.OmsResponse:
+    async def call_unary(self, rpc_name: str, request: Any) -> oms_gateway_pb2.OmsResponse:
         rpc = getattr(self._stub, rpc_name)
-        return await rpc(request, metadata=self._call_metadata(headers=request.metadata.headers))
+        metadata_obj = getattr(request, "metadata", None)
+        metadata_headers = dict(getattr(metadata_obj, "headers", {}) or {})
+        return await rpc(request, metadata=self._call_metadata(headers=metadata_headers))
 
-    async def call_stream(self, rpc_name: str, request: oms_gateway_pb2.OmsRequest) -> list[oms_gateway_pb2.OmsStreamChunk]:
+    async def call_stream(self, rpc_name: str, request: Any) -> list[oms_gateway_pb2.OmsStreamChunk]:
         rpc = getattr(self._stub, rpc_name)
         chunks: list[oms_gateway_pb2.OmsStreamChunk] = []
-        async for item in rpc(request, metadata=self._call_metadata(headers=request.metadata.headers)):
+        metadata_obj = getattr(request, "metadata", None)
+        metadata_headers = dict(getattr(metadata_obj, "headers", {}) or {})
+        async for item in rpc(request, metadata=self._call_metadata(headers=metadata_headers)):
             chunks.append(item)
         return chunks
 

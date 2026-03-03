@@ -16,11 +16,12 @@ mkdir -p "${OUT_DIR}"
 
 find "${OUT_DIR}" -type d -exec touch "{}/__init__.py" \;
 
-"${PYTHON_BIN}" - <<'PY'
+OUT_DIR="${OUT_DIR}" "${PYTHON_BIN}" - <<'PY'
+import os
 from pathlib import Path
 import re
 
-root = Path("backend/shared/generated/grpc")
+root = Path(os.environ.get("OUT_DIR", "backend/shared/generated/grpc"))
 for file_path in root.rglob("*_pb2_grpc.py"):
     content = file_path.read_text(encoding="utf-8")
     content = content.replace(

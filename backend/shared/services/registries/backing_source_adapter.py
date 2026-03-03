@@ -18,16 +18,20 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import httpx
 
 from shared.utils.object_type_backing import select_primary_backing_source
 
+if TYPE_CHECKING:
+    from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
+
 logger = logging.getLogger(__name__)
 
 # Prefix used to distinguish OMS-sourced mapping specs from PostgreSQL ones.
 OMS_MAPPING_SPEC_PREFIX = "oms:"
+OmsHttpClient = Union[httpx.AsyncClient, "OMSGrpcHttpCompatClient"]
 
 
 def _build_oms_url(*, oms_base_url: str, path: str) -> str:
@@ -70,7 +74,7 @@ def _normalize_oms_response(payload: Any) -> Dict[str, Any]:
 
 
 async def get_mapping_from_oms(
-    http_client: httpx.AsyncClient,
+    http_client: OmsHttpClient,
     *,
     oms_base_url: str,
     db_name: str,
@@ -137,7 +141,7 @@ async def get_mapping_from_oms(
 
 
 async def find_class_id_by_dataset(
-    http_client: httpx.AsyncClient,
+    http_client: OmsHttpClient,
     *,
     oms_base_url: str,
     db_name: str,
@@ -206,7 +210,7 @@ class MappingSpecResolver:
     def __init__(
         self,
         *,
-        http_client: httpx.AsyncClient,
+        http_client: OmsHttpClient,
         oms_base_url: str,
         admin_token: Optional[str] = None,
         objectify_registry: Any = None,

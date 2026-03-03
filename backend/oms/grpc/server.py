@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Mapping, Optional
+from typing import Any, AsyncIterator, Mapping, Optional
 
 import grpc
 import httpx
@@ -153,11 +153,56 @@ class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
         )
 
     async def GetDatabase(self, request, context):
-        return await self._dispatch(
+        response = await self._dispatch(
             context=context,
             method="GET",
-            path=f"/api/v1/database/exists/{request.db_name}",
+            path="/api/v1/database/list",
             request=request,
+        )
+        if int(response.status_code or 500) >= 400:
+            return response
+
+        db_name = str(request.db_name or "").strip()
+        payload: dict[str, Any]
+        try:
+            payload = json.loads(response.json_body or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        rows = data.get("databases") if isinstance(data.get("databases"), list) else []
+        row = next(
+            (
+                item
+                for item in rows
+                if isinstance(item, dict) and str(item.get("name") or "").strip() == db_name
+            ),
+            None,
+        )
+        if row is None:
+            return oms_gateway_pb2.OmsResponse(
+                status_code=404,
+                json_body=json.dumps(
+                    {"detail": f"Database '{db_name}' not found"},
+                    ensure_ascii=False,
+                ),
+                headers={"content-type": "application/json"},
+                content_type="application/json",
+                detail=f"Database '{db_name}' not found",
+            )
+
+        return oms_gateway_pb2.OmsResponse(
+            status_code=200,
+            json_body=json.dumps(
+                {
+                    "status": "success",
+                    "message": f"데이터베이스 '{db_name}' 조회 완료",
+                    "data": {"name": db_name, **row},
+                },
+                ensure_ascii=False,
+            ),
+            headers=dict(response.headers or {}),
+            content_type="application/json",
         )
 
     async def DatabaseExists(self, request, context):
@@ -360,16 +405,99 @@ class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
             f"/api/v2/ontologies/{request.db_name}/objects/{request.object_type}/{request.primary_key}"
             f"/timeseries/{request.property_name}/streamPoints"
         )
-        resp = await self._dispatch(context=context, method="POST", path=path, request=req)
-        yield oms_gateway_pb2.OmsStreamChunk(
-            status_code=resp.status_code,
-            chunk=resp.binary_body,
-            headers=resp.headers,
-            content_type=resp.content_type,
-            json_body=resp.json_body,
-            detail=resp.detail,
-            eof=True,
-        )
+        async for chunk in self._dispatch_stream(context=context, method="POST", path=path, request=req):
+            yield chunk
+
+    async def _dispatch_stream(
+        self,
+        *,
+        context: grpc.aio.ServicerContext,
+        method: str,
+        path: str,
+        request: oms_gateway_pb2.OmsRequest,
+        chunk_size: int = 64 * 1024,
+    ) -> AsyncIterator[oms_gateway_pb2.OmsStreamChunk]:
+        await self._authorize(context)
+
+        headers = _as_str_dict(request.metadata.headers)
+        headers[_INTERNAL_BRIDGE_HEADER] = "1"
+        query = _as_str_dict(request.metadata.query)
+
+        try:
+            json_body: Optional[Any] = None
+            if request.json_body:
+                json_body = json.loads(request.json_body)
+        except json.JSONDecodeError as exc:
+            yield oms_gateway_pb2.OmsStreamChunk(
+                status_code=400,
+                json_body=json.dumps({"detail": f"invalid json_body: {exc}"}, ensure_ascii=False),
+                content_type="application/json",
+                detail=f"invalid json_body: {exc}",
+                eof=True,
+            )
+            return
+
+        async with self._http.stream(
+            method=method.upper(),
+            url=path,
+            params=query or None,
+            headers=headers or None,
+            json=json_body,
+            content=(bytes(request.binary_body) if request.binary_body else None),
+        ) as response:
+            status_code = int(response.status_code)
+            content_type = response.headers.get("content-type", "") or "application/octet-stream"
+            wire_headers = _as_str_dict(response.headers)
+
+            if status_code >= 400:
+                body = await response.aread()
+                text = body.decode("utf-8", errors="replace") if body else ""
+                detail = text
+                if "application/json" in content_type and text:
+                    try:
+                        detail = str((json.loads(text) or {}).get("detail") or text)
+                    except json.JSONDecodeError:
+                        detail = text
+                yield oms_gateway_pb2.OmsStreamChunk(
+                    status_code=status_code,
+                    chunk=body if body and "application/json" not in content_type else b"",
+                    headers=wire_headers,
+                    content_type=content_type,
+                    json_body=text if "application/json" in content_type else "",
+                    detail=detail,
+                    eof=True,
+                )
+                return
+
+            emitted = False
+            first_chunk = True
+            async for data_chunk in response.aiter_bytes(chunk_size=chunk_size):
+                if not data_chunk:
+                    continue
+                emitted = True
+                yield oms_gateway_pb2.OmsStreamChunk(
+                    status_code=status_code,
+                    chunk=data_chunk,
+                    headers=wire_headers if first_chunk else {},
+                    content_type=content_type,
+                    eof=False,
+                )
+                first_chunk = False
+
+            if not emitted:
+                yield oms_gateway_pb2.OmsStreamChunk(
+                    status_code=status_code,
+                    headers=wire_headers,
+                    content_type=content_type,
+                    eof=True,
+                )
+                return
+
+            yield oms_gateway_pb2.OmsStreamChunk(
+                status_code=status_code,
+                content_type=content_type,
+                eof=True,
+            )
 
     # AttachmentService
     async def UploadAttachment(self, request, context):
@@ -473,9 +601,15 @@ class OMSGrpcServer:
                 raise RuntimeError("OMS gRPC TLS enabled but cert/key path is missing.")
             if require_mtls and not ca_path:
                 raise RuntimeError("OMS gRPC mTLS enabled but CA path is missing.")
-            cert_chain = open(cert_path, "rb").read()
-            private_key = open(key_path, "rb").read()
-            root_ca = open(ca_path, "rb").read() if ca_path else None
+            with open(cert_path, "rb") as cert_handle:
+                cert_chain = cert_handle.read()
+            with open(key_path, "rb") as key_handle:
+                private_key = key_handle.read()
+            if ca_path:
+                with open(ca_path, "rb") as ca_handle:
+                    root_ca = ca_handle.read()
+            else:
+                root_ca = None
             server_creds = grpc.ssl_server_credentials(
                 ((private_key, cert_chain),),
                 root_certificates=root_ca,

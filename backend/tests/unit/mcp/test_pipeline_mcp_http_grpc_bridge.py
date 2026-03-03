@@ -10,13 +10,20 @@ import pytest
 async def test_oms_json_uses_grpc_transport(monkeypatch):
     from mcp_servers import pipeline_mcp_http as target
 
-    called: dict[str, object] = {"closed": False, "http_json_called": False}
+    called: dict[str, object] = {
+        "closed": False,
+        "http_json_called": False,
+        "instances_created": 0,
+    }
 
     async def _should_not_be_called(*args, **kwargs):
         called["http_json_called"] = True
         raise AssertionError("oms_json must not use direct HTTP path")
 
     class _DummyCompat:
+        def __init__(self) -> None:
+            called["instances_created"] = int(called["instances_created"]) + 1
+
         async def request(self, method: str, path: str, **kwargs):
             called["method"] = method
             called["path"] = path
@@ -32,6 +39,7 @@ async def test_oms_json_uses_grpc_transport(monkeypatch):
 
     monkeypatch.setattr(target, "http_json", _should_not_be_called)
     monkeypatch.setattr(target, "OMSGrpcHttpCompatClient", _DummyCompat)
+    monkeypatch.setattr(target, "_OMS_GRPC_COMPAT_CLIENT", None)
 
     payload = await target.oms_json(
         "POST",
@@ -43,7 +51,8 @@ async def test_oms_json_uses_grpc_transport(monkeypatch):
 
     assert payload == {"ok": True}
     assert called["http_json_called"] is False
-    assert called["closed"] is True
+    assert called["closed"] is False
+    assert called["instances_created"] == 1
     assert called["method"] == "POST"
     assert called["path"] == "/api/v1/database/list"
 
@@ -54,6 +63,12 @@ async def test_oms_json_uses_grpc_transport(monkeypatch):
     headers = kwargs.get("headers") or {}
     assert isinstance(headers, dict)
     assert headers.get("Accept") == "application/json"
+
+    payload_2 = await target.oms_json("GET", "/api/v1/database/list", timeout_seconds=0.1)
+    assert payload_2 == {"ok": True}
+    assert called["instances_created"] == 1
+    await target.close_oms_grpc_compat_client()
+    assert called["closed"] is True
 
 
 @pytest.mark.asyncio
@@ -73,7 +88,9 @@ async def test_oms_json_timeout_maps_to_504(monkeypatch):
             return None
 
     monkeypatch.setattr(target, "OMSGrpcHttpCompatClient", _SlowCompat)
+    monkeypatch.setattr(target, "_OMS_GRPC_COMPAT_CLIENT", None)
 
     payload = await target.oms_json("GET", "/api/v1/database/list", timeout_seconds=0.01)
     assert payload.get("status_code") == 504
     assert "timed out" in str(payload.get("error", "")).lower()
+    await target.close_oms_grpc_compat_client()
