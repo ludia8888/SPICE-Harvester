@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ServerCapabilities, Tool, ToolsCapability
+from shared.foundry.rids import build_rid, parse_rid
 
 # ---------------------------------------------------------------------------
 # Path setup (repo / container)
@@ -84,6 +85,73 @@ def _common_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
         "principal_id": _opt(arguments.get("principal_id")),
         "principal_type": _opt(arguments.get("principal_type")),
     }
+
+
+def _coerce_pipeline_id(value: Any) -> str:
+    raw = _s(value)
+    if not raw:
+        return raw
+    if raw.startswith("pipeline://"):
+        return raw[len("pipeline://") :].strip()
+    try:
+        kind, rid_id = parse_rid(raw)
+    except ValueError:
+        return raw
+    return rid_id if kind == "pipeline" else raw
+
+
+def _pipeline_target_rid(value: Any) -> str:
+    raw = _s(value)
+    if not raw:
+        raise ValueError("pipeline_id is required")
+    try:
+        kind, rid_id = parse_rid(raw)
+        if kind == "pipeline":
+            return build_rid("pipeline", rid_id)
+    except ValueError:
+        pass
+    pipeline_id = _coerce_pipeline_id(raw)
+    return build_rid("pipeline", pipeline_id)
+
+
+def _extract_dataset_ids(payload: Dict[str, Any]) -> List[str]:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    datasets = data.get("datasets") if isinstance(data.get("datasets"), list) else []
+    dataset_ids: List[str] = []
+    for item in datasets:
+        if not isinstance(item, dict):
+            continue
+        candidate = _s(item.get("dataset_id") or item.get("datasetId") or item.get("id"))
+        if candidate:
+            dataset_ids.append(candidate)
+    return dataset_ids
+
+
+def _build_objectify_run_body(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    body: Dict[str, Any] = {}
+    mapping_spec_id = _opt(arguments.get("mapping_spec_id"))
+    target_class_id = _opt(arguments.get("target_class_id"))
+    dataset_version_id = _opt(arguments.get("dataset_version_id"))
+    artifact_output_name = _opt(arguments.get("artifact_output_name"))
+    if mapping_spec_id:
+        body["mapping_spec_id"] = mapping_spec_id
+    if target_class_id:
+        body["target_class_id"] = target_class_id
+    if dataset_version_id:
+        body["dataset_version_id"] = dataset_version_id
+    if artifact_output_name:
+        body["artifact_output_name"] = artifact_output_name
+
+    max_rows = arguments.get("max_rows")
+    batch_size = arguments.get("batch_size")
+    allow_partial = arguments.get("allow_partial")
+    if max_rows is not None:
+        body["max_rows"] = int(max_rows)
+    if batch_size is not None:
+        body["batch_size"] = int(batch_size)
+    if allow_partial is not None:
+        body["allow_partial"] = bool(allow_partial)
+    return body
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -384,13 +452,20 @@ TOOL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "name": "bff_start_objectify",
-        "description": "Start an objectify run for a pipeline.",
+        "description": "Start objectify for all datasets in a pipeline via /api/v1/objectify/datasets/{dataset_id}/run fan-out.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "db_name": _DB_NAME_PROP,
-                "pipeline_id": {"type": "string", "description": "Pipeline ID"},
+                "pipeline_id": {"type": "string", "description": "Pipeline ID or pipeline RID"},
                 "branch": _BRANCH_PROP,
+                "mapping_spec_id": {"type": "string", "description": "Optional mapping spec to force for each dataset"},
+                "target_class_id": {"type": "string", "description": "Optional target class id (OMS mapping resolution)"},
+                "dataset_version_id": {"type": "string", "description": "Optional dataset version id override"},
+                "artifact_output_name": {"type": "string", "description": "Optional artifact output name"},
+                "max_rows": {"type": "integer", "description": "Optional max rows per objectify job"},
+                "batch_size": {"type": "integer", "description": "Optional batch size per objectify job"},
+                "allow_partial": {"type": "boolean", "description": "Allow partial objectify writes"},
                 **_PRINCIPAL_PROPS,
             },
             "required": ["db_name", "pipeline_id"],
@@ -485,21 +560,21 @@ async def _handle_tool(name: str, arguments: Dict[str, Any]) -> list:
         return _json_result(r)
 
     if name == "bff_get_pipeline":
-        pid = _s(arguments["pipeline_id"])
+        pid = _coerce_pipeline_id(arguments["pipeline_id"])
         r = await bff_json("GET", f"/pipelines/{pid}", **ca)
         return _json_result(r)
 
     if name == "bff_list_datasets":
-        pid = _s(arguments["pipeline_id"])
+        pid = _coerce_pipeline_id(arguments["pipeline_id"])
         r = await bff_json("GET", f"/pipelines/{pid}/datasets", **ca)
         return _json_result(r)
 
     if name == "bff_execute_pipeline":
-        pid = _s(arguments["pipeline_id"])
+        pid = _coerce_pipeline_id(arguments["pipeline_id"])
         mode = _s(arguments["mode"])
         branch = _s(arguments.get("branch")) or "main"
         payload = {
-            "target": {"targetRids": [f"pipeline://{pid}"]},
+            "target": {"targetRids": [_pipeline_target_rid(arguments["pipeline_id"])]},
             "mode": mode,
             "branchName": branch,
         }
@@ -610,20 +685,79 @@ async def _handle_tool(name: str, arguments: Dict[str, Any]) -> list:
 
     # ── Objectify ────────────────────────────────────────────────────────
     if name == "bff_list_objectify_runs":
-        pid = _s(arguments["pipeline_id"])
-        r = await bff_json("GET", f"/pipelines/{pid}/objectify/runs", **ca)
-        return _json_result(r)
+        pid = _coerce_pipeline_id(arguments["pipeline_id"])
+        legacy = await bff_json("GET", f"/pipelines/{pid}/objectify/runs", **ca)
+        if not legacy.get("error"):
+            return _json_result(legacy)
+        runs_resp = await bff_json("GET", f"/pipelines/{pid}/runs", params={"limit": 200}, **ca)
+        data = runs_resp.get("data") if isinstance(runs_resp.get("data"), dict) else {}
+        runs = data.get("runs") if isinstance(data.get("runs"), list) else []
+        filtered = [
+            run
+            for run in runs
+            if isinstance(run, dict) and str(run.get("mode") or "").strip().lower() == "objectify"
+        ]
+        return _json_result(
+            {
+                "status": "success",
+                "message": "Fallback to /pipelines/{id}/runs filter(mode=objectify)",
+                "data": {"runs": filtered, "count": len(filtered), "pipeline_id": pid},
+                "legacy_error": legacy.get("error"),
+            }
+        )
 
     if name == "bff_start_objectify":
-        pid = _s(arguments["pipeline_id"])
-        branch = _s(arguments.get("branch")) or "main"
-        payload = {
-            "target": {"targetRids": [f"pipeline://{pid}"]},
-            "mode": "objectify",
-            "branchName": branch,
-        }
-        r = await bff_v2_json("POST", "/v2/orchestration/builds/create", json_body=payload, **ca)
-        return _json_result(r)
+        pid = _coerce_pipeline_id(arguments["pipeline_id"])
+        datasets_resp = await bff_json("GET", f"/pipelines/{pid}/datasets", **ca)
+        if datasets_resp.get("error"):
+            return _json_result(
+                {
+                    "status": "error",
+                    "message": "Failed to list pipeline datasets for objectify start",
+                    "pipeline_id": pid,
+                    "targetRid": _pipeline_target_rid(arguments["pipeline_id"]),
+                    "error": datasets_resp.get("error"),
+                }
+            )
+        dataset_ids = _extract_dataset_ids(datasets_resp)
+        if not dataset_ids:
+            return _json_result(
+                {
+                    "status": "error",
+                    "message": "No datasets found in pipeline; cannot start objectify",
+                    "pipeline_id": pid,
+                    "targetRid": _pipeline_target_rid(arguments["pipeline_id"]),
+                    "datasets_response": datasets_resp,
+                }
+            )
+
+        run_body = _build_objectify_run_body(arguments)
+        jobs: List[Dict[str, Any]] = []
+        failures: List[Dict[str, Any]] = []
+        for dataset_id in dataset_ids:
+            resp = await bff_json(
+                "POST",
+                f"/objectify/datasets/{dataset_id}/run",
+                json_body=run_body,
+                **ca,
+            )
+            entry = {"dataset_id": dataset_id, "response": resp}
+            if resp.get("error"):
+                failures.append(entry)
+            else:
+                jobs.append(entry)
+
+        status_value = "success" if jobs else "error"
+        return _json_result(
+            {
+                "status": status_value,
+                "pipeline_id": pid,
+                "targetRid": _pipeline_target_rid(arguments["pipeline_id"]),
+                "dataset_count": len(dataset_ids),
+                "enqueued_jobs": jobs,
+                "failed_jobs": failures,
+            }
+        )
 
     # ── Admin / Health ───────────────────────────────────────────────────
     if name == "bff_health_check":
@@ -700,6 +834,8 @@ def main_sse(host: str = "0.0.0.0", port: int = 9090) -> None:
     """Run as SSE transport (for Claude.ai web connector via ngrok)."""
     import uvicorn
     from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
     from starlette.routing import Mount, Route
     from starlette.responses import JSONResponse
     from mcp.server.sse import SseServerTransport
@@ -729,6 +865,14 @@ def main_sse(host: str = "0.0.0.0", port: int = 9090) -> None:
             Route("/health", handle_health),
             Route("/sse", handle_sse),
             Route("/messages/", handle_messages, methods=["POST"]),
+        ],
+        middleware=[
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            ),
         ],
     )
 

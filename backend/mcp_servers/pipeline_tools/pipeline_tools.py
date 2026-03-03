@@ -5,6 +5,7 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from shared.errors.external_codes import ExternalErrorCode
+from shared.foundry.rids import build_rid
 from shared.models.pipeline_plan import PipelinePlan
 from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
@@ -89,7 +90,7 @@ async def _pipeline_wait_for_mode(
     if not job_id:
         # Enqueue via v2 orchestration API
         v2_payload: Dict[str, Any] = {
-            "target": {"targetRids": [f"pipeline://{pipeline_id}"]},
+            "target": {"targetRids": [build_rid("pipeline", pipeline_id)]},
             "mode": mode,
             "parameters": {"limit": limit},
         }
