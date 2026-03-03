@@ -829,17 +829,18 @@ async def _wait_for_ontology(
     headers = oms_headers if isinstance(oms_headers, dict) and oms_headers else None
     while time.monotonic() < deadline:
         resp = await client.get(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/{class_id}",
             params={"branch": "main"},
             headers=headers,
         )
         if resp.status_code == 200:
             if not require_properties:
                 return
-            # If we need properties, check they're populated
-            # OMS GET returns properties at data.properties (flattened, no spec wrapper)
-            data = resp.json().get("data") or resp.json()
-            props = data.get("properties") or []
+            payload = resp.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(data, dict):
+                data = payload if isinstance(payload, dict) else {}
+            props = data.get("properties") if isinstance(data.get("properties"), dict) else {}
             if len(props) > 0:
                 return
         await asyncio.sleep(1.0)
@@ -884,33 +885,22 @@ async def _upsert_object_type_contract(
     existing_metadata: Dict[str, Any] = {"source": "foundry_e2e_qa"}
 
     try:
-        # GET the ontology class — returns properties/relationships flattened from spec
+        # GET object-type resource via BFF to preserve existing spec fields.
         get_resp = await client.get(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
+            f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types/{class_id}",
             params={"branch": "main"},
             headers=oms_headers,
         )
         if get_resp.status_code == 200:
-            onto_data = get_resp.json().get("data") or get_resp.json()
-            # Rebuild spec from the flattened ontology response
-            if onto_data.get("properties"):
-                existing_spec["properties"] = onto_data["properties"]
-            if onto_data.get("relationships"):
-                existing_spec["relationships"] = onto_data["relationships"]
-            if onto_data.get("parent_class"):
-                existing_spec["parent_class"] = onto_data["parent_class"]
-            if onto_data.get("abstract"):
-                existing_spec["abstract"] = onto_data["abstract"]
-            if onto_data.get("label"):
-                existing_label = onto_data["label"]
-                existing_spec["label"] = onto_data["label"]
-            if onto_data.get("description"):
-                existing_desc = onto_data["description"]
-                existing_spec["description"] = onto_data["description"]
-            if onto_data.get("id"):
-                existing_spec["id"] = onto_data["id"]
-            if onto_data.get("metadata"):
-                existing_metadata = {**onto_data["metadata"], "source": "foundry_e2e_qa"}
+            resource_data = get_resp.json().get("data") or get_resp.json()
+            if isinstance(resource_data.get("spec"), dict):
+                existing_spec = dict(resource_data["spec"])
+            if resource_data.get("label"):
+                existing_label = resource_data["label"]
+            if resource_data.get("description"):
+                existing_desc = resource_data["description"]
+            if resource_data.get("metadata"):
+                existing_metadata = {**resource_data["metadata"], "source": "foundry_e2e_qa"}
     except Exception:
         pass  # If can't GET, just use defaults
 
@@ -930,7 +920,7 @@ async def _upsert_object_type_contract(
         "spec": merged_spec,
     }
     resp = await client.post(
-        f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types",
         params={"branch": "main", "expected_head_commit": expected_head_commit},
         json=payload,
         headers=oms_headers,
@@ -939,7 +929,7 @@ async def _upsert_object_type_contract(
         return
     if resp.status_code == 409:
         resp2 = await client.put(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}",
+            f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types/{class_id}",
             params={"branch": "main", "expected_head_commit": expected_head_commit},
             json=payload,
             headers=oms_headers,
@@ -1996,7 +1986,7 @@ async def phase3_ontology_creation(state: QAState, client: httpx.AsyncClient) ->
     for at in action_types:
         try:
             resp = await client.post(
-                f"{OMS_URL}/api/v1/database/{state.db_name}/ontology/resources/action-types",
+                f"{BFF_URL}/api/v1/databases/{state.db_name}/ontology/resources/action-types",
                 params={"branch": "main", "expected_head_commit": "branch:main"},
                 json=at,
                 headers=state.oms_headers,
@@ -2102,13 +2092,16 @@ async def phase4_objectify(state: QAState, client: httpx.AsyncClient) -> None:
     for class_id in state.ontology_classes:
         try:
             resp = await client.get(
-                f"{OMS_URL}/api/v1/database/{state.db_name}/ontology/{class_id}",
+                f"{BFF_URL}/api/v2/ontologies/{state.db_name}/objectTypes/{class_id}",
                 params={"branch": "main"},
                 headers=state.oms_headers,
             )
             if resp.status_code == 200:
-                data = resp.json().get("data") or resp.json()
-                props = data.get("properties") or []
+                payload = resp.json()
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(data, dict):
+                    data = payload if isinstance(payload, dict) else {}
+                props = data.get("properties") if isinstance(data.get("properties"), dict) else {}
                 print(f"    {class_id}: {len(props)} properties")
             else:
                 print(f"    {class_id}: status={resp.status_code}")
@@ -2818,7 +2811,7 @@ async def _record_deployed_commit_qa(
 ) -> None:
     """Record ontology deployment via HTTP API so actions can execute (required by OMS)."""
     resp = await client.post(
-        f"{OMS_URL}/api/v1/database/{db_name}/ontology/records/deployments",
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/records/deployments",
         json={
             "target_branch": target_branch,
             "ontology_commit_id": f"branch:{target_branch}",

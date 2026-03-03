@@ -45,6 +45,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e 'backend/shared[test]'
 
+      - name: Check gRPC generated code drift
+        run: |
+          PYTHON=python scripts/grpc/generate_proto.sh
+          git diff --exit-code backend/shared/generated/grpc
+
+      - name: Check SDK generated code drift
+        run: |
+          scripts/sdk/check_sdk_drift.sh
+
       - name: Start docker stack
         run: |
           docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d --build

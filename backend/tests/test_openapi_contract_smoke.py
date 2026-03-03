@@ -2906,7 +2906,7 @@ async def test_openapi_stable_contract_smoke():
                     proposal_class_meta[ctx.class_id] = ("Product", "제품")
 
                 action_target_class = ctx.class_id
-                action_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/action-types"
+                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/resources/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
                     "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
@@ -2949,7 +2949,7 @@ async def test_openapi_stable_contract_smoke():
                 }
                 async with session.post(
                     action_type_url,
-                    headers=BFF_HEADERS,
+                    headers={**BFF_HEADERS, "X-DB-Name": ctx.db_name},
                     params={"branch": ctx.branch_name, "expected_head_commit": branch_head},
                     json=action_type_body,
                 ) as resp:
@@ -3000,7 +3000,7 @@ async def test_openapi_stable_contract_smoke():
                 if not ctx.dataset_id:
                     raise AssertionError(f"Missing dataset_id in bootstrap dataset response: {payload}")
 
-                object_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/object-types"
+                object_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/resources/object-types"
                 object_type_classes = [
                     (class_id, *proposal_class_meta.get(class_id, (class_id, class_id)))
                     for class_id in proposal_class_ids
@@ -3147,7 +3147,7 @@ async def test_openapi_stable_contract_smoke():
             # Create one action type and mark the current ontology commit as deployed so Action simulation can run.
             if not action_type_created:
                 head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="master")
-                action_type_url = f"{OMS_URL}/api/v1/database/{ctx.db_name}/ontology/resources/action-types"
+                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/resources/action-types"
                 action_type_body = {
                     "id": ctx.action_type_id,
                     "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
@@ -3186,7 +3186,7 @@ async def test_openapi_stable_contract_smoke():
 
                 async with session.post(
                     action_type_url,
-                    headers=BFF_HEADERS,
+                    headers={**BFF_HEADERS, "X-DB-Name": ctx.db_name},
                     params={"branch": "master", "expected_head_commit": head_commit},
                     json=action_type_body,
                 ) as resp:
@@ -3205,7 +3205,7 @@ async def test_openapi_stable_contract_smoke():
                     branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=action_branch)
                     async with session.post(
                         action_type_url,
-                        headers=BFF_HEADERS,
+                        headers={**BFF_HEADERS, "X-DB-Name": ctx.db_name},
                         params={"branch": action_branch, "expected_head_commit": branch_head},
                         json=action_type_body,
                     ) as resp:

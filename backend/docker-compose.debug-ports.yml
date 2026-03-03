@@ -29,6 +29,7 @@ services:
   oms:
     ports:
       - "${OMS_PORT_HOST:-8000}:8000"
+      - "${OMS_GRPC_PORT_HOST:-50051}:50051"
   agent:
     ports:
       - "${AGENT_PORT_HOST:-8004}:8004"

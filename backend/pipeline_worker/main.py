@@ -22,7 +22,6 @@ import operator
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 from uuid import UUID, uuid4
 
-import httpx
 from confluent_kafka import Producer
 
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
@@ -131,6 +130,7 @@ from shared.services.registries.processed_event_registry import ProcessedEventRe
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.pipeline.pipeline_lock import PipelineLock, PipelineLockError
 from shared.services.storage.redis_service import RedisService, create_redis_service
+from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 from shared.services.storage.storage_service import StorageService
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
@@ -332,7 +332,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.storage: Optional[StorageService] = None
         self.lakefs_client: Optional[LakeFSClient] = None
         self.sheets: Optional[GoogleSheetsService] = None
-        self.http: Optional[httpx.AsyncClient] = None
+        self.http: Optional[OMSGrpcHttpCompatClient] = None
         self.spark: Optional[SparkSession] = None
         self._spark_executor: Optional[ThreadPoolExecutor] = None
         self.redis: Optional[RedisService] = None
@@ -447,20 +447,17 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         if self.objectify_registry:
             self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
 
-        # MappingSpecResolver: OMS-first, PostgreSQL-fallback
-        if self.http:
-            oms_base = os.environ.get("OMS_BASE_URL", "http://oms:8000").rstrip("/")
-            oms_token = ""
-            for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-                oms_token = (os.environ.get(key) or "").strip()
-                if oms_token:
-                    break
-            self.mapping_resolver = MappingSpecResolver(
-                http_client=self.http,
-                oms_base_url=oms_base,
-                admin_token=oms_token or None,
-                objectify_registry=self.objectify_registry,
-            )
+        self.http = OMSGrpcHttpCompatClient()
+
+        # MappingSpecResolver: OMS-first, PostgreSQL-fallback (gRPC bridge transport)
+        oms_base = ""
+        oms_token = ""
+        self.mapping_resolver = MappingSpecResolver(
+            http_client=self.http,
+            oms_base_url=oms_base,
+            admin_token=oms_token or None,
+            objectify_registry=self.objectify_registry,
+        )
 
         self.processed = await create_processed_event_registry(
             lease_timeout_seconds=int(self.processed_event_lease_timeout_seconds),
@@ -489,13 +486,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
         api_key = (settings.google_sheets.google_sheets_api_key or "").strip() or None
         self.sheets = GoogleSheetsService(api_key=api_key)
-
-        token = self.bff_admin_token
-        headers: Dict[str, str] = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-            headers["X-Admin-Token"] = token
-        self.http = httpx.AsyncClient(timeout=120.0, headers=headers)
 
         if self.lock_enabled:
             self.redis = create_redis_service(settings)

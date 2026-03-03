@@ -9,6 +9,7 @@ from shared.config.settings import get_settings
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 
 _EXEMPT_PATHS_DEFAULT = ("/health", "/")
+_INTERNAL_BRIDGE_HEADER = "X-OMS-Internal-Bridge"
 
 
 def ensure_oms_auth_configured() -> None:
@@ -37,6 +38,10 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
 
         exempt_paths = auth.resolve_oms_exempt_paths(defaults=_EXEMPT_PATHS_DEFAULT)
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
+            return await call_next(request)
+
+        # gRPC server dispatches into FastAPI via internal ASGI transport after transport-level auth.
+        if request.headers.get(_INTERNAL_BRIDGE_HEADER) == "1":
             return await call_next(request)
 
         dev_master = bool(auth.dev_master_auth_enabled and settings.is_development)

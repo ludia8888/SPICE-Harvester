@@ -68,7 +68,23 @@ async def test_oms_write_requires_auth():
             f"{OMS_URL}/api/v1/database/create",
             json={},
         ) as resp:
-            assert resp.status == 401
+            unauth_status = resp.status
+            unauth_text = await resp.text()
+
+    if unauth_status == 404:
+        assert "disabled" in unauth_text.lower()
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            headers=oms_auth_headers(),
+        ) as session:
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/create",
+                json={},
+            ) as resp:
+                assert resp.status == 404
+        return
+
+    assert unauth_status == 401
 
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=30),

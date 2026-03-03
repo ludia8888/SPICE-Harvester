@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package spice.oms.v1;
+import "google/protobuf/struct.proto";
+
+message RequestMetadata {
+  map<string, string> headers = 1;
+  map<string, string> query = 2;
+  string request_id = 3;
+  string correlation_id = 4;
+}
+
+message OmsRequest {
+  // Canonical path parameters
+  string db_name = 1;
+  string class_id = 2;
+  string object_type = 3;
+  string primary_key = 4;
+  string property_name = 5;
+  string attachment_rid = 6;
+  string resource_type = 7;
+  string resource_id = 8;
+  string branch = 9;
+  string expected_seq = 10;
+  string expected_head_commit = 11;
+  string filename = 12;
+
+  // Generic fields for payload passthrough
+  string path = 20;
+  string json_body = 21;
+  bytes binary_body = 22;
+  RequestMetadata metadata = 23;
+}
+
+message OmsResponse {
+  int32 status_code = 1;
+  string json_body = 2;
+  bytes binary_body = 3;
+  map<string, string> headers = 4;
+  string content_type = 5;
+  string detail = 6;
+  string error_name = 7;
+  string error_code = 8;
+  string error_instance_id = 9;
+}
+
+message OmsStreamChunk {
+  int32 status_code = 1;
+  bytes chunk = 2;
+  bool eof = 3;
+  map<string, string> headers = 4;
+  string content_type = 5;
+  string json_body = 6;
+  string detail = 7;
+}
+
+message CreateOntologyTypedRequest {
+  string db_name = 1;
+  string branch = 2;
+  google.protobuf.Struct ontology = 3;
+  RequestMetadata metadata = 4;
+}
+
+message GetOntologyTypedRequest {
+  string db_name = 1;
+  string class_id = 2;
+  string branch = 3;
+  RequestMetadata metadata = 4;
+}
+
+service OmsGatewayService {
+  // Generic passthrough verbs (for worker-side compatibility)
+  rpc GenericGet(OmsRequest) returns (OmsResponse);
+  rpc GenericPost(OmsRequest) returns (OmsResponse);
+  rpc GenericPut(OmsRequest) returns (OmsResponse);
+  rpc GenericDelete(OmsRequest) returns (OmsResponse);
+
+  // DatabaseService
+  rpc CheckHealth(OmsRequest) returns (OmsResponse);
+  rpc ListDatabases(OmsRequest) returns (OmsResponse);
+  rpc CreateDatabase(OmsRequest) returns (OmsResponse);
+  rpc DeleteDatabase(OmsRequest) returns (OmsResponse);
+  rpc GetDatabase(OmsRequest) returns (OmsResponse);
+  rpc DatabaseExists(OmsRequest) returns (OmsResponse);
+
+  // OntologyService
+  rpc CreateOntologyTyped(CreateOntologyTypedRequest) returns (OmsResponse);
+  rpc GetOntologyTyped(GetOntologyTypedRequest) returns (OmsResponse);
+  rpc CreateOntology(OmsRequest) returns (OmsResponse);
+  rpc GetOntology(OmsRequest) returns (OmsResponse);
+  rpc ListOntologies(OmsRequest) returns (OmsResponse);
+  rpc UpdateOntology(OmsRequest) returns (OmsResponse);
+  rpc DeleteOntology(OmsRequest) returns (OmsResponse);
+  rpc ListOntologyResources(OmsRequest) returns (OmsResponse);
+  rpc GetOntologyResource(OmsRequest) returns (OmsResponse);
+  rpc CreateOntologyResource(OmsRequest) returns (OmsResponse);
+  rpc UpdateOntologyResource(OmsRequest) returns (OmsResponse);
+  rpc DeleteOntologyResource(OmsRequest) returns (OmsResponse);
+  rpc RecordOntologyDeployment(OmsRequest) returns (OmsResponse);
+
+  // ObjectQueryService
+  rpc SearchObjects(OmsRequest) returns (OmsResponse);
+  rpc AggregateObjects(OmsRequest) returns (OmsResponse);
+
+  // TimeseriesService
+  rpc GetTimeseriesFirstPoint(OmsRequest) returns (OmsResponse);
+  rpc GetTimeseriesLastPoint(OmsRequest) returns (OmsResponse);
+  rpc StreamTimeseriesPoints(OmsRequest) returns (stream OmsStreamChunk);
+
+  // AttachmentService
+  rpc UploadAttachment(OmsRequest) returns (OmsResponse);
+  rpc ListPropertyAttachments(OmsRequest) returns (OmsResponse);
+  rpc GetAttachmentByRid(OmsRequest) returns (OmsResponse);
+  rpc GetAttachmentContent(OmsRequest) returns (OmsResponse);
+  rpc GetAttachmentContentByRid(OmsRequest) returns (OmsResponse);
+}

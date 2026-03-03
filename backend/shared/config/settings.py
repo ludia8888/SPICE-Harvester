@@ -287,6 +287,22 @@ class ServiceSettings(BaseSettings):
         default=None,
         description="OMS base URL override (OMS_BASE_URL)"
     )
+    oms_grpc_port: int = Field(
+        default=50051,
+        description="OMS gRPC service port (OMS_GRPC_PORT)",
+    )
+    oms_grpc_target_override: Optional[str] = Field(
+        default=None,
+        description="OMS gRPC target override (OMS_GRPC_TARGET)",
+    )
+    oms_grpc_use_tls: bool = Field(
+        default=False,
+        description="Use TLS for OMS gRPC client channels (OMS_GRPC_USE_TLS)",
+    )
+    oms_grpc_server_name: Optional[str] = Field(
+        default=None,
+        description="SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME)",
+    )
     bff_host: str = Field(
         default_factory=lambda: ("bff" if _is_docker_environment() else "127.0.0.1"),
         description="BFF service host",
@@ -364,6 +380,12 @@ class ServiceSettings(BaseSettings):
         fallback = (os.getenv("OMS_URL") or "").strip()
         return fallback or v
 
+    @field_validator("oms_grpc_target_override", mode="before")
+    @classmethod
+    def get_oms_grpc_target_override(cls, v):
+        override = (os.getenv("OMS_GRPC_TARGET") or "").strip()
+        return override or v
+
     @field_validator("bff_base_url_override", mode="before")
     @classmethod
     def get_bff_base_url_override(cls, v):
@@ -421,6 +443,13 @@ class ServiceSettings(BaseSettings):
             return self.oms_base_url_override.rstrip("/")
         protocol = "https" if self.use_https else "http"
         return f"{protocol}://{self.oms_host}:{self.oms_port}"
+
+    @property
+    def oms_grpc_target(self) -> str:
+        """Construct OMS gRPC target host:port."""
+        if self.oms_grpc_target_override:
+            return self.oms_grpc_target_override.strip()
+        return f"{self.oms_host}:{int(self.oms_grpc_port)}"
     
     @property
     def bff_base_url(self) -> str:

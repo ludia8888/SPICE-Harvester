@@ -24,7 +24,6 @@ from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4
 
 import boto3
-import httpx
 from botocore.exceptions import ClientError
 
 from shared.config.app_config import AppConfig
@@ -44,8 +43,8 @@ from shared.models.lineage_edge_types import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.security.auth_utils import OMS_SERVICE_TOKEN_ENV_KEYS, get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_instance_id
+from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
     CommandParseError,
@@ -142,7 +141,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         self.command_status_service: Optional[CommandStatusTracker] = None
         self.s3_client = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
-        self.oms_http: Optional[httpx.AsyncClient] = None
+        self.oms_http: Optional[OMSGrpcHttpCompatClient] = None
         self._created_es_indices: set = set()
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
 
@@ -302,17 +301,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             raise RuntimeError("Failed to connect to Elasticsearch during worker startup") from es_connect_error
         logger.info("Elasticsearch connected for direct instance writes")
 
-        # OMS HTTP client (ontology schema resolution)
-        oms_url = settings.services.oms_base_url
-        oms_headers: Dict[str, str] = {}
-        oms_token = get_expected_token(OMS_SERVICE_TOKEN_ENV_KEYS)
-        if oms_token:
-            oms_headers["X-Admin-Token"] = oms_token
-        self.oms_http = httpx.AsyncClient(
-            base_url=oms_url,
-            timeout=60.0,
-            headers=oms_headers,
-        )
+        # OMS gRPC-backed client (ontology schema resolution)
+        self.oms_http = OMSGrpcHttpCompatClient()
 
         stores = None
         stores_init_error: Optional[Exception] = None
@@ -429,9 +419,10 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         if not self.oms_http:
             return None
         try:
-            resp = await self.oms_http.get(
-                f"/api/v1/database/{db_name}/ontology/{class_id}",
-                params={"branch": branch},
+            resp = await self.oms_http.get_ontology_typed(
+                db_name=db_name,
+                class_id=class_id,
+                branch=branch,
             )
             if resp.status_code == 200:
                 return resp.json()

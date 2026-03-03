@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import uuid
 from typing import Any, Dict, Optional
 
 import httpx
+from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 
 from mcp_servers.bff_auth import bff_admin_token as _bff_admin_token
 from mcp_servers.bff_auth import bff_api_base_url, bff_api_v2_base_url
@@ -130,11 +133,6 @@ async def bff_v2_json(
     )
 
 
-def oms_api_base_url() -> str:
-    """Get OMS API base URL from environment."""
-    return os.getenv("OMS_BASE_URL", "http://oms:8000").rstrip("/")
-
-
 def _oms_admin_token() -> str:
     """Resolve OMS admin token from environment (same fallback as OMSClient)."""
     for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
@@ -152,20 +150,67 @@ async def oms_json(
     json_body: Optional[Dict[str, Any]] = None,
     timeout_seconds: float = 30.0,
 ) -> Dict[str, Any]:
-    """Make an HTTP request to OMS API and return JSON response."""
-    base = oms_api_base_url()
-    url = f"{base}{path}"
+    """Make an OMS request through gRPC bridge and return JSON response."""
     headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
     token = _oms_admin_token()
     if token:
         headers["X-Admin-Token"] = token
-    return await http_json(
-        method,
-        url,
-        headers=headers,
-        json_body=json_body,
-        params=params,
-        timeout_seconds=timeout_seconds,
-        error_prefix="OMS",
-        error_path=path,
-    )
+
+    compat = OMSGrpcHttpCompatClient()
+    try:
+        method_upper = method.upper()
+        class_fetch_match = re.fullmatch(r"/api/v1/database/([^/]+)/ontology/([^/]+)", str(path))
+        if method_upper == "GET" and class_fetch_match:
+            db_name = class_fetch_match.group(1)
+            class_id = class_fetch_match.group(2)
+            branch_value = str((params or {}).get("branch") or "main")
+            resp = await asyncio.wait_for(
+                compat.get_ontology_typed(
+                    db_name=db_name,
+                    class_id=class_id,
+                    branch=branch_value,
+                    headers=headers,
+                ),
+                timeout=timeout_seconds,
+            )
+        else:
+            resp = await asyncio.wait_for(
+                compat.request(
+                    method_upper,
+                    path,
+                    params=params,
+                    headers=headers,
+                    json_body=json_body,
+                ),
+                timeout=timeout_seconds,
+            )
+    except asyncio.TimeoutError:
+        return {
+            "error": f"OMS {method.upper()} {path} timed out after {timeout_seconds:.1f}s",
+            "status_code": 504,
+            "response": {},
+        }
+    except Exception as exc:
+        return {
+            "error": f"OMS {method.upper()} {path} transport failure: {exc}",
+            "status_code": 502,
+            "response": {},
+        }
+    finally:
+        await compat.aclose()
+
+    try:
+        payload = resp.json()
+    except Exception:
+        logging.getLogger(__name__).warning("Exception fallback at mcp_servers/pipeline_mcp_http.py:oms_json", exc_info=True)
+        payload = {"raw": (resp.text or "").strip()}
+
+    if resp.status_code >= 400:
+        detail = payload.get("detail") if isinstance(payload, dict) else None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        return {
+            "error": message or detail or f"OMS {method.upper()} {path} failed ({resp.status_code})",
+            "status_code": resp.status_code,
+            "response": payload,
+        }
+    return payload if isinstance(payload, dict) else {"response": payload}

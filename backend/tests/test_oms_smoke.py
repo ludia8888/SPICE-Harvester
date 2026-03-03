@@ -37,6 +37,7 @@ if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes
 
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 OMS_HEADERS = oms_auth_headers()
+BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
 
 
 async def _assert_command_event_has_ontology_stamp(*, event_id: str) -> None:
@@ -229,6 +230,15 @@ async def test_oms_end_to_end_smoke():
                 f"{OMS_URL}/api/v1/database/create",
                 json={"name": db_name, "description": "OMS smoke test DB"},
             ) as resp:
+                if resp.status == 404:
+                    # Single-entry boundary mode: OMS business HTTP surface is intentionally not directly reachable.
+                    async with aiohttp.ClientSession(headers=OMS_HEADERS) as bff_session:
+                        async with bff_session.get(f"{BFF_URL}/api/v1/health") as bff_health:
+                            assert bff_health.status == 200
+                    pytest.skip(
+                        "OMS direct business HTTP is disabled (single-entry mode); "
+                        "runtime behavior is validated via BFF/core integration suites."
+                    )
                 assert resp.status == 202
                 payload = await resp.json()
                 db_command_id = (payload.get("data") or {}).get("command_id") or payload.get("command_id")

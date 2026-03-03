@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 OMS_MAPPING_SPEC_PREFIX = "oms:"
 
 
+def _build_oms_url(*, oms_base_url: str, path: str) -> str:
+    base = str(oms_base_url or "").strip().rstrip("/")
+    if not base:
+        return path
+    return f"{base}{path}"
+
+
 @dataclass(frozen=True)
 class BackingSourceMappingSpec:
     """OMS backing_source에서 추출된 mapping spec (PostgreSQL MappingSpecRecord과 호환)."""
@@ -78,7 +85,10 @@ async def get_mapping_from_oms(
       - object_type does not exist
       - backing_source has no property_mappings
     """
-    url = f"{oms_base_url}/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}"
+    url = _build_oms_url(
+        oms_base_url=oms_base_url,
+        path=f"/api/v1/database/{db_name}/ontology/resources/object_type/{target_class_id}",
+    )
     headers: Dict[str, str] = {"Accept": "application/json"}
     if admin_token:
         headers["X-Admin-Token"] = admin_token
@@ -141,7 +151,10 @@ async def find_class_id_by_dataset(
     Scans all object_type resources (typically < 100 per database).
     Returns the first matching class_id or None.
     """
-    url = f"{oms_base_url}/api/v1/database/{db_name}/ontology/resources/object_type"
+    url = _build_oms_url(
+        oms_base_url=oms_base_url,
+        path=f"/api/v1/database/{db_name}/ontology/resources/object_type",
+    )
     headers: Dict[str, str] = {"Accept": "application/json"}
     if admin_token:
         headers["X-Admin-Token"] = admin_token

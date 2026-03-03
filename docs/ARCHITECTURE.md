@@ -41,20 +41,20 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **644**, functions **6118**, classes **884**, internal cross-imports **1532**
+- Population: files **655**, functions **6260**, classes **891**, internal cross-imports **1539**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1532 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1539 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 4/93 (4.30%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 3/22 (13.64%) | <= 15.00% | **PASS** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 51/644 (7.92%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 58/644 (9.01%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 330/6118 (5.39%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/884 (1.70%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 738/6118 (12.06%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 420/6118 (6.86%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 51/655 (7.79%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 60/655 (9.16%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 332/6260 (5.30%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/891 (1.68%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 740/6260 (11.82%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 422/6260 (6.74%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
@@ -62,7 +62,7 @@ python scripts/check_docs.py
 - Dependency cycles: none detected
 - I/O-core direct links (sample): `shared/services/core/agent_internal_client.py`, `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
 - Longest functions: `mcp_servers/pipeline_mcp_server.py:202` (1321 lines), `mcp_servers/pipeline_mcp_server.py:204` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:684` (1009 lines)
-- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:684` (CC=296), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1437` (CC=247)
+- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:684` (CC=296), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1438` (CC=247)
 
 ## External Interfaces (Published Ports)
 

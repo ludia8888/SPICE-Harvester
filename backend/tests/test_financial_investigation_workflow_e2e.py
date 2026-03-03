@@ -16,7 +16,6 @@ from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 _ES_PORT = os.getenv("ELASTICSEARCH_PORT") or os.getenv("ELASTICSEARCH_PORT_HOST") or "9200"
 ELASTICSEARCH_URL = os.getenv(
     "ELASTICSEARCH_URL",
@@ -120,7 +119,7 @@ async def _wait_for_ontology(
     last_status: Optional[int] = None
     while time.monotonic() < deadline:
         resp = await client.get(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
+            f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/{class_id}",
             params={"branch": branch},
         )
         last_status = resp.status_code
@@ -164,7 +163,7 @@ async def _upsert_object_type_contract(
 ) -> None:
     expected_head_commit = f"branch:{branch}"
     create_resp = await client.post(
-        f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types",
         params={"branch": branch, "expected_head_commit": expected_head_commit},
         json={
             "id": class_id,
@@ -189,7 +188,7 @@ async def _upsert_object_type_contract(
     if create_resp.status_code in {200, 201}:
         return
     if create_resp.status_code == 409:
-        update_url = f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}"
+        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types/{class_id}"
         update_payload = {
             "id": class_id,
             "label": {"en": class_id, "ko": class_id},

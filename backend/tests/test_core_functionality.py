@@ -22,6 +22,7 @@ from shared.config.search_config import get_ontologies_index_name
 # Real service endpoints
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+USE_OMS_DIRECT = (os.getenv("CORE_TEST_USE_OMS_DIRECT") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Test configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://:spicepass123@localhost:6380/0")
@@ -48,6 +49,51 @@ OMS_HEADERS = oms_auth_headers()
 if BFF_HEADERS.get("X-Admin-Token") != OMS_HEADERS.get("X-Admin-Token"):
     raise AssertionError("BFF/OMS auth tokens differ; tests require a single admin token.")
 AUTH_HEADERS = BFF_HEADERS
+
+CORE_URL = OMS_URL if USE_OMS_DIRECT else BFF_URL
+
+
+def _path_database_create() -> str:
+    return "/api/v1/database/create" if USE_OMS_DIRECT else "/api/v1/databases"
+
+
+def _path_database_item(db_name: str) -> str:
+    return f"/api/v1/database/{db_name}" if USE_OMS_DIRECT else f"/api/v1/databases/{db_name}"
+
+
+def _path_database_exists(db_name: str) -> str:
+    return f"/api/v1/database/exists/{db_name}" if USE_OMS_DIRECT else _path_database_item(db_name)
+
+
+def _path_command_status(command_id: str) -> str:
+    return f"/api/v1/commands/{command_id}/status"
+
+
+def _path_ontology_collection(db_name: str) -> str:
+    return f"/api/v1/database/{db_name}/ontology" if USE_OMS_DIRECT else f"/api/v1/databases/{db_name}/ontology"
+
+
+def _path_ontology_item(db_name: str, ontology_id: str) -> str:
+    return f"{_path_ontology_collection(db_name)}/{ontology_id}"
+
+
+def _headers_for_db(db_name: str) -> Dict[str, str]:
+    headers = dict(AUTH_HEADERS)
+    if not USE_OMS_DIRECT:
+        headers["X-DB-Name"] = db_name
+    return headers
+
+
+def _extract_exists_flag(payload: Dict[str, Any]) -> Optional[bool]:
+    data = payload.get("data")
+    if isinstance(data, dict):
+        exists = data.get("exists")
+        if isinstance(exists, bool):
+            return exists
+        nested = data.get("data")
+        if isinstance(nested, dict) and isinstance(nested.get("exists"), bool):
+            return nested.get("exists")
+    return None
 
 
 async def _resolve_bff_path(
@@ -144,11 +190,27 @@ async def _wait_for_db_exists(
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
-            assert resp.status == 200
-            last = await resp.json()
-            if (last.get("data") or {}).get("exists") is expected:
-                return
+        async with session.get(
+            f"{CORE_URL}{_path_database_exists(db_name)}",
+            headers=_headers_for_db(db_name),
+        ) as resp:
+            if USE_OMS_DIRECT:
+                assert resp.status == 200
+                last = await resp.json()
+                if (last.get("data") or {}).get("exists") is expected:
+                    return
+            else:
+                if resp.status == 200:
+                    last = await resp.json()
+                    exists = _extract_exists_flag(last)
+                    if exists is expected:
+                        return
+                elif resp.status == 404:
+                    last = {"status": 404}
+                    if not expected:
+                        return
+                else:
+                    last = {"status": resp.status, "body": await resp.text()}
         await asyncio.sleep(poll_interval_seconds)
 
     raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
@@ -171,7 +233,7 @@ async def _wait_for_command_terminal_state(
     last: Optional[Dict[str, Any]] = None
 
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+        async with session.get(f"{CORE_URL}{_path_command_status(command_id)}") as resp:
             if resp.status != 200:
                 last = {"status": resp.status, "body": await resp.text()}
                 await asyncio.sleep(poll_interval_seconds)
@@ -201,15 +263,30 @@ async def _wait_for_ontology_present(
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-            params={"branch": branch},
-        ) as resp:
-            assert resp.status == 200
-            last = await resp.json()
-            ontologies = (last.get("data") or {}).get("ontologies") or []
-            if any(o.get("id") == ontology_id for o in ontologies):
-                return
+        if USE_OMS_DIRECT:
+            async with session.get(
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                params={"branch": branch},
+                headers=_headers_for_db(db_name),
+            ) as resp:
+                assert resp.status == 200
+                last = await resp.json()
+                ontologies = (last.get("data") or {}).get("ontologies") or []
+                if any(o.get("id") == ontology_id for o in ontologies):
+                    return
+        else:
+            async with session.get(
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes",
+                params={"branch": branch},
+                headers=_headers_for_db(db_name),
+            ) as resp:
+                if resp.status == 200:
+                    last = await resp.json()
+                    rows = (last.get("data") if isinstance(last, dict) else None) or []
+                    if any((row.get("apiName") or row.get("id")) == ontology_id for row in rows if isinstance(row, dict)):
+                        return
+                else:
+                    last = {"status": resp.status, "body": await resp.text()}
         await asyncio.sleep(poll_interval_seconds)
 
     raise AssertionError(f"Timed out waiting for ontology '{ontology_id}' (last={last})")
@@ -255,7 +332,7 @@ class TestCoreOntologyManagement:
             
             # Create database
             async with session.post(
-                f"{OMS_URL}/api/v1/database/create",
+                f"{CORE_URL}{_path_database_create()}",
                 json={"name": db_name, "description": "Test database"}
             ) as resp:
                 assert resp.status == 202  # Event Sourcing async
@@ -275,8 +352,9 @@ class TestCoreOntologyManagement:
                     aggregate_type="Database", aggregate_id=db_name
                 )
                 async with session.delete(
-                    f"{OMS_URL}/api/v1/database/{db_name}",
+                    f"{CORE_URL}{_path_database_item(db_name)}",
                     params={"expected_seq": expected_seq},
+                    headers=_headers_for_db(db_name),
                 ) as resp:
                     if resp.status == 202:
                         break
@@ -296,7 +374,7 @@ class TestCoreOntologyManagement:
             
             # Create database first
             async with session.post(
-                f"{OMS_URL}/api/v1/database/create",
+                f"{CORE_URL}{_path_database_create()}",
                 json={"name": db_name, "description": "Ontology test"}
             ) as resp:
                 assert resp.status == 202
@@ -315,9 +393,10 @@ class TestCoreOntologyManagement:
                 "relationships": [],
             }
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 params={"branch": ontology_branch},
                 json=customer_ontology,
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
 
@@ -350,9 +429,10 @@ class TestCoreOntologyManagement:
             }
             
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 params={"branch": ontology_branch},
-                json=ontology_data
+                json=ontology_data,
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
                 result = await resp.json()
@@ -374,7 +454,7 @@ class TestCoreOntologyManagement:
             ontology_branch = "main"
 
             async with session.post(
-                f"{OMS_URL}/api/v1/database/create",
+                f"{CORE_URL}{_path_database_create()}",
                 json={"name": db_name, "description": "Ontology i18n test"},
             ) as resp:
                 assert resp.status == 202
@@ -397,9 +477,10 @@ class TestCoreOntologyManagement:
                 "relationships": [],
             }
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 params={"branch": ontology_branch},
                 json=customer,
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
 
@@ -437,9 +518,10 @@ class TestCoreOntologyManagement:
             }
 
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 params={"branch": ontology_branch},
                 json=product,
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
                 result = await resp.json()
@@ -500,7 +582,7 @@ class TestCoreOntologyManagement:
             ontology_branch = "main"
 
             async with session.post(
-                f"{OMS_URL}/api/v1/database/create",
+                f"{CORE_URL}{_path_database_create()}",
                 json={"name": db_name, "description": "Advanced ontology test"},
             ) as resp:
                 assert resp.status == 202
@@ -524,9 +606,10 @@ class TestCoreOntologyManagement:
                 "relationships": [],
             }
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 params={"branch": ontology_branch},
                 json=customer,
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
                 body = await resp.json()
@@ -563,9 +646,10 @@ class TestCoreOntologyManagement:
             }
 
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{CORE_URL}{_path_ontology_collection(db_name)}",
                 json=product_adv,
                 params={"branch": ontology_branch},
+                headers=_headers_for_db(db_name),
             ) as resp:
                 assert resp.status == 202
                 body = await resp.json()
@@ -582,16 +666,31 @@ class TestCoreOntologyManagement:
             await _wait_for_command_terminal_state(session, command_id=str(command_id))
 
             # Verify relationship payload was persisted on read path.
-            async with session.get(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology/AdvProduct",
-                params={"branch": ontology_branch},
-            ) as resp:
-                assert resp.status == 200
-                body = await resp.json()
-                assert body.get("status") == "success"
-                ontology = body.get("data") or {}
-                relationships = ontology.get("relationships") or []
-                assert any(rel.get("predicate") == "owned_by" for rel in relationships)
+            if USE_OMS_DIRECT:
+                async with session.get(
+                    f"{CORE_URL}{_path_ontology_item(db_name, 'AdvProduct')}",
+                    params={"branch": ontology_branch},
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 200
+                    body = await resp.json()
+                    assert body.get("status") == "success"
+                    ontology = body.get("data") or {}
+                    relationships = ontology.get("relationships") or []
+                    assert any(rel.get("predicate") == "owned_by" for rel in relationships)
+            else:
+                async with session.get(
+                    f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/AdvProduct/outgoingLinkTypes",
+                    params={"branch": ontology_branch},
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 200
+                    body = await resp.json()
+                    links = (body.get("data") if isinstance(body, dict) else None) or []
+                    assert any(
+                        isinstance(link, dict) and str(link.get("apiName") or "").strip() == "owned_by"
+                        for link in links
+                    )
 
 
 class TestBFFGraphFederation:

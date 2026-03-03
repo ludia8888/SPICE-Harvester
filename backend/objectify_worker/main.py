@@ -48,6 +48,7 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.storage.storage_service import create_storage_service
+from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.processed_event_registry import ProcessedEventRegistry
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
@@ -265,7 +266,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         self.lineage_required = bool(settings.observability.lineage_required_effective and self.enable_lineage)
         self.storage = None
         self.instance_storage = None  # MinIO/S3 StorageService for instance-events
-        self.http: Optional[httpx.AsyncClient] = None
+        self.http: Optional[OMSGrpcHttpCompatClient] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
         self.instance_write_path: Optional[ObjectifyWritePath] = None
 
@@ -1003,7 +1004,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if token:
             headers["Authorization"] = f"Bearer {token}"
             headers["X-Admin-Token"] = token
-        self.http = httpx.AsyncClient(base_url=settings.services.oms_base_url, timeout=60.0, headers=headers)
+        self.http = OMSGrpcHttpCompatClient()
 
         self.elasticsearch_service = create_elasticsearch_service(settings)
         await self.elasticsearch_service.connect()
@@ -2546,9 +2547,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if not self.http:
             return {}
         branch = job.ontology_branch or job.dataset_branch or "main"
-        resp = await self.http.get(
-            f"/api/v1/database/{job.db_name}/ontology/{job.target_class_id}",
-            params={"branch": branch},
+        resp = await self.http.get_ontology_typed(
+            db_name=job.db_name,
+            class_id=job.target_class_id,
+            branch=branch,
         )
         resp.raise_for_status()
         return resp.json() if resp.text else {}

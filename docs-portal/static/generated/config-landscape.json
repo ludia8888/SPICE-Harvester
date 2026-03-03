@@ -215,7 +215,7 @@
     {
       "name": "ServiceSettings",
       "docstring": "Service configuration settings",
-      "field_count": 19,
+      "field_count": 23,
       "fields": [
         {
           "name": "oms_host",
@@ -244,6 +244,46 @@
           "description": "OMS base URL override (OMS_BASE_URL)",
           "env_vars": [
             "OMS_BASE_URL_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_port",
+          "type": "int",
+          "default": "50051",
+          "description": "OMS gRPC service port (OMS_GRPC_PORT)",
+          "env_vars": [
+            "OMS_GRPC_PORT"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_grpc_target_override",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "OMS gRPC target override (OMS_GRPC_TARGET)",
+          "env_vars": [
+            "OMS_GRPC_TARGET_OVERRIDE"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_use_tls",
+          "type": "bool",
+          "default": "False",
+          "description": "Use TLS for OMS gRPC client channels (OMS_GRPC_USE_TLS)",
+          "env_vars": [
+            "OMS_GRPC_USE_TLS"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_grpc_server_name",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME)",
+          "env_vars": [
+            "OMS_GRPC_SERVER_NAME"
           ],
           "required": true
         },
@@ -5689,5 +5729,5 @@
       ]
     }
   ],
-  "total_fields": 530
+  "total_fields": 534
 }

@@ -42,6 +42,7 @@ from shared.services.core.service_container_common import (
 )
 from shared.security.startup_guard import ensure_startup_security
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
+from oms.grpc.server import OMSGrpcServer
 
 # OMS specific imports  
 from oms.services.event_store import event_store
@@ -289,6 +290,7 @@ async def lifespan(app: FastAPI):
     
     ontology_outbox_task: Optional[asyncio.Task] = None
     ontology_outbox_stop: Optional[asyncio.Event] = None
+    grpc_server: Optional[OMSGrpcServer] = None
 
     try:
         ensure_startup_security("oms")
@@ -332,6 +334,10 @@ async def lifespan(app: FastAPI):
             app.state.ontology_deploy_outbox_task = ontology_outbox_task
             app.state.ontology_deploy_outbox_stop = ontology_outbox_stop
 
+        grpc_server = OMSGrpcServer(app)
+        await grpc_server.start()
+        app.state.oms_grpc_server = grpc_server
+
         yield
         
     except Exception as e:
@@ -349,6 +355,9 @@ async def lifespan(app: FastAPI):
                 await ontology_outbox_task
             except Exception as exc:
                 logger.warning("Ontology deploy outbox worker shutdown failed: %s", exc)
+
+        if grpc_server is not None:
+            await grpc_server.stop()
         
         if _oms_container:
             await _oms_container.shutdown_oms_services()
@@ -368,6 +377,27 @@ app = create_fastapi_service(
     validation_error_status=status.HTTP_400_BAD_REQUEST,
 )
 install_oms_auth_middleware(app)
+
+
+@app.middleware("http")
+async def _block_direct_business_http(request: Request, call_next):
+    """gRPC single-entry hardening: OMS business APIs are not directly served over HTTP."""
+    path = str(request.url.path or "")
+    if request.headers.get("X-OMS-Internal-Bridge") == "1":
+        return await call_next(request)
+
+    allowed_paths = {
+        "/",
+        "/health",
+        "/metrics",
+    }
+    if path in allowed_paths or path.startswith("/health"):
+        return await call_next(request)
+
+    if path.startswith("/api/"):
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": "OMS HTTP business API disabled; use gRPC"})
+
+    return await call_next(request)
 
 # ── OMS domain exception → enterprise error envelope mapping ──
 from oms.exceptions import (  # noqa: E402

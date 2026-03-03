@@ -1,18 +1,25 @@
 """
-OMS (Ontology Management Service) 클라이언트
-BFF에서 OMS와 통신하기 위한 HTTP 클라이언트
+OMS gRPC client used by BFF.
+
+External API stays REST at BFF, while internal BFF→OMS transport is gRPC.
 """
 
+from __future__ import annotations
+
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import grpc
 import httpx
+from google.protobuf.json_format import ParseDict
 
-from shared.config.settings import build_client_ssl_config, get_settings
+from shared.config.settings import get_settings
+from shared.generated.grpc.spice.oms.v1 import oms_gateway_pb2
+from shared.services.grpc.oms_gateway_client import OMSGatewayGrpcClient
+
 from bff.services.base_http_client import ManagedAsyncClient
-
-# shared 모델 import
 
 logger = logging.getLogger(__name__)
 
@@ -21,146 +28,163 @@ SERVICE_NAME = "BFF"
 
 @dataclass(frozen=True)
 class OntologyRef:
-    """Minimal ontology reference used by BFF validation flows."""
-
     id: str
     type: str  # "Class" | "Property"
 
 
 class OMSClient(ManagedAsyncClient):
-    """OMS HTTP 클라이언트"""
+    """OMS gRPC client with HTTP-like compatibility helpers for existing BFF services."""
 
-    def __init__(self, base_url: Optional[str] = None):
-        settings = get_settings()
-        client_settings = settings.clients
-
-        self.base_url = base_url or settings.services.oms_base_url
-
-        ssl_config = build_client_ssl_config(settings)
-
-        # HTTPX 클라이언트 생성
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        auth_token = self._get_auth_token()
-        if auth_token:
-            headers["X-Admin-Token"] = auth_token
-        timeout_seconds = client_settings.oms_client_timeout_seconds
-        self._debug_payload = client_settings.oms_client_debug_payload
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=timeout_seconds,
-            headers=headers,
-            verify=ssl_config.get("verify", True),
-        )
-
-        logger.info(f"OMS Client initialized with base URL: {self.base_url}")
+    def __init__(self, _base_url: Optional[str] = None):
+        self._settings = get_settings()
+        self._debug_payload = self._settings.clients.oms_client_debug_payload
+        self.client = OMSGatewayGrpcClient()
+        logger.info("OMS gRPC client initialized (target=%s)", self._settings.services.oms_grpc_target)
 
     @staticmethod
     def _get_auth_token() -> Optional[str]:
         token = get_settings().clients.oms_client_token
         return (token or "").strip() or None
 
-    # -----------------------------
-    # Generic HTTP helpers
-    # -----------------------------
+    @property
+    def base_url(self) -> str:
+        return f"grpc://{self._settings.services.oms_grpc_target}"
+
+    def _default_headers(self) -> Dict[str, str]:
+        headers = {"Accept": "application/json"}
+        auth_token = self._get_auth_token()
+        if auth_token:
+            headers["X-Admin-Token"] = auth_token
+            headers["Authorization"] = f"Bearer {auth_token}"
+        return headers
+
+    def _merged_headers(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+        merged = self._default_headers()
+        if headers:
+            merged.update({str(k): str(v) for k, v in headers.items() if str(k).strip()})
+        return merged
+
+    async def _call_unary(
+        self,
+        rpc_name: str,
+        *,
+        path_for_error: str,
+        json_body: Optional[Any] = None,
+        binary_body: Optional[bytes] = None,
+        headers: Optional[Dict[str, str]] = None,
+        query: Optional[Dict[str, Any]] = None,
+        **fields: str,
+    ) -> httpx.Response:
+        request = OMSGatewayGrpcClient.build_request(
+            json_body=json_body,
+            binary_body=binary_body,
+            headers=self._merged_headers(headers),
+            query=query,
+            **fields,
+        )
+        response = await self.client.call_unary(rpc_name, request)
+        http_response = OMSGatewayGrpcClient.to_httpx_response("POST", path_for_error, response)
+        return http_response
+
+    @staticmethod
+    def _decode_json_or_empty(response: httpx.Response) -> Dict[str, Any]:
+        if not response.text:
+            return {}
+        return response.json()
+
+    @staticmethod
+    def _raise_for_status(response: httpx.Response) -> None:
+        response.raise_for_status()
 
     async def get(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Low-level GET helper (returns JSON dict)."""
-        response = await self.client.get(path, **kwargs)
-        response.raise_for_status()
-        if not response.text:
-            return {}
-        return response.json()
+        response = await self._call_unary(
+            "GenericGet",
+            path_for_error=path,
+            path=path,
+            headers=kwargs.get("headers"),
+            query=kwargs.get("params"),
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def post(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Low-level POST helper (returns JSON dict)."""
-        response = await self.client.post(path, **kwargs)
-        response.raise_for_status()
-        if not response.text:
-            return {}
-        return response.json()
+        response = await self._call_unary(
+            "GenericPost",
+            path_for_error=path,
+            path=path,
+            headers=kwargs.get("headers"),
+            query=kwargs.get("params"),
+            json_body=kwargs.get("json"),
+            binary_body=kwargs.get("content"),
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def put(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Low-level PUT helper (returns JSON dict)."""
-        response = await self.client.put(path, **kwargs)
-        response.raise_for_status()
-        if not response.text:
-            return {}
-        return response.json()
+        response = await self._call_unary(
+            "GenericPut",
+            path_for_error=path,
+            path=path,
+            headers=kwargs.get("headers"),
+            query=kwargs.get("params"),
+            json_body=kwargs.get("json"),
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def delete(self, path: str, **kwargs) -> Dict[str, Any]:
-        """Low-level DELETE helper (returns JSON dict when available)."""
-        response = await self.client.delete(path, **kwargs)
-        response.raise_for_status()
-        if not response.text:
-            return {}
-        return response.json()
+        response = await self._call_unary(
+            "GenericDelete",
+            path_for_error=path,
+            path=path,
+            headers=kwargs.get("headers"),
+            query=kwargs.get("params"),
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def check_health(self) -> bool:
-        """OMS 서비스 상태 확인"""
         try:
-            response = await self.client.get("/health")
-            response.raise_for_status()
-            # OMS 서비스 자체의 health endpoint가 정상이면 연결 성공으로 간주한다.
+            response = await self._call_unary("CheckHealth", path_for_error="/health")
+            self._raise_for_status(response)
             return True
         except Exception as e:
-            logger.error(f"OMS 헬스 체크 실패: {e}")
+            logger.error("OMS health check failed: %s", e)
             return False
 
     async def list_databases(self) -> Dict[str, Any]:
-        """데이터베이스 목록 조회"""
-        try:
-            response = await self.client.get("/api/v1/database/list")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"데이터베이스 목록 조회 실패: {e}")
-            raise
+        response = await self._call_unary("ListDatabases", path_for_error="/api/v1/database/list")
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def create_database(self, db_name: str, description: str = "") -> Dict[str, Any]:
-        """데이터베이스 생성"""
-        logger.info(f"🔥 OMS Client: Creating database - name: {db_name}, description: {description}")
-        logger.info(f"🌐 OMS Client: Base URL: {self.base_url}")
-        
-        try:
-            data = {"name": db_name, "description": description}
-            url = "/api/v1/database/create"
-            full_url = f"{self.base_url}{url}"
-            logger.info(f"📤 OMS Client: POST {full_url} with data: {data}")
-            
-            response = await self.client.post(url, json=data)
-            logger.info(f"📥 OMS Client: Response status: {response.status_code}")
-            
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"✅ OMS Client: Database created successfully: {result}")
-            return result
-        except Exception as e:
-            logger.error(f"❌ OMS Client: Database creation failed ({db_name}): {type(e).__name__}: {e}")
-            logger.error(f"🔍 OMS Client: Error details: {e.__dict__ if hasattr(e, '__dict__') else str(e)}")
-            raise
+        response = await self._call_unary(
+            "CreateDatabase",
+            path_for_error="/api/v1/database/create",
+            json_body={"name": db_name, "description": description},
+            db_name=db_name,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def delete_database(self, db_name: str, *, expected_seq: int) -> Dict[str, Any]:
-        """데이터베이스 삭제"""
-        try:
-            response = await self.client.delete(
-                f"/api/v1/database/{db_name}",
-                params={"expected_seq": int(expected_seq)},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"데이터베이스 삭제 실패 ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "DeleteDatabase",
+            path_for_error=f"/api/v1/database/{db_name}",
+            db_name=db_name,
+            expected_seq=str(int(expected_seq)),
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_database(self, db_name: str) -> Dict[str, Any]:
-        """데이터베이스 정보 조회"""
-        try:
-            response = await self.client.get(f"/api/v1/database/exists/{db_name}")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"데이터베이스 조회 실패 ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetDatabase",
+            path_for_error=f"/api/v1/database/exists/{db_name}",
+            db_name=db_name,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def create_ontology(
         self,
@@ -170,73 +194,80 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 생성"""
+        if self._debug_payload:
+            logger.debug("OMS create_ontology payload: %s", json.dumps(ontology_data, ensure_ascii=False))
+        path_for_error = f"/api/v1/database/{db_name}/ontology"
         try:
-            if self._debug_payload:
-                import json
-
-                logger.debug("OMS create_ontology payload: %s", json.dumps(ontology_data, ensure_ascii=False))
-            
-            # Send data as-is to OMS (no format conversion needed)
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology",
-                params={"branch": branch},
-                json=ontology_data,
+            typed_request = oms_gateway_pb2.CreateOntologyTypedRequest(
+                db_name=db_name,
+                branch=branch,
+            )
+            typed_request.metadata.headers.update(self._merged_headers(headers))
+            if ontology_data:
+                ParseDict(ontology_data, typed_request.ontology, ignore_unknown_fields=True)
+            typed_response = await self.client.call_unary("CreateOntologyTyped", typed_request)
+            response = OMSGatewayGrpcClient.to_httpx_response("POST", path_for_error, typed_response)
+        except grpc.aio.AioRpcError as exc:
+            if exc.code() != grpc.StatusCode.UNIMPLEMENTED:
+                raise
+            logger.warning("CreateOntologyTyped not implemented; falling back to legacy CreateOntology RPC")
+            response = await self._call_unary(
+                "CreateOntology",
+                path_for_error=path_for_error,
+                db_name=db_name,
+                branch=branch,
+                json_body=ontology_data,
                 headers=headers,
             )
-            response.raise_for_status()
-            return response.json()
-        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
-            logger.error(f"온톨로지 생성 실패 ({db_name}): {e}")
-            raise
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> Dict[str, Any]:
-        """온톨로지 조회"""
+        path_for_error = f"/api/v1/database/{db_name}/ontology/{class_id}"
         try:
-            url = f"/api/v1/database/{db_name}/ontology/{class_id}"
-            logger.info(f"Requesting OMS: GET {self.base_url}{url}")
-            response = await self.client.get(url, params={"branch": branch})
-            logger.info(f"OMS response status: {response.status_code}")
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"온톨로지 조회 실패 ({db_name}/{class_id}): {e}")
-            raise
+            typed_request = oms_gateway_pb2.GetOntologyTypedRequest(
+                db_name=db_name,
+                class_id=class_id,
+                branch=branch,
+            )
+            typed_request.metadata.headers.update(self._default_headers())
+            typed_response = await self.client.call_unary("GetOntologyTyped", typed_request)
+            response = OMSGatewayGrpcClient.to_httpx_response("GET", path_for_error, typed_response)
+        except grpc.aio.AioRpcError as exc:
+            if exc.code() != grpc.StatusCode.UNIMPLEMENTED:
+                raise
+            logger.warning("GetOntologyTyped not implemented; falling back to legacy GetOntology RPC")
+            response = await self._call_unary(
+                "GetOntology",
+                path_for_error=path_for_error,
+                db_name=db_name,
+                class_id=class_id,
+                branch=branch,
+            )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def list_ontologies(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
-        """온톨로지 목록 조회"""
-        try:
-            response = await self.client.get(
-                f"/api/v1/database/{db_name}/ontology",
-                params={"branch": branch},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"온톨로지 목록 조회 실패 ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "ListOntologies",
+            path_for_error=f"/api/v1/database/{db_name}/ontology",
+            db_name=db_name,
+            branch=branch,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_ontologies(self, db_name: str, *, branch: str = "main") -> List[OntologyRef]:
-        """
-        Compatibility helper for BFF callers that need a flattened view of:
-        - Class IDs
-        - Property IDs (derived from class properties)
-
-        Returns:
-            List[OntologyRef] where each ref has `.id` and `.type` ("Class" or "Property").
-        """
         payload = await self.list_ontologies(db_name, branch=branch)
         data = payload.get("data") if isinstance(payload, dict) else None
         ontologies = (data or {}).get("ontologies") if isinstance(data, dict) else None
         if ontologies is None:
-            # Keep the error explicit; callers treat exceptions as upstream failures.
             raise ValueError("Unexpected OMS response shape: missing data.ontologies")
 
         refs: List[OntologyRef] = []
         for ontology in ontologies:
             if not isinstance(ontology, dict):
                 continue
-
             class_id = (
                 ontology.get("id")
                 or ontology.get("@id")
@@ -246,19 +277,12 @@ class OMSClient(ManagedAsyncClient):
             )
             if class_id:
                 refs.append(OntologyRef(id=str(class_id), type="Class"))
-
             for prop in ontology.get("properties") or []:
                 if not isinstance(prop, dict):
                     continue
-                prop_id = (
-                    prop.get("name")
-                    or prop.get("property_id")
-                    or prop.get("propertyId")
-                    or prop.get("id")
-                )
+                prop_id = prop.get("name") or prop.get("property_id") or prop.get("propertyId") or prop.get("id")
                 if prop_id:
                     refs.append(OntologyRef(id=str(prop_id), type="Property"))
-
         return refs
 
     async def list_ontology_resources(
@@ -270,24 +294,16 @@ class OMSClient(ManagedAsyncClient):
         limit: int = 200,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        """온톨로지 리소스 목록 조회"""
-        try:
-            params = {"branch": branch, "limit": limit, "offset": offset}
-            if resource_type:
-                response = await self.client.get(
-                    f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
-                    params=params,
-                )
-            else:
-                response = await self.client.get(
-                    f"/api/v1/database/{db_name}/ontology/resources",
-                    params=params,
-                )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology resource list failed ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "ListOntologyResources",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/resources",
+            db_name=db_name,
+            resource_type=resource_type or "",
+            branch=branch,
+            query={"limit": int(limit), "offset": int(offset)},
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_ontology_resource(
         self,
@@ -297,17 +313,16 @@ class OMSClient(ManagedAsyncClient):
         resource_id: str,
         branch: str = "main",
     ) -> Dict[str, Any]:
-        """단일 온톨로지 리소스 조회"""
-        try:
-            response = await self.client.get(
-                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
-                params={"branch": branch},
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology resource get failed ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetOntologyResource",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+            db_name=db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def create_ontology_resource(
         self,
@@ -318,21 +333,17 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         expected_head_commit: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 리소스 생성"""
-        try:
-            params = {"branch": branch}
-            if expected_head_commit is not None:
-                params["expected_head_commit"] = expected_head_commit
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
-                params=params,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology resource create failed ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "CreateOntologyResource",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
+            db_name=db_name,
+            resource_type=resource_type,
+            branch=branch,
+            expected_head_commit=expected_head_commit or "",
+            json_body=payload,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def record_ontology_deployment(
         self,
@@ -344,24 +355,20 @@ class OMSClient(ManagedAsyncClient):
         deployed_by: str = "system",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 배포 레코드 기록 (actions precondition)."""
-        try:
-            payload: Dict[str, Any] = {
+        response = await self._call_unary(
+            "RecordOntologyDeployment",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/records/deployments",
+            db_name=db_name,
+            json_body={
                 "target_branch": target_branch,
                 "ontology_commit_id": ontology_commit_id,
                 "snapshot_rid": snapshot_rid,
                 "deployed_by": deployed_by,
                 "metadata": metadata or {},
-            }
-            response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology/records/deployments",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology deployment record failed ({db_name}): {e}")
-            raise
+            },
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def update_ontology_resource(
         self,
@@ -373,21 +380,18 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         expected_head_commit: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 리소스 업데이트"""
-        try:
-            params = {"branch": branch}
-            if expected_head_commit is not None:
-                params["expected_head_commit"] = expected_head_commit
-            response = await self.client.put(
-                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
-                params=params,
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology resource update failed ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "UpdateOntologyResource",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+            db_name=db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+            expected_head_commit=expected_head_commit or "",
+            json_body=payload,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def delete_ontology_resource(
         self,
@@ -398,44 +402,40 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         expected_head_commit: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 리소스 삭제"""
-        try:
-            params = {"branch": branch}
-            if expected_head_commit is not None:
-                params["expected_head_commit"] = expected_head_commit
-            response = await self.client.delete(
-                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
-                params=params,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Ontology resource delete failed ({db_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "DeleteOntologyResource",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+            db_name=db_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            branch=branch,
+            expected_head_commit=expected_head_commit or "",
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def update_ontology(
         self,
         db_name: str,
         class_id: str,
-        update_data: Dict[str, Any],
+        ontology_data: Dict[str, Any],
         *,
         expected_seq: int,
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 업데이트"""
-        try:
-            response = await self.client.put(
-                f"/api/v1/database/{db_name}/ontology/{class_id}",
-                params={"expected_seq": int(expected_seq), "branch": branch},
-                json=update_data,
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"온톨로지 업데이트 실패: {e}")
-            raise
+        response = await self._call_unary(
+            "UpdateOntology",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/{class_id}",
+            db_name=db_name,
+            class_id=class_id,
+            expected_seq=str(int(expected_seq)),
+            branch=branch,
+            headers=headers,
+            json_body=ontology_data,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def delete_ontology(
         self,
@@ -446,23 +446,19 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """온톨로지 삭제"""
-        try:
-            response = await self.client.delete(
-                f"/api/v1/database/{db_name}/ontology/{class_id}",
-                params={"expected_seq": int(expected_seq), "branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            # 실제 삭제 응답 반환
-            if response.text:
-                return response.json()
-            else:
-                # 빈 응답이면 성공 메시지 반환
-                return {"status": "success", "message": f"온톨로지 '{class_id}' 삭제됨"}
-        except Exception as e:
-            logger.error(f"온톨로지 삭제 실패: {e}")
-            raise
+        response = await self._call_unary(
+            "DeleteOntology",
+            path_for_error=f"/api/v1/database/{db_name}/ontology/{class_id}",
+            db_name=db_name,
+            class_id=class_id,
+            expected_seq=str(int(expected_seq)),
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        if response.text:
+            return response.json()
+        return {"status": "success", "message": f"온톨로지 '{class_id}' 삭제됨"}
 
     async def search_objects_v2(
         self,
@@ -479,40 +475,32 @@ class OMSClient(ManagedAsyncClient):
         snapshot: Optional[bool] = None,
         branch: str = "main",
     ) -> Dict[str, Any]:
-        """Foundry Search Objects API v2 proxy."""
-        try:
-            body: Dict[str, Any] = {"pageSize": int(page_size)}
-            if where is not None:
-                body["where"] = where
-            else:
-                body["where"] = {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
-            if page_token:
-                body["pageToken"] = page_token
-            if select:
-                body["select"] = list(select)
-            if order_by:
-                direction = str(order_direction or "asc").strip().lower()
-                if direction not in {"asc", "desc"}:
-                    raise ValueError("order_direction must be 'asc' or 'desc'")
-                body["orderBy"] = {
-                    "orderType": "fields",
-                    "fields": [{"field": str(order_by).strip(), "direction": direction}],
-                }
-            if exclude_rid is not None:
-                body["excludeRid"] = bool(exclude_rid)
-            if snapshot is not None:
-                body["snapshot"] = bool(snapshot)
+        body: Dict[str, Any] = {"pageSize": int(page_size)}
+        body["where"] = where if where is not None else {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
+        if page_token:
+            body["pageToken"] = page_token
+        if select:
+            body["select"] = list(select)
+        if order_by:
+            direction = str(order_direction or "asc").strip().lower()
+            if direction not in {"asc", "desc"}:
+                raise ValueError("order_direction must be 'asc' or 'desc'")
+            body["orderBy"] = {"orderType": "fields", "fields": [{"field": str(order_by).strip(), "direction": direction}]}
+        if exclude_rid is not None:
+            body["excludeRid"] = bool(exclude_rid)
+        if snapshot is not None:
+            body["snapshot"] = bool(snapshot)
 
-            response = await self.client.post(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-                params={"branch": branch},
-                json=body,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Foundry object search failed ({db_name}/{object_type}): {e}")
-            raise
+        response = await self._call_unary(
+            "SearchObjects",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
+            db_name=db_name,
+            object_type=object_type,
+            branch=branch,
+            json_body=body,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def aggregate_objects_v2(
         self,
@@ -522,22 +510,16 @@ class OMSClient(ManagedAsyncClient):
         *,
         branch: str = "main",
     ) -> Dict[str, Any]:
-        """Foundry Aggregate Objects API v2 proxy — delegates to OMS ES-native engine."""
-        try:
-            response = await self.client.post(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/aggregate",
-                params={"branch": branch},
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Foundry object aggregate failed ({db_name}/{object_type}): {e}")
-            raise
-
-    # ------------------------------------------------------------------
-    # Time Series Property proxy
-    # ------------------------------------------------------------------
+        response = await self._call_unary(
+            "AggregateObjects",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/aggregate",
+            db_name=db_name,
+            object_type=object_type,
+            branch=branch,
+            json_body=payload,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_timeseries_first_point(
         self,
@@ -549,18 +531,18 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Proxy GET firstPoint to OMS Time Series router."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/firstPoint",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Timeseries firstPoint failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetTimeseriesFirstPoint",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/firstPoint",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_timeseries_last_point(
         self,
@@ -572,18 +554,18 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Proxy GET lastPoint to OMS Time Series router."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/lastPoint",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Timeseries lastPoint failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetTimeseriesLastPoint",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/lastPoint",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def stream_timeseries_points(
         self,
@@ -596,23 +578,30 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
-        """Proxy POST streamPoints to OMS (returns raw response for streaming)."""
-        try:
-            response = await self.client.post(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/timeseries/{property_name}/streamPoints",
-                params={"branch": branch},
-                json=payload,
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response
-        except Exception as e:
-            logger.error(f"Timeseries streamPoints failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
-            raise
-
-    # ------------------------------------------------------------------
-    # Attachment Property proxy
-    # ------------------------------------------------------------------
+        request = OMSGatewayGrpcClient.build_request(
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            branch=branch,
+            json_body=payload,
+            headers=self._merged_headers(headers),
+        )
+        chunks = await self.client.call_stream("StreamTimeseriesPoints", request)
+        if not chunks:
+            return httpx.Response(status_code=200, content=b"", request=httpx.Request("POST", "http://oms.local/stream"))
+        first = chunks[0]
+        content = b"".join(bytes(chunk.chunk) for chunk in chunks if chunk.chunk)
+        if not content and first.json_body:
+            content = first.json_body.encode("utf-8")
+        response = httpx.Response(
+            status_code=int(first.status_code or 500),
+            content=content,
+            headers=dict(first.headers or {}),
+            request=httpx.Request("POST", "http://oms.local/stream"),
+        )
+        self._raise_for_status(response)
+        return response
 
     async def upload_attachment(
         self,
@@ -622,23 +611,17 @@ class OMSClient(ManagedAsyncClient):
         content_type: str = "application/octet-stream",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Proxy POST attachment upload to OMS."""
-        try:
-            response = await self.client.post(
-                "/api/v2/ontologies/attachments/upload",
-                params={"filename": filename},
-                content=data,
-                headers={
-                    **(headers or {}),
-                    "Content-Type": content_type,
-                    "Accept": "application/json",
-                },
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Attachment upload failed ({filename}): {e}")
-            raise
+        merged = self._merged_headers(headers)
+        merged["Content-Type"] = content_type
+        response = await self._call_unary(
+            "UploadAttachment",
+            path_for_error="/api/v2/ontologies/attachments/upload",
+            filename=filename,
+            binary_body=data,
+            headers=merged,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def list_property_attachments(
         self,
@@ -650,18 +633,18 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Proxy GET list attachment property metadata."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"List attachments failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "ListPropertyAttachments",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_attachment_by_rid(
         self,
@@ -674,18 +657,19 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Proxy GET attachment metadata by RID."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logger.error(f"Get attachment by RID failed ({attachment_rid}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetAttachmentByRid",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            attachment_rid=attachment_rid,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return self._decode_json_or_empty(response)
 
     async def get_attachment_content(
         self,
@@ -697,18 +681,18 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
-        """Proxy GET attachment content (returns raw response for binary data)."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/content",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response
-        except Exception as e:
-            logger.error(f"Get attachment content failed ({db_name}/{object_type}/{primary_key}/{property_name}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetAttachmentContent",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/content",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return response
 
     async def get_attachment_content_by_rid(
         self,
@@ -721,29 +705,29 @@ class OMSClient(ManagedAsyncClient):
         branch: str = "main",
         headers: Optional[Dict[str, str]] = None,
     ) -> httpx.Response:
-        """Proxy GET attachment content by RID (returns raw response for binary data)."""
-        try:
-            response = await self.client.get(
-                f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}/content",
-                params={"branch": branch},
-                headers=headers,
-            )
-            response.raise_for_status()
-            return response
-        except Exception as e:
-            logger.error(f"Get attachment content by RID failed ({attachment_rid}): {e}")
-            raise
+        response = await self._call_unary(
+            "GetAttachmentContentByRid",
+            path_for_error=f"/api/v2/ontologies/{db_name}/objects/{object_type}/{primary_key}/attachments/{property_name}/{attachment_rid}/content",
+            db_name=db_name,
+            object_type=object_type,
+            primary_key=primary_key,
+            property_name=property_name,
+            attachment_rid=attachment_rid,
+            branch=branch,
+            headers=headers,
+        )
+        self._raise_for_status(response)
+        return response
 
     async def database_exists(self, db_name: str) -> bool:
-        """데이터베이스 존재 여부 확인"""
-        try:
-            response = await self.client.get(f"/api/v1/database/exists/{db_name}")
-            response.raise_for_status()
-            data = response.json()
-            return data.get("data", {}).get("exists", False)
-        except Exception as e:
-            logger.error(f"데이터베이스 존재 여부 확인 실패: {e}")
-            raise
+        response = await self._call_unary(
+            "DatabaseExists",
+            path_for_error=f"/api/v1/database/exists/{db_name}",
+            db_name=db_name,
+        )
+        self._raise_for_status(response)
+        data = self._decode_json_or_empty(response)
+        return bool(data.get("data", {}).get("exists", False))
 
     async def __aenter__(self):
         return self

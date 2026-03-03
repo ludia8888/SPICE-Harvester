@@ -24,6 +24,7 @@ setup(
         "fastapi==0.115.0",
         "uvicorn[standard]==0.31.1",
         "httpx==0.27.2",
+        "grpcio==1.66.2",
         
         # 📋 Data Validation & Settings
         "pydantic==2.11.10",

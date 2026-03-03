@@ -342,6 +342,12 @@ services:
       # Dev convenience: allow treating all requests as master when enabled (development only).
       - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-false}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      - OMS_GRPC_ENABLED=${OMS_GRPC_ENABLED:-true}
+      - OMS_GRPC_PORT=${OMS_GRPC_PORT:-50051}
+      - OMS_GRPC_BIND_HOST=0.0.0.0
+      - OMS_GRPC_SERVER_USE_TLS=${OMS_GRPC_SERVER_USE_TLS:-false}
+      - OMS_GRPC_REQUIRE_MTLS=${OMS_GRPC_REQUIRE_MTLS:-false}
+      - OMS_GRPC_SERVICE_TOKENS=${OMS_GRPC_SERVICE_TOKENS:-${ADMIN_TOKEN},${BFF_AGENT_TOKEN:-spice-dev-agent-token}}
       # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
       # Set to true in environments that require proposal workflow on protected branches (main/prod).
       - ONTOLOGY_REQUIRE_PROPOSALS=${ONTOLOGY_REQUIRE_PROPOSALS:-false}
@@ -358,6 +364,7 @@ services:
       - spice_network
     expose:
       - "8000"
+      - "50051"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -371,7 +378,7 @@ services:
       dockerfile: ./bff/Dockerfile
     container_name: spice_bff
     environment:
-      - OMS_BASE_URL=http://oms:8000
+      - OMS_GRPC_TARGET=${OMS_GRPC_TARGET:-oms:50051}
       - OMS_CLIENT_TIMEOUT_SECONDS=${OMS_CLIENT_TIMEOUT_SECONDS:-60}
       - AGENT_BASE_URL=http://agent:8004
       - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-300}
@@ -629,6 +636,7 @@ services:
       - DOCKER_CONTAINER=true
       - PIPELINE_JOBS_TOPIC=pipeline-jobs
       - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
+      - OMS_GRPC_TARGET=${OMS_GRPC_TARGET:-oms:50051}
     depends_on:
       - kafka
       - postgres
@@ -684,7 +692,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - OMS_BASE_URL=http://oms:8000
+      - OMS_GRPC_TARGET=${OMS_GRPC_TARGET:-oms:50051}
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
       - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
       - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
@@ -822,6 +830,7 @@ services:
       - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       - OMS_CLIENT_TOKEN=${OMS_CLIENT_TOKEN:-}
+      - OMS_GRPC_TARGET=${OMS_GRPC_TARGET:-oms:50051}
       # Correctness/chaos tuning (defaults are production-safe)
       - PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=${PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS:-900}
       - PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=${PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS:-30}

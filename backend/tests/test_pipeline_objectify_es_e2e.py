@@ -17,7 +17,6 @@ from tests.utils.pipelines_v2_adapter import PipelinesV2AdapterClient
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 _ES_PORT = (
     os.getenv("ELASTICSEARCH_PORT")
     or os.getenv("ELASTICSEARCH_PORT_HOST")
@@ -180,7 +179,7 @@ async def _wait_for_ontology(
     while time.monotonic() < deadline:
         try:
             resp = await client.get(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology/{class_id}",
+                f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/{class_id}",
                 params={"branch": branch},
             )
         except httpx.HTTPError as exc:
@@ -339,14 +338,14 @@ async def _upsert_object_type_contract(
         },
     }
     create_resp = await client.post(
-        f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types",
+        f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types",
         params={"branch": branch, "expected_head_commit": head_commit},
         json=resource_payload,
     )
     if create_resp.status_code in {200, 201}:
         return
     if create_resp.status_code == 409:
-        update_url = f"{OMS_URL}/api/v1/database/{db_name}/ontology/resources/object-types/{class_id}"
+        update_url = f"{BFF_URL}/api/v1/databases/{db_name}/ontology/resources/object-types/{class_id}"
         update_resp = await client.put(
             update_url,
             params={"branch": branch, "expected_head_commit": head_commit},

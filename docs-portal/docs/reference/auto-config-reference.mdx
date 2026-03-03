@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **530 settings** total.
+SPICE Harvester uses **45 configuration classes** with **534 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -95,13 +95,17 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Service configuration settings
 
-**19 settings**
+**23 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
 | `oms_host` | `str` | `<env-dependent>` | `OMS_HOST` | OMS service host |
 | `oms_port` | `int` | `8000` | `OMS_PORT` | OMS service port |
 | `oms_base_url_override` | `Optional[str]` | **required** | `OMS_BASE_URL_OVERRIDE` | OMS base URL override (OMS_BASE_URL) |
+| `oms_grpc_port` | `int` | `50051` | `OMS_GRPC_PORT` | OMS gRPC service port (OMS_GRPC_PORT) |
+| `oms_grpc_target_override` | `Optional[str]` | **required** | `OMS_GRPC_TARGET_OVERRIDE` | OMS gRPC target override (OMS_GRPC_TARGET) |
+| `oms_grpc_use_tls` | `bool` | `False` | `OMS_GRPC_USE_TLS` | Use TLS for OMS gRPC client channels (OMS_GRPC_USE_TLS) |
+| `oms_grpc_server_name` | `Optional[str]` | **required** | `OMS_GRPC_SERVER_NAME` | SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME) |
 | `bff_host` | `str` | `<env-dependent>` | `BFF_HOST` | BFF service host |
 | `bff_port` | `int` | `8002` | `BFF_PORT` | BFF service port |
 | `bff_base_url_override` | `Optional[str]` | **required** | `BFF_BASE_URL_OVERRIDE` | BFF base URL override (BFF_BASE_URL) |
