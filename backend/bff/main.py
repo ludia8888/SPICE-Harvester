@@ -41,6 +41,7 @@ from shared.services.events.objectify_reconciler import run_objectify_reconciler
 from shared.services.agent.agent_retention_worker import run_agent_session_retention_worker
 from shared.services.storage.storage_service import StorageService, create_storage_service
 from shared.services.registries.lineage_store import LineageStore
+from shared.security.startup_guard import ensure_startup_security
 
 # Service factory import
 from shared.services.core.service_factory import create_fastapi_service, get_bff_service_info, run_service
@@ -635,6 +636,7 @@ async def lifespan(app: FastAPI):
     agent_retention_stop: Optional[asyncio.Event] = None
 
     try:
+        ensure_startup_security("bff")
         ensure_bff_auth_configured()
 
         settings = get_settings()

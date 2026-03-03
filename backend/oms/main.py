@@ -40,6 +40,7 @@ from shared.services.core.service_container_common import (
     initialize_elasticsearch_service,
     initialize_rate_limiter_service,
 )
+from shared.security.startup_guard import ensure_startup_security
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
@@ -290,6 +291,7 @@ async def lifespan(app: FastAPI):
     ontology_outbox_stop: Optional[asyncio.Event] = None
 
     try:
+        ensure_startup_security("oms")
         ensure_oms_auth_configured()
 
         settings = get_settings()

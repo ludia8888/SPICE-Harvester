@@ -66,6 +66,9 @@ def create_fastapi_service(
     custom_tags: Optional[List[Dict[str, str]]] = None,
     include_error_handlers: bool = True,
     validation_error_status: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
+    openapi_url: Optional[str] = "/openapi.json",
+    docs_url: Optional[str] = "/docs",
+    redoc_url: Optional[str] = "/redoc",
 ) -> FastAPI:
     """
     Create a standardized FastAPI application with common configurations.
@@ -107,7 +110,10 @@ def create_fastapi_service(
         description=service_info.description,
         version=service_info.version,
         lifespan=lifespan_func,
-        openapi_tags=openapi_tags
+        openapi_tags=openapi_tags,
+        openapi_url=openapi_url,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
     )
     app.state.service_name = service_info.name
 

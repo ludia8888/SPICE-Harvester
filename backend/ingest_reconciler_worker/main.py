@@ -23,6 +23,7 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
+from shared.security.startup_guard import ensure_startup_security
 from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
 
@@ -205,6 +206,7 @@ SERVICE_INFO = ServiceInfo(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ensure_startup_security(SERVICE_NAME)
     worker = IngestReconcilerWorker()
     await worker.initialize()
     stop_event = asyncio.Event()
@@ -228,6 +230,9 @@ app = create_fastapi_service(
     custom_lifespan=lifespan,
     include_health_check=True,
     include_logging_middleware=True,
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
 )
 
 

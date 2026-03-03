@@ -66,6 +66,13 @@ _PLATFORM_API_SCOPES = (
 )
 
 
+def _resolve_runtime_exempt_paths(*, settings: Any, auth: Any) -> set[str]:
+    exempt_paths = auth.resolve_bff_exempt_paths(defaults=_EXEMPT_PATHS_DEFAULT)
+    if settings.is_production and "/metrics" in exempt_paths:
+        exempt_paths = {path for path in exempt_paths if path != "/metrics"}
+    return exempt_paths
+
+
 def _attach_pytest_scoped_principal(request: Request) -> None:
     if getattr(request.state, "user", None) is not None:
         return
@@ -1447,7 +1454,7 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 _attach_pytest_scoped_principal(request)
             return await call_next(request)
 
-        exempt_paths = auth.resolve_bff_exempt_paths(defaults=_EXEMPT_PATHS_DEFAULT)
+        exempt_paths = _resolve_runtime_exempt_paths(settings=settings, auth=auth)
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 

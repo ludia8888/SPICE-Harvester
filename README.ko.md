@@ -195,12 +195,15 @@ cd SPICE-Harvester
 # 2. 환경 변수 설정
 cp .env.example .env
 
-# 3. 전체 스택 실행 (32개 서비스)
+# 3. 전체 스택 실행 (secure-default: 외부 진입점은 BFF만 공개)
 docker compose -f docker-compose.full.yml up -d
 
+# (선택) Gate/디버깅용 내부 포트 오픈 오버레이
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
+
 # 4. 헬스 체크
-curl http://localhost:8000/health          # OMS → {"status":"healthy"}
 curl http://localhost:8002/api/v1/health   # BFF → {"status":"healthy"}
+docker compose -f docker-compose.full.yml exec oms curl -s http://localhost:8000/health
 ```
 
 > 상세한 설정 방법은 [로컬 환경 설정 가이드](docs/onboarding/ko/03-LOCAL-SETUP.md)를 참고하세요.
@@ -474,19 +477,20 @@ graph LR
 | 서비스 | 포트 | 용도 |
 |:---|:---:|:---|
 | BFF | `8002` | 프론트엔드 API 게이트웨이 |
-| OMS | `8000` | 온톨로지/검색 핵심 엔진 |
-| Agent | `8004` | AI Agent 서비스 |
-| PostgreSQL | **`5433`** | 관계형 데이터 저장 (컨테이너 내부 5432) |
-| Elasticsearch | `9200` | 전문 검색 엔진 |
-| Redis | `6379` | 캐싱/세션/실시간 알림 |
-| Kafka | `39092` | 이벤트 스트리밍 |
-| MinIO | `9000` / `9001` | S3 API / 웹 콘솔 |
-| LakeFS | `48080` | 데이터 버전 관리 |
+| OMS | 내부 `8000` | 온톨로지/검색 핵심 엔진 (기본 비노출) |
+| Agent | 내부 `8004` | AI Agent 서비스 (기본 비노출) |
+| PostgreSQL | 내부 `5432` | 관계형 데이터 저장 (기본 비노출) |
+| Elasticsearch | 내부 `9200` | 전문 검색 엔진 (기본 비노출) |
+| Redis | 내부 `6379` | 캐싱/세션/실시간 알림 (기본 비노출) |
+| Kafka | 내부 `29092` | 이벤트 스트리밍 (기본 비노출) |
+| MinIO | 내부 `9000` / `9001` | S3 API / 웹 콘솔 (기본 비노출) |
+| LakeFS | 내부 `8000` | 데이터 버전 관리 (기본 비노출) |
 | Grafana | `13000` | 모니터링 대시보드 |
 | Jaeger | `16686` | 분산 추적 |
 | Kafka UI | `8080` | Kafka 토픽 모니터링 |
 
-> **주의:** PostgreSQL 호스트 포트는 5432가 아니라 **5433**입니다!
+> **주의:** OMS/Agent/데이터플레인 포트는 기본 compose에서 호스트에 공개되지 않습니다.  
+> Gate/디버깅 시 `backend/docker-compose.debug-ports.yml` 오버레이로만 공개하세요.
 
 ---
 
@@ -545,6 +549,10 @@ SPICE-Harvester/
 docker compose -f docker-compose.full.yml up -d   # 시작
 docker compose -f docker-compose.full.yml down     # 종료
 docker compose -f docker-compose.full.yml ps       # 상태 확인
+
+# ── Gate/디버깅(내부 포트 오픈) ──
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d --build
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml down
 
 # ── DB만 실행 (가볍게 개발할 때) ──
 docker compose -f docker-compose.databases.yml up -d
