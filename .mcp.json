@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "bff-sdk": {
+      "command": "/Users/isihyeon/Desktop/SPICE-Harvester/.venv-tests-311/bin/python",
+      "args": [
+        "/Users/isihyeon/Desktop/SPICE-Harvester/backend/mcp_servers/bff_sdk_mcp_server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/isihyeon/Desktop/SPICE-Harvester/backend",
+        "BFF_BASE_URL": "http://localhost:8002",
+        "ADMIN_TOKEN": "change_me"
+      }
+    }
+  }
+}

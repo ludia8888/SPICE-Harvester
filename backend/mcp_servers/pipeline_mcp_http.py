@@ -5,6 +5,7 @@ import os
 import re
 import uuid
 from typing import Any, Dict, Optional
+from urllib.parse import unquote
 
 import httpx
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
@@ -66,6 +67,7 @@ def bff_headers(
     if db_name:
         headers["X-DB-Name"] = db_name
         headers["X-Project"] = db_name
+        headers["X-Project-Scope"] = db_name
 
     pid = (principal_id or "").strip() or None
     ptype = (principal_type or "").strip().lower() or None
@@ -77,6 +79,46 @@ def bff_headers(
         headers["X-Principal-Type"] = ptype
         headers["X-Actor-Type"] = ptype
     return headers
+
+
+def resolve_db_name_for_bff_call(
+    *,
+    db_name: str,
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Resolve db_name for generic BFF calls from explicit args, payload, or path."""
+    explicit = str(db_name or "").strip()
+    if explicit:
+        return explicit
+
+    query = params if isinstance(params, dict) else {}
+    body = json_body if isinstance(json_body, dict) else {}
+    keys = ("db_name", "dbName", "database_name", "database", "project", "project_name")
+
+    for source in (query, body):
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    raw_path = str(path or "").strip()
+    path_only = raw_path.split("?", 1)[0]
+    decoded = unquote(path_only)
+    patterns = (
+        r"^/api/v\d+/databases/([^/]+)(?:/|$)",
+        r"^/databases/([^/]+)(?:/|$)",
+        r"^/api/v\d+/database/([^/]+)(?:/|$)",
+        r"^/database/([^/]+)(?:/|$)",
+        r"^/api/v1/graph-query/([^/]+)(?:/|$)",
+        r"^/graph-query/([^/]+)(?:/|$)",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, decoded)
+        if match:
+            return match.group(1)
+    return ""
 
 
 async def bff_json(

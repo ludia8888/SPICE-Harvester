@@ -94,3 +94,83 @@ async def test_oms_json_timeout_maps_to_504(monkeypatch):
     assert payload.get("status_code") == 504
     assert "timed out" in str(payload.get("error", "")).lower()
     await target.close_oms_grpc_compat_client()
+
+
+def test_resolve_db_name_for_bff_call_priority():
+    from mcp_servers import pipeline_mcp_http as target
+
+    assert (
+        target.resolve_db_name_for_bff_call(
+            db_name="explicit-db",
+            path="/pipelines",
+            params={"db_name": "param-db"},
+            json_body={"db_name": "body-db"},
+        )
+        == "explicit-db"
+    )
+    assert (
+        target.resolve_db_name_for_bff_call(
+            db_name="",
+            path="/pipelines",
+            params={"db_name": "param-db"},
+            json_body={"db_name": "body-db"},
+        )
+        == "param-db"
+    )
+    assert (
+        target.resolve_db_name_for_bff_call(
+            db_name="",
+            path="/pipelines",
+            params=None,
+            json_body={"db_name": "body-db"},
+        )
+        == "body-db"
+    )
+    assert (
+        target.resolve_db_name_for_bff_call(
+            db_name="",
+            path="/api/v1/databases/path-db/pipelines",
+            params=None,
+            json_body=None,
+        )
+        == "path-db"
+    )
+
+
+@pytest.mark.asyncio
+async def test_bff_json_includes_project_scope_header(monkeypatch):
+    from mcp_servers import pipeline_mcp_http as target
+
+    captured: dict[str, object] = {}
+
+    async def _fake_http_json(method: str, url: str, *, headers: dict[str, str], **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["kwargs"] = kwargs
+        return {"ok": True}
+
+    monkeypatch.setattr(target, "http_json", _fake_http_json)
+    monkeypatch.setattr(target, "_bff_admin_token", lambda: "test-token")
+    monkeypatch.setattr(target, "bff_api_base_url", lambda: "http://bff.local/api/v1")
+
+    payload = await target.bff_json(
+        "POST",
+        "/pipelines",
+        db_name="qa_scope_db",
+        principal_id="user-1",
+        principal_type="user",
+        json_body={"db_name": "qa_scope_db"},
+    )
+
+    assert payload == {"ok": True}
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://bff.local/api/v1/pipelines"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["X-DB-Name"] == "qa_scope_db"
+    assert headers["X-Project"] == "qa_scope_db"
+    assert headers["X-Project-Scope"] == "qa_scope_db"
+    assert headers["X-Principal-Id"] == "user-1"
+    assert headers["X-Principal-Type"] == "user"
+    assert "Idempotency-Key" in headers

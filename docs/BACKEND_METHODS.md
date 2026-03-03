@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T19:08:12+09:00
+> Generated: 2026-03-03T20:59:39+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -3568,6 +3568,21 @@
   - `bff_api_v2_base_url()` (line 13): Base URL for v2 BFF API endpoints (e.g. /api/v2/orchestration/...).
   - `bff_admin_token()` (line 19): no docstring
 
+### `backend/mcp_servers/bff_sdk_mcp_server.py`
+- **Functions**
+  - `_s(val)` (line 64): no docstring
+  - `_opt(val)` (line 68): no docstring
+  - `_json_result(data)` (line 73): Wrap result for MCP text content.
+  - `_common_args(arguments)` (line 80): Extract common BFF call args: db_name, principal_id, principal_type.
+  - `async _handle_tool(name, arguments)` (line 435): Dispatch a tool call to the matching handler.
+  - `async main_stdio()` (line 690): Run as stdio transport (for Claude Code CLI).
+  - `main_sse(host, port)` (line 699): Run as SSE transport (for Claude.ai web connector via ngrok).
+  - `main_streamable_http(host, port)` (line 741): Run as Streamable HTTP transport (MCP 2025-03 spec).
+- **Classes**
+  - `BffSdkMCPServer` (line 660): MCP server that exposes BFF SDK operations as tools.
+    - `__init__(self)` (line 663): no docstring
+    - `_setup_handlers(self)` (line 667): no docstring
+
 ### `backend/mcp_servers/context7_development.py`
 - **Functions**
   - `get_context7_developer()` (line 368): Get or create Context7 developer instance
@@ -3643,14 +3658,15 @@
 
 ### `backend/mcp_servers/pipeline_mcp_http.py`
 - **Functions**
-  - `async http_json(method, url, headers, json_body, params, timeout_seconds, error_prefix, error_path)` (line 21): no docstring
-  - `bff_headers(db_name, principal_id, principal_type)` (line 51): no docstring
-  - `async bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 82): no docstring
-  - `async bff_v2_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 111): Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create).
-  - `_oms_admin_token()` (line 140): Resolve OMS admin token from environment (same fallback as OMSClient).
-  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 149): Make an OMS request through gRPC bridge and return JSON response.
-  - `async _get_oms_grpc_compat_client()` (line 221): no docstring
-  - `async close_oms_grpc_compat_client()` (line 231): no docstring
+  - `async http_json(method, url, headers, json_body, params, timeout_seconds, error_prefix, error_path)` (line 22): no docstring
+  - `bff_headers(db_name, principal_id, principal_type)` (line 52): no docstring
+  - `resolve_db_name_for_bff_call(db_name, path, params, json_body)` (line 84): Resolve db_name for generic BFF calls from explicit args, payload, or path.
+  - `async bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 124): no docstring
+  - `async bff_v2_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 153): Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create).
+  - `_oms_admin_token()` (line 182): Resolve OMS admin token from environment (same fallback as OMSClient).
+  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 191): Make an OMS request through gRPC bridge and return JSON response.
+  - `async _get_oms_grpc_compat_client()` (line 263): no docstring
+  - `async close_oms_grpc_compat_client()` (line 273): no docstring
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - **Functions**
@@ -10887,6 +10903,8 @@
 - **Functions**
   - `async test_oms_json_uses_grpc_transport(monkeypatch)` (line 10): no docstring
   - `async test_oms_json_timeout_maps_to_504(monkeypatch)` (line 75): no docstring
+  - `test_resolve_db_name_for_bff_call_priority()` (line 99): no docstring
+  - `async test_bff_json_includes_project_scope_header(monkeypatch)` (line 141): no docstring
 
 ### `backend/tests/unit/mcp/test_pipeline_plan_add_output_contract.py`
 - **Functions**

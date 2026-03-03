@@ -1,17 +1,17 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T19:08:12+09:00
+> Generated: 2026-03-03T20:59:39+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
 ## Coverage Summary
 
-- Modules scanned: **1041**
-- Modules with module docstring: **549/1041**
-- Modules with broad `except Exception`: **279**
+- Modules scanned: **1042**
+- Modules with module docstring: **550/1042**
+- Modules with broad `except Exception`: **280**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **257207**
+- Total code lines (non-empty, non-comment): **258004**
 
 ## Package Scoreboard
 
@@ -30,7 +30,7 @@
 | `funnel` | 14 | 12/14 (85%) | 4 | 32 | 15 | 23 | 3588 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 221 |
 | `instance_worker` | 2 | 2/2 (100%) | 1 | 38 | 28 | 2 | 2376 |
-| `mcp_servers` | 18 | 6/18 (33%) | 10 | 52 | 128 | 33 | 6900 |
+| `mcp_servers` | 19 | 7/19 (36%) | 11 | 53 | 137 | 38 | 7627 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
 | `objectify_worker` | 4 | 4/4 (100%) | 2 | 34 | 51 | 7 | 4639 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 21 | 19/21 (90%) | 12 | 24 | 29 | 47 | 2979 |
 | `shared` | 320 | 211/320 (65%) | 107 | 387 | 884 | 1154 | 82599 |
-| `tests` | 319 | 54/319 (16%) | 20 | 154 | 1682 | 1545 | 55433 |
+| `tests` | 319 | 54/319 (16%) | 20 | 154 | 1684 | 1547 | 55503 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
@@ -4735,6 +4735,22 @@
 - External imports (2): __future__; typing
 - Public API names: bff_admin_token; bff_api_base_url; bff_api_v2_base_url
 
+### `backend/mcp_servers/bff_sdk_mcp_server.py`
+- Module summary: BFF SDK MCP Server
+- Responsibilities: not documented
+- Invariants: not documented
+- Failure modes: not documented
+- Extension points: not documented
+- Dependencies (doc): not documented
+- Inferred role: general backend module
+- Source footprint: total_lines=812 | code_lines=690 | risk_score=6
+- API surface: public=4 | top-level functions=8 | classes=1 | methods=2
+- Runtime signals: async_functions=9 | try=1 | raise=0 | broad_except=1 | bare_except=0 | finally_return=0
+- Doc coverage: module=yes | top-level functions=6/8 (75%) | classes=1/1 (100%) | methods=0/2 (0%)
+- Internal imports (1): mcp_servers.pipeline_mcp_http
+- External imports (9): __future__; json; logging; mcp; os; pathlib; sys; typing (+1 more)
+- Public API names: BffSdkMCPServer; main_sse; main_stdio; main_streamable_http
+
 ### `backend/mcp_servers/context7_development.py`
 - Module summary: Context7 Development Helper
 - Responsibilities: not documented
@@ -4823,13 +4839,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=237 | code_lines=210 | risk_score=17
-- API surface: public=6 | top-level functions=8 | classes=0 | methods=0
+- Source footprint: total_lines=279 | code_lines=247 | risk_score=17
+- API surface: public=7 | top-level functions=9 | classes=0 | methods=0
 - Runtime signals: async_functions=6 | try=3 | raise=1 | broad_except=3 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=3/8 (37%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=4/9 (44%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): mcp_servers.bff_auth; shared.services.grpc.oms_gateway_client
-- External imports (8): __future__; asyncio; httpx; logging; os; re; typing; uuid
-- Public API names: bff_headers; bff_json; bff_v2_json; close_oms_grpc_compat_client; http_json; oms_json
+- External imports (9): __future__; asyncio; httpx; logging; os; re; typing; urllib (+1 more)
+- Public API names: bff_headers; bff_json; bff_v2_json; close_oms_grpc_compat_client; http_json; oms_json; resolve_db_name_for_bff_call
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - Module summary: Pipeline MCP Server
@@ -12703,13 +12719,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=96 | code_lines=76 | risk_score=0
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
-- Runtime signals: async_functions=7 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Source footprint: total_lines=176 | code_lines=146 | risk_score=0
+- API surface: public=4 | top-level functions=4 | classes=0 | methods=0
+- Runtime signals: async_functions=9 | try=0 | raise=1 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=0/4 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (0): not documented
 - External imports (4): __future__; asyncio; httpx; pytest
-- Public API names: test_oms_json_timeout_maps_to_504; test_oms_json_uses_grpc_transport
+- Public API names: test_bff_json_includes_project_scope_header; test_oms_json_timeout_maps_to_504; test_oms_json_uses_grpc_transport; test_resolve_db_name_for_bff_call_priority
 
 ### `backend/tests/unit/mcp/test_pipeline_plan_add_output_contract.py`
 - Module summary: no docstring

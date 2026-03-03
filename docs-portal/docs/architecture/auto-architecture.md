@@ -41,7 +41,7 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **655**, functions **6263**, classes **891**, internal cross-imports **1540**
+- Population: files **656**, functions **6281**, classes **892**, internal cross-imports **1540**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
@@ -49,12 +49,12 @@ python scripts/check_docs.py
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | ≤ 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 4/93 (4.30%) | ≤ 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 3/22 (13.64%) | ≤ 15.00% | **PASS** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 51/655 (7.79%) | ≤ 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 60/655 (9.16%) | ≤ 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 332/6263 (5.30%) | ≤ 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/891 (1.68%) | ≤ 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 742/6263 (11.85%) | ≤ 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 423/6263 (6.75%) | ≤ 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 51/656 (7.77%) | ≤ 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 60/656 (9.15%) | ≤ 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 333/6281 (5.30%) | ≤ 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/892 (1.68%) | ≤ 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 743/6281 (11.83%) | ≤ 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 424/6281 (6.75%) | ≤ 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
