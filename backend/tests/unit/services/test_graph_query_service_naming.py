@@ -5,6 +5,7 @@ from typing import Any, Dict
 import pytest
 
 from bff.services.graph_query_service import (
+    _resolve_graph_branches,
     execute_graph_query,
     execute_multi_hop_query,
     execute_simple_graph_query,
@@ -188,3 +189,37 @@ async def test_execute_graph_query_provenance_uses_graph_key() -> None:
     provenance = response.nodes[0].provenance or {}
     assert "graph" in provenance
     assert "terminus" not in provenance
+
+
+def test_resolve_graph_branches_skips_virtualization_for_graph_only_queries() -> None:
+    ctx = _resolve_graph_branches(
+        db_name="demo",
+        base_branch="main",
+        overlay_branch=None,
+        branch=None,
+        include_documents=False,
+        classes_in_query=["Person"],
+    )
+
+    assert ctx.graph_branch == "main"
+    assert ctx.read_model_base_branch == "main"
+    assert ctx.read_model_overlay_branch is None
+    assert ctx.branch_virtualization_active is False
+    assert ctx.overlay_required is False
+
+
+def test_resolve_graph_branches_keeps_virtualization_for_document_queries() -> None:
+    ctx = _resolve_graph_branches(
+        db_name="demo",
+        base_branch="main",
+        overlay_branch=None,
+        branch=None,
+        include_documents=True,
+        classes_in_query=["Person"],
+    )
+
+    assert ctx.graph_branch == "main"
+    assert ctx.read_model_base_branch == "master"
+    assert ctx.read_model_overlay_branch == "main"
+    assert ctx.branch_virtualization_active is True
+    assert ctx.overlay_required is True

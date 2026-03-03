@@ -1,6 +1,6 @@
 # Backend Design Reference
 
-> Generated: 2026-03-03T13:53:26+09:00
+> Generated: 2026-03-03T16:24:07+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 > Source: AST + docstring extraction (module/class/function) via `scripts/generate_backend_methods.py`.
 
@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **279**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **256424**
+- Total code lines (non-empty, non-comment): **256477**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 2 | 2/2 (100%) | 1 | 8 | 41 | 2 | 2431 |
 | `agent` | 12 | 4/12 (33%) | 3 | 16 | 17 | 18 | 2946 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 221 | 167/221 (75%) | 78 | 340 | 1098 | 789 | 59852 |
+| `bff` | 221 | 167/221 (75%) | 78 | 340 | 1098 | 789 | 59857 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 4 | 11 | 1 | 415 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 9 | 8 | 1 | 294 |
@@ -34,7 +34,7 @@
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 10 | 2 | 664 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
 | `objectify_worker` | 4 | 4/4 (100%) | 2 | 34 | 51 | 7 | 4639 |
-| `oms` | 53 | 38/53 (71%) | 18 | 93 | 202 | 195 | 16557 |
+| `oms` | 53 | 38/53 (71%) | 18 | 93 | 202 | 195 | 16576 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 15 | 1 | 1192 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
 | `pipeline_scheduler` | 1 | 1/1 (100%) | 0 | 0 | 1 | 1 | 26 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 26 | 27 | 1 | 1866 |
 | `scripts` | 20 | 19/20 (95%) | 12 | 24 | 20 | 41 | 2379 |
 | `shared` | 320 | 211/320 (65%) | 107 | 387 | 884 | 1154 | 82594 |
-| `tests` | 317 | 54/317 (17%) | 20 | 154 | 1678 | 1534 | 55295 |
+| `tests` | 317 | 54/317 (17%) | 20 | 154 | 1678 | 1536 | 55324 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 299 |
 
 ## Engineering Hotspots
@@ -62,7 +62,7 @@
 | `backend/shared/services/kafka/processed_event_worker.py` | 123 | 22 | 0 | 0 | 29 | 16 | 1391 |
 | `backend/shared/services/storage/event_store.py` | 108 | 20 | 0 | 0 | 24 | 16 | 1062 |
 | `backend/bff/services/ai_service.py` | 105 | 21 | 0 | 0 | 25 | 25 | 1571 |
-| `backend/bff/services/graph_query_service.py` | 86 | 17 | 0 | 0 | 18 | 17 | 957 |
+| `backend/bff/services/graph_query_service.py` | 86 | 17 | 0 | 0 | 18 | 17 | 962 |
 | `backend/bff/routers/foundry_connectivity_v2.py` | 80 | 8 | 0 | 0 | 50 | 10 | 3830 |
 
 ## Entrypoint Risk Map
@@ -2485,7 +2485,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=1069 | code_lines=957 | risk_score=86
+- Source footprint: total_lines=1076 | code_lines=962 | risk_score=86
 - API surface: public=6 | top-level functions=14 | classes=1 | methods=0
 - Runtime signals: async_functions=7 | try=18 | raise=17 | broad_except=17 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=7/14 (50%) | classes=0/1 (0%) | methods=0/0 (n/a)
@@ -5295,7 +5295,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=632 | code_lines=553 | risk_score=0
+- Source footprint: total_lines=652 | code_lines=572 | risk_score=0
 - API surface: public=2 | top-level functions=3 | classes=2 | methods=41
 - Runtime signals: async_functions=39 | try=4 | raise=4 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/2 (0%) | methods=0/41 (0%)
@@ -14287,13 +14287,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=190 | code_lines=168 | risk_score=0
-- API surface: public=3 | top-level functions=3 | classes=5 | methods=5
+- Source footprint: total_lines=225 | code_lines=197 | risk_score=0
+- API surface: public=5 | top-level functions=5 | classes=5 | methods=5
 - Runtime signals: async_functions=8 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/5 (0%) | methods=0/5 (0%)
+- Doc coverage: module=no | top-level functions=0/5 (0%) | classes=0/5 (0%) | methods=0/5 (0%)
 - Internal imports (2): bff.services.graph_query_service; shared.models.graph_query
 - External imports (3): __future__; pytest; typing
-- Public API names: test_execute_graph_query_provenance_uses_graph_key; test_execute_multi_hop_query_uses_foundry_naming; test_execute_simple_graph_query_uses_foundry_naming
+- Public API names: test_execute_graph_query_provenance_uses_graph_key; test_execute_multi_hop_query_uses_foundry_naming; test_execute_simple_graph_query_uses_foundry_naming; test_resolve_graph_branches_keeps_virtualization_for_document_queries; test_resolve_graph_branches_skips_virtualization_for_graph_only_queries
 
 ### `backend/tests/unit/services/test_graph_service_health.py`
 - Module summary: Tests for graph_service_health (ES-only mode).

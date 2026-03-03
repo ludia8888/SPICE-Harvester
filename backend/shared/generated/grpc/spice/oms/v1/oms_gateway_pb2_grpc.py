@@ -5,8 +5,8 @@ import warnings
 
 from . import oms_gateway_pb2 as spice_dot_oms_dot_v1_dot_oms__gateway__pb2
 
-GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__
+GRPC_GENERATED_VERSION = GRPC_VERSION
 _version_not_supported = False
 
 try:

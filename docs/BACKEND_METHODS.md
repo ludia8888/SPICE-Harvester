@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-03T13:53:26+09:00
+> Generated: 2026-03-03T16:24:07+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -1661,19 +1661,19 @@
 ### `backend/bff/services/graph_query_service.py`
 - **Functions**
   - `_resolve_graph_branches(db_name, base_branch, overlay_branch, branch, include_documents, classes_in_query)` (line 56): no docstring
-  - `_raise_overlay_degraded(ctx)` (line 108): no docstring
-  - `async _merge_fallback_for_degraded(db_name, ctx, documents)` (line 126): Server-side merge fallback when ES overlay index is unavailable (DEGRADED).
-  - `async _load_access_policies(dataset_registry, db_name, class_ids)` (line 203): no docstring
-  - `_apply_access_policies_to_nodes(nodes, policies)` (line 222): no docstring
-  - `_apply_access_policies_to_documents(documents, policy)` (line 253): no docstring
-  - `_collect_class_ids_from_hops(hops)` (line 277): no docstring
-  - `_normalize_paths_for_response(paths)` (line 290): Normalize graph path payloads to a stable object shape.
-  - `_normalize_es_doc_id(raw_id)` (line 327): Normalize graph document identifiers to instance ID form for API compatibility.
-  - `async execute_graph_query(db_name, query, request, lineage_store, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 344): Execute multi-hop graph query with ES federation (graph + Elasticsearch).
-  - `async execute_simple_graph_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 701): Execute simple single-class graph query.
-  - `async execute_multi_hop_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 842): Execute multi-hop graph query (compat dict payload).
-  - `async find_relationship_paths(db_name, source_class, target_class, max_depth, graph_service, branch)` (line 1009): no docstring
-  - `async graph_service_health(graph_service)` (line 1047): Check health of graph federation service (ES-only, no external graph DB dependency).
+  - `_raise_overlay_degraded(ctx)` (line 115): no docstring
+  - `async _merge_fallback_for_degraded(db_name, ctx, documents)` (line 133): Server-side merge fallback when ES overlay index is unavailable (DEGRADED).
+  - `async _load_access_policies(dataset_registry, db_name, class_ids)` (line 210): no docstring
+  - `_apply_access_policies_to_nodes(nodes, policies)` (line 229): no docstring
+  - `_apply_access_policies_to_documents(documents, policy)` (line 260): no docstring
+  - `_collect_class_ids_from_hops(hops)` (line 284): no docstring
+  - `_normalize_paths_for_response(paths)` (line 297): Normalize graph path payloads to a stable object shape.
+  - `_normalize_es_doc_id(raw_id)` (line 334): Normalize graph document identifiers to instance ID form for API compatibility.
+  - `async execute_graph_query(db_name, query, request, lineage_store, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 351): Execute multi-hop graph query with ES federation (graph + Elasticsearch).
+  - `async execute_simple_graph_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 708): Execute simple single-class graph query.
+  - `async execute_multi_hop_query(db_name, query, request, graph_service, dataset_registry, base_branch, overlay_branch, branch)` (line 849): Execute multi-hop graph query (compat dict payload).
+  - `async find_relationship_paths(db_name, source_class, target_class, max_depth, graph_service, branch)` (line 1016): no docstring
+  - `async graph_service_health(graph_service)` (line 1054): Check health of graph federation service (ES-only, no external graph DB dependency).
 - **Classes**
   - `GraphBranchContext` (line 45): no docstring
 
@@ -4075,35 +4075,35 @@
     - `async CreateDatabase(self, request, context)` (line 141): no docstring
     - `async DeleteDatabase(self, request, context)` (line 144): no docstring
     - `async GetDatabase(self, request, context)` (line 155): no docstring
-    - `async DatabaseExists(self, request, context)` (line 208): no docstring
-    - `async CreateOntologyTyped(self, request, context)` (line 212): no docstring
-    - `async GetOntologyTyped(self, request, context)` (line 224): no docstring
-    - `async CreateOntology(self, request, context)` (line 232): no docstring
-    - `async GetOntology(self, request, context)` (line 243): no docstring
-    - `async ListOntologies(self, request, context)` (line 254): no docstring
-    - `async UpdateOntology(self, request, context)` (line 265): no docstring
-    - `async DeleteOntology(self, request, context)` (line 277): no docstring
-    - `async ListOntologyResources(self, request, context)` (line 289): no docstring
-    - `async GetOntologyResource(self, request, context)` (line 298): no docstring
-    - `async CreateOntologyResource(self, request, context)` (line 309): no docstring
-    - `async UpdateOntologyResource(self, request, context)` (line 322): no docstring
-    - `async DeleteOntologyResource(self, request, context)` (line 335): no docstring
-    - `async RecordOntologyDeployment(self, request, context)` (line 348): no docstring
-    - `async SearchObjects(self, request, context)` (line 357): no docstring
-    - `async AggregateObjects(self, request, context)` (line 368): no docstring
-    - `async GetTimeseriesFirstPoint(self, request, context)` (line 380): no docstring
-    - `async GetTimeseriesLastPoint(self, request, context)` (line 390): no docstring
-    - `async StreamTimeseriesPoints(self, request, context)` (line 400): no docstring
-    - `async _dispatch_stream(self, context, method, path, request, chunk_size)` (line 411): no docstring
-    - `async UploadAttachment(self, request, context)` (line 503): no docstring
-    - `async ListPropertyAttachments(self, request, context)` (line 514): no docstring
-    - `async GetAttachmentByRid(self, request, context)` (line 524): no docstring
-    - `async GetAttachmentContent(self, request, context)` (line 534): no docstring
-    - `async GetAttachmentContentByRid(self, request, context)` (line 544): no docstring
-  - `OMSGrpcServer` (line 555): no docstring
-    - `__init__(self, app)` (line 556): no docstring
-    - `async start(self)` (line 561): no docstring
-    - `async stop(self, grace)` (line 626): no docstring
+    - `async DatabaseExists(self, request, context)` (line 209): no docstring
+    - `async CreateOntologyTyped(self, request, context)` (line 232): no docstring
+    - `async GetOntologyTyped(self, request, context)` (line 244): no docstring
+    - `async CreateOntology(self, request, context)` (line 252): no docstring
+    - `async GetOntology(self, request, context)` (line 263): no docstring
+    - `async ListOntologies(self, request, context)` (line 274): no docstring
+    - `async UpdateOntology(self, request, context)` (line 285): no docstring
+    - `async DeleteOntology(self, request, context)` (line 297): no docstring
+    - `async ListOntologyResources(self, request, context)` (line 309): no docstring
+    - `async GetOntologyResource(self, request, context)` (line 318): no docstring
+    - `async CreateOntologyResource(self, request, context)` (line 329): no docstring
+    - `async UpdateOntologyResource(self, request, context)` (line 342): no docstring
+    - `async DeleteOntologyResource(self, request, context)` (line 355): no docstring
+    - `async RecordOntologyDeployment(self, request, context)` (line 368): no docstring
+    - `async SearchObjects(self, request, context)` (line 377): no docstring
+    - `async AggregateObjects(self, request, context)` (line 388): no docstring
+    - `async GetTimeseriesFirstPoint(self, request, context)` (line 400): no docstring
+    - `async GetTimeseriesLastPoint(self, request, context)` (line 410): no docstring
+    - `async StreamTimeseriesPoints(self, request, context)` (line 420): no docstring
+    - `async _dispatch_stream(self, context, method, path, request, chunk_size)` (line 431): no docstring
+    - `async UploadAttachment(self, request, context)` (line 523): no docstring
+    - `async ListPropertyAttachments(self, request, context)` (line 534): no docstring
+    - `async GetAttachmentByRid(self, request, context)` (line 544): no docstring
+    - `async GetAttachmentContent(self, request, context)` (line 554): no docstring
+    - `async GetAttachmentContentByRid(self, request, context)` (line 564): no docstring
+  - `OMSGrpcServer` (line 575): no docstring
+    - `__init__(self, app)` (line 576): no docstring
+    - `async start(self)` (line 581): no docstring
+    - `async stop(self, grace)` (line 646): no docstring
 
 ### `backend/oms/main.py`
 - **Functions**
@@ -12032,20 +12032,22 @@
 
 ### `backend/tests/unit/services/test_graph_query_service_naming.py`
 - **Functions**
-  - `async test_execute_simple_graph_query_uses_foundry_naming()` (line 114): no docstring
-  - `async test_execute_multi_hop_query_uses_foundry_naming()` (line 134): no docstring
-  - `async test_execute_graph_query_provenance_uses_graph_key()` (line 162): no docstring
+  - `async test_execute_simple_graph_query_uses_foundry_naming()` (line 115): no docstring
+  - `async test_execute_multi_hop_query_uses_foundry_naming()` (line 135): no docstring
+  - `async test_execute_graph_query_provenance_uses_graph_key()` (line 163): no docstring
+  - `test_resolve_graph_branches_skips_virtualization_for_graph_only_queries()` (line 194): no docstring
+  - `test_resolve_graph_branches_keeps_virtualization_for_document_queries()` (line 211): no docstring
 - **Classes**
-  - `_GraphServiceSimpleStub` (line 15): no docstring
-    - `async simple_graph_query(self, **kwargs)` (line 16): no docstring
-  - `_GraphServiceMultiHopStub` (line 33): no docstring
-    - `async multi_hop_query(self, **kwargs)` (line 34): no docstring
-  - `_GraphServiceWithProvenanceStub` (line 53): no docstring
-    - `async multi_hop_query(self, **kwargs)` (line 54): no docstring
-  - `_DatasetRegistryStub` (line 75): no docstring
-    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 76): no docstring
-  - `_LineageStoreStub` (line 88): no docstring
-    - `async get_latest_edges_to(self, to_node_ids, edge_type, db_name, branch)` (line 89): no docstring
+  - `_GraphServiceSimpleStub` (line 16): no docstring
+    - `async simple_graph_query(self, **kwargs)` (line 17): no docstring
+  - `_GraphServiceMultiHopStub` (line 34): no docstring
+    - `async multi_hop_query(self, **kwargs)` (line 35): no docstring
+  - `_GraphServiceWithProvenanceStub` (line 54): no docstring
+    - `async multi_hop_query(self, **kwargs)` (line 55): no docstring
+  - `_DatasetRegistryStub` (line 76): no docstring
+    - `async get_access_policy(self, db_name, scope, subject_type, subject_id)` (line 77): no docstring
+  - `_LineageStoreStub` (line 89): no docstring
+    - `async get_latest_edges_to(self, to_node_ids, edge_type, db_name, branch)` (line 90): no docstring
 
 ### `backend/tests/unit/services/test_graph_service_health.py`
 - **Functions**

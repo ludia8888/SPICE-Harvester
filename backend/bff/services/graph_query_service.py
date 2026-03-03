@@ -86,9 +86,16 @@ def _resolve_graph_branches(
     read_model_overlay_branch = resolved_overlay_branch
     branch_virtualization_active = False
     if resolved_graph_branch != virtualization_base_branch and not requested_overlay:
-        branch_virtualization_active = True
-        read_model_base_branch = virtualization_base_branch
-        read_model_overlay_branch = resolved_graph_branch
+        if include_documents:
+            branch_virtualization_active = True
+            read_model_base_branch = virtualization_base_branch
+            read_model_overlay_branch = resolved_graph_branch
+        else:
+            # Graph-only queries should keep the requested branch as read-model base.
+            # Virtualized base indices can legitimately be absent for non-document queries.
+            branch_virtualization_active = False
+            read_model_base_branch = resolved_graph_branch
+            read_model_overlay_branch = None
 
     overlay_active = bool(read_model_overlay_branch and read_model_overlay_branch != read_model_base_branch)
     overlay_required = bool(overlay_active and include_documents)

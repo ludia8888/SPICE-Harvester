@@ -197,7 +197,8 @@ class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
                 {
                     "status": "success",
                     "message": f"데이터베이스 '{db_name}' 조회 완료",
-                    "data": {"name": db_name, **row},
+                    "exists": True,
+                    "data": {"exists": True, "name": db_name, **row},
                 },
                 ensure_ascii=False,
             ),
@@ -206,7 +207,26 @@ class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
         )
 
     async def DatabaseExists(self, request, context):
-        return await self.GetDatabase(request, context)
+        response = await self.GetDatabase(request, context)
+        status_code = int(response.status_code or 500)
+        if status_code >= 400 and status_code != 404:
+            return response
+
+        db_name = str(request.db_name or "").strip()
+        exists = status_code == 200
+        return oms_gateway_pb2.OmsResponse(
+            status_code=200,
+            json_body=json.dumps(
+                {
+                    "status": "success",
+                    "message": f"데이터베이스 '{db_name}' 존재 여부 조회 완료",
+                    "data": {"exists": exists, "name": db_name},
+                },
+                ensure_ascii=False,
+            ),
+            headers={"content-type": "application/json"},
+            content_type="application/json",
+        )
 
     # OntologyService
     async def CreateOntologyTyped(self, request, context):
