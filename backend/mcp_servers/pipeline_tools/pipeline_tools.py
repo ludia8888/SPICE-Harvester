@@ -5,12 +5,12 @@ import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from shared.errors.external_codes import ExternalErrorCode
-from shared.foundry.rids import build_rid
 from shared.models.pipeline_plan import PipelinePlan
 from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_preview_inspector import inspect_preview
 from shared.utils.llm_safety import mask_pii
 
+from mcp_servers.feature_helpers import build_pipeline_execution_payload, extract_pipeline_job_id
 from mcp_servers.pipeline_mcp_helpers import (
     extract_spark_error_details,
     trim_build_output,
@@ -88,16 +88,13 @@ async def _pipeline_wait_for_mode(
                     break
 
     if not job_id:
-        # Enqueue via v2 orchestration API
-        v2_payload: Dict[str, Any] = {
-            "target": {"targetRids": [build_rid("pipeline", pipeline_id)]},
-            "mode": mode,
-            "parameters": {"limit": limit},
-        }
-        if node_id:
-            v2_payload["parameters"]["nodeId"] = node_id
-        if branch:
-            v2_payload["branchName"] = branch
+        v2_payload = build_pipeline_execution_payload(
+            pipeline_id=pipeline_id,
+            mode=mode,
+            branch=branch,
+            limit=limit,
+            node_id=node_id,
+        )
         resp = await bff_v2_json(
             "POST",
             "/v2/orchestration/builds/create",
@@ -109,14 +106,7 @@ async def _pipeline_wait_for_mode(
         )
         if resp.get("error"):
             return resp
-        # Extract job_id from v2 build RID (format: "build://build-{pipeline_uuid}-{job_uuid}")
-        rid = str(resp.get("rid") or "").strip()
-        if rid.startswith("build://"):
-            job_id = rid[len("build://"):]
-        if not job_id:
-            # Fallback: try v1 response format
-            data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-            job_id = str(data.get("job_id") or "").strip()
+        job_id = extract_pipeline_job_id(resp)
         if not job_id:
             return {"error": f"{mode} enqueue did not return job_id", "response": resp}
 

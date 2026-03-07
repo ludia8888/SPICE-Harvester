@@ -65,9 +65,16 @@ class _FakeObjectifyRegistry:
 class _FakeJobQueue:
     def __init__(self) -> None:
         self.published = None
+        self.created = True
+        self.resolved_job_id: str | None = None
 
     async def publish(self, job, require_delivery: bool = False):  # noqa: ANN001
         self.published = {"job": job, "require_delivery": require_delivery}
+        resolved_job_id = self.resolved_job_id or job.job_id
+        return SimpleNamespace(
+            record=SimpleNamespace(job_id=resolved_job_id, status="ENQUEUE_REQUESTED"),
+            created=self.created,
+        )
 
 
 def _request() -> Request:
@@ -148,3 +155,105 @@ async def test_run_objectify_accepts_version_pinned_execution(monkeypatch: pytes
     assert payload.get("status") == "QUEUED"
     assert queue.published is not None
     assert queue.published["job"].dataset_version_id == "ver-1"
+
+
+@pytest.mark.asyncio
+async def test_run_objectify_returns_existing_job_when_enqueue_dedupes(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _allow_role(*args, **kwargs):  # noqa: ANN003
+        _ = args, kwargs
+        return None
+
+    monkeypatch.setattr(objectify_run_service, "_require_db_role", _allow_role)
+    monkeypatch.setattr(objectify_run_service, "enforce_db_scope", lambda headers, db_name: None)
+
+    dataset_version = SimpleNamespace(
+        version_id="ver-1",
+        dataset_id="ds-1",
+        artifact_key="s3://raw-datasets/main/demo_db/ds-1/orders.csv",
+        sample_json={"columns": [{"name": "order_id", "type": "string"}]},
+    )
+    queue = _FakeJobQueue()
+    queue.created = False
+    queue.resolved_job_id = "existing-job"
+
+    response = await objectify_run_service.run_objectify(
+        dataset_id="ds-1",
+        body=TriggerObjectifyRequest(
+            mapping_spec_id="map-1",
+            dataset_version_id="ver-1",
+        ),
+        request=_request(),
+        dataset_registry=_FakeDatasetRegistry(version=dataset_version),
+        objectify_registry=_FakeObjectifyRegistry(),
+        job_queue=queue,
+        pipeline_registry=SimpleNamespace(),
+        oms_client=None,
+    )
+
+    payload = response.get("data") if isinstance(response.get("data"), dict) else {}
+    assert payload.get("job_id") == "existing-job"
+    assert payload.get("status") == "ENQUEUE_REQUESTED"
+
+
+class _TargetClassRegistry(_FakeObjectifyRegistry):
+    def __init__(self) -> None:
+        self.active_calls: list[dict[str, object]] = []
+
+    async def get_active_mapping_spec(self, **kwargs):  # noqa: ANN003
+        self.active_calls.append(dict(kwargs))
+        if kwargs.get("target_class_id") != "Customer":
+            return None
+        return SimpleNamespace(
+            mapping_spec_id="map-target",
+            dataset_id="ds-1",
+            artifact_output_name="orders",
+            schema_hash=None,
+            backing_datasource_version_id=None,
+            version=2,
+            options={},
+            target_class_id="Customer",
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_objectify_prefers_target_class_pg_mapping_before_oms(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _allow_role(*args, **kwargs):  # noqa: ANN003
+        _ = args, kwargs
+        return None
+
+    async def _fail_oms_lookup(*args, **kwargs):  # noqa: ANN003
+        raise AssertionError("OMS lookup must not run when canonical PG mapping spec exists")
+
+    monkeypatch.setattr(objectify_run_service, "_require_db_role", _allow_role)
+    monkeypatch.setattr(objectify_run_service, "enforce_db_scope", lambda headers, db_name: None)
+    monkeypatch.setattr(objectify_run_service, "get_mapping_from_oms", _fail_oms_lookup)
+
+    dataset_version = SimpleNamespace(
+        version_id="ver-1",
+        dataset_id="ds-1",
+        artifact_key="s3://raw-datasets/main/demo_db/ds-1/orders.csv",
+        sample_json={"columns": [{"name": "order_id", "type": "string"}]},
+    )
+    queue = _FakeJobQueue()
+    registry = _TargetClassRegistry()
+
+    response = await objectify_run_service.run_objectify(
+        dataset_id="ds-1",
+        body=TriggerObjectifyRequest(
+            target_class_id="Customer",
+            dataset_version_id="ver-1",
+        ),
+        request=_request(),
+        dataset_registry=_FakeDatasetRegistry(version=dataset_version),
+        objectify_registry=registry,
+        job_queue=queue,
+        pipeline_registry=SimpleNamespace(),
+        oms_client=SimpleNamespace(client=object(), base_url="grpc://oms", _get_auth_token=lambda: "token"),
+    )
+
+    payload = response.get("data") if isinstance(response.get("data"), dict) else {}
+    assert payload.get("mapping_spec_id") == "map-target"
+    assert payload.get("oms_mode") is False
+    assert registry.active_calls
+    assert registry.active_calls[0]["target_class_id"] == "Customer"
+    assert registry.active_calls[0]["artifact_output_name"] == "orders"

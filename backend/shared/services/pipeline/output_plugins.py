@@ -60,6 +60,19 @@ def _camel_case(value: str) -> str:
     return parts[0] + "".join(part.capitalize() for part in parts[1:])
 
 
+def find_virtual_dataset_style_settings(payload: Mapping[str, Any]) -> list[str]:
+    unsupported: List[str] = []
+    for aliases in _VirtualPlugin._UNSUPPORTED_DATASET_STYLE_KEYS:
+        value = _text(payload, *aliases)
+        if value:
+            unsupported.append(aliases[0])
+            continue
+        raw = payload.get(aliases[0])
+        if isinstance(raw, list) and raw:
+            unsupported.append(aliases[0])
+    return sorted(set(unsupported))
+
+
 class _DatasetPlugin:
     kind = OUTPUT_KIND_DATASET
 
@@ -154,19 +167,11 @@ class _VirtualPlugin(_RequiredMetadataPlugin):
         if refresh_mode not in {"on_read", "scheduled"}:
             return ["refresh_mode must be one of: on_read|scheduled"]
 
-        unsupported: List[str] = []
-        for aliases in self._UNSUPPORTED_DATASET_STYLE_KEYS:
-            value = _text(payload, *aliases)
-            if value:
-                unsupported.append(aliases[0])
-                continue
-            raw = payload.get(aliases[0])
-            if isinstance(raw, list) and raw:
-                unsupported.append(aliases[0])
+        unsupported = find_virtual_dataset_style_settings(payload)
         if unsupported:
             return [
                 "virtual output does not support dataset write settings: "
-                + ", ".join(sorted(set(unsupported)))
+                + ", ".join(unsupported)
             ]
         return []
 

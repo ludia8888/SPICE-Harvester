@@ -54,6 +54,7 @@ from mcp_servers.pipeline_mcp_http import (  # noqa: E402
     bff_v2_json,
     resolve_db_name_for_bff_call,
 )
+from mcp_servers.feature_helpers import build_objectify_run_body, build_pipeline_execution_payload  # noqa: E402
 from mcp_servers.pipeline_mcp_errors import tool_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -126,34 +127,6 @@ def _extract_dataset_ids(payload: Dict[str, Any]) -> List[str]:
         if candidate:
             dataset_ids.append(candidate)
     return dataset_ids
-
-
-def _build_objectify_run_body(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    body: Dict[str, Any] = {}
-    mapping_spec_id = _opt(arguments.get("mapping_spec_id"))
-    target_class_id = _opt(arguments.get("target_class_id"))
-    dataset_version_id = _opt(arguments.get("dataset_version_id"))
-    artifact_output_name = _opt(arguments.get("artifact_output_name"))
-    if mapping_spec_id:
-        body["mapping_spec_id"] = mapping_spec_id
-    if target_class_id:
-        body["target_class_id"] = target_class_id
-    if dataset_version_id:
-        body["dataset_version_id"] = dataset_version_id
-    if artifact_output_name:
-        body["artifact_output_name"] = artifact_output_name
-
-    max_rows = arguments.get("max_rows")
-    batch_size = arguments.get("batch_size")
-    allow_partial = arguments.get("allow_partial")
-    if max_rows is not None:
-        body["max_rows"] = int(max_rows)
-    if batch_size is not None:
-        body["batch_size"] = int(batch_size)
-    if allow_partial is not None:
-        body["allow_partial"] = bool(allow_partial)
-    return body
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Tool definitions (organised by SDK domain)
@@ -574,11 +547,11 @@ async def _handle_tool(name: str, arguments: Dict[str, Any]) -> list:
         pid = _coerce_pipeline_id(arguments["pipeline_id"])
         mode = _s(arguments["mode"])
         branch = _s(arguments.get("branch")) or "main"
-        payload = {
-            "target": {"targetRids": [_pipeline_target_rid(arguments["pipeline_id"])]},
-            "mode": mode,
-            "branchName": branch,
-        }
+        payload = build_pipeline_execution_payload(
+            pipeline_id=pid,
+            mode=mode,
+            branch=branch,
+        )
         r = await bff_v2_json("POST", "/v2/orchestration/builds/create", json_body=payload, **ca)
         return _json_result(r)
 
@@ -741,7 +714,7 @@ async def _handle_tool(name: str, arguments: Dict[str, Any]) -> list:
             payload["datasets_response"] = datasets_resp
             return _json_result(payload)
 
-        run_body = _build_objectify_run_body(arguments)
+        run_body = build_objectify_run_body(arguments)
         jobs: List[Dict[str, Any]] = []
         failures: List[Dict[str, Any]] = []
         for dataset_id in dataset_ids:

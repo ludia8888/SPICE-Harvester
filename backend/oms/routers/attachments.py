@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Query, Request, status
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 
 from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
@@ -32,6 +32,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_db_name,
 )
+from shared.utils.instance_properties import iter_instance_properties
 
 logger = logging.getLogger(__name__)
 _ACTOR_HEADER_KEYS = ("X-User-ID", "X-User", "X-Actor")
@@ -192,14 +193,10 @@ def _extract_attachment_property(source: Dict[str, Any], property_name: str) -> 
     or None if the property is not found / not an attachment type.
     """
     properties = source.get("properties")
-    if isinstance(properties, list):
-        for prop in properties:
-            if not isinstance(prop, dict):
-                continue
-            name = str(prop.get("name") or "").strip()
-            prop_type = str(prop.get("type") or "").strip().lower()
-            if name == property_name and prop_type in {"attachment", "media"}:
-                return prop.get("value")
+    for name, prop in iter_instance_properties(properties):
+        prop_type = str(prop.get("type") or "").strip().lower()
+        if name == property_name and prop_type in {"attachment", "media"}:
+            return prop.get("value")
 
     # Also check the unindexed data field.
     data = source.get("data")

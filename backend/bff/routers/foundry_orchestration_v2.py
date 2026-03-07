@@ -22,7 +22,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
-from shared.foundry.rids import build_rid, parse_rid
+from shared.foundry.rids import build_rid, extract_build_job_id, parse_rid, rid_id_for_kind
 from shared.observability.tracing import trace_endpoint
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -51,29 +51,11 @@ def _foundry_error(
 
 
 def _pipeline_id_from_target_rid(target_rid: str) -> str | None:
-    text = str(target_rid or "").strip()
-    if not text:
-        return None
-    try:
-        kind, rid_id = parse_rid(text)
-    except ValueError:
-        return None
-    if kind != "pipeline":
-        return None
-    return rid_id
+    return rid_id_for_kind(str(target_rid or "").strip(), "pipeline")
 
 
 def _job_id_from_build_rid(build_rid: str) -> str | None:
-    text = str(build_rid or "").strip()
-    if not text:
-        return None
-    try:
-        kind, rid_id = parse_rid(text)
-    except ValueError:
-        return None
-    if kind != "build":
-        return None
-    return rid_id
+    return extract_build_job_id(build_rid)
 
 
 def _pipeline_id_from_build_job_id(job_id: str) -> str | None:

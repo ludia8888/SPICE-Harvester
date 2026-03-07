@@ -688,6 +688,27 @@ async def test_materialize_virtual_output_writes_manifest_artifact(worker: Pipel
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_materialize_virtual_output_rejects_dataset_write_settings(worker: PipelineWorker) -> None:
+    with pytest.raises(ValueError, match="virtual output does not support dataset write settings"):
+        await worker._materialize_virtual_output(
+            output_metadata={
+                "query_sql": "select id from source",
+                "refresh_mode": "scheduled",
+                "write_mode": "append_only_new_rows",
+            },
+            df=worker.spark.createDataFrame([(1,)], ["id"]),
+            artifact_bucket="bucket-virtual",
+            prefix="pipeline/virtual-output",
+            write_mode="overwrite",
+            file_prefix=None,
+            file_format="parquet",
+            partition_cols=None,
+            row_count_hint=1,
+        )
+
+
+@pytest.mark.unit
 def test_select_new_or_changed_rows_returns_new_and_changed(worker: PipelineWorker) -> None:
     incoming = worker.spark.createDataFrame(
         [

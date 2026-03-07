@@ -31,6 +31,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_db_name,
 )
+from shared.utils.instance_properties import iter_instance_properties
 
 logger = logging.getLogger(__name__)
 _ACTOR_HEADER_KEYS = ("X-User-ID", "X-User", "X-Actor")
@@ -161,14 +162,10 @@ def _extract_ts_property(source: Dict[str, Any], property_name: str) -> Optional
     or ``None`` if the property is not found / not a timeseries type.
     """
     properties = source.get("properties")
-    if isinstance(properties, list):
-        for prop in properties:
-            if not isinstance(prop, dict):
-                continue
-            name = str(prop.get("name") or "").strip()
-            prop_type = str(prop.get("type") or "").strip().lower()
-            if name == property_name and prop_type in {"timeseries", "time_series"}:
-                return str(prop.get("value") or "").strip() or None
+    for name, prop in iter_instance_properties(properties):
+        prop_type = str(prop.get("type") or "").strip().lower()
+        if name == property_name and prop_type in {"timeseries", "time_series"}:
+            return str(prop.get("value") or "").strip() or None
 
     # Also check the unindexed ``data`` field.
     data = source.get("data")

@@ -13,14 +13,7 @@ import httpx
 from fastapi import HTTPException, Request, status
 
 from bff.routers.objectify_deps import _require_db_role
-from bff.services.objectify_ops_service import (
-    _build_mapping_change_summary,
-    _compute_schema_hash_from_sample,
-    _extract_ontology_fields,
-    _extract_schema_columns,
-    _resolve_import_type,
-    _unwrap_data_payload,
-)
+from bff.services.objectify_ops_service import _build_mapping_change_summary
 from bff.schemas.objectify_requests import CreateMappingSpecRequest
 from bff.services.oms_client import OMSClient
 from shared.errors.error_types import ErrorCode, classified_http_exception
@@ -31,9 +24,14 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_class_id
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
-from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
 from shared.utils.key_spec import normalize_key_spec, normalize_object_type_key_spec
+from shared.utils.ontology_fields import extract_ontology_fields
 from shared.utils.object_type_backing import select_primary_backing_source
+from shared.utils.payload_utils import unwrap_data_payload
+from shared.utils.schema_columns import extract_schema_column_names
+from shared.utils.schema_hash import compute_schema_hash_from_sample
+from shared.utils.string_list_utils import normalize_string_list
 from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
@@ -146,9 +144,9 @@ async def create_mapping_spec(
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             if not schema_hash:
-                schema_hash = _compute_schema_hash_from_sample(schema_version.sample_json)
+                schema_hash = compute_schema_hash_from_sample(schema_version.sample_json)
                 if not schema_hash:
-                    schema_hash = _compute_schema_hash_from_sample(dataset.schema_json)
+                    schema_hash = compute_schema_hash_from_sample(dataset.schema_json)
             if not schema_hash:
                 raise classified_http_exception(status.HTTP_409_CONFLICT, "schema_hash is required for mapping spec", code=ErrorCode.OBJECTIFY_CONTRACT_ERROR)
             backing_version = await dataset_registry.get_or_create_backing_datasource_version(
@@ -157,9 +155,9 @@ async def create_mapping_spec(
                 schema_hash=schema_hash,
             )
 
-        schema_columns = _extract_schema_columns(schema_version.sample_json if schema_version else dataset.schema_json)
+        schema_columns = extract_schema_column_names(schema_version.sample_json if schema_version else dataset.schema_json)
         if not schema_columns:
-            schema_columns = _extract_schema_columns(dataset.schema_json)
+            schema_columns = extract_schema_column_names(dataset.schema_json)
         if not schema_columns:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
@@ -231,7 +229,7 @@ async def create_mapping_spec(
 
         ontology_branch = str((options or {}).get("ontology_branch") or dataset_branch or dataset.branch or "main").strip() or "main"
         ontology_payload = await oms_client.get_ontology(dataset.db_name, target_class_id, branch=ontology_branch)
-        prop_map, rel_map = _extract_ontology_fields(ontology_payload)
+        prop_map, rel_map = extract_ontology_fields(ontology_payload)
         if not prop_map:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
@@ -259,7 +257,7 @@ async def create_mapping_spec(
                 external_code=ExternalErrorCode.OBJECT_TYPE_CONTRACT_MISSING,
                 extra={"class_id": target_class_id},
             )
-        object_type_resource = _unwrap_data_payload(object_type_payload)
+        object_type_resource = unwrap_data_payload(object_type_payload)
         if isinstance(object_type_resource, dict):
             object_type_spec = object_type_resource.get("spec") if isinstance(object_type_resource.get("spec"), dict) else {}
         status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
@@ -370,12 +368,7 @@ async def create_mapping_spec(
                 explicit_pk.add(expected_pk)
 
         pk_targets = options.get("primary_key_targets") or options.get("target_primary_keys")
-        if isinstance(pk_targets, str):
-            pk_targets = [pk.strip() for pk in pk_targets.split(",") if pk.strip()]
-        if isinstance(pk_targets, list):
-            pk_targets = [str(pk).strip() for pk in pk_targets if str(pk).strip()]
-        else:
-            pk_targets = None
+        pk_targets = normalize_string_list(pk_targets) if pk_targets is not None else None
         if not pk_targets:
             pk_targets = object_type_pk_targets or sorted(explicit_pk)
         if object_type_pk_targets and set(pk_targets) != set(object_type_pk_targets):
@@ -498,7 +491,7 @@ async def create_mapping_spec(
             if is_relationship:
                 unsupported_types.append(target)
                 continue
-            import_type = _resolve_import_type(raw_type)
+            import_type = resolve_import_type(raw_type)
             if not import_type:
                 unsupported_types.append(target)
                 continue

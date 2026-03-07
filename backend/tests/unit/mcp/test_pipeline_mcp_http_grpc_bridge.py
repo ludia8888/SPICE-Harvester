@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -94,6 +95,18 @@ async def test_oms_json_timeout_maps_to_504(monkeypatch):
     assert payload.get("status_code") == 504
     assert "timed out" in str(payload.get("error", "")).lower()
     await target.close_oms_grpc_compat_client()
+
+
+def test_oms_admin_token_uses_settings_ssot(monkeypatch):
+    from mcp_servers import pipeline_mcp_http as target
+
+    monkeypatch.setattr(
+        target,
+        "get_settings",
+        lambda: SimpleNamespace(clients=SimpleNamespace(oms_client_token="settings-oms-token")),
+    )
+
+    assert target._oms_admin_token() == "settings-oms-token"
 
 
 def test_resolve_db_name_for_bff_call_priority():

@@ -4,7 +4,7 @@ Language utilities for SPICE HARVESTER
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from fastapi import Request
 import logging
@@ -259,6 +259,28 @@ def select_localized_text(value: Any, *, lang: str) -> str:
             return mapping[candidate]
     # Last resort: any available string
     return next(iter(mapping.values()), "")
+
+
+def first_localized_text(value: Any, *, preferred_langs: Sequence[str] = ("en", "ko")) -> Optional[str]:
+    """
+    Return the first non-empty localized string using a stable preferred-language order.
+
+    Unlike `select_localized_text`, this helper preserves the historical router behavior
+    of accepting only plain strings or localized-text dictionaries.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if not isinstance(value, dict):
+        return None
+
+    mapping = coerce_localized_text(value)
+    for lang in preferred_langs:
+        normalized = normalize_language(lang)
+        candidate = mapping.get(normalized)
+        if candidate:
+            return candidate
+    return next(iter(mapping.values()), None)
 
 
 class MultilingualText:

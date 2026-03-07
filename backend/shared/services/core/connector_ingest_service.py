@@ -266,10 +266,6 @@ class ConnectorIngestService:
             artifact_id=None,
             artifact_output_name=output_name,
         )
-        existing = await self._objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-        if existing:
-            return existing.job_id
-
         options = dict(mapping_spec.options or {})
         job = ObjectifyJob(
             job_id=str(uuid4()),
@@ -290,8 +286,8 @@ class ConnectorIngestService:
             allow_partial=bool(options.get("allow_partial")),
             options={**options, "actor_user_id": actor_user_id},
         )
-        await self._objectify_job_queue.publish(job, require_delivery=False)
-        return job.job_id
+        enqueue_result = await self._objectify_job_queue.publish(job, require_delivery=False)
+        return enqueue_result.record.job_id
 
     async def ingest_rows(
         self,

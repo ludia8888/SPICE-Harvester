@@ -18,7 +18,12 @@ import httpx
 from agent.models import AgentToolCall
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode
-from shared.foundry.rids import build_rid as build_foundry_rid, parse_rid
+from shared.foundry.payload_ids import (
+    extract_build_rid as extract_build_rid_from_payload,
+    extract_pipeline_id as extract_pipeline_id_from_payload,
+    extract_pipeline_job_id as extract_pipeline_job_id_from_payload,
+)
+from shared.foundry.rids import build_rid as build_foundry_rid, extract_build_job_id, parse_rid
 from shared.models.event_envelope import EventEnvelope
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.storage.event_store import EventStore
@@ -482,80 +487,19 @@ def _extract_command_status(payload: Any) -> Optional[str]:
 
 
 def _extract_pipeline_job_id(payload: Any) -> Optional[str]:
-    if not isinstance(payload, dict):
-        return None
-    for key in ("job_id", "jobId"):
-        value = payload.get(key)
-        if value:
-            return str(value)
-    data = payload.get("data")
-    if isinstance(data, dict):
-        for key in ("job_id", "jobId"):
-            value = data.get(key)
-            if value:
-                return str(value)
-    build_rid = _extract_build_rid(payload)
-    if build_rid:
-        return _extract_build_job_id_from_rid(build_rid)
-    return None
+    return extract_pipeline_job_id_from_payload(payload)
 
 
 def _extract_pipeline_id(payload: Any) -> Optional[str]:
-    if not isinstance(payload, dict):
-        return None
-    for key in ("pipeline_id", "pipelineId"):
-        value = payload.get(key)
-        if value:
-            return str(value)
-    data = payload.get("data")
-    if isinstance(data, dict):
-        for key in ("pipeline_id", "pipelineId"):
-            value = data.get(key)
-            if value:
-                return str(value)
-    return None
+    return extract_pipeline_id_from_payload(payload)
 
 
 def _extract_build_job_id_from_rid(build_rid: str) -> Optional[str]:
-    try:
-        kind, rid_id = parse_rid(str(build_rid or "").strip())
-    except ValueError:
-        return None
-    if kind != "build":
-        return None
-    return rid_id
+    return extract_build_job_id(build_rid)
 
 
 def _extract_build_rid(payload: Any) -> Optional[str]:
-    if not isinstance(payload, dict):
-        return None
-
-    candidates: list[Any] = []
-    for key in ("buildRid", "rid"):
-        if key in payload:
-            candidates.append(payload.get(key))
-    data = payload.get("data")
-    if isinstance(data, dict):
-        for key in ("buildRid", "rid"):
-            if key in data:
-                candidates.append(data.get(key))
-    result = payload.get("result")
-    if isinstance(result, dict):
-        for key in ("buildRid", "rid"):
-            if key in result:
-                candidates.append(result.get(key))
-
-    for candidate in candidates:
-        raw = str(candidate or "").strip()
-        if not raw:
-            continue
-        try:
-            kind, rid_id = parse_rid(raw)
-        except ValueError:
-            continue
-        if kind == "build":
-            return build_foundry_rid("build", rid_id)
-    return None
+    return extract_build_rid_from_payload(payload, keys=("buildRid", "rid"))
 
 
 def _extract_status_url(payload: Any) -> Optional[str]:

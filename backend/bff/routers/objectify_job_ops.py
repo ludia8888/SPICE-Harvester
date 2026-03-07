@@ -81,10 +81,6 @@ async def enqueue_objectify_job_for_mapping_spec(
         artifact_id=None,
         artifact_output_name=getattr(dataset, "name", None),
     )
-    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-    if existing:
-        return existing.job_id
-
     job_id = str(uuid4())
     options = dict(getattr(mapping_spec, "options", None) or {})
     if options_override:
@@ -111,5 +107,6 @@ async def enqueue_objectify_job_for_mapping_spec(
         allow_partial=bool(options.get("allow_partial")),
         options=options,
     )
-    await objectify_registry.enqueue_objectify_job(job=job)
-    return job_id
+    record = await objectify_registry.enqueue_objectify_job(job=job)
+    resolved_job_id = str(getattr(record, "job_id", "") or "").strip() or job_id
+    return resolved_job_id

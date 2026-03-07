@@ -1219,7 +1219,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "objectify_create_mapping_spec",
-                    "description": "Create a mapping specification that defines how dataset columns map to ontology class properties. Required before running objectify.",
+                    "description": "Create a PostgreSQL-backed mapping specification through the canonical BFF API. Required before running objectify unless the class already has an active mapping spec.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1260,16 +1260,16 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "objectify_run",
-                    "description": "Execute objectify transformation to convert dataset rows into ontology instances. Can use OMS backing_source (via target_class_id) or PostgreSQL mapping spec.",
+                    "description": "Execute objectify transformation through the canonical BFF API. When target_class_id is provided without mapping_spec_id, the runtime prefers an active PostgreSQL mapping spec and only falls back to legacy OMS backing_source mappings if no matching spec exists.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "dataset_id": {"type": "string", "description": "Dataset ID"},
                             "target_class_id": {
                                 "type": "string",
-                                "description": "Ontology class ID — resolves property_mappings from OMS backing_source (preferred over mapping_spec_id)",
+                                "description": "Ontology class ID. Used to resolve the active canonical mapping spec for that class when mapping_spec_id is omitted.",
                             },
-                            "mapping_spec_id": {"type": "string", "description": "PostgreSQL mapping spec ID (fallback if target_class_id not provided)"},
+                            "mapping_spec_id": {"type": "string", "description": "Explicit PostgreSQL mapping spec ID"},
                             "dataset_version_id": {"type": "string", "description": "Specific dataset version (optional, uses latest)"},
                             "db_name": {"type": "string", "description": "Database name"},
                             "max_rows": {"type": "integer", "description": "Max rows to process"},
@@ -1304,7 +1304,7 @@ class PipelineMCPServer:
                 },
                 {
                     "name": "ontology_register_object_type",
-                    "description": "Register an ontology class as an object_type resource for objectify. REQUIRED before running objectify. Creates the object_type contract with pk_spec and backing_source configuration.",
+                    "description": "Register an ontology class as an object type through the canonical BFF v2 contract API. REQUIRED before running objectify. When property_mappings are provided, this tool also creates a PostgreSQL mapping spec instead of storing mappings directly in OMS.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1332,7 +1332,7 @@ class PipelineMCPServer:
                                     },
                                     "required": ["source_field", "target_field"],
                                 },
-                                "description": "Column-to-property mappings (Foundry-style). When provided, stored in OMS backing_source — no separate create_mapping_spec needed.",
+                                "description": "Column-to-property mappings. When provided, the tool creates a canonical PostgreSQL mapping spec and links it to the object type contract.",
                             },
                             "target_field_types": {
                                 "type": "object",

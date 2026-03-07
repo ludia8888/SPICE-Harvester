@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Literal, Tuple, overload
+from typing import Iterable, Literal, Optional, Tuple
 
 
 FoundryRidKind = Literal[
@@ -59,3 +59,28 @@ def parse_rid(
             return kind, raw_id
 
     raise ValueError("rid prefix not allowed")
+
+
+def rid_id_for_kind(
+    rid: str,
+    expected_kind: str,
+    *,
+    allowed_prefixes: Iterable[str] = _DEFAULT_ALLOWED_PREFIXES,
+) -> Optional[str]:
+    try:
+        kind, rid_id = parse_rid(rid, allowed_prefixes=allowed_prefixes)
+    except ValueError:
+        return None
+    if kind != str(expected_kind or "").strip():
+        return None
+    return rid_id
+
+
+def extract_build_job_id(build_ref: str) -> Optional[str]:
+    value = str(build_ref or "").strip()
+    if not value:
+        return None
+    if value.startswith("build://"):
+        job_id = value[len("build://") :].strip()
+        return job_id or None
+    return rid_id_for_kind(value, "build")

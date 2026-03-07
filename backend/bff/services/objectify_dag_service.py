@@ -20,7 +20,6 @@ from fastapi import HTTPException, Request, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.services.objectify_ops_service import _extract_ontology_fields, _unwrap_data_payload
 from bff.schemas.objectify_requests import RunObjectifyDAGRequest
 from bff.services.oms_client import OMSClient
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
@@ -30,10 +29,13 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_branch_name, validate_class_id
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
+from shared.services.pipeline.pipeline_dataset_utils import build_branch_candidates
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.observability.tracing import trace_external_call
+from shared.utils.ontology_fields import extract_ontology_fields
 from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
+from shared.utils.payload_utils import unwrap_data_payload
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,7 @@ class _ObjectifyDagOrchestrator:
                     extra={"class_id": class_id},
                 ) from exc
             raise
-        resource = _unwrap_data_payload(resp)
+        resource = unwrap_data_payload(resp)
         spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
         return {"resource": resource, "spec": spec}
 
@@ -127,11 +129,7 @@ class _ObjectifyDagOrchestrator:
                 extra={"class_id": class_id},
             )
 
-        branch_candidates: list[str] = [dataset_branch]
-        if dataset_branch == "main":
-            branch_candidates.append("main")
-        elif dataset_branch == "main":
-            branch_candidates.append("main")
+        branch_candidates = build_branch_candidates(dataset_branch)
 
         mapping_spec = None
         resolved_branch = dataset_branch
@@ -168,7 +166,7 @@ class _ObjectifyDagOrchestrator:
 
     async def _fetch_relationship_targets(self, class_id: str) -> Dict[str, str]:
         ontology_payload = await self.oms_client.get_ontology(self.db_name, class_id, branch=self.branch)
-        _, rel_map = _extract_ontology_fields(ontology_payload)
+        _, rel_map = extract_ontology_fields(ontology_payload)
         targets: Dict[str, str] = {}
         for predicate, rel in rel_map.items():
             if not isinstance(rel, dict):
@@ -381,12 +379,6 @@ class _ObjectifyDagOrchestrator:
             artifact_id=None,
             artifact_output_name=mapping_spec.artifact_output_name,
         )
-        existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-        if existing:
-            self.job_ids_by_class[class_id] = existing.job_id
-            self.deduped_by_class[class_id] = True
-            return existing.job_id
-
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
         options.update(self.override_options)
@@ -418,10 +410,11 @@ class _ObjectifyDagOrchestrator:
             allow_partial=bool(options.get("allow_partial")),
             options=options,
         )
-        await self.job_queue.publish(job, require_delivery=False)
-        self.job_ids_by_class[class_id] = job_id
-        self.deduped_by_class[class_id] = False
-        return job_id
+        enqueue_result = await self.job_queue.publish(job, require_delivery=False)
+        resolved_job_id = enqueue_result.record.job_id
+        self.job_ids_by_class[class_id] = resolved_job_id
+        self.deduped_by_class[class_id] = not enqueue_result.created
+        return resolved_job_id
 
     @staticmethod
     def _extract_command_status(payload: Any) -> str:

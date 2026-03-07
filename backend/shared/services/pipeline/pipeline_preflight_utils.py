@@ -17,6 +17,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_MEDIA,
     OUTPUT_KIND_ONTOLOGY,
     OUTPUT_KIND_VIRTUAL,
+    find_virtual_dataset_style_settings,
     normalize_output_kind,
     resolve_ontology_output_semantics,
     validate_output_payload,
@@ -1034,20 +1035,7 @@ async def compute_pipeline_preflight(
                             }
                         )
             elif resolved_output_kind == OUTPUT_KIND_VIRTUAL:
-                unsupported_settings: List[str] = []
-                for canonical, aliases in (
-                    ("write_mode", ("write_mode", "writeMode")),
-                    ("primary_key_columns", ("primary_key_columns", "primaryKeyColumns")),
-                    ("post_filtering_column", ("post_filtering_column", "postFilteringColumn")),
-                    ("output_format", ("output_format", "outputFormat", "format")),
-                    ("partition_by", ("partition_by", "partitionBy")),
-                ):
-                    if _output_metadata_text(merged_output_payload, *aliases):
-                        unsupported_settings.append(canonical)
-                        continue
-                    raw = merged_output_payload.get(canonical)
-                    if isinstance(raw, list) and raw:
-                        unsupported_settings.append(canonical)
+                unsupported_settings = find_virtual_dataset_style_settings(merged_output_payload)
                 if unsupported_settings:
                     issues.append(
                         {
@@ -1056,7 +1044,7 @@ async def compute_pipeline_preflight(
                             "node_id": node_id,
                             "message": (
                                 "virtual output does not support dataset write settings: "
-                                + ", ".join(sorted(set(unsupported_settings)))
+                                + ", ".join(unsupported_settings)
                             ),
                             "output_kind": resolved_output_kind,
                         }

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from confluent_kafka import Producer
 
@@ -51,6 +51,7 @@ from shared.services.registries.processed_event_registry import ProcessedEventRe
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.utils.app_logger import configure_logging
+from shared.utils.connector_import_config import resolve_primary_key_column
 from shared.utils.time_utils import utcnow
 from shared.utils.worker_runner import run_component_lifecycle
 
@@ -383,9 +384,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             branch=branch,
             dataset_name=str(source_cfg.get("display_name") or f"{connector_kind}_{source_id}"),
             import_mode=import_mode,
-            primary_key_column=(
-                str(import_config.get("primaryKeyColumn") or import_config.get("primary_key_column") or "").strip() or None
-            ),
+            primary_key_column=resolve_primary_key_column(import_config),
             actor_user_id="connector_sync_worker",
             source_ref=f"{source_type}:{source_id}",
         )

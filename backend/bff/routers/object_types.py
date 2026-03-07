@@ -23,6 +23,10 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
+from shared.utils.key_spec import derive_key_spec_from_properties, normalize_key_spec
+from shared.utils.language import first_localized_text
+from shared.utils.ontology_fields import list_ontology_properties
+from shared.utils.payload_utils import extract_payload_object, extract_payload_rows, unwrap_data_payload
 
 logger = logging.getLogger(__name__)
 
@@ -39,50 +43,23 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
 
 
 def _unwrap_data(payload: Any) -> Dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-    data = payload.get("data")
-    if isinstance(data, dict):
-        return data
-    return payload
+    return unwrap_data_payload(payload)
 
 
 def _extract_resources(payload: Any) -> List[Dict[str, Any]]:
-    data = _unwrap_data(payload)
-    resources = data.get("resources") if isinstance(data, dict) else None
-    if not isinstance(resources, list):
-        return []
-    return [entry for entry in resources if isinstance(entry, dict)]
+    return extract_payload_rows(payload, key="resources")
 
 
 def _extract_resource(payload: Any) -> Dict[str, Any]:
-    data = _unwrap_data(payload)
-    if isinstance(data, dict):
-        return data
-    return {}
+    return extract_payload_object(payload)
 
 
 def _localized_text(value: Any) -> Optional[str]:
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, dict):
-        for key in ("en", "ko"):
-            key_value = value.get(key)
-            if isinstance(key_value, str) and key_value.strip():
-                return key_value.strip()
-        for key_value in value.values():
-            if isinstance(key_value, str) and key_value.strip():
-                return key_value.strip()
-    return None
+    return first_localized_text(value)
 
 
 def _extract_ontology_properties(payload: Any) -> List[Dict[str, Any]]:
-    data = _unwrap_data(payload)
-    properties = data.get("properties") if isinstance(data, dict) else None
-    if not isinstance(properties, list):
-        return []
-    return [entry for entry in properties if isinstance(entry, dict)]
+    return list_ontology_properties(payload)
 
 
 def _normalize_foundry_data_type(value: Any) -> Optional[str]:
@@ -130,11 +107,12 @@ def _to_foundry_data_type(value: Any) -> Optional[Dict[str, Any]]:
 def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) -> Dict[str, Any]:
     spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
     pk_spec = spec.get("pk_spec") if isinstance(spec.get("pk_spec"), dict) else {}
+    normalized_pk_spec = normalize_key_spec(pk_spec)
     metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
     class_api_name = str(resource.get("id") or "").strip()
 
     primary_key = None
-    raw_primary_keys = pk_spec.get("primary_key")
+    raw_primary_keys = normalized_pk_spec.get("primary_key") or []
     if isinstance(raw_primary_keys, list):
         for value in raw_primary_keys:
             candidate = str(value or "").strip()
@@ -143,7 +121,7 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
                 break
 
     title_property = None
-    raw_title_keys = pk_spec.get("title_key")
+    raw_title_keys = normalized_pk_spec.get("title_key") or []
     if isinstance(raw_title_keys, list):
         for value in raw_title_keys:
             candidate = str(value or "").strip()
@@ -151,8 +129,7 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
                 title_property = candidate
                 break
 
-    inferred_primary_keys: List[str] = []
-    inferred_title_keys: List[str] = []
+    normalized_properties: List[Dict[str, Any]] = []
     properties: Dict[str, Dict[str, Any]] = {}
     for prop in _extract_ontology_properties(ontology_payload):
         api_name = str(prop.get("name") or prop.get("id") or "").strip()
@@ -174,18 +151,7 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
         required = prop.get("required")
         if isinstance(required, bool):
             item["required"] = required
-
-        is_primary = prop.get("primary_key")
-        if is_primary is None:
-            is_primary = prop.get("primaryKey")
-        if bool(is_primary):
-            inferred_primary_keys.append(api_name)
-
-        is_title = prop.get("title_key")
-        if is_title is None:
-            is_title = prop.get("titleKey")
-        if bool(is_title):
-            inferred_title_keys.append(api_name)
+        normalized_properties.append({**prop, "name": api_name})
 
         prop_status = str(prop.get("status") or "ACTIVE").strip().upper()
         if prop_status:
@@ -194,6 +160,10 @@ def _to_foundry_object_type(resource: Dict[str, Any], *, ontology_payload: Any) 
         if prop_rid:
             item["rid"] = prop_rid
         properties[api_name] = item
+
+    derived_pk_spec = derive_key_spec_from_properties(normalized_properties)
+    inferred_primary_keys = derived_pk_spec.get("primary_key") or []
+    inferred_title_keys = derived_pk_spec.get("title_key") or []
 
     out: Dict[str, Any] = {
         "apiName": class_api_name,

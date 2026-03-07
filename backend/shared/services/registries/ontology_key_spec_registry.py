@@ -21,31 +21,9 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.utils.json_utils import json_default
+from shared.utils.key_spec import normalize_key_columns
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_str_list(values: Any) -> List[str]:
-    if values is None:
-        return []
-    if isinstance(values, str):
-        values = [v.strip() for v in values.split(",")]
-    if not isinstance(values, list):
-        return []
-    out: List[str] = []
-    seen: set[str] = set()
-    for raw in values:
-        if raw is None:
-            continue
-        text = str(raw).strip()
-        if not text:
-            continue
-        # Preserve order, avoid accidental duplicates.
-        if text in seen:
-            continue
-        seen.add(text)
-        out.append(text)
-    return out
 
 @dataclass(frozen=True)
 class OntologyKeySpec:
@@ -126,8 +104,8 @@ class OntologyKeySpecRegistry:
         title_key: Any,
     ) -> OntologyKeySpec:
         await self.ensure_schema()
-        pk = _normalize_str_list(primary_key)
-        title = _normalize_str_list(title_key)
+        pk = normalize_key_columns(primary_key)
+        title = normalize_key_columns(title_key)
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(

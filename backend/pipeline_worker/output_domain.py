@@ -22,6 +22,7 @@ from shared.services.pipeline.output_plugins import (
     OUTPUT_KIND_VIRTUAL,
     normalize_output_kind,
     resolve_ontology_output_semantics,
+    validate_output_payload,
 )
 from shared.utils.s3_uri import build_s3_uri
 from shared.utils.time_utils import utcnow
@@ -382,33 +383,11 @@ class PipelineOutputDomain:
         row_count_hint: Optional[int],
     ) -> str:
         worker = self._worker
+        validation_errors = validate_output_payload(kind=OUTPUT_KIND_VIRTUAL, payload=output_metadata)
+        if validation_errors:
+            raise ValueError(validation_errors[0])
         query_sql = str(output_metadata.get("query_sql") or output_metadata.get("querySql") or "").strip()
         refresh_mode = str(output_metadata.get("refresh_mode") or output_metadata.get("refreshMode") or "").strip().lower()
-        if not query_sql:
-            raise ValueError("virtual output requires query_sql")
-        if refresh_mode not in {"on_read", "scheduled"}:
-            raise ValueError("virtual output refresh_mode must be one of: on_read|scheduled")
-        dataset_style_keys = [
-            key
-            for key in (
-                "write_mode",
-                "writeMode",
-                "primary_key_columns",
-                "primaryKeyColumns",
-                "post_filtering_column",
-                "postFilteringColumn",
-                "output_format",
-                "outputFormat",
-                "partition_by",
-                "partitionBy",
-            )
-            if output_metadata.get(key) not in (None, "", [])
-        ]
-        if dataset_style_keys:
-            raise ValueError(
-                "virtual output does not support dataset write settings: "
-                + ", ".join(sorted(set(dataset_style_keys)))
-            )
         if not worker.storage:
             raise RuntimeError("Storage service not available")
         await worker.storage.create_bucket(artifact_bucket)

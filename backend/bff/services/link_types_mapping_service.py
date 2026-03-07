@@ -31,30 +31,14 @@ from shared.services.registries.dataset_registry_get_or_create import get_or_cre
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_object_type_key_spec
-from shared.utils.payload_utils import unwrap_data_payload
 from shared.utils.schema_columns import (
-    extract_schema_columns as _extract_schema_columns_raw,
-    extract_schema_type_map as _extract_schema_type_map_raw,
+    extract_schema_type_map,
 )
 from shared.utils.schema_hash import compute_schema_hash_from_payload
 # NOTE: Palantir Foundry style — type compatibility checks removed.
 # Type coercion is done at objectify/write time.
 from shared.utils.string_list_utils import normalize_string_list
 from shared.observability.tracing import trace_external_call, trace_db_operation
-
-
-def extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
-    return _extract_schema_columns_raw(schema)
-
-
-def extract_schema_types(schema: Any) -> Dict[str, str]:
-    return _extract_schema_type_map_raw(schema, normalizer=normalize_schema_type)
-
-
-def compute_schema_hash(schema: Any) -> Optional[str]:
-    return compute_schema_hash_from_payload(schema)
-
-
 def build_join_schema(
     *,
     source_key_column: str,
@@ -70,34 +54,6 @@ def build_join_schema(
     }
 
 
-def extract_ontology_properties(payload: Any) -> Dict[str, Dict[str, Any]]:
-    data = unwrap_data_payload(payload)
-    props = data.get("properties") if isinstance(data, dict) else None
-    output: Dict[str, Dict[str, Any]] = {}
-    if isinstance(props, list):
-        for prop in props:
-            if not isinstance(prop, dict):
-                continue
-            name = str(prop.get("name") or "").strip()
-            if name:
-                output[name] = prop
-    return output
-
-
-def extract_ontology_relationships(payload: Any) -> Dict[str, Dict[str, Any]]:
-    data = unwrap_data_payload(payload)
-    rels = data.get("relationships") if isinstance(data, dict) else None
-    output: Dict[str, Dict[str, Any]] = {}
-    if isinstance(rels, list):
-        for rel in rels:
-            if not isinstance(rel, dict):
-                continue
-            predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
-            if predicate:
-                output[predicate] = rel
-    return output
-
-
 def normalize_spec_type(value: str) -> str:
     return str(value or "").strip().lower()
 
@@ -107,12 +63,6 @@ def normalize_policy(value: Optional[str], *, default: str) -> str:
     if raw not in {"FAIL", "WARN", "DEDUP"}:
         return default
     return raw
-
-
-def normalize_pk_fields(value: Any) -> List[str]:
-    return normalize_string_list(value)
-
-
 @trace_external_call("bff.link_types_mapping.resolve_object_type_contract")
 async def resolve_object_type_contract(
     *,
@@ -153,7 +103,7 @@ async def resolve_dataset_and_version(
         version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
     if not version:
         raise classified_http_exception(status.HTTP_409_CONFLICT, "Dataset version is required", code=ErrorCode.CONFLICT)
-    schema_hash = compute_schema_hash(version.sample_json or dataset.schema_json)
+    schema_hash = compute_schema_hash_from_payload(version.sample_json or dataset.schema_json)
     if not schema_hash:
         raise classified_http_exception(status.HTTP_409_CONFLICT, "schema_hash is required for relationship spec", code=ErrorCode.CONFLICT)
     return dataset, version, schema_hash
@@ -235,7 +185,7 @@ async def ensure_join_dataset(
     if not version:
         raise classified_http_exception(status.HTTP_409_CONFLICT, "Join dataset version is required", code=ErrorCode.CONFLICT)
 
-    schema_hash = compute_schema_hash(version.sample_json or dataset.schema_json)
+    schema_hash = compute_schema_hash_from_payload(version.sample_json or dataset.schema_json)
     if not schema_hash:
         raise classified_http_exception(status.HTTP_409_CONFLICT, "schema_hash is required for relationship spec", code=ErrorCode.CONFLICT)
     return dataset, version, schema_hash
@@ -317,7 +267,10 @@ class _ForeignKeyMappingStrategy:
         )
         enforce_db_scope(ctx.request.headers, db_name=dataset.db_name)
 
-        schema_types = extract_schema_types(version.sample_json or dataset.schema_json)
+        schema_types = extract_schema_type_map(
+            version.sample_json or dataset.schema_json,
+            normalizer=normalize_schema_type,
+        )
         if fk_column not in schema_types:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "fk_column not found in dataset", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
@@ -329,7 +282,7 @@ class _ForeignKeyMappingStrategy:
         if target_pk_field not in ctx.target_props:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "target_pk_field missing from ontology", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
 
-        effective_source_pk_fields = normalize_pk_fields(fk_spec.source_pk_fields) or source_pk_fields
+        effective_source_pk_fields = normalize_string_list(fk_spec.source_pk_fields) or source_pk_fields
         for field in effective_source_pk_fields:
             if field not in schema_types:
                 raise classified_http_exception(status.HTTP_400_BAD_REQUEST, f"source pk column missing: {field}", code=ErrorCode.OBJECTIFY_MAPPING_ERROR)
@@ -440,7 +393,10 @@ class _JoinTableMappingStrategy:
             target_key_type=target_pk_type,
         )
 
-        schema_types = extract_schema_types(version.sample_json or dataset.schema_json)
+        schema_types = extract_schema_type_map(
+            version.sample_json or dataset.schema_json,
+            normalizer=normalize_schema_type,
+        )
         source_key_column = str(join_spec.source_key_column or "").strip()
         target_key_column = str(join_spec.target_key_column or "").strip()
         if source_key_column not in schema_types:

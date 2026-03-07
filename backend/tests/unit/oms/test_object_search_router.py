@@ -172,6 +172,34 @@ async def test_search_objects_v2_retries_with_properties_when_data_query_misses(
 
 
 @pytest.mark.asyncio
+async def test_search_objects_v2_flattens_id_only_property_entries(mock_es):
+    mock_es.search.return_value = {
+        "total": 1,
+        "hits": [
+            {
+                "instance_id": "order-1",
+                "class_id": "Order",
+                "properties": [
+                    {"id": "order_id", "value": "order-1"},
+                    {"name": "order_status", "value": "PENDING"},
+                ],
+            }
+        ],
+        "aggregations": {},
+    }
+
+    payload = {"pageSize": 10}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Order/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"][0]["order_id"] == "order-1"
+    assert body["data"][0]["order_status"] == "PENDING"
+
+
+@pytest.mark.asyncio
 async def test_search_objects_v2_collapses_duplicate_overlay_rows(mock_es):
     mock_es.search.return_value = {
         "total": 2,

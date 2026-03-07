@@ -55,9 +55,11 @@ from shared.services.registries.processed_event_registry_factory import create_p
 from shared.services.core.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix
 from shared.utils.import_type_normalization import normalize_import_target_type, resolve_import_type
-from shared.utils.key_spec import normalize_key_spec
+from shared.utils.key_spec import extract_payload_key_spec, normalize_key_spec, normalize_object_type_key_spec
+from shared.utils.ontology_fields import extract_ontology_fields as extract_ontology_fields_raw
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
+from shared.utils.payload_utils import unwrap_data_payload
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash_from_payload
 from shared.utils.blank_utils import is_blank_value
@@ -487,38 +489,11 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
     @staticmethod
     def _normalize_ontology_payload(payload: Any) -> Dict[str, Any]:
-        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-            return payload["data"]
-        if isinstance(payload, dict):
-            return payload
-        return {}
+        return unwrap_data_payload(payload)
 
     @classmethod
     def _extract_ontology_fields(cls, payload: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-        data = cls._normalize_ontology_payload(payload)
-        properties = data.get("properties") if isinstance(data, dict) else None
-        relationships = data.get("relationships") if isinstance(data, dict) else None
-
-        prop_map: Dict[str, Dict[str, Any]] = {}
-        if isinstance(properties, list):
-            for prop in properties:
-                if not isinstance(prop, dict):
-                    continue
-                name = str(prop.get("name") or "").strip()
-                if not name:
-                    continue
-                prop_map[name] = prop
-
-        rel_map: Dict[str, Dict[str, Any]] = {}
-        if isinstance(relationships, list):
-            for rel in relationships:
-                if not isinstance(rel, dict):
-                    continue
-                predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
-                if predicate:
-                    rel_map[predicate] = rel
-
-        return prop_map, rel_map
+        return extract_ontology_fields_raw(payload)
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
@@ -682,34 +657,8 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
     def _extract_ontology_pk_targets(self, payload: Any) -> List[str]:
         """Extract ontology-declared primaryKey fields in order (best-effort)."""
         data = self._normalize_ontology_payload(payload)
-        meta = data.get("metadata") if isinstance(data, dict) else None
-        if isinstance(meta, dict):
-            key_spec = meta.get("key_spec") or meta.get("keySpec") or meta.get("key_specification")
-            if isinstance(key_spec, dict):
-                raw_pk = (
-                    key_spec.get("primary_key")
-                    or key_spec.get("primaryKey")
-                    or key_spec.get("primaryKeys")
-                    or []
-                )
-                if isinstance(raw_pk, list):
-                    ordered = [str(v).strip() for v in raw_pk if str(v).strip()]
-                    if ordered:
-                        return ordered
-        props = data.get("properties") if isinstance(data, dict) else None
-        out: List[str] = []
-        seen: set[str] = set()
-        if isinstance(props, list):
-            for prop in props:
-                if not isinstance(prop, dict):
-                    continue
-                if not bool(prop.get("primary_key") or prop.get("primaryKey")):
-                    continue
-                name = str(prop.get("name") or "").strip()
-                if name and name not in seen:
-                    seen.add(name)
-                    out.append(name)
-        return out
+        primary_key, _ = extract_payload_key_spec(data)
+        return primary_key
 
     @staticmethod
     def _map_mappings_by_target(mappings: List[FieldMapping]) -> Dict[str, List[str]]:
@@ -888,15 +837,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                     ]
                 },
             )
-        # Resolve pk_spec: prefer explicit pk_spec, fallback to properties-level flags
-        raw_pk_spec = object_type_spec.get("pk_spec") or {}
-        if not raw_pk_spec:
-            _props = object_type_spec.get("properties") or []
-            _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
-            _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
-            if _pk_cols or _tk_cols:
-                raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
-        object_type_key_spec = normalize_key_spec(raw_pk_spec, columns=list(prop_map.keys()))
+        object_type_key_spec = normalize_object_type_key_spec(
+            object_type_spec,
+            columns=list(prop_map.keys()),
+        )
         object_type_pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
         object_type_title_targets = [str(v).strip() for v in object_type_key_spec.get("title_key") or [] if str(v).strip()]
         object_type_unique_keys = [
@@ -3476,7 +3420,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 {"input_rows": 0},
             )
 
-        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        object_type_key_spec = normalize_object_type_key_spec(
+            object_type_spec,
+            columns=list(prop_map.keys()),
+        )
         pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
         if not pk_targets:
             await _fail_link(

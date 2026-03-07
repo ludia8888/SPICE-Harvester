@@ -1,21 +1,14 @@
 """Helpers for normalizing link-type resources into Foundry v2 shapes."""
 
+from shared.utils.language import first_localized_text
+from shared.utils.payload_utils import extract_payload_rows, unwrap_data_payload
 
 def _unwrap_data(payload):
-    if not isinstance(payload, dict):
-        return {}
-    data = payload.get("data")
-    if isinstance(data, dict):
-        return data
-    return payload
+    return unwrap_data_payload(payload)
 
 
 def _extract_resources(payload):
-    data = _unwrap_data(payload)
-    resources = data.get("resources") if isinstance(data, dict) else None
-    if not isinstance(resources, list):
-        return []
-    return [entry for entry in resources if isinstance(entry, dict)]
+    return extract_payload_rows(payload, key="resources")
 
 
 def _normalize_object_ref(raw):
@@ -34,18 +27,7 @@ def _normalize_object_ref(raw):
 
 
 def _localized_text(value):
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, dict):
-        for key in ("en", "ko"):
-            key_value = value.get(key)
-            if isinstance(key_value, str) and key_value.strip():
-                return key_value.strip()
-        for key_value in value.values():
-            if isinstance(key_value, str) and key_value.strip():
-                return key_value.strip()
-    return None
+    return first_localized_text(value)
 
 
 def _map_cardinality(raw):

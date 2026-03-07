@@ -3837,9 +3837,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             artifact_id=None,
             artifact_output_name=resolved_output_name,
         )
-        existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-        if existing:
-            return existing.job_id
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
         # OMS-sourced specs: don't store "oms:..." in PostgreSQL uuid column
@@ -3865,10 +3862,11 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         )
         try:
             if self.objectify_job_queue:
-                await self.objectify_job_queue.publish(job, require_delivery=False)
+                enqueue_result = await self.objectify_job_queue.publish(job, require_delivery=False)
+                return enqueue_result.record.job_id
         except Exception as exc:
             logger.warning("Failed to enqueue objectify job %s: %s", job_id, exc)
-        return job_id
+        return None
 
     async def _maybe_enqueue_relationship_jobs(self, *, dataset, version) -> List[str]:
         if not self.objectify_registry or not self.dataset_registry:
@@ -3951,10 +3949,6 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
                 artifact_id=None,
                 artifact_output_name=dataset.name,
             )
-            existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-            if existing:
-                job_ids.append(existing.job_id)
-                continue
             job_id = str(uuid4())
             options = dict(mapping_spec.options or {})
             job = ObjectifyJob(
@@ -3977,8 +3971,8 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             )
             try:
                 if self.objectify_job_queue:
-                    await self.objectify_job_queue.publish(job, require_delivery=False)
-                job_ids.append(job_id)
+                    enqueue_result = await self.objectify_job_queue.publish(job, require_delivery=False)
+                    job_ids.append(enqueue_result.record.job_id)
             except Exception as exc:
                 logger.warning("Failed to enqueue relationship job %s: %s", job_id, exc)
 

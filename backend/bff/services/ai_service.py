@@ -41,6 +41,7 @@ from shared.observability.request_context import get_correlation_id, get_request
 from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_db_name
 from shared.services.storage.redis_service import RedisService
 from shared.services.agent.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
+from shared.utils.ontology_fields import extract_ontology_relationships, list_ontology_properties
 from shared.utils.token_count import approx_token_count_json as _approx_token_count
 from shared.utils.language import detect_language_from_text, get_accept_language, normalize_language
 from shared.utils.llm_safety import digest_for_audit, mask_pii, sample_items
@@ -584,10 +585,8 @@ async def _load_schema_context(
         class_label = str(item.get("label") or item.get("@label") or item.get("display_label") or "").strip()
 
         props: List[Dict[str, str]] = []
-        for prop in (item.get("properties") or [])[:max_properties_per_class]:
-            if not isinstance(prop, dict):
-                continue
-            name = str(prop.get("name") or "").strip()
+        for prop in list_ontology_properties(item)[:max_properties_per_class]:
+            name = str(prop.get("name") or prop.get("id") or "").strip()
             if not name:
                 continue
             label = str(prop.get("display_label") or prop.get("label") or name).strip()
@@ -595,10 +594,8 @@ async def _load_schema_context(
             props.append({"name": name, "label": label, "type": ptype})
 
         rels: List[Dict[str, str]] = []
-        for rel in (item.get("relationships") or [])[:max_relationships_per_class]:
-            if not isinstance(rel, dict):
-                continue
-            predicate = str(rel.get("predicate") or "").strip()
+        for rel in list(extract_ontology_relationships(item).values())[:max_relationships_per_class]:
+            predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
             target = str(rel.get("target") or "").strip()
             if not predicate or not target:
                 continue

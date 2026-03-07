@@ -42,6 +42,18 @@ _ES_HIT_SINGLE = {
     ],
 }
 
+_ES_HIT_SINGLE_ID_ONLY = {
+    "instance_id": "emp-001",
+    "class_id": "Employee",
+    "properties": [
+        {
+            "id": "resume",
+            "value": json.dumps(_ATTACHMENT_META),
+            "type": "attachment",
+        },
+    ],
+}
+
 _MULTI_ATTACHMENTS = [
     _ATTACHMENT_META,
     {
@@ -150,6 +162,22 @@ async def test_list_property_attachments_single(mock_es):
     assert body["type"] == "single"
     assert body["rid"] == "ri.attachments.main.attachment.aaaa-bbbb-cccc"
     assert body["filename"] == "report.pdf"
+
+
+@pytest.mark.asyncio
+async def test_list_property_attachments_supports_id_only_property_entries(mock_es):
+    mock_es.search = AsyncMock(return_value={"total": 1, "hits": [_ES_HIT_SINGLE_ID_ONLY]})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Employee/emp-001/attachments/resume",
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "single"
+    assert body["rid"] == "ri.attachments.main.attachment.aaaa-bbbb-cccc"
 
 
 @pytest.mark.asyncio

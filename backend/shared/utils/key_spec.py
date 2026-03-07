@@ -42,6 +42,14 @@ def _dedupe(values: List[str]) -> List[str]:
     return output
 
 
+def _property_flag(item: Dict[str, Any], snake_key: str, camel_key: str) -> bool:
+    return bool(item.get(snake_key) or item.get(camel_key))
+
+
+def _property_name(item: Dict[str, Any]) -> str:
+    return str(item.get("name") or item.get("id") or "").strip()
+
+
 def normalize_key_columns(value: Any) -> List[str]:
     if value is None:
         return []
@@ -94,14 +102,14 @@ def derive_key_spec_from_properties(properties: Any) -> Dict[str, Any]:
         return {}
 
     primary_key = [
-        str(item.get("name")).strip()
+        _property_name(item)
         for item in properties
-        if isinstance(item, dict) and item.get("primary_key") and str(item.get("name") or "").strip()
+        if isinstance(item, dict) and _property_flag(item, "primary_key", "primaryKey") and _property_name(item)
     ]
     title_key = [
-        str(item.get("name")).strip()
+        _property_name(item)
         for item in properties
-        if isinstance(item, dict) and item.get("title_key") and str(item.get("name") or "").strip()
+        if isinstance(item, dict) and _property_flag(item, "title_key", "titleKey") and _property_name(item)
     ]
     if not primary_key and not title_key:
         return {}
@@ -111,6 +119,25 @@ def derive_key_spec_from_properties(properties: Any) -> Dict[str, Any]:
     }
 
 
+def extract_payload_key_spec(payload: Any) -> tuple[List[str], List[str]]:
+    if not isinstance(payload, dict):
+        return [], []
+
+    derived = derive_key_spec_from_properties(payload.get("properties"))
+    derived_primary = list(derived.get("primary_key") or [])
+    derived_title = list(derived.get("title_key") or [])
+    if derived_primary or derived_title:
+        return derived_primary, derived_title
+
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    raw_key_spec = metadata.get("key_spec") or metadata.get("keySpec") or metadata.get("key_specification")
+    if not isinstance(raw_key_spec, dict):
+        return [], []
+
+    normalized = normalize_key_spec(raw_key_spec)
+    return list(normalized.get("primary_key") or []), list(normalized.get("title_key") or [])
+
+
 def normalize_object_type_key_spec(
     spec: Optional[Dict[str, Any]],
     *,
@@ -118,6 +145,8 @@ def normalize_object_type_key_spec(
 ) -> Dict[str, Any]:
     payload = spec or {}
     raw_key_spec = payload.get("pk_spec") if isinstance(payload, dict) else None
+    if not raw_key_spec and isinstance(payload, dict):
+        raw_key_spec = payload.get("pkSpec")
     if not raw_key_spec and isinstance(payload, dict):
         raw_key_spec = derive_key_spec_from_properties(payload.get("properties"))
     return normalize_key_spec(raw_key_spec if isinstance(raw_key_spec, dict) else {}, columns=columns)

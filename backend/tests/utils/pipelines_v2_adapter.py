@@ -6,13 +6,13 @@ import os
 import re
 import time
 from datetime import date, datetime
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 
-from shared.foundry.rids import build_rid, parse_rid
+from shared.foundry.rids import build_rid, extract_build_job_id, parse_rid
 from shared.models.pipeline_job import PipelineJob
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -61,10 +61,10 @@ def _extract_dataset_id(dataset_rid: str) -> str:
 
 
 def _build_job_id_from_build_rid(build_rid: str) -> str:
-    kind, rid_id = parse_rid(str(build_rid or "").strip())
-    if kind != "build":
+    job_id = extract_build_job_id(build_rid)
+    if not job_id:
         raise ValueError("buildRid must be build kind")
-    return rid_id
+    return job_id
 
 
 def _rows_to_csv_bytes(*, rows: list[dict[str, Any]], schema_json: dict[str, Any] | None) -> bytes:
@@ -1029,8 +1029,6 @@ class PipelinesV2AdapterClient:
         parsed = urlsplit(url)
         path = parsed.path
         payload = kwargs.get("json") if isinstance(kwargs.get("json"), dict) else {}
-        headers = kwargs.get("headers")
-
         update_match = re.fullmatch(r"/api/v1/pipelines/([^/]+)", path)
         if update_match:
             pipeline_id = update_match.group(1)

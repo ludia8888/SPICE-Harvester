@@ -107,9 +107,6 @@ async def _maybe_enqueue_objectify_job(
         artifact_id=None,
         artifact_output_name=resolved_output_name,
     )
-    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-    if existing:
-        return existing.job_id
     job_id = str(uuid4())
     job = ObjectifyJob(
         job_id=job_id,
@@ -133,5 +130,5 @@ async def _maybe_enqueue_objectify_job(
             "actor_user_id": actor_user_id,
         },
     )
-    await job_queue.publish(job, require_delivery=False)
-    return job_id
+    enqueue_result = await job_queue.publish(job, require_delivery=False)
+    return enqueue_result.record.job_id

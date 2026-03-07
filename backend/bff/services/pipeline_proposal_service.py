@@ -22,6 +22,7 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.registries.pipeline_registry import PipelineMergeNotSupportedError
 from shared.services.storage.lakefs_client import LakeFSConflictError
 from shared.utils.schema_hash import compute_schema_hash
+from shared.utils.string_list_utils import normalize_string_list
 from shared.utils.time_utils import utcnow
 from shared.observability.tracing import trace_db_operation
 
@@ -40,30 +41,7 @@ def _normalize_ontology_bundle(*, ontology_meta: dict[str, Any], build_branch: s
 
 
 def normalize_mapping_spec_ids(raw: Any) -> list[str]:
-    if raw is None:
-        return []
-    values: list[str] = []
-    if isinstance(raw, str):
-        raw = raw.split(",") if "," in raw else [raw]
-    if isinstance(raw, list):
-        for item in raw:
-            if item is None:
-                continue
-            value = str(item).strip()
-            if value:
-                values.append(value)
-    else:
-        value = str(raw).strip()
-        if value:
-            values.append(value)
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        deduped.append(value)
-    return deduped
+    return normalize_string_list(raw, dedupe=True)
 
 
 async def _build_proposal_bundle(

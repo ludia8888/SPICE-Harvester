@@ -27,14 +27,14 @@
 | `detect_foreign_keys` | `db_name, dataset_id` | Detect potential FK relationships in a dataset based on naming conventions and value overlap analysis. Returns detected FK patterns with confidence scores. |
 | `get_objectify_watermark` | `mapping_spec_id` | Get the current watermark state for a mapping spec. Shows last processed watermark value and timestamp. |
 | `list_schema_changes` | `db_name, subject_type, subject_id` | List recent schema changes for a dataset or mapping spec. Shows drift history with severity and change details. |
-| `objectify_create_mapping_spec` | `dataset_id, target_class_id, mappings, db_name` | Create a mapping specification that defines how dataset columns map to ontology class properties. Required before running objectify. |
+| `objectify_create_mapping_spec` | `dataset_id, target_class_id, mappings, db_name` | Create a PostgreSQL-backed mapping specification through the canonical BFF API. Required before running objectify unless the class already has an active mapping spec. |
 | `objectify_get_status` | `job_id` | Get the status of an objectify job. |
 | `objectify_list_mapping_specs` | `dataset_id` | List existing mapping specifications for a dataset. |
-| `objectify_run` | `dataset_id, db_name` | Execute objectify transformation to convert dataset rows into ontology instances. Can use OMS backing_source (via target_class_id) or PostgreSQL mapping spec. |
+| `objectify_run` | `dataset_id, db_name` | Execute objectify transformation through the canonical BFF API. When target_class_id is provided without mapping_spec_id, the runtime prefers an active PostgreSQL mapping spec and only falls back to legacy OMS backing_source mappings if no matching spec exists. |
 | `objectify_suggest_mapping` | `dataset_id, target_class_id, db_name` | Suggest field mappings from dataset columns to ontology class properties. Uses schema matching and naming heuristics. Call this before creating a mapping spec. |
 | `objectify_wait` | `job_id` | Wait for an objectify job to complete. Polls the job status until completion, failure, or timeout. Returns final job status with results. |
 | `ontology_query_instances` | `db_name, class_id` | Query ontology instances by class type. Use this to verify objectify results by counting instances or retrieving sample data. Returns instance count and sample instances. |
-| `ontology_register_object_type` | `db_name, class_id, dataset_id, primary_key, title_key` | Register an ontology class as an object_type resource for objectify. REQUIRED before running objectify. Creates the object_type contract with pk_spec and backing_source configuration. |
+| `ontology_register_object_type` | `db_name, class_id, dataset_id, primary_key, title_key` | Register an ontology class as an object type through the canonical BFF v2 contract API. REQUIRED before running objectify. When property_mappings are provided, this tool also creates a PostgreSQL mapping spec instead of storing mappings directly in OMS. |
 | `preview_inspect` | `preview` | Inspect a preview sample and propose cleansing suggestions (deterministic). |
 | `trigger_incremental_objectify` | `db_name, mapping_spec_id` | Trigger objectify in incremental mode (watermark or delta). Processes only changed rows since last run. |
 

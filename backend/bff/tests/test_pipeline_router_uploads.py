@@ -62,6 +62,10 @@ async def test_maybe_enqueue_objectify_job():
 
         async def publish(self, job, *, require_delivery: bool = True):
             self.jobs.append(job)
+            return SimpleNamespace(
+                record=SimpleNamespace(job_id=job.job_id, status="ENQUEUE_REQUESTED"),
+                created=True,
+            )
 
     class FakeDatasetRegistry:
         async def record_gate_result(self, **kwargs):

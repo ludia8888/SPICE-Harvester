@@ -38,6 +38,8 @@ from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid
 from shared.observability.tracing import trace_endpoint
+from shared.utils.language import first_localized_text
+from shared.utils.payload_utils import extract_payload_object, extract_payload_rows
 from shared.security.database_access import DOMAIN_MODEL_ROLES, READ_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -49,6 +51,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
+from shared.utils.ontology_fields import list_ontology_properties
 from shared.utils.object_type_backing import list_backing_sources
 
 logger = logging.getLogger(__name__)
@@ -591,13 +594,7 @@ def _dedupe_rows_by_identity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             or row.get("class_id")
             or ""
         ).strip()
-        primary_key = str(
-            row.get("__primaryKey")
-            or row.get("primaryKey")
-            or row.get("instance_id")
-            or row.get("id")
-            or ""
-        ).strip()
+        primary_key = _resolve_source_primary_key_from_row(row) or ""
         if not object_type or not primary_key:
             deduped.append(row)
             continue
@@ -677,7 +674,7 @@ async def _resolve_search_around_target_primary_keys(
         if status_code == status.HTTP_404_NOT_FOUND:
             raise ValueError(f"LinkType not found: {link_type}") from exc
         raise
-    link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+    link_resource = _extract_ontology_resource(link_payload)
     if not isinstance(link_resource, dict):
         raise ValueError(f"LinkType not found: {link_type}")
 
@@ -1176,6 +1173,7 @@ def _project_row_with_required_fields(
 
 
 _MAX_ROWS_LOAD_ALL = 50_000
+_PRIMARY_KEY_VALUE_KEYS = ("__primaryKey", "primaryKey", "instance_id", "id")
 
 
 async def _load_all_rows_for_object_type(
@@ -1326,15 +1324,14 @@ def _resolve_source_primary_key_from_row(
     *,
     primary_key_field: str | None = None,
 ) -> str | None:
-    for key in ("__primaryKey", "primaryKey", "instance_id", "id"):
-        value = str(row.get(key) or "").strip()
+    for key in _PRIMARY_KEY_VALUE_KEYS:
+        value = _normalize_primary_key_text(row.get(key))
         if value:
             return value
     if primary_key_field:
-        value = _value_by_field(row, primary_key_field)
-        text = str(value or "").strip()
-        if text:
-            return text
+        value = _normalize_primary_key_text(_value_by_field(row, primary_key_field))
+        if value:
+            return value
     return None
 
 
@@ -1748,6 +1745,10 @@ def _strip_typed_ref(value: str) -> str:
     return text
 
 
+def _normalize_primary_key_text(value: Any) -> str:
+    return _strip_typed_ref(str(value or ""))
+
+
 def _iter_primary_key_values(value: Any):
     if value is None:
         return
@@ -1756,15 +1757,15 @@ def _iter_primary_key_values(value: Any):
             yield from _iter_primary_key_values(item)
         return
     if isinstance(value, dict):
-        for key in ("__primaryKey", "primaryKey", "id", "instance_id"):
+        for key in _PRIMARY_KEY_VALUE_KEYS:
             candidate = value.get(key)
             if candidate is None:
                 continue
-            text = _strip_typed_ref(str(candidate))
+            text = _normalize_primary_key_text(candidate)
             if text:
                 yield text
         return
-    text = _strip_typed_ref(str(value))
+    text = _normalize_primary_key_text(value)
     if text:
         yield text
 
@@ -2034,39 +2035,16 @@ def _extract_databases(payload: Any) -> list[dict[str, Any]]:
 
 
 def _extract_ontology_resource_rows(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict):
-        return []
-    data = payload.get("data")
-    container = data if isinstance(data, dict) else payload
-    rows = container.get("resources") if isinstance(container, dict) else None
-    if not isinstance(rows, list):
-        return []
-    return [row for row in rows if isinstance(row, dict)]
+    return extract_payload_rows(payload, key="resources")
 
 
 def _extract_ontology_resource(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return None
-    data = payload.get("data")
-    row = data if isinstance(data, dict) else payload
-    if not isinstance(row, dict):
-        return None
-    return row
+    row = extract_payload_object(payload)
+    return row or None
 
 
 def _localized_text(value: Any) -> str | None:
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, dict):
-        for key in ("en", "ko"):
-            item = value.get(key)
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-        for item in value.values():
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-    return None
+    return first_localized_text(value)
 
 
 def _to_foundry_named_metadata(resource: dict[str, Any]) -> dict[str, Any] | None:
@@ -2916,13 +2894,7 @@ def _extract_interface_names(resource: dict[str, Any]) -> list[str]:
 
 
 def _extract_ontology_properties_payload(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict):
-        return []
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    properties = data.get("properties") if isinstance(data, dict) else None
-    if not isinstance(properties, list):
-        return []
-    return [property_item for property_item in properties if isinstance(property_item, dict)]
+    return list_ontology_properties(payload)
 
 
 def _extract_shared_property_type_mapping(resource: dict[str, Any], *, ontology_payload: Any) -> dict[str, str]:
@@ -3232,7 +3204,7 @@ async def get_ontology_v2(
 
     try:
         payload = await oms_client.get_database(db_name)
-        row = payload.get("data") if isinstance(payload, dict) and isinstance(payload.get("data"), dict) else payload
+        row = extract_payload_object(payload)
         if not isinstance(row, dict):
             row = {"name": db_name}
         out = _to_foundry_ontology(row)
@@ -5243,7 +5215,7 @@ async def list_outgoing_link_types_v2(
                     resource_id=source_object_type,
                     branch=branch,
                 )
-                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                object_resource = _extract_ontology_resource(object_payload)
                 if isinstance(object_resource, dict):
                     derived_all = _derive_outgoing_link_types_from_relationships(
                         _extract_object_type_relationships(object_resource)
@@ -5349,7 +5321,7 @@ async def get_outgoing_link_type_v2(
                 resource_id=link_type,
                 branch=branch,
             )
-            resource = payload.get("data") if isinstance(payload, dict) else payload
+            resource = _extract_ontology_resource(payload)
             if isinstance(resource, dict):
                 mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source_object_type)
         except httpx.HTTPStatusError as exc:
@@ -5365,7 +5337,7 @@ async def get_outgoing_link_type_v2(
                     resource_id=source_object_type,
                     branch=branch,
                 )
-                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                object_resource = _extract_ontology_resource(object_payload)
                 if isinstance(object_resource, dict):
                     for rel in _extract_object_type_relationships(object_resource):
                         predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
@@ -5598,7 +5570,7 @@ async def get_incoming_link_type_v2(
             resource_id=link_type,
             branch=branch,
         )
-        resource = payload.get("data") if isinstance(payload, dict) else payload
+        resource = _extract_ontology_resource(payload)
         if not isinstance(resource, dict):
             return _not_found_error(
                 "LinkTypeNotFound",
@@ -6084,7 +6056,7 @@ async def load_object_set_links_v2(
                 parameters={"objectSet": "loadLinks", "linkType": link_type},
             )
 
-        link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+        link_resource = _extract_ontology_resource(link_payload)
         if not isinstance(link_resource, dict):
             return _not_found_error(
                 "LinkTypeNotFound",
@@ -6916,7 +6888,7 @@ async def list_linked_objects_v2(
                 resource_id=link_type,
                 branch=branch,
             )
-            link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+            link_resource = _extract_ontology_resource(link_payload)
             if isinstance(link_resource, dict):
                 link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
         except httpx.HTTPStatusError as exc:
@@ -6932,7 +6904,7 @@ async def list_linked_objects_v2(
                     resource_id=object_type,
                     branch=branch,
                 )
-                object_resource = object_payload.get("data") if isinstance(object_payload, dict) else object_payload
+                object_resource = _extract_ontology_resource(object_payload)
                 if isinstance(object_resource, dict):
                     for rel in _extract_object_type_relationships(object_resource):
                         predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
@@ -7204,7 +7176,7 @@ async def get_linked_object_v2(
             resource_id=link_type,
             branch=branch,
         )
-        link_resource = link_payload.get("data") if isinstance(link_payload, dict) else link_payload
+        link_resource = _extract_ontology_resource(link_payload)
         if not isinstance(link_resource, dict):
             return _not_found_error(
                 "LinkTypeNotFound",

@@ -37,6 +37,14 @@ _ES_HIT_WITH_TS = {
     ],
 }
 
+_ES_HIT_WITH_TS_ID_ONLY = {
+    "instance_id": "sensor-001",
+    "class_id": "Sensor",
+    "properties": [
+        {"id": "temperature", "value": "s3://timeseries-data/test_db/main/Sensor/sensor-001/temperature.json", "type": "timeseries"},
+    ],
+}
+
 
 @pytest.fixture
 def mock_es():
@@ -138,6 +146,21 @@ async def test_get_last_point_returns_latest_point(mock_es, mock_storage):
     body = resp.json()
     assert body["time"] == "2024-01-04T00:00:00Z"
     assert body["value"] == 25.7
+
+
+@pytest.mark.asyncio
+async def test_get_first_point_supports_id_only_property_entries(mock_es, mock_storage):
+    mock_es.search = AsyncMock(return_value={"total": 1, "hits": [_ES_HIT_WITH_TS_ID_ONLY]})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/firstPoint",
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["time"] == "2024-01-01T00:00:00Z"
 
 
 # ---------------------------------------------------------------------------

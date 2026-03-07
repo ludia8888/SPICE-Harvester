@@ -59,6 +59,7 @@ from shared.security.database_access import (
     upsert_database_owner,
 )
 from shared.utils.spice_event_ids import spice_event_id
+from shared.utils.key_spec import extract_payload_key_spec
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.worker_runner import run_worker_until_stopped
 from oms.services.ontology_resources import OntologyResourceService
@@ -150,34 +151,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         - Prefer explicit per-property flags (primaryKey/titleKey) to preserve order.
         - If flags are missing but payload.metadata.key_spec exists, use it as a fallback.
         """
-        props = payload.get("properties") or []
-        pk_fields: list[str] = []
-        title_fields: list[str] = []
-        if isinstance(props, list):
-            for item in props:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                if bool(item.get("primaryKey") or item.get("primary_key")):
-                    pk_fields.append(name)
-                if bool(item.get("titleKey") or item.get("title_key")):
-                    title_fields.append(name)
-
-        if pk_fields or title_fields:
-            return pk_fields, title_fields
-
-        meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-        key_spec = meta.get("key_spec") if isinstance(meta, dict) else None
-        if isinstance(key_spec, dict):
-            raw_pk = key_spec.get("primary_key") or key_spec.get("primaryKey") or []
-            raw_title = key_spec.get("title_key") or key_spec.get("titleKey") or []
-            if isinstance(raw_pk, list):
-                pk_fields = [str(v).strip() for v in raw_pk if str(v).strip()]
-            if isinstance(raw_title, list):
-                title_fields = [str(v).strip() for v in raw_title if str(v).strip()]
-        return pk_fields, title_fields
+        return extract_payload_key_spec(payload)
 
     @property
     def _uses_resource_registry_for_ontology(self) -> bool:

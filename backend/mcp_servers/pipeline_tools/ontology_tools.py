@@ -5,14 +5,23 @@ from typing import Any, Awaitable, Dict, Callable
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.tracing import trace_external_call
+from shared.utils.key_spec import normalize_key_columns
 from shared.utils.llm_safety import mask_pii
 
+from mcp_servers.feature_helpers import tool_error_from_upstream_response, unwrap_api_payload
 from mcp_servers.pipeline_mcp_errors import missing_required_params, tool_error
-from mcp_servers.pipeline_mcp_http import bff_json, oms_json
+from mcp_servers.pipeline_mcp_http import bff_json, bff_v2_json
 
 logger = logging.getLogger(__name__)
 
 ToolHandler = Callable[[Any, Dict[str, Any]], Awaitable[Any]]
+
+
+def _is_conflict_response(response: Dict[str, Any]) -> bool:
+    if int(response.get("status_code") or 0) == 409:
+        return True
+    message = str(response.get("error") or "").lower()
+    return "already exists" in message or "conflict" in message
 
 
 @trace_external_call("mcp.ontology_register_object_type")
@@ -36,16 +45,8 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             arguments,
         )
 
-    pk_list = (
-        [str(k).strip() for k in primary_key if str(k).strip()]
-        if isinstance(primary_key, list)
-        else [str(primary_key).strip()]
-    )
-    title_list = (
-        [str(k).strip() for k in title_key if str(k).strip()]
-        if isinstance(title_key, list)
-        else [str(title_key).strip()]
-    )
+    pk_list = normalize_key_columns(primary_key)
+    title_list = normalize_key_columns(title_key)
 
     if not pk_list:
         return tool_error("primary_key must be a non-empty list of field names")
@@ -53,68 +54,126 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
         return tool_error("title_key must be a non-empty list of field names")
 
     try:
-        # Build backing_source with optional Foundry-style property mappings
-        backing_source_spec: Dict[str, Any] = {"dataset_id": dataset_id}
-        if property_mappings and isinstance(property_mappings, list):
-            normalized = [
-                {"source_field": str(m.get("source_field", "")).strip(),
-                 "target_field": str(m.get("target_field", "")).strip()}
-                for m in property_mappings
-                if isinstance(m, dict) and str(m.get("source_field", "")).strip()
-                and str(m.get("target_field", "")).strip()
-            ]
-            if normalized:
-                backing_source_spec["property_mappings"] = normalized
-                backing_source_spec["mapping_version"] = 1
-                if target_field_types and isinstance(target_field_types, dict):
-                    backing_source_spec["target_field_types"] = target_field_types
-                if auto_sync is not None:
-                    backing_source_spec["auto_sync"] = bool(auto_sync)
-                else:
-                    backing_source_spec["auto_sync"] = True
+        normalized_mappings = [
+            {
+                "source_field": str(m.get("source_field", "")).strip(),
+                "target_field": str(m.get("target_field", "")).strip(),
+            }
+            for m in property_mappings
+            if isinstance(m, dict)
+            and str(m.get("source_field", "")).strip()
+            and str(m.get("target_field", "")).strip()
+        ] if isinstance(property_mappings, list) else []
+        auto_sync_value = bool(auto_sync) if auto_sync is not None else True
 
-        object_type_payload: Dict[str, Any] = {
-            "id": class_id,
-            "label": class_id,
-            "description": f"Object type contract for {class_id}",
-            "spec": {
-                "status": "ACTIVE",
-                "pk_spec": {"primary_key": pk_list, "title_key": title_list},
-                "backing_source": backing_source_spec,
-            },
+        create_payload: Dict[str, Any] = {
+            "apiName": class_id,
+            "status": "ACTIVE",
+            "pkSpec": {"primary_key": pk_list, "title_key": title_list},
+            "backingSource": {"kind": "dataset", "ref": dataset_id},
         }
-
-        resp = await oms_json(
+        response = await bff_v2_json(
             "POST",
-            f"/api/v1/database/{db_name}/ontology/resources/object_type",
+            f"/v2/ontologies/{db_name}/objectTypes",
+            db_name=db_name,
+            principal_id=None,
+            principal_type=None,
             params={"branch": branch},
-            json_body=object_type_payload,
+            json_body=create_payload,
             timeout_seconds=30.0,
         )
 
-        if resp.get("error") and (resp.get("status_code") == 409 or "409" in str(resp.get("error")) or "already exists" in str(resp.get("error")).lower()):
-            logger.info("object_type exists, updating with PUT db=%s class=%s", db_name, class_id)
-            resp = await oms_json(
-                "PUT",
-                f"/api/v1/database/{db_name}/ontology/resources/object_type/{class_id}",
+        if response.get("error") and _is_conflict_response(response):
+            logger.info("object_type exists, updating with PATCH db=%s class=%s", db_name, class_id)
+            response = await bff_v2_json(
+                "PATCH",
+                f"/v2/ontologies/{db_name}/objectTypes/{class_id}",
+                db_name=db_name,
+                principal_id=None,
+                principal_type=None,
                 params={"branch": branch},
-                json_body=object_type_payload,
+                json_body={
+                    "status": "ACTIVE",
+                    "pkSpec": {"primary_key": pk_list, "title_key": title_list},
+                    "backingSource": {"kind": "dataset", "ref": dataset_id},
+                },
                 timeout_seconds=30.0,
             )
 
-        if resp.get("error"):
-            payload = tool_error(
-                str(resp.get("error") or "OMS request failed"),
-                status_code=502,
-                code=ErrorCode.UPSTREAM_ERROR,
-                category=ErrorCategory.UPSTREAM,
+        if response.get("error"):
+            payload = tool_error_from_upstream_response(
+                response,
+                default_message="Failed to register object type",
                 context={"db_name": db_name, "class_id": class_id},
             )
             payload["db_name"] = db_name
             payload["class_id"] = class_id
             return payload
 
-        has_mappings = "property_mappings" in backing_source_spec
+        object_type_payload = unwrap_api_payload(response)
+        mapping_payload = None
+        if normalized_mappings:
+            mapping_request: Dict[str, Any] = {
+                "dataset_id": dataset_id,
+                "target_class_id": class_id,
+                "mappings": normalized_mappings,
+                "auto_sync": auto_sync_value,
+                "options": {"ontology_branch": branch},
+            }
+            if isinstance(target_field_types, dict) and target_field_types:
+                mapping_request["target_field_types"] = target_field_types
+            mapping_response = await bff_json(
+                "POST",
+                "/objectify/mapping-specs",
+                db_name=db_name,
+                principal_id=None,
+                principal_type=None,
+                json_body=mapping_request,
+                timeout_seconds=30.0,
+            )
+            if mapping_response.get("error"):
+                payload = tool_error_from_upstream_response(
+                    mapping_response,
+                    default_message="Object type contract created, but mapping spec creation failed",
+                    context={"db_name": db_name, "class_id": class_id, "dataset_id": dataset_id},
+                )
+                payload["partial_success"] = {"object_type": object_type_payload}
+                payload["db_name"] = db_name
+                payload["class_id"] = class_id
+                return payload
+
+            mapping_data = unwrap_api_payload(mapping_response)
+            mapping_payload = mapping_data.get("mapping_spec") if isinstance(mapping_data.get("mapping_spec"), dict) else None
+            if mapping_payload and str(mapping_payload.get("mapping_spec_id") or "").strip():
+                link_response = await bff_v2_json(
+                    "PATCH",
+                    f"/v2/ontologies/{db_name}/objectTypes/{class_id}",
+                    db_name=db_name,
+                    principal_id=None,
+                    principal_type=None,
+                    params={"branch": branch},
+                    json_body={
+                        "mappingSpecId": mapping_payload.get("mapping_spec_id"),
+                        "mappingSpecVersion": mapping_payload.get("version"),
+                    },
+                    timeout_seconds=30.0,
+                )
+                if link_response.get("error"):
+                    payload = tool_error_from_upstream_response(
+                        link_response,
+                        default_message="Object type and mapping spec created, but contract link update failed",
+                        context={"db_name": db_name, "class_id": class_id, "dataset_id": dataset_id},
+                    )
+                    payload["partial_success"] = {
+                        "object_type": object_type_payload,
+                        "mapping_spec": mapping_payload,
+                    }
+                    payload["db_name"] = db_name
+                    payload["class_id"] = class_id
+                    return payload
+                object_type_payload = unwrap_api_payload(link_response)
+
+        has_mappings = bool(normalized_mappings)
         result: Dict[str, Any] = {
             "status": "success",
             "message": f"Object type '{class_id}' registered successfully",
@@ -124,11 +183,16 @@ async def _ontology_register_object_type(_server: Any, arguments: Dict[str, Any]
             "primary_key": pk_list,
             "title_key": title_list,
             "has_property_mappings": has_mappings,
+            "object_type": object_type_payload,
         }
+        if mapping_payload:
+            result["mapping_spec_id"] = mapping_payload.get("mapping_spec_id")
+            result["mapping_spec_version"] = mapping_payload.get("version")
+            result["mapping_spec"] = mapping_payload
         if has_mappings:
             result["hint"] = (
-                "Property mappings are stored in OMS backing_source. "
-                "You can now run objectify_run directly with target_class_id — no separate create_mapping_spec needed."
+                "Object type contract and PostgreSQL mapping spec are now registered through the canonical BFF APIs. "
+                "You can run objectify_run with target_class_id or mapping_spec_id."
             )
         else:
             result["hint"] = (

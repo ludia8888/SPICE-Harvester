@@ -1887,6 +1887,343 @@ async def test_foundry_file_import_create_rejects_missing_selector_for_google_sh
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_foundry_file_import_execute_records_build_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    runs: dict[tuple[str, str], dict[str, Any]] = {}
+
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-fi-exec"): SimpleNamespace(
+                    source_id="conn-fi-exec",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                ),
+                ("postgresql_file_import", "fi-1"): SimpleNamespace(
+                    source_id="fi-1",
+                    source_type="postgresql_file_import",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-fi-exec",
+                        "display_name": "Orders file import",
+                        "import_mode": "SNAPSHOT",
+                        "file_import_config": {
+                            "type": "postgreSqlFileImportConfig",
+                            "query": "select 1 as id",
+                        },
+                    },
+                    created_at=None,
+                    updated_at=None,
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return SimpleNamespace(
+                target_db_name="sales_db",
+                target_branch="main",
+                target_class_label="Order",
+            )
+
+    class _PipelineRegistry:
+        def __init__(self) -> None:
+            self.pipelines: dict[str, Any] = {}
+
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return self.pipelines.get(pipeline_id)
+
+        async def create_pipeline(self, **kwargs: Any):  # noqa: ANN401
+            pipeline = SimpleNamespace(
+                pipeline_id=kwargs["pipeline_id"],
+                branch=kwargs.get("branch", "main"),
+            )
+            self.pipelines[kwargs["pipeline_id"]] = pipeline
+            return pipeline
+
+        async def get_run(self, *, pipeline_id: str, job_id: str):  # noqa: ANN001
+            return runs.get((pipeline_id, job_id))
+
+        async def record_run(self, **kwargs: Any):  # noqa: ANN401
+            runs[(kwargs["pipeline_id"], kwargs["job_id"])] = {
+                "pipeline_id": kwargs["pipeline_id"],
+                "job_id": kwargs["job_id"],
+                "status": kwargs["status"],
+                "mode": kwargs["mode"],
+                "output_json": kwargs.get("output_json") or {},
+                "started_at": kwargs.get("started_at"),
+                "finished_at": kwargs.get("finished_at"),
+            }
+
+    async def _fake_start_pipelining_file_import(**kwargs: Any):  # noqa: ANN401
+        _ = kwargs
+        return {"status": "success", "data": {"dataset": {"dataset_id": "dataset-fi-1"}}}
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        foundry_connectivity_v2.data_connector_pipelining_service,
+        "start_pipelining_file_import",
+        _fake_start_pipelining_file_import,
+    )
+
+    app = _build_test_app()
+    pipeline_registry = _PipelineRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: pipeline_registry
+    app.dependency_overrides[get_pipeline_registry] = lambda: pipeline_registry
+    app.dependency_overrides[get_objectify_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_job_queue] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        execute_resp = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi-exec/fileImports/ri.spice.main.file-import.fi-1/execute",
+            params={"preview": "true"},
+        )
+        assert execute_resp.status_code == 200
+        build_rid = execute_resp.json()
+        assert build_rid.startswith("ri.foundry.main.build.build-")
+
+        orchestration_get_resp = await client.get(f"/api/v2/orchestration/builds/{build_rid}")
+        assert orchestration_get_resp.status_code == 200
+        assert orchestration_get_resp.json()["status"] == "SUCCEEDED"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_file_import_replace_preserves_shared_source_contract(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.mapping = SimpleNamespace(
+                target_db_name="demo",
+                target_branch="main",
+                target_class_label=None,
+                enabled=False,
+                status="draft",
+                field_mappings=[{"source": "id", "target": "id"}],
+            )
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-fi-replace"): SimpleNamespace(
+                    source_id="conn-fi-replace",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                ),
+                ("postgresql_file_import", "fi-replace"): SimpleNamespace(
+                    source_id="fi-replace",
+                    source_type="postgresql_file_import",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-fi-replace",
+                        "dataset_rid": "ri.spice.main.dataset.dataset-fi-replace",
+                        "display_name": "Orders file import",
+                        "name": "Orders file import",
+                        "import_mode": "SNAPSHOT",
+                        "allow_schema_changes": False,
+                        "file_import_config": {
+                            "type": "postgreSqlFileImportConfig",
+                            "query": "select 1 as id",
+                        },
+                        "branch_name": "main",
+                        "resource_kind": "file_import",
+                    },
+                    created_at=None,
+                    updated_at=None,
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def upsert_source(self, *, source_type: str, source_id: str, enabled: bool, config_json: dict):  # noqa: ANN001
+            self.sources[(source_type, source_id)] = SimpleNamespace(
+                source_id=source_id,
+                source_type=source_type,
+                enabled=enabled,
+                config_json=dict(config_json),
+                created_at=None,
+                updated_at=None,
+            )
+            return self.sources[(source_type, source_id)]
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return self.mapping
+
+        async def upsert_mapping(self, **kwargs: Any):  # noqa: ANN401
+            self.mapping = SimpleNamespace(
+                target_db_name=kwargs.get("target_db_name"),
+                target_branch=kwargs.get("target_branch"),
+                target_class_label=kwargs.get("target_class_label"),
+                enabled=kwargs.get("enabled"),
+                status=kwargs.get("status"),
+                field_mappings=kwargs.get("field_mappings") or [],
+            )
+            return self.mapping
+
+    class _DatasetRegistry:
+        async def get_dataset(self, *, dataset_id: str):  # noqa: ANN001
+            _ = dataset_id
+            return None
+
+        async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+            _ = kwargs
+            return None
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    app = _build_test_app()
+    registry = _ConnectorRegistry()
+    app.dependency_overrides[get_connector_registry] = lambda: registry
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: _DatasetRegistry()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi-replace/fileImports/ri.spice.main.file-import.fi-replace",
+            params={"preview": "true"},
+            json={
+                "displayName": "Orders file import v2",
+                "destination": {"ontology": "demo", "branchName": "feature-x", "objectType": "Order"},
+                "config": {"type": "postgreSqlFileImportConfig", "query": "select 2 as id"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["displayName"] == "Orders file import v2"
+    assert payload["branchName"] == "feature-x"
+    assert payload["allowSchemaChanges"] is False
+
+    updated_source = registry.sources[("postgresql_file_import", "fi-replace")]
+    assert updated_source.config_json["display_name"] == "Orders file import v2"
+    assert updated_source.config_json["name"] == "Orders file import v2"
+    assert updated_source.config_json["branch_name"] == "feature-x"
+    assert updated_source.config_json["allow_schema_changes"] is False
+    assert updated_source.config_json["resource_kind"] == "file_import"
+    assert updated_source.config_json["file_import_config"]["query"] == "select 2 as id"
+
+    assert registry.mapping.target_db_name == "demo"
+    assert registry.mapping.target_branch == "feature-x"
+    assert registry.mapping.target_class_label == "Order"
+    assert registry.mapping.enabled is True
+    assert registry.mapping.status == "confirmed"
+    assert registry.mapping.field_mappings == [{"source": "id", "target": "id"}]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_file_import_execute_rejects_incomplete_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class _Flags:
+        enable_foundry_connectivity_jdbc = True
+        foundry_connectivity_jdbc_db_allowlist = ""
+        enable_foundry_connectivity_cdc = True
+        foundry_connectivity_cdc_db_allowlist = ""
+
+    class _Settings:
+        feature_flags = _Flags()
+
+    class _ConnectorRegistry:
+        def __init__(self) -> None:
+            self.sources: dict[tuple[str, str], Any] = {
+                ("postgresql_connection", "conn-fi-not-ready"): SimpleNamespace(
+                    source_id="conn-fi-not-ready",
+                    source_type="postgresql_connection",
+                    enabled=True,
+                    config_json={"display_name": "pg", "type": "PostgreSqlConnectionConfig"},
+                    created_at=None,
+                    updated_at=None,
+                ),
+                ("postgresql_file_import", "fi-not-ready"): SimpleNamespace(
+                    source_id="fi-not-ready",
+                    source_type="postgresql_file_import",
+                    enabled=True,
+                    config_json={
+                        "connection_id": "conn-fi-not-ready",
+                        "display_name": "Orders file import",
+                        "import_mode": "SNAPSHOT",
+                        "file_import_config": {
+                            "type": "postgreSqlFileImportConfig",
+                            "query": "select 1 as id",
+                        },
+                    },
+                    created_at=None,
+                    updated_at=None,
+                ),
+            }
+
+        async def get_source(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            return self.sources.get((source_type, source_id))
+
+        async def get_mapping(self, *, source_type: str, source_id: str):  # noqa: ANN001
+            _ = source_type, source_id
+            return SimpleNamespace(
+                target_db_name="",
+                target_branch="main",
+                target_class_label=None,
+            )
+
+    monkeypatch.setattr(foundry_connectivity_v2, "get_settings", lambda: _Settings())
+
+    app = _build_test_app()
+    app.dependency_overrides[get_connector_registry] = lambda: _ConnectorRegistry()
+    app.dependency_overrides[get_connector_dataset_registry] = lambda: object()
+    app.dependency_overrides[get_google_sheets_service] = lambda: object()
+    app.dependency_overrides[get_connector_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_pipeline_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_registry] = lambda: object()
+    app.dependency_overrides[get_objectify_job_queue] = lambda: object()
+    app.dependency_overrides[get_lineage_store] = lambda: object()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/connectivity/connections/ri.spice.main.connection.conn-fi-not-ready/fileImports/ri.spice.main.file-import.fi-not-ready/execute",
+            params={"preview": "true"},
+        )
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["errorCode"] == "CONFLICT"
+    assert payload["errorName"] == "FileImportNotReady"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_foundry_file_import_execute_rejects_invalid_runtime_config_before_pipeline(
     monkeypatch: pytest.MonkeyPatch,
 ):

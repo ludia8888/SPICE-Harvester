@@ -4,6 +4,7 @@ import pytest
 from starlette.requests import Request
 
 from bff.services import link_types_mapping_service as link_types_service
+from shared.utils.schema_hash import compute_schema_hash_from_payload
 
 
 class _FakeDatasetRegistry:
@@ -106,4 +107,4 @@ async def test_ensure_join_dataset_auto_creates_dataset_and_version() -> None:
     assert columns[0]["type"] == "xsd:string"
     assert columns[1]["name"] == "user_id"
     assert columns[1]["type"] == "xsd:integer"
-    assert schema_hash == link_types_service.compute_schema_hash(version.sample_json)
+    assert schema_hash == compute_schema_hash_from_payload(version.sample_json)

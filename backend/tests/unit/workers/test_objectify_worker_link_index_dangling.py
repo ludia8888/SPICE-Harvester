@@ -76,6 +76,21 @@ class _CaptureWorker(_DummyWorker):
         return {"command_id": "cmd-1"}
 
 
+class _PropertyFlagLinkWorker(_CaptureWorker):
+    async def _fetch_object_type_contract(self, job):  # noqa: ANN003
+        _ = job
+        return {
+            "data": {
+                "spec": {
+                    "status": "ACTIVE",
+                    "properties": [
+                        {"name": "source_id", "type": "xsd:string", "primaryKey": True, "titleKey": True},
+                    ],
+                }
+            }
+        }
+
+
 def _link_job(*, dangling_policy):
     return ObjectifyJob(
         job_id="job-1",
@@ -193,6 +208,38 @@ async def test_link_index_warns_on_missing_target_when_policy_warn():
 @pytest.mark.asyncio
 async def test_link_index_creates_link_when_fk_matches_target():
     worker = _CaptureWorker(rows=[["s1", "t1"]], target_ids={"t1"})
+    job = _fk_job(dangling_policy="FAIL")
+    mapping_spec = SimpleNamespace(mapping_spec_id="map-1", version=1, target_class_id="Source", options={})
+    mappings = [
+        FieldMapping(source_field="source_id", target_field="source_id"),
+        FieldMapping(source_field="target_id", target_field="linked_to"),
+    ]
+    relationship_mappings = [FieldMapping(source_field="target_id", target_field="linked_to")]
+
+    await worker._run_link_index_job(
+        job=job,
+        mapping_spec=mapping_spec,
+        options=job.options,
+        mappings=mappings,
+        mapping_sources=["source_id", "target_id"],
+        mapping_targets=["source_id", "linked_to"],
+        sources_by_target={"source_id": ["source_id"], "linked_to": ["target_id"]},
+        prop_map={"source_id": {"type": "xsd:string"}},
+        rel_map={"linked_to": {"target": "Target", "cardinality": "1:1"}},
+        relationship_mappings=relationship_mappings,
+        stable_seed="seed",
+        row_batch_size=10,
+        max_rows=None,
+    )
+
+    assert worker.last_updates == [
+        {"instance_id": "s1", "data": {"linked_to": "Target/t1"}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_link_index_supports_camel_case_property_flag_fallback_when_pk_spec_missing():
+    worker = _PropertyFlagLinkWorker(rows=[["s1", "t1"]], target_ids={"t1"})
     job = _fk_job(dangling_policy="FAIL")
     mapping_spec = SimpleNamespace(mapping_spec_id="map-1", version=1, target_class_id="Source", options={})
     mappings = [

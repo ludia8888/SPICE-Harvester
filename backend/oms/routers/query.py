@@ -28,6 +28,7 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
+from shared.utils.instance_properties import flatten_instance_properties
 from shared.utils.number_utils import to_int_or_none
 from oms.services.ontology_resources import OntologyResourceService
 
@@ -1546,15 +1547,7 @@ def _flatten_source(source: Dict[str, Any]) -> Dict[str, Any]:
     flat: Dict[str, Any] = dict(data) if isinstance(data, dict) else {}
 
     if not flat:
-        properties = source.get("properties")
-        if isinstance(properties, list):
-            for prop in properties:
-                if not isinstance(prop, dict):
-                    continue
-                name = str(prop.get("name") or "").strip()
-                if not name:
-                    continue
-                flat[name] = prop.get("value")
+        flat = flatten_instance_properties(source.get("properties"))
 
     for key in (
         "instance_id",

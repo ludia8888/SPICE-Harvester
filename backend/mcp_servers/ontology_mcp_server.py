@@ -26,9 +26,11 @@ for _path in (str(_backend_root), str(_repo_root)):
     if _path and _path not in sys.path:
         sys.path.append(_path)
 
-from shared.utils.llm_safety import mask_pii
-from mcp_servers.pipeline_mcp_errors import tool_error
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.utils.llm_safety import mask_pii  # noqa: E402
+from shared.utils.ontology_fields import list_ontology_properties  # noqa: E402
+from shared.utils.string_list_utils import normalize_string_list  # noqa: E402
+from mcp_servers.pipeline_mcp_errors import tool_error  # noqa: E402
+from shared.errors.error_types import ErrorCategory, ErrorCode  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -41,15 +43,7 @@ def _normalize_string(value: Any) -> str:
 
 def _normalize_string_list(value: Any) -> List[str]:
     """Normalize to a list of strings."""
-    if value is None:
-        return []
-    items = value if isinstance(value, list) else [value]
-    out: List[str] = []
-    for item in items:
-        text = str(item or "").strip()
-        if text:
-            out.append(text)
-    return out
+    return normalize_string_list(value, split_commas=False)
 
 
 def _mask_observation(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1247,9 +1241,8 @@ class OntologyMCPServer:
                         continue
 
                     # Match by property names
-                    properties = c.get("properties") or []
-                    for prop in properties:
-                        prop_name = str(prop.get("name") or "")
+                    for prop in list_ontology_properties(c):
+                        prop_name = str(prop.get("name") or prop.get("id") or "")
                         prop_label = str(prop.get("label") or "")
                         if query_lower in prop_name.lower() or query_lower in prop_label.lower():
                             matches.append(c)

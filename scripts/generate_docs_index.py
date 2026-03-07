@@ -47,6 +47,8 @@ ONBOARDING_KO_DOCS = [
 HIDDEN_DOCS = [
     "reference/_generated/API_DUPLICATE_LEGACY_AUDIT",
     "verification/API_CONTRACT_DRIFT_TICKETS_2026-03-03",
+    "verification/BACKEND_DUPLICATE_DESIGN_AUDIT",
+    "verification/MCP_SDK_API_FEATURE_OVERLAP_AUDIT",
 ]
 
 

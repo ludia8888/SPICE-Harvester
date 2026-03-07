@@ -40,6 +40,7 @@ from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.event_store import event_store
 from shared.utils.event_utils import build_command_event
+from shared.utils.connector_import_config import resolve_primary_key_column
 from shared.utils.s3_uri import build_s3_uri
 from shared.observability.tracing import trace_external_call
 
@@ -366,7 +367,7 @@ async def start_pipelining_google_sheet(
                         len(existing_rows), len(rows), len(final_rows),
                     )
                 elif import_mode == "UPDATE":
-                    pk_column = config.get("primary_key_column") or None
+                    pk_column = resolve_primary_key_column(config)
                     final_columns, final_rows = _apply_update_mode(
                         existing_columns, existing_rows, columns, rows,
                         primary_key_column=pk_column,
@@ -720,9 +721,7 @@ async def _start_pipelining_connector_import(
         branch=branch_name,
         dataset_name=str(source_cfg.get("display_name") or f"{connector_kind}_{source.source_id}"),
         import_mode=import_mode,
-        primary_key_column=(
-            str(import_config.get("primaryKeyColumn") or import_config.get("primary_key_column") or "").strip() or None
-        ),
+        primary_key_column=resolve_primary_key_column(import_config),
         actor_user_id=actor_user_id,
         source_ref=f"{source.source_type}:{source.source_id}",
     )

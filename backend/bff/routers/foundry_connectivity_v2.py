@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from typing import Any, Dict
+from typing import Any, Awaitable, Callable, Dict
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -459,24 +459,55 @@ async def _run_connection_export(
         raise RuntimeError(error_message) from exc
 
 
-def _table_import_pipeline_id(*, connection_id: str, source_type: str, source_id: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"spice:table-import:{connection_id}:{source_type}:{source_id}"))
+def _connector_import_pipeline_id(
+    *,
+    namespace: str,
+    connection_id: str,
+    source_type: str,
+    source_id: str,
+) -> str:
+    return str(uuid5(NAMESPACE_URL, f"spice:{namespace}:{connection_id}:{source_type}:{source_id}"))
 
 
-def _table_import_build_job_id(*, pipeline_id: str) -> str:
+def _build_pipeline_job_id(*, pipeline_id: str) -> str:
     return f"build-{pipeline_id}-{uuid4()}"
-
-
-def _file_import_pipeline_id(*, connection_id: str, source_type: str, source_id: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"spice:file-import:{connection_id}:{source_type}:{source_id}"))
-
-
-def _virtual_table_pipeline_id(*, connection_id: str, source_type: str, source_id: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"spice:virtual-table:{connection_id}:{source_type}:{source_id}"))
 
 
 def _parse_allowlist(raw: str) -> set[str]:
     return {item.strip().lower() for item in str(raw or "").split(",") if item.strip()}
+
+
+def _invalid_pagination_response(message: str) -> JSONResponse:
+    return _foundry_error(
+        status.HTTP_400_BAD_REQUEST,
+        error_code="INVALID_ARGUMENT",
+        error_name="InvalidArgument",
+        parameters={"message": message},
+    )
+
+
+def _parse_page_size_value(page_size: Any, *, default: int = 100) -> int | JSONResponse:
+    if page_size is None:
+        return default
+    try:
+        parsed = int(page_size)
+    except (TypeError, ValueError):
+        return _invalid_pagination_response("pageSize must be an integer")
+    if parsed <= 0:
+        return _invalid_pagination_response("pageSize must be > 0")
+    return parsed
+
+
+def _parse_page_offset(page_token: str | None) -> int | JSONResponse:
+    if not page_token:
+        return 0
+    try:
+        offset = int(page_token)
+    except (TypeError, ValueError):
+        return _invalid_pagination_response("pageToken is invalid")
+    if offset < 0:
+        return _invalid_pagination_response("pageToken is invalid")
+    return offset
 
 
 def _is_flag_or_allowlist_enabled(*, global_enabled: bool, allowlist_raw: str, db_name: str | None) -> bool:
@@ -927,8 +958,45 @@ async def _load_connection_source_or_404(
             error_code="NOT_FOUND",
             error_name="ConnectionNotFound",
             parameters={"connectionRid": connection_rid},
-        )
+    )
     return connection_id, source, None
+
+
+async def _load_connector_import_source(
+    *,
+    connector_registry: ConnectorRegistry,
+    connection_id: str,
+    source_id: str,
+    source_types: tuple[str, ...],
+) -> tuple[ConnectorSource | None, ConnectorMapping | None]:
+    for source_type in source_types:
+        source = await connector_registry.get_source(source_type=source_type, source_id=source_id)
+        if source is None:
+            continue
+        cfg = source.config_json or {}
+        owner_connection = str(cfg.get("connection_id") or "").strip()
+        if owner_connection and owner_connection != connection_id:
+            continue
+        mapping = await connector_registry.get_mapping(source_type=source.source_type, source_id=source.source_id)
+        return source, mapping
+    return None, None
+
+
+async def _list_connection_owned_sources(
+    *,
+    connector_registry: ConnectorRegistry,
+    connection_id: str,
+    source_types: tuple[str, ...],
+) -> list[ConnectorSource]:
+    owned_sources: list[ConnectorSource] = []
+    for source_type in source_types:
+        sources = await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000)
+        for src in sources:
+            if str((src.config_json or {}).get("connection_id") or "").strip() != connection_id:
+                continue
+            owned_sources.append(src)
+    owned_sources.sort(key=lambda src: str(src.source_id))
+    return owned_sources
 
 
 async def _load_table_import_source(
@@ -937,17 +1005,12 @@ async def _load_table_import_source(
     connection_id: str,
     table_import_id: str,
 ) -> tuple[ConnectorSource | None, ConnectorMapping | None]:
-    for source_type in _table_import_source_types():
-        source = await connector_registry.get_source(source_type=source_type, source_id=table_import_id)
-        if source is None:
-            continue
-        cfg = source.config_json or {}
-        owner_connection = str(cfg.get("connection_id") or "").strip()
-        if owner_connection and owner_connection != connection_id:
-            continue
-        mapping = await connector_registry.get_mapping(source_type=source.source_type, source_id=source.source_id)
-        return source, mapping
-    return None, None
+    return await _load_connector_import_source(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_id=table_import_id,
+        source_types=_table_import_source_types(),
+    )
 
 
 async def _load_file_import_source(
@@ -956,17 +1019,12 @@ async def _load_file_import_source(
     connection_id: str,
     file_import_id: str,
 ) -> tuple[ConnectorSource | None, ConnectorMapping | None]:
-    for source_type in _file_import_source_types():
-        source = await connector_registry.get_source(source_type=source_type, source_id=file_import_id)
-        if source is None:
-            continue
-        cfg = source.config_json or {}
-        owner_connection = str(cfg.get("connection_id") or "").strip()
-        if owner_connection and owner_connection != connection_id:
-            continue
-        mapping = await connector_registry.get_mapping(source_type=source.source_type, source_id=source.source_id)
-        return source, mapping
-    return None, None
+    return await _load_connector_import_source(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_id=file_import_id,
+        source_types=_file_import_source_types(),
+    )
 
 
 async def _load_virtual_table_source(
@@ -975,17 +1033,12 @@ async def _load_virtual_table_source(
     connection_id: str,
     virtual_table_id: str,
 ) -> tuple[ConnectorSource | None, ConnectorMapping | None]:
-    for source_type in _virtual_table_source_types():
-        source = await connector_registry.get_source(source_type=source_type, source_id=virtual_table_id)
-        if source is None:
-            continue
-        cfg = source.config_json or {}
-        owner_connection = str(cfg.get("connection_id") or "").strip()
-        if owner_connection and owner_connection != connection_id:
-            continue
-        mapping = await connector_registry.get_mapping(source_type=source.source_type, source_id=source.source_id)
-        return source, mapping
-    return None, None
+    return await _load_connector_import_source(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_id=virtual_table_id,
+        source_types=_virtual_table_source_types(),
+    )
 
 
 async def _resolve_output_dataset_rid(
@@ -1018,6 +1071,70 @@ async def _resolve_output_dataset_rid(
     return _dataset_rid(f"connector-{source.source_type}-{source.source_id}")
 
 
+def _resource_parent_rid(*, cfg: Dict[str, Any], connection_id: str) -> str:
+    raw_parent = str(cfg.get("parent_rid") or "").strip()
+    if not raw_parent:
+        return _connection_rid(connection_id)
+    return _connection_rid(_connection_id_from_rid(raw_parent) or connection_id)
+
+
+def _resource_branch_name(*, cfg: Dict[str, Any], mapping: ConnectorMapping | None) -> str | None:
+    if mapping is not None:
+        return str(mapping.target_branch or "").strip() or None
+    return str(cfg.get("branch_name") or "").strip() or None
+
+
+async def _build_connector_import_response(
+    *,
+    connection_id: str,
+    source: ConnectorSource,
+    mapping: ConnectorMapping | None,
+    dataset_registry: DatasetRegistry,
+    rid_builder: Callable[[str], str],
+    config_key: str,
+    default_config_factory: Callable[[str], Dict[str, Any]],
+    default_name_factory: Callable[[str, str], str],
+    name_hint_keys: tuple[str, ...] = (),
+    include_import_mode: bool = False,
+    include_allow_schema_changes: bool = False,
+    include_markings: bool = False,
+) -> Dict[str, Any]:
+    cfg = source.config_json or {}
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
+
+    config = cfg.get(config_key) if isinstance(cfg.get(config_key), dict) else {}
+    if not config:
+        config = default_config_factory(connector_kind)
+
+    name = str(cfg.get("name") or "").strip() or str(cfg.get("display_name") or "").strip()
+    if not name:
+        for key in name_hint_keys:
+            name = str(cfg.get(key) or "").strip()
+            if name:
+                break
+    if not name:
+        name = default_name_factory(connector_kind, source.source_id)
+
+    output: Dict[str, Any] = {
+        "rid": rid_builder(source.source_id),
+        "name": name,
+        "parentRid": _resource_parent_rid(cfg=cfg, connection_id=connection_id),
+        "displayName": name,
+        "connectionRid": _connection_rid(connection_id),
+        "datasetRid": dataset_rid,
+        "branchName": _resource_branch_name(cfg=cfg, mapping=mapping),
+        "config": config,
+    }
+    if include_import_mode:
+        output["importMode"] = _safe_import_mode(cfg.get("import_mode"))
+    if include_allow_schema_changes:
+        output["allowSchemaChanges"] = bool(cfg.get("allow_schema_changes") or False)
+    if include_markings:
+        output["markings"] = cfg.get("markings") if isinstance(cfg.get("markings"), list) else []
+    return output
+
+
 async def _build_table_import_response(
     *,
     connection_id: str,
@@ -1025,41 +1142,19 @@ async def _build_table_import_response(
     mapping: ConnectorMapping | None,
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
-    cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
-
-    import_mode = _safe_import_mode(cfg.get("import_mode"))
-
-    table_import_config = cfg.get("table_import_config") if isinstance(cfg.get("table_import_config"), dict) else {}
-    if not table_import_config:
-        table_import_config = _resolve_table_import_config({}, connector_kind=connector_kind)
-
-    name = (
-        str(cfg.get("name") or "").strip()
-        or str(cfg.get("display_name") or "").strip()
-        or str(cfg.get("sheet_title") or "").strip()
-        or f"{connector_kind} import {source.source_id}"
+    return await _build_connector_import_response(
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        dataset_registry=dataset_registry,
+        rid_builder=_table_import_rid,
+        config_key="table_import_config",
+        default_config_factory=lambda connector_kind: _resolve_table_import_config({}, connector_kind=connector_kind),
+        default_name_factory=lambda connector_kind, source_id: f"{connector_kind} import {source_id}",
+        name_hint_keys=("sheet_title",),
+        include_import_mode=True,
+        include_allow_schema_changes=True,
     )
-    parent_rid = (
-        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
-        if str(cfg.get("parent_rid") or "").strip()
-        else _connection_rid(connection_id)
-    )
-
-    return {
-        "rid": _table_import_rid(source.source_id),
-        "name": name,
-        "parentRid": parent_rid,
-        # Compatibility aliases for existing clients.
-        "displayName": name,
-        "connectionRid": _connection_rid(connection_id),
-        "datasetRid": dataset_rid,
-        "branchName": str(mapping.target_branch or "").strip() if mapping else (str(cfg.get("branch_name") or "").strip() or None),
-        "importMode": import_mode,
-        "allowSchemaChanges": bool(cfg.get("allow_schema_changes") or False),
-        "config": table_import_config,
-    }
 
 
 async def _build_file_import_response(
@@ -1069,41 +1164,19 @@ async def _build_file_import_response(
     mapping: ConnectorMapping | None,
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
-    cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
-
-    import_mode = _safe_import_mode(cfg.get("import_mode"))
-
-    file_import_config = cfg.get("file_import_config") if isinstance(cfg.get("file_import_config"), dict) else {}
-    if not file_import_config:
-        file_import_config = _resolve_file_import_config({}, connector_kind=connector_kind)
-
-    name = (
-        str(cfg.get("name") or "").strip()
-        or str(cfg.get("display_name") or "").strip()
-        or str(cfg.get("file_pattern") or "").strip()
-        or f"{connector_kind} file import {source.source_id}"
+    return await _build_connector_import_response(
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        dataset_registry=dataset_registry,
+        rid_builder=_file_import_rid,
+        config_key="file_import_config",
+        default_config_factory=lambda connector_kind: _resolve_file_import_config({}, connector_kind=connector_kind),
+        default_name_factory=lambda connector_kind, source_id: f"{connector_kind} file import {source_id}",
+        name_hint_keys=("file_pattern",),
+        include_import_mode=True,
+        include_allow_schema_changes=True,
     )
-    parent_rid = (
-        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
-        if str(cfg.get("parent_rid") or "").strip()
-        else _connection_rid(connection_id)
-    )
-
-    return {
-        "rid": _file_import_rid(source.source_id),
-        "name": name,
-        "parentRid": parent_rid,
-        # Compatibility aliases for existing clients.
-        "displayName": name,
-        "connectionRid": _connection_rid(connection_id),
-        "datasetRid": dataset_rid,
-        "branchName": str(mapping.target_branch or "").strip() if mapping else (str(cfg.get("branch_name") or "").strip() or None),
-        "importMode": import_mode,
-        "allowSchemaChanges": bool(cfg.get("allow_schema_changes") or False),
-        "config": file_import_config,
-    }
 
 
 async def _build_virtual_table_response(
@@ -1113,37 +1186,144 @@ async def _build_virtual_table_response(
     mapping: ConnectorMapping | None,
     dataset_registry: DatasetRegistry,
 ) -> Dict[str, Any]:
-    cfg = source.config_json or {}
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    dataset_rid = await _resolve_output_dataset_rid(source=source, mapping=mapping, dataset_registry=dataset_registry)
-
-    virtual_table_config = cfg.get("virtual_table_config") if isinstance(cfg.get("virtual_table_config"), dict) else {}
-    if not virtual_table_config:
-        virtual_table_config = _resolve_virtual_table_config({}, connector_kind=connector_kind)
-
-    name = (
-        str(cfg.get("name") or "").strip()
-        or str(cfg.get("display_name") or "").strip()
-        or f"{connector_kind} virtual table {source.source_id}"
+    return await _build_connector_import_response(
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        dataset_registry=dataset_registry,
+        rid_builder=_virtual_table_rid,
+        config_key="virtual_table_config",
+        default_config_factory=lambda connector_kind: _resolve_virtual_table_config({}, connector_kind=connector_kind),
+        default_name_factory=lambda connector_kind, source_id: f"{connector_kind} virtual table {source_id}",
+        include_markings=True,
     )
-    parent_rid = (
-        _connection_rid(_connection_id_from_rid(str(cfg.get("parent_rid") or "").strip()) or connection_id)
-        if str(cfg.get("parent_rid") or "").strip()
-        else _connection_rid(connection_id)
+
+
+def _resolved_display_names(
+    payload: Dict[str, Any],
+    *,
+    fallback_display_name: str,
+    fallback_name: str | None = None,
+) -> tuple[str, str]:
+    display_name = _display_name_from_payload(payload, fallback=fallback_display_name)
+    name = _display_name_from_payload(payload, fallback=fallback_name or fallback_display_name)
+    return display_name, name
+
+
+def _resolved_allow_schema_changes(
+    payload: Dict[str, Any],
+    *,
+    existing_cfg: Dict[str, Any] | None = None,
+    default: bool = False,
+) -> bool:
+    if payload.get("allowSchemaChanges") is not None:
+        return bool(payload.get("allowSchemaChanges"))
+    if existing_cfg is not None:
+        return bool(existing_cfg.get("allow_schema_changes") or False)
+    return default
+
+
+def _build_connector_import_source_config(
+    *,
+    connection_id: str,
+    display_name: str,
+    name: str,
+    import_mode: str,
+    config_key: str,
+    resource_config: Dict[str, Any],
+    existing_cfg: Dict[str, Any] | None = None,
+    dataset_rid: str | None = None,
+    branch_name: str | None = None,
+    allow_schema_changes: bool | None = None,
+    resource_kind: str | None = None,
+    extra_updates: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    cfg = dict(existing_cfg or {})
+    if extra_updates:
+        cfg.update(extra_updates)
+    cfg.update(
+        {
+            "connection_id": connection_id,
+            "display_name": display_name,
+            "name": name,
+            "parent_rid": _connection_rid(connection_id),
+            "import_mode": import_mode,
+            config_key: resource_config,
+        }
     )
-    markings = cfg.get("markings") if isinstance(cfg.get("markings"), list) else []
-    return {
-        "rid": _virtual_table_rid(source.source_id),
-        "name": name,
-        "parentRid": parent_rid,
-        "markings": markings,
-        # Compatibility aliases for existing clients.
-        "displayName": name,
-        "connectionRid": _connection_rid(connection_id),
-        "datasetRid": dataset_rid,
-        "branchName": str(mapping.target_branch or "").strip() if mapping else (str(cfg.get("branch_name") or "").strip() or None),
-        "config": virtual_table_config,
-    }
+    if dataset_rid is not None:
+        cfg["dataset_rid"] = dataset_rid
+    if branch_name:
+        cfg["branch_name"] = branch_name
+    if allow_schema_changes is not None:
+        cfg["allow_schema_changes"] = allow_schema_changes
+    if resource_kind:
+        cfg["resource_kind"] = resource_kind
+    return cfg
+
+
+def _connector_import_mapping_status(
+    *,
+    target_db_name: str | None,
+    target_class_label: str | None,
+) -> str:
+    return "confirmed" if str(target_db_name or "").strip() and str(target_class_label or "").strip() else "draft"
+
+
+async def _upsert_created_connector_import_mapping(
+    *,
+    connector_registry: ConnectorRegistry,
+    source_type: str,
+    source_id: str,
+    target_db_name: str | None,
+    target_branch: str | None,
+    target_class_label: str | None,
+) -> ConnectorMapping | None:
+    if not str(target_db_name or "").strip():
+        return None
+    return await connector_registry.upsert_mapping(
+        source_type=source_type,
+        source_id=source_id,
+        enabled=bool(target_db_name and target_class_label),
+        status=_connector_import_mapping_status(
+            target_db_name=target_db_name,
+            target_class_label=target_class_label,
+        ),
+        target_db_name=target_db_name,
+        target_branch=target_branch,
+        target_class_label=target_class_label,
+        field_mappings=[],
+    )
+
+
+async def _upsert_replaced_connector_import_mapping(
+    *,
+    connector_registry: ConnectorRegistry,
+    source_type: str,
+    source_id: str,
+    mapping: ConnectorMapping | None,
+    destination_db: str | None,
+    destination_branch: str | None,
+    destination_object_type: str | None,
+) -> ConnectorMapping | None:
+    if mapping is None or not (destination_db or destination_branch or destination_object_type):
+        return mapping
+    target_db_name = destination_db or mapping.target_db_name
+    target_branch = destination_branch or mapping.target_branch
+    target_class_label = destination_object_type or mapping.target_class_label
+    return await connector_registry.upsert_mapping(
+        source_type=source_type,
+        source_id=source_id,
+        enabled=bool(destination_db or mapping.enabled),
+        status=_connector_import_mapping_status(
+            target_db_name=target_db_name,
+            target_class_label=target_class_label,
+        ),
+        target_db_name=target_db_name,
+        target_branch=target_branch,
+        target_class_label=target_class_label,
+        field_mappings=mapping.field_mappings,
+    )
 
 
 async def _connection_configuration(
@@ -1345,14 +1525,20 @@ async def _record_execute_failure_run(
         logger.warning("Failed to record execute failure build run: %s", record_exc)
 
 
-async def _ensure_table_import_pipeline(
+async def _ensure_connector_import_pipeline(
     *,
     pipeline_registry: PipelineRegistry,
     connection_id: str,
     source: ConnectorSource,
     mapping: ConnectorMapping,
+    namespace: str,
+    pipeline_name_prefix: str,
+    pipeline_type: str,
+    location_segment: str,
+    description_label: str,
 ) -> str:
-    pipeline_id = _table_import_pipeline_id(
+    pipeline_id = _connector_import_pipeline_id(
+        namespace=namespace,
         connection_id=connection_id,
         source_type=source.source_type,
         source_id=source.source_id,
@@ -1363,82 +1549,217 @@ async def _ensure_table_import_pipeline(
 
     db_name = str(mapping.target_db_name or "").strip() or "main"
     branch = str(mapping.target_branch or "").strip() or "main"
-    pipeline_name = f"table_import_{connection_id}_{source.source_type}_{source.source_id}"
+    pipeline_name = f"{pipeline_name_prefix}_{connection_id}_{source.source_type}_{source.source_id}"
     await pipeline_registry.create_pipeline(
         pipeline_id=pipeline_id,
         db_name=db_name,
         name=pipeline_name,
-        description=f"Foundry connectivity table import pipeline for {source.source_type}:{source.source_id}",
-        pipeline_type="connector_table_import",
-        location=f"connectivity/connections/{connection_id}/tableImports/{source.source_id}",
+        description=f"Foundry connectivity {description_label} pipeline for {source.source_type}:{source.source_id}",
+        pipeline_type=pipeline_type,
+        location=f"connectivity/connections/{connection_id}/{location_segment}/{source.source_id}",
         status="active",
         branch=branch,
     )
     return pipeline_id
 
 
-async def _ensure_file_import_pipeline(
+async def _execute_connector_import_build(
     *,
+    request: Request,
+    google_sheets_service: GoogleSheetsService,
+    connector_adapter_factory: ConnectorAdapterFactory,
+    connector_registry: ConnectorRegistry,
     pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+    objectify_job_queue: ObjectifyJobQueue,
     connection_id: str,
     source: ConnectorSource,
     mapping: ConnectorMapping,
-) -> str:
-    pipeline_id = _file_import_pipeline_id(
-        connection_id=connection_id,
-        source_type=source.source_type,
-        source_id=source.source_id,
-    )
-    existing = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
-    if existing is not None:
-        return pipeline_id
+    resource_kind: str,
+    resource_kind_key: str,
+    resource_log_id: str,
+    resource_rid: str,
+    resource_field: str,
+    pipeline_namespace: str,
+    pipeline_name_prefix: str,
+    pipeline_type: str,
+    location_segment: str,
+    start_pipelining: Callable[..., Awaitable[Any]],
+) -> str | JSONResponse:
+    branch_name = str(mapping.target_branch or "").strip() or "main"
+    actor_user_id = str(request.headers.get("X-User-ID") or "").strip() or None
+    requested_by = actor_user_id or "system"
+    connection_rid = _connection_rid(connection_id)
+    pipeline_id: str | None = None
+    job_id: str | None = None
+    started_at: Any = None
 
-    db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "main"
-    pipeline_name = f"file_import_{connection_id}_{source.source_type}_{source.source_id}"
-    await pipeline_registry.create_pipeline(
-        pipeline_id=pipeline_id,
-        db_name=db_name,
-        name=pipeline_name,
-        description=f"Foundry connectivity file import pipeline for {source.source_type}:{source.source_id}",
-        pipeline_type="connector_file_import",
-        location=f"connectivity/connections/{connection_id}/fileImports/{source.source_id}",
-        status="active",
-        branch=branch,
-    )
-    return pipeline_id
+    try:
+        pipeline_id = await _ensure_connector_import_pipeline(
+            pipeline_registry=pipeline_registry,
+            connection_id=connection_id,
+            source=source,
+            mapping=mapping,
+            namespace=pipeline_namespace,
+            pipeline_name_prefix=pipeline_name_prefix,
+            pipeline_type=pipeline_type,
+            location_segment=location_segment,
+            description_label=resource_kind,
+        )
+        job_id = _build_pipeline_job_id(pipeline_id=pipeline_id)
+        started_at = utcnow()
+        await pipeline_registry.record_run(
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            mode="build",
+            status="RUNNING",
+            output_json=_build_execute_run_output(
+                connection_rid=connection_rid,
+                resource_rid=resource_rid,
+                resource_field=resource_field,
+                branch_name=branch_name,
+                requested_by=requested_by,
+            ),
+            started_at=started_at,
+        )
+
+        result_payload = await start_pipelining(
+            source=source,
+            mapping=mapping,
+            google_sheets_service=google_sheets_service,
+            connector_adapter_factory=connector_adapter_factory,
+            connector_registry=connector_registry,
+            pipeline_registry=pipeline_registry,
+            dataset_registry=dataset_registry,
+            objectify_registry=objectify_registry,
+            objectify_job_queue=objectify_job_queue,
+            actor_user_id=actor_user_id,
+        )
+        result_payload = _validated_execute_result_payload(
+            result_payload=result_payload,
+            resource_kind=resource_kind,
+        )
+        await pipeline_registry.record_run(
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            mode="build",
+            status="SUCCESS",
+            output_json=_build_execute_run_output(
+                connection_rid=connection_rid,
+                resource_rid=resource_rid,
+                resource_field=resource_field,
+                branch_name=branch_name,
+                requested_by=requested_by,
+                result_payload=result_payload if isinstance(result_payload, dict) else None,
+            ),
+            started_at=started_at,
+            finished_at=utcnow(),
+        )
+    except ValueError as exc:
+        logger.warning("Invalid %s runtime configuration for %s: %s", resource_kind, resource_log_id, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=resource_rid,
+            resource_field=resource_field,
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
+        return _resource_invalid_config_response(resource_kind=resource_kind_key, message=str(exc))
+    except Exception as exc:
+        logger.error("Failed to execute %s %s: %s", resource_kind, resource_log_id, exc)
+        await _record_execute_failure_run(
+            pipeline_registry=pipeline_registry,
+            pipeline_id=pipeline_id,
+            job_id=job_id,
+            connection_rid=connection_rid,
+            resource_rid=resource_rid,
+            resource_field=resource_field,
+            branch_name=branch_name,
+            requested_by=requested_by,
+            error_detail=str(exc),
+            started_at=started_at,
+        )
+        return _foundry_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL",
+            error_name="Internal",
+            parameters={"message": f"Failed to execute {resource_kind}"},
+        )
+
+    assert job_id is not None
+    return build_rid("build", job_id)
 
 
-async def _ensure_virtual_table_pipeline(
+async def _load_validated_executable_connector_import(
     *,
-    pipeline_registry: PipelineRegistry,
+    connector_registry: ConnectorRegistry,
     connection_id: str,
-    source: ConnectorSource,
-    mapping: ConnectorMapping,
-) -> str:
-    pipeline_id = _virtual_table_pipeline_id(
+    source_id: str,
+    source_types: tuple[str, ...],
+    resource_kind: str,
+    resource_display_name: str,
+    resource_error_name: str,
+    not_found_parameters: Dict[str, Any],
+    validate_cdc: bool = True,
+) -> tuple[ConnectorSource, ConnectorMapping] | JSONResponse:
+    source, mapping = await _load_connector_import_source(
+        connector_registry=connector_registry,
         connection_id=connection_id,
-        source_type=source.source_type,
-        source_id=source.source_id,
+        source_id=source_id,
+        source_types=source_types,
     )
-    existing = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
-    if existing is not None:
-        return pipeline_id
+    if source is None:
+        return _foundry_error(
+            status.HTTP_404_NOT_FOUND,
+            error_code="NOT_FOUND",
+            error_name=f"{resource_error_name}NotFound",
+            parameters=not_found_parameters,
+        )
+    if mapping is None or not str(mapping.target_db_name or "").strip():
+        return _foundry_error(
+            status.HTTP_409_CONFLICT,
+            error_code="CONFLICT",
+            error_name=f"{resource_error_name}NotReady",
+            parameters={"message": f"{resource_display_name} mapping is incomplete; target ontology is required"},
+        )
 
-    db_name = str(mapping.target_db_name or "").strip() or "main"
-    branch = str(mapping.target_branch or "").strip() or "main"
-    pipeline_name = f"virtual_table_{connection_id}_{source.source_type}_{source.source_id}"
-    await pipeline_registry.create_pipeline(
-        pipeline_id=pipeline_id,
-        db_name=db_name,
-        name=pipeline_name,
-        description=f"Foundry connectivity virtual table pipeline for {source.source_type}:{source.source_id}",
-        pipeline_type="connector_virtual_table",
-        location=f"connectivity/connections/{connection_id}/virtualTables/{source.source_id}",
-        status="active",
-        branch=branch,
-    )
-    return pipeline_id
+    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
+    source_cfg = dict(source.config_json or {})
+    target_db = str(mapping.target_db_name or "").strip() or None
+    try:
+        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind=resource_kind)
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind=resource_kind, message=str(exc))
+    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
+        return _foundry_error(
+            status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED",
+            error_name="ConnectivityFeatureDisabled",
+            parameters={"message": "JDBC connectivity is disabled for this ontology"},
+        )
+    if validate_cdc and _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(target_db):
+        return _foundry_error(
+            status.HTTP_403_FORBIDDEN,
+            error_code="PERMISSION_DENIED",
+            error_name="ConnectivityFeatureDisabled",
+            parameters={"message": "CDC connectivity is disabled for this ontology"},
+        )
+    try:
+        validate_resource_import_config(
+            resource_kind=resource_kind,
+            connector_kind=connector_kind,
+            import_mode=import_mode,
+            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind=resource_kind),
+        )
+    except ValueError as exc:
+        return _resource_invalid_config_response(resource_kind=resource_kind, message=str(exc))
+    return source, mapping
 
 
 @router.post("/connections/{connectionRid}/tableImports")
@@ -1565,24 +1886,26 @@ async def create_table_import_v2(
             if source is None:
                 raise ValueError("table import source could not be resolved")
             cfg = dict(source.config_json or {})
-            name = _display_name_from_payload(payload, fallback=f"Google Sheet Import {table_import_id}")
-            cfg.update(
-                {
-                    "connection_id": connection_id,
-                    "dataset_rid": resolved_dataset_rid,
-                    "display_name": name,
-                    "name": name,
-                    "parent_rid": _connection_rid(connection_id),
-                    "import_mode": import_mode,
-                    "allow_schema_changes": bool(payload.get("allowSchemaChanges") or False),
-                    "table_import_config": _resolve_table_import_config(
-                        payload,
-                        connector_kind="google_sheets",
-                        sheet_url=str(cfg.get("sheet_url") or sheet_url),
-                        worksheet_name=str(cfg.get("worksheet_name") or worksheet_name or "").strip() or None,
-                    ),
-                    "branch_name": resolved_branch,
-                }
+            display_name, name = _resolved_display_names(
+                payload,
+                fallback_display_name=f"Google Sheet Import {table_import_id}",
+            )
+            cfg = _build_connector_import_source_config(
+                connection_id=connection_id,
+                dataset_rid=resolved_dataset_rid,
+                display_name=display_name,
+                name=name,
+                import_mode=import_mode,
+                config_key="table_import_config",
+                resource_config=_resolve_table_import_config(
+                    payload,
+                    connector_kind="google_sheets",
+                    sheet_url=str(cfg.get("sheet_url") or sheet_url),
+                    worksheet_name=str(cfg.get("worksheet_name") or worksheet_name or "").strip() or None,
+                ),
+                existing_cfg=cfg,
+                branch_name=resolved_branch,
+                allow_schema_changes=_resolved_allow_schema_changes(payload, default=False),
             )
             validate_resource_import_config(
                 resource_kind="table_import",
@@ -1596,24 +1919,24 @@ async def create_table_import_v2(
                 enabled=True,
                 config_json=cfg,
             )
-            if resolved_db:
-                await connector_registry.upsert_mapping(
-                    source_type=source.source_type,
-                    source_id=source.source_id,
-                    enabled=bool(resolved_db and destination_object_type),
-                    status="confirmed" if resolved_db and destination_object_type else "draft",
-                    target_db_name=resolved_db,
-                    target_branch=resolved_branch,
-                    target_class_label=destination_object_type,
-                    field_mappings=[],
-                )
+            await _upsert_created_connector_import_mapping(
+                connector_registry=connector_registry,
+                source_type=source.source_type,
+                source_id=source.source_id,
+                target_db_name=resolved_db,
+                target_branch=resolved_branch,
+                target_class_label=destination_object_type,
+            )
         except ValueError as exc:
             return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
     else:
         table_import_id = str(payload.get("tableImportId") or uuid4()).strip()
         source_type = table_import_source_type_for_kind(connector_kind)
-        display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} import {table_import_id}")
-        allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
+        display_name, name = _resolved_display_names(
+            payload,
+            fallback_display_name=f"{connector_kind} import {table_import_id}",
+        )
+        allow_schema_changes = _resolved_allow_schema_changes(payload, default=False)
         table_import_config = _resolve_table_import_config(payload, connector_kind=connector_kind)
         try:
             validate_resource_import_config(
@@ -1629,29 +1952,26 @@ async def create_table_import_v2(
             source_type=source_type,
             source_id=table_import_id,
             enabled=True,
-            config_json={
-                "connection_id": connection_id,
-                "dataset_rid": dataset_rid_input,
-                "display_name": display_name,
-                "name": display_name,
-                "parent_rid": _connection_rid(connection_id),
-                "import_mode": import_mode,
-                "allow_schema_changes": allow_schema_changes,
-                "table_import_config": table_import_config,
-                "branch_name": resolved_branch,
-            },
+            config_json=_build_connector_import_source_config(
+                connection_id=connection_id,
+                dataset_rid=dataset_rid_input,
+                display_name=display_name,
+                name=name,
+                import_mode=import_mode,
+                config_key="table_import_config",
+                resource_config=table_import_config,
+                branch_name=resolved_branch,
+                allow_schema_changes=allow_schema_changes,
+            ),
         )
-        if resolved_db:
-            await connector_registry.upsert_mapping(
-                source_type=source_type,
-                source_id=table_import_id,
-                enabled=bool(resolved_db and destination_object_type),
-                status="confirmed" if resolved_db and destination_object_type else "draft",
-                target_db_name=resolved_db,
-                target_branch=resolved_branch,
-                target_class_label=destination_object_type,
-                field_mappings=[],
-            )
+        await _upsert_created_connector_import_mapping(
+            connector_registry=connector_registry,
+            source_type=source_type,
+            source_id=table_import_id,
+            target_db_name=resolved_db,
+            target_branch=resolved_branch,
+            target_class_label=destination_object_type,
+        )
 
     source, mapping = await _load_table_import_source(
         connector_registry=connector_registry,
@@ -1758,54 +2078,18 @@ async def list_table_imports_v2(
             parameters={"connectionRid": connectionRid},
         )
 
-    if pageSize is None:
-        page_size = 100
-    else:
-        try:
-            page_size = int(pageSize)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be an integer"},
-            )
-        if page_size <= 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be > 0"},
-            )
+    page_size = _parse_page_size_value(pageSize)
+    if isinstance(page_size, JSONResponse):
+        return page_size
+    offset = _parse_page_offset(pageToken)
+    if isinstance(offset, JSONResponse):
+        return offset
 
-    offset = 0
-    if pageToken:
-        try:
-            offset = int(pageToken)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-        if offset < 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-
-    owned_sources: list[ConnectorSource] = []
-    for source_type in _table_import_source_types():
-        sources = await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000)
-        for src in sources:
-            if str((src.config_json or {}).get("connection_id") or "").strip() != connection_id:
-                continue
-            owned_sources.append(src)
-
-    owned_sources.sort(key=lambda src: str(src.source_id))
+    owned_sources = await _list_connection_owned_sources(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_types=_table_import_source_types(),
+    )
     page_items = owned_sources[offset : offset + page_size]
 
     data: list[dict[str, Any]] = []
@@ -1917,23 +2201,22 @@ async def replace_table_import_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
 
-    cfg.update(
-        {
-            "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} import {table_import_id}"),
-            "name": _display_name_from_payload(payload, fallback=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} import {table_import_id}"),
-            "parent_rid": _connection_rid(connection_id),
-            "import_mode": import_mode,
-            "allow_schema_changes": bool(
-                payload.get("allowSchemaChanges")
-                if payload.get("allowSchemaChanges") is not None
-                else cfg.get("allow_schema_changes")
-            ),
-            "table_import_config": table_import_config,
-            "connection_id": connection_id,
-        }
+    display_name, name = _resolved_display_names(
+        payload,
+        fallback_display_name=cfg.get("display_name") or f"{connector_kind} import {table_import_id}",
+        fallback_name=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} import {table_import_id}",
     )
-    if destination_branch:
-        cfg["branch_name"] = destination_branch
+    cfg = _build_connector_import_source_config(
+        connection_id=connection_id,
+        display_name=display_name,
+        name=name,
+        import_mode=import_mode,
+        config_key="table_import_config",
+        resource_config=table_import_config,
+        existing_cfg=cfg,
+        branch_name=destination_branch,
+        allow_schema_changes=_resolved_allow_schema_changes(payload, existing_cfg=cfg),
+    )
 
     await connector_registry.upsert_source(
         source_type=source.source_type,
@@ -1942,17 +2225,15 @@ async def replace_table_import_v2(
         config_json=cfg,
     )
 
-    if mapping and (destination_db or destination_object_type or destination_branch):
-        await connector_registry.upsert_mapping(
-            source_type=source.source_type,
-            source_id=source.source_id,
-            enabled=bool(destination_db or mapping.enabled),
-            status="confirmed" if (destination_db or mapping.target_db_name) and (destination_object_type or mapping.target_class_label) else "draft",
-            target_db_name=destination_db or mapping.target_db_name,
-            target_branch=destination_branch or mapping.target_branch,
-            target_class_label=destination_object_type or mapping.target_class_label,
-            field_mappings=mapping.field_mappings,
-        )
+    await _upsert_replaced_connector_import_mapping(
+        connector_registry=connector_registry,
+        source_type=source.source_type,
+        source_id=source.source_id,
+        mapping=mapping,
+        destination_db=destination_db,
+        destination_branch=destination_branch,
+        destination_object_type=destination_object_type,
+    )
 
     refreshed_source, refreshed_mapping = await _load_table_import_source(
         connector_registry=connector_registry,
@@ -2069,156 +2350,43 @@ async def execute_table_import_v2(
             parameters={"message": "tableImportRid is invalid"},
         )
 
-    source, mapping = await _load_table_import_source(
+    loaded = await _load_validated_executable_connector_import(
         connector_registry=connector_registry,
         connection_id=connection_id,
-        table_import_id=table_import_id,
+        source_id=table_import_id,
+        source_types=_table_import_source_types(),
+        resource_kind="table_import",
+        resource_display_name="table import",
+        resource_error_name="TableImport",
+        not_found_parameters={"connectionRid": connectionRid, "tableImportRid": tableImportRid},
     )
-    if source is None:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="TableImportNotFound",
-            parameters={"connectionRid": connectionRid, "tableImportRid": tableImportRid},
-        )
-    if mapping is None or not str(mapping.target_db_name or "").strip():
-        return _foundry_error(
-            status.HTTP_409_CONFLICT,
-            error_code="CONFLICT",
-            error_name="TableImportNotReady",
-            parameters={"message": "table import mapping is incomplete; target ontology is required"},
-        )
+    if isinstance(loaded, JSONResponse):
+        return loaded
+    source, mapping = loaded
 
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    source_cfg = dict(source.config_json or {})
-    target_db = str(mapping.target_db_name or "").strip() or None
-    try:
-        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="table_import")
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
-    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "JDBC connectivity is disabled for this ontology"},
-        )
-    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "CDC connectivity is disabled for this ontology"},
-        )
-    try:
-        validate_resource_import_config(
-            resource_kind="table_import",
-            connector_kind=connector_kind,
-            import_mode=import_mode,
-            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="table_import"),
-        )
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
-
-    branch_name = str(mapping.target_branch or "").strip() or "main"
-    requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
-    connection_rid = _connection_rid(connection_id)
-    table_import_rid = _table_import_rid(source.source_id)
-    pipeline_id: str | None = None
-    job_id: str | None = None
-    started_at: Any = None
-
-    try:
-        pipeline_id = await _ensure_table_import_pipeline(
-            pipeline_registry=pipeline_registry,
-            connection_id=connection_id,
-            source=source,
-            mapping=mapping,
-        )
-        job_id = _table_import_build_job_id(pipeline_id=pipeline_id)
-        started_at = utcnow()
-
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="RUNNING",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=table_import_rid,
-                branch_name=branch_name,
-                requested_by=requested_by,
-            ),
-            started_at=started_at,
-        )
-
-        result_payload = await data_connector_pipelining_service.start_pipelining_table_import(
-            source=source,
-            mapping=mapping,
-            google_sheets_service=google_sheets_service,
-            connector_adapter_factory=connector_adapter_factory,
-            connector_registry=connector_registry,
-            pipeline_registry=pipeline_registry,
-            dataset_registry=dataset_registry,
-            objectify_registry=objectify_registry,
-            objectify_job_queue=objectify_job_queue,
-            actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
-        )
-        result_payload = _validated_execute_result_payload(
-            result_payload=result_payload,
-            resource_kind="table import",
-        )
-
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="SUCCESS",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=table_import_rid,
-                branch_name=branch_name,
-                requested_by=requested_by,
-                result_payload=result_payload if isinstance(result_payload, dict) else None,
-            ),
-            started_at=started_at,
-            finished_at=utcnow(),
-        )
-    except ValueError as exc:
-        logger.warning("Invalid table import runtime configuration for %s: %s", tableImportRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=table_import_rid,
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _resource_invalid_config_response(resource_kind="table_import", message=str(exc))
-    except Exception as exc:
-        logger.error("Failed to execute table import %s: %s", tableImportRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=table_import_rid,
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"message": "Failed to execute table import"},
-        )
-
-    return build_rid("build", job_id)
+    return await _execute_connector_import_build(
+        request=request,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        resource_kind="table import",
+        resource_kind_key="table_import",
+        resource_log_id=tableImportRid,
+        resource_rid=_table_import_rid(source.source_id),
+        resource_field="tableImportRid",
+        pipeline_namespace="table-import",
+        pipeline_name_prefix="table_import",
+        pipeline_type="connector_table_import",
+        location_segment="tableImports",
+        start_pipelining=data_connector_pipelining_service.start_pipelining_table_import,
+    )
 
 
 @router.post("/connections/{connectionRid}/fileImports")
@@ -2274,8 +2442,11 @@ async def create_file_import_v2(
 
     file_import_id = str(payload.get("fileImportId") or uuid4()).strip()
     source_type = file_import_source_type_for_kind(connector_kind)
-    display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} file import {file_import_id}")
-    allow_schema_changes = bool(payload.get("allowSchemaChanges") or False)
+    display_name, name = _resolved_display_names(
+        payload,
+        fallback_display_name=f"{connector_kind} file import {file_import_id}",
+    )
+    allow_schema_changes = _resolved_allow_schema_changes(payload, default=False)
     file_import_config = _resolve_file_import_config(payload, connector_kind=connector_kind)
     try:
         validate_resource_import_config(
@@ -2308,30 +2479,27 @@ async def create_file_import_v2(
         source_type=source_type,
         source_id=file_import_id,
         enabled=True,
-        config_json={
-            "connection_id": connection_id,
-            "dataset_rid": dataset_rid_input,
-            "display_name": display_name,
-            "name": display_name,
-            "parent_rid": _connection_rid(connection_id),
-            "import_mode": import_mode,
-            "allow_schema_changes": allow_schema_changes,
-            "file_import_config": file_import_config,
-            "branch_name": resolved_branch,
-            "resource_kind": "file_import",
-        },
+        config_json=_build_connector_import_source_config(
+            connection_id=connection_id,
+            dataset_rid=dataset_rid_input,
+            display_name=display_name,
+            name=name,
+            import_mode=import_mode,
+            config_key="file_import_config",
+            resource_config=file_import_config,
+            branch_name=resolved_branch,
+            allow_schema_changes=allow_schema_changes,
+            resource_kind="file_import",
+        ),
     )
-    if resolved_db:
-        await connector_registry.upsert_mapping(
-            source_type=source_type,
-            source_id=file_import_id,
-            enabled=bool(resolved_db and destination_object_type),
-            status="confirmed" if resolved_db and destination_object_type else "draft",
-            target_db_name=resolved_db,
-            target_branch=resolved_branch,
-            target_class_label=destination_object_type,
-            field_mappings=[],
-        )
+    await _upsert_created_connector_import_mapping(
+        connector_registry=connector_registry,
+        source_type=source_type,
+        source_id=file_import_id,
+        target_db_name=resolved_db,
+        target_branch=resolved_branch,
+        target_class_label=destination_object_type,
+    )
 
     source, mapping = await _load_file_import_source(
         connector_registry=connector_registry,
@@ -2431,54 +2599,18 @@ async def list_file_imports_v2(
             parameters={"message": "connectionRid is invalid"},
         )
 
-    if pageSize is None:
-        page_size = 100
-    else:
-        try:
-            page_size = int(pageSize)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be an integer"},
-            )
-        if page_size <= 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be > 0"},
-            )
+    page_size = _parse_page_size_value(pageSize)
+    if isinstance(page_size, JSONResponse):
+        return page_size
+    offset = _parse_page_offset(pageToken)
+    if isinstance(offset, JSONResponse):
+        return offset
 
-    offset = 0
-    if pageToken:
-        try:
-            offset = int(pageToken)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-        if offset < 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-
-    owned_sources: list[ConnectorSource] = []
-    for source_type in _file_import_source_types():
-        sources = await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000)
-        for src in sources:
-            if str((src.config_json or {}).get("connection_id") or "").strip() != connection_id:
-                continue
-            owned_sources.append(src)
-
-    owned_sources.sort(key=lambda src: str(src.source_id))
+    owned_sources = await _list_connection_owned_sources(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_types=_file_import_source_types(),
+    )
     page_items = owned_sources[offset : offset + page_size]
     data: list[dict[str, Any]] = []
     for src in page_items:
@@ -2577,23 +2709,22 @@ async def replace_file_import_v2(
         )
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-    cfg.update(
-        {
-            "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} file import {file_import_id}"),
-            "name": _display_name_from_payload(payload, fallback=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} file import {file_import_id}"),
-            "parent_rid": _connection_rid(connection_id),
-            "import_mode": import_mode,
-            "allow_schema_changes": bool(
-                payload.get("allowSchemaChanges")
-                if payload.get("allowSchemaChanges") is not None
-                else cfg.get("allow_schema_changes")
-            ),
-            "file_import_config": file_import_config,
-            "connection_id": connection_id,
-        }
+    display_name, name = _resolved_display_names(
+        payload,
+        fallback_display_name=cfg.get("display_name") or f"{connector_kind} file import {file_import_id}",
+        fallback_name=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} file import {file_import_id}",
     )
-    if destination_branch:
-        cfg["branch_name"] = destination_branch
+    cfg = _build_connector_import_source_config(
+        connection_id=connection_id,
+        display_name=display_name,
+        name=name,
+        import_mode=import_mode,
+        config_key="file_import_config",
+        resource_config=file_import_config,
+        existing_cfg=cfg,
+        branch_name=destination_branch,
+        allow_schema_changes=_resolved_allow_schema_changes(payload, existing_cfg=cfg),
+    )
     await connector_registry.upsert_source(
         source_type=source.source_type,
         source_id=source.source_id,
@@ -2601,17 +2732,15 @@ async def replace_file_import_v2(
         config_json=cfg,
     )
 
-    if mapping and (destination_db or destination_object_type or destination_branch):
-        await connector_registry.upsert_mapping(
-            source_type=source.source_type,
-            source_id=source.source_id,
-            enabled=bool(destination_db or mapping.enabled),
-            status="confirmed" if (destination_db or mapping.target_db_name) and (destination_object_type or mapping.target_class_label) else "draft",
-            target_db_name=destination_db or mapping.target_db_name,
-            target_branch=destination_branch or mapping.target_branch,
-            target_class_label=destination_object_type or mapping.target_class_label,
-            field_mappings=mapping.field_mappings,
-        )
+    await _upsert_replaced_connector_import_mapping(
+        connector_registry=connector_registry,
+        source_type=source.source_type,
+        source_id=source.source_id,
+        mapping=mapping,
+        destination_db=destination_db,
+        destination_branch=destination_branch,
+        destination_object_type=destination_object_type,
+    )
 
     refreshed_source, refreshed_mapping = await _load_file_import_source(
         connector_registry=connector_registry,
@@ -2723,158 +2852,43 @@ async def execute_file_import_v2(
             parameters={"message": "fileImportRid is invalid"},
         )
 
-    source, mapping = await _load_file_import_source(
+    loaded = await _load_validated_executable_connector_import(
         connector_registry=connector_registry,
         connection_id=connection_id,
-        file_import_id=file_import_id,
+        source_id=file_import_id,
+        source_types=_file_import_source_types(),
+        resource_kind="file_import",
+        resource_display_name="file import",
+        resource_error_name="FileImport",
+        not_found_parameters={"connectionRid": connectionRid, "fileImportRid": fileImportRid},
     )
-    if source is None:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="FileImportNotFound",
-            parameters={"connectionRid": connectionRid, "fileImportRid": fileImportRid},
-        )
-    if mapping is None or not str(mapping.target_db_name or "").strip():
-        return _foundry_error(
-            status.HTTP_409_CONFLICT,
-            error_code="CONFLICT",
-            error_name="FileImportNotReady",
-            parameters={"message": "file import mapping is incomplete; target ontology is required"},
-        )
+    if isinstance(loaded, JSONResponse):
+        return loaded
+    source, mapping = loaded
 
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    source_cfg = dict(source.config_json or {})
-    target_db = str(mapping.target_db_name or "").strip() or None
-    try:
-        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="file_import")
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "JDBC connectivity is disabled for this ontology"},
-        )
-    if _requires_cdc_feature(import_mode) and not _cdc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "CDC connectivity is disabled for this ontology"},
-        )
-    try:
-        validate_resource_import_config(
-            resource_kind="file_import",
-            connector_kind=connector_kind,
-            import_mode=import_mode,
-            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="file_import"),
-        )
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-
-    branch_name = str(mapping.target_branch or "").strip() or "main"
-    requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
-    connection_rid = _connection_rid(connection_id)
-    file_import_rid = _file_import_rid(source.source_id)
-    pipeline_id: str | None = None
-    job_id: str | None = None
-    started_at: Any = None
-
-    try:
-        pipeline_id = await _ensure_file_import_pipeline(
-            pipeline_registry=pipeline_registry,
-            connection_id=connection_id,
-            source=source,
-            mapping=mapping,
-        )
-        job_id = _table_import_build_job_id(pipeline_id=pipeline_id)
-        started_at = utcnow()
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="RUNNING",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=file_import_rid,
-                resource_field="fileImportRid",
-                branch_name=branch_name,
-                requested_by=requested_by,
-            ),
-            started_at=started_at,
-        )
-
-        result_payload = await data_connector_pipelining_service.start_pipelining_file_import(
-            source=source,
-            mapping=mapping,
-            google_sheets_service=google_sheets_service,
-            connector_adapter_factory=connector_adapter_factory,
-            connector_registry=connector_registry,
-            pipeline_registry=pipeline_registry,
-            dataset_registry=dataset_registry,
-            objectify_registry=objectify_registry,
-            objectify_job_queue=objectify_job_queue,
-            actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
-        )
-        result_payload = _validated_execute_result_payload(
-            result_payload=result_payload,
-            resource_kind="file import",
-        )
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="SUCCESS",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=file_import_rid,
-                resource_field="fileImportRid",
-                branch_name=branch_name,
-                requested_by=requested_by,
-                result_payload=result_payload if isinstance(result_payload, dict) else None,
-            ),
-            started_at=started_at,
-            finished_at=utcnow(),
-        )
-    except ValueError as exc:
-        logger.warning("Invalid file import runtime configuration for %s: %s", fileImportRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=file_import_rid,
-            resource_field="fileImportRid",
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _resource_invalid_config_response(resource_kind="file_import", message=str(exc))
-    except Exception as exc:
-        logger.error("Failed to execute file import %s: %s", fileImportRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=file_import_rid,
-            resource_field="fileImportRid",
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"message": "Failed to execute file import"},
-        )
-
-    return build_rid("build", job_id)
+    return await _execute_connector_import_build(
+        request=request,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        resource_kind="file import",
+        resource_kind_key="file_import",
+        resource_log_id=fileImportRid,
+        resource_rid=_file_import_rid(source.source_id),
+        resource_field="fileImportRid",
+        pipeline_namespace="file-import",
+        pipeline_name_prefix="file_import",
+        pipeline_type="connector_file_import",
+        location_segment="fileImports",
+        start_pipelining=data_connector_pipelining_service.start_pipelining_file_import,
+    )
 
 
 @router.post("/connections/{connectionRid}/virtualTables/{virtualTableRid}/execute")
@@ -2914,151 +2928,44 @@ async def execute_virtual_table_v2(
             parameters={"message": "virtualTableRid is invalid"},
         )
 
-    source, mapping = await _load_virtual_table_source(
+    loaded = await _load_validated_executable_connector_import(
         connector_registry=connector_registry,
         connection_id=connection_id,
-        virtual_table_id=virtual_table_id,
+        source_id=virtual_table_id,
+        source_types=_virtual_table_source_types(),
+        resource_kind="virtual_table",
+        resource_display_name="virtual table",
+        resource_error_name="VirtualTable",
+        not_found_parameters={"connectionRid": connectionRid, "virtualTableRid": virtualTableRid},
+        validate_cdc=False,
     )
-    if source is None:
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="VirtualTableNotFound",
-            parameters={"connectionRid": connectionRid, "virtualTableRid": virtualTableRid},
-        )
-    if mapping is None or not str(mapping.target_db_name or "").strip():
-        return _foundry_error(
-            status.HTTP_409_CONFLICT,
-            error_code="CONFLICT",
-            error_name="VirtualTableNotReady",
-            parameters={"message": "virtual table mapping is incomplete; target ontology is required"},
-        )
+    if isinstance(loaded, JSONResponse):
+        return loaded
+    source, mapping = loaded
 
-    connector_kind = connector_kind_from_source_type(source.source_type, strict=True)
-    source_cfg = dict(source.config_json or {})
-    target_db = str(mapping.target_db_name or "").strip() or None
-    try:
-        import_mode = _resource_import_mode_from_source(source_cfg=source_cfg, resource_kind="virtual_table")
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-    if is_jdbc_connector_kind(connector_kind) and not _jdbc_enabled_for_db(target_db):
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="ConnectivityFeatureDisabled",
-            parameters={"message": "JDBC connectivity is disabled for this ontology"},
-        )
-    try:
-        validate_resource_import_config(
-            resource_kind="virtual_table",
-            connector_kind=connector_kind,
-            import_mode=import_mode,
-            config=_resource_import_config_from_source(source_cfg=source_cfg, resource_kind="virtual_table"),
-        )
-    except ValueError as exc:
-        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-
-    branch_name = str(mapping.target_branch or "").strip() or "main"
-    requested_by = str(request.headers.get("X-User-ID") or "").strip() or "system"
-    connection_rid = _connection_rid(connection_id)
-    virtual_table_rid = _virtual_table_rid(source.source_id)
-    pipeline_id: str | None = None
-    job_id: str | None = None
-    started_at: Any = None
-
-    try:
-        pipeline_id = await _ensure_virtual_table_pipeline(
-            pipeline_registry=pipeline_registry,
-            connection_id=connection_id,
-            source=source,
-            mapping=mapping,
-        )
-        job_id = _table_import_build_job_id(pipeline_id=pipeline_id)
-        started_at = utcnow()
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="RUNNING",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=virtual_table_rid,
-                resource_field="virtualTableRid",
-                branch_name=branch_name,
-                requested_by=requested_by,
-            ),
-            started_at=started_at,
-        )
-
-        result_payload = await data_connector_pipelining_service.start_pipelining_virtual_table(
-            source=source,
-            mapping=mapping,
-            google_sheets_service=google_sheets_service,
-            connector_adapter_factory=connector_adapter_factory,
-            connector_registry=connector_registry,
-            pipeline_registry=pipeline_registry,
-            dataset_registry=dataset_registry,
-            objectify_registry=objectify_registry,
-            objectify_job_queue=objectify_job_queue,
-            actor_user_id=str(request.headers.get("X-User-ID") or "").strip() or None,
-        )
-        result_payload = _validated_execute_result_payload(
-            result_payload=result_payload,
-            resource_kind="virtual table",
-        )
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            mode="build",
-            status="SUCCESS",
-            output_json=_build_execute_run_output(
-                connection_rid=connection_rid,
-                resource_rid=virtual_table_rid,
-                resource_field="virtualTableRid",
-                branch_name=branch_name,
-                requested_by=requested_by,
-                result_payload=result_payload if isinstance(result_payload, dict) else None,
-            ),
-            started_at=started_at,
-            finished_at=utcnow(),
-        )
-    except ValueError as exc:
-        logger.warning("Invalid virtual table runtime configuration for %s: %s", virtualTableRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=virtual_table_rid,
-            resource_field="virtualTableRid",
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-    except Exception as exc:
-        logger.error("Failed to execute virtual table %s: %s", virtualTableRid, exc)
-        await _record_execute_failure_run(
-            pipeline_registry=pipeline_registry,
-            pipeline_id=pipeline_id,
-            job_id=job_id,
-            connection_rid=connection_rid,
-            resource_rid=virtual_table_rid,
-            resource_field="virtualTableRid",
-            branch_name=branch_name,
-            requested_by=requested_by,
-            error_detail=str(exc),
-            started_at=started_at,
-        )
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"message": "Failed to execute virtual table"},
-        )
-
-    return build_rid("build", job_id)
+    return await _execute_connector_import_build(
+        request=request,
+        google_sheets_service=google_sheets_service,
+        connector_adapter_factory=connector_adapter_factory,
+        connector_registry=connector_registry,
+        pipeline_registry=pipeline_registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        objectify_job_queue=objectify_job_queue,
+        connection_id=connection_id,
+        source=source,
+        mapping=mapping,
+        resource_kind="virtual table",
+        resource_kind_key="virtual_table",
+        resource_log_id=virtualTableRid,
+        resource_rid=_virtual_table_rid(source.source_id),
+        resource_field="virtualTableRid",
+        pipeline_namespace="virtual-table",
+        pipeline_name_prefix="virtual_table",
+        pipeline_type="connector_virtual_table",
+        location_segment="virtualTables",
+        start_pipelining=data_connector_pipelining_service.start_pipelining_virtual_table,
+    )
 
 
 @router.post("/connections/{connectionRid}/virtualTables")
@@ -3116,7 +3023,10 @@ async def create_virtual_table_v2(
         )
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
-    display_name = _display_name_from_payload(payload, fallback=f"{connector_kind} virtual table {virtual_table_id}")
+    display_name, name = _resolved_display_names(
+        payload,
+        fallback_display_name=f"{connector_kind} virtual table {virtual_table_id}",
+    )
 
     try:
         dataset_rid_input, dataset_db_name, dataset_branch = await _resolve_dataset_context(
@@ -3139,29 +3049,26 @@ async def create_virtual_table_v2(
         source_type=source_type,
         source_id=virtual_table_id,
         enabled=True,
-        config_json={
-            "connection_id": connection_id,
-            "dataset_rid": dataset_rid_input,
-            "display_name": display_name,
-                "name": display_name,
-                "parent_rid": _connection_rid(connection_id),
-                "import_mode": import_mode,
-                "virtual_table_config": virtual_table_config,
-                "branch_name": resolved_branch,
-                "resource_kind": "virtual_table",
-            },
-        )
-    if resolved_db:
-        await connector_registry.upsert_mapping(
-            source_type=source_type,
-            source_id=virtual_table_id,
-            enabled=bool(resolved_db and destination_object_type),
-            status="confirmed" if resolved_db and destination_object_type else "draft",
-            target_db_name=resolved_db,
-            target_branch=resolved_branch,
-            target_class_label=destination_object_type,
-            field_mappings=[],
-        )
+        config_json=_build_connector_import_source_config(
+            connection_id=connection_id,
+            dataset_rid=dataset_rid_input,
+            display_name=display_name,
+            name=name,
+            import_mode=import_mode,
+            config_key="virtual_table_config",
+            resource_config=virtual_table_config,
+            branch_name=resolved_branch,
+            resource_kind="virtual_table",
+        ),
+    )
+    await _upsert_created_connector_import_mapping(
+        connector_registry=connector_registry,
+        source_type=source_type,
+        source_id=virtual_table_id,
+        target_db_name=resolved_db,
+        target_branch=resolved_branch,
+        target_class_label=destination_object_type,
+    )
 
     source, mapping = await _load_virtual_table_source(
         connector_registry=connector_registry,
@@ -3259,54 +3166,18 @@ async def list_virtual_tables_v2(
             parameters={"message": "connectionRid is invalid"},
         )
 
-    if pageSize is None:
-        page_size = 100
-    else:
-        try:
-            page_size = int(pageSize)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be an integer"},
-            )
-        if page_size <= 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageSize must be > 0"},
-            )
+    page_size = _parse_page_size_value(pageSize)
+    if isinstance(page_size, JSONResponse):
+        return page_size
+    offset = _parse_page_offset(pageToken)
+    if isinstance(offset, JSONResponse):
+        return offset
 
-    offset = 0
-    if pageToken:
-        try:
-            offset = int(pageToken)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-        if offset < 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-
-    owned_sources: list[ConnectorSource] = []
-    for source_type in _virtual_table_source_types():
-        sources = await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000)
-        for src in sources:
-            if str((src.config_json or {}).get("connection_id") or "").strip() != connection_id:
-                continue
-            owned_sources.append(src)
-
-    owned_sources.sort(key=lambda src: str(src.source_id))
+    owned_sources = await _list_connection_owned_sources(
+        connector_registry=connector_registry,
+        connection_id=connection_id,
+        source_types=_virtual_table_source_types(),
+    )
     page_items = owned_sources[offset : offset + page_size]
     data: list[dict[str, Any]] = []
     for src in page_items:
@@ -3397,18 +3268,21 @@ async def replace_virtual_table_v2(
     except ValueError as exc:
         return _resource_invalid_config_response(resource_kind="virtual_table", message=str(exc))
 
-    cfg.update(
-        {
-            "display_name": _display_name_from_payload(payload, fallback=cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}"),
-            "name": _display_name_from_payload(payload, fallback=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}"),
-            "parent_rid": _connection_rid(connection_id),
-            "import_mode": import_mode,
-            "virtual_table_config": virtual_table_config,
-            "connection_id": connection_id,
-        }
+    display_name, name = _resolved_display_names(
+        payload,
+        fallback_display_name=cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}",
+        fallback_name=cfg.get("name") or cfg.get("display_name") or f"{connector_kind} virtual table {virtual_table_id}",
     )
-    if destination_branch:
-        cfg["branch_name"] = destination_branch
+    cfg = _build_connector_import_source_config(
+        connection_id=connection_id,
+        display_name=display_name,
+        name=name,
+        import_mode=import_mode,
+        config_key="virtual_table_config",
+        resource_config=virtual_table_config,
+        existing_cfg=cfg,
+        branch_name=destination_branch,
+    )
     await connector_registry.upsert_source(
         source_type=source.source_type,
         source_id=source.source_id,
@@ -3416,17 +3290,15 @@ async def replace_virtual_table_v2(
         config_json=cfg,
     )
 
-    if mapping and (destination_db or destination_object_type or destination_branch):
-        await connector_registry.upsert_mapping(
-            source_type=source.source_type,
-            source_id=source.source_id,
-            enabled=bool(destination_db or mapping.enabled),
-            status="confirmed" if (destination_db or mapping.target_db_name) and (destination_object_type or mapping.target_class_label) else "draft",
-            target_db_name=destination_db or mapping.target_db_name,
-            target_branch=destination_branch or mapping.target_branch,
-            target_class_label=destination_object_type or mapping.target_class_label,
-            field_mappings=mapping.field_mappings,
-        )
+    await _upsert_replaced_connector_import_mapping(
+        connector_registry=connector_registry,
+        source_type=source.source_type,
+        source_id=source.source_id,
+        mapping=mapping,
+        destination_db=destination_db,
+        destination_branch=destination_branch,
+        destination_object_type=destination_object_type,
+    )
 
     refreshed_source, refreshed_mapping = await _load_virtual_table_source(
         connector_registry=connector_registry,
@@ -3636,24 +3508,9 @@ async def list_connections_v2(
     preview_error = _require_preview_or_400(preview)
     if preview_error is not None:
         return preview_error
-    offset = 0
-    if pageToken:
-        try:
-            offset = int(pageToken)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-        if offset < 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
+    offset = _parse_page_offset(pageToken)
+    if isinstance(offset, JSONResponse):
+        return offset
 
     all_connections: list[ConnectorSource] = []
     for source_type in _connection_source_types():
@@ -4131,24 +3988,9 @@ async def list_connection_export_runs_v2(
     assert connection_id is not None
     assert source is not None
 
-    offset = 0
-    if pageToken:
-        try:
-            offset = int(pageToken)
-        except (TypeError, ValueError):
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
-        if offset < 0:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="INVALID_ARGUMENT",
-                error_name="InvalidArgument",
-                parameters={"message": "pageToken is invalid"},
-            )
+    offset = _parse_page_offset(pageToken)
+    if isinstance(offset, JSONResponse):
+        return offset
 
     tasks = await task_manager.get_all_tasks(task_type="connectivity_export_run", limit=5000)
     scoped_tasks = []

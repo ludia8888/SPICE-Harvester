@@ -27,10 +27,13 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
-from shared.utils.key_spec import normalize_key_spec
+from shared.utils.key_spec import derive_key_spec_from_properties, normalize_key_spec
+from shared.utils.ontology_fields import list_ontology_properties
 from shared.utils.object_type_backing import list_backing_sources, select_primary_backing_source
+from shared.utils.payload_utils import unwrap_data_payload
 from shared.utils.schema_columns import extract_schema_columns
 from shared.utils.schema_hash import compute_schema_hash
+from shared.utils.string_list_utils import normalize_string_list
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.errors.external_codes import ExternalErrorCode
 from shared.observability.tracing import trace_external_call
@@ -39,15 +42,6 @@ logger = logging.getLogger(__name__)
 
 _CONTRACT_STATUS_ACTIVE = "ACTIVE"
 _CONTRACT_STATUS_DRAFT = "DRAFT"
-
-
-def _extract_resource_payload(response: Any) -> Dict[str, Any]:
-    if not isinstance(response, dict):
-        return {}
-    payload = response.get("data") if isinstance(response.get("data"), dict) else None
-    if isinstance(payload, dict):
-        return payload
-    return response
 
 
 def _schema_hash_from_version(sample_json: Any, schema_json: Any) -> Optional[str]:
@@ -243,18 +237,11 @@ async def _resolve_backing(
 
 
 def _extract_ontology_property_names(payload: Any) -> set[str]:
-    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-        payload = payload["data"]
-    if not isinstance(payload, dict):
-        return set()
-    props = payload.get("properties")
     names: set[str] = set()
-    if isinstance(props, list):
-        for prop in props:
-            if isinstance(prop, dict):
-                name = str(prop.get("name") or "").strip()
-                if name:
-                    names.add(name)
+    for prop in list_ontology_properties(payload):
+        name = str(prop.get("name") or prop.get("id") or "").strip()
+        if name:
+            names.add(name)
     return names
 
 
@@ -263,15 +250,12 @@ def _infer_pk_spec_from_ontology(
     ontology_payload: Any,
     class_id: str,
 ) -> Dict[str, Any]:
-    if isinstance(ontology_payload, dict) and isinstance(ontology_payload.get("data"), dict):
-        ontology_payload = ontology_payload.get("data")
-    properties = ontology_payload.get("properties") if isinstance(ontology_payload, dict) else None
-    if not isinstance(properties, list):
+    properties = list_ontology_properties(ontology_payload)
+    if not properties:
         return {}
 
     names: List[str] = []
-    primary_candidates: List[str] = []
-    title_candidates: List[str] = []
+    normalized_properties: List[Dict[str, Any]] = []
     for entry in properties:
         if not isinstance(entry, dict):
             continue
@@ -279,13 +263,16 @@ def _infer_pk_spec_from_ontology(
         if not name:
             continue
         names.append(name)
-        if bool(entry.get("primary_key") or entry.get("primaryKey")):
-            primary_candidates.append(name)
-        if bool(entry.get("title_key") or entry.get("titleKey")):
-            title_candidates.append(name)
+        normalized_entry = dict(entry)
+        normalized_entry["name"] = name
+        normalized_properties.append(normalized_entry)
 
     if not names:
         return {}
+
+    derived_key_spec = derive_key_spec_from_properties(normalized_properties)
+    primary_candidates = list(derived_key_spec.get("primary_key") or [])
+    title_candidates = list(derived_key_spec.get("title_key") or [])
 
     primary = primary_candidates[:]
     if not primary:
@@ -310,6 +297,16 @@ def _infer_pk_spec_from_ontology(
         "primary_key": primary,
         "title_key": title,
     }
+
+
+def _build_target_schema_from_ontology(ontology_payload: Any) -> List[Dict[str, Any]]:
+    target_schema: List[Dict[str, Any]] = []
+    for prop in list_ontology_properties(ontology_payload):
+        name = str(prop.get("name") or prop.get("id") or "").strip()
+        if not name:
+            continue
+        target_schema.append({"name": name, "type": prop.get("type")})
+    return target_schema
 
 
 def _normalize_and_validate_pk_spec(raw_pk_spec: Any, *, ontology_property_names: set[str]) -> Dict[str, Any]:
@@ -475,7 +472,7 @@ async def create_object_type_contract(
             branch=branch,
             expected_head_commit=expected_head,
         )
-        resource = _extract_resource_payload(response)
+        resource = unwrap_data_payload(response)
 
         if auto_generate_mapping and status_value != _CONTRACT_STATUS_ACTIVE:
             raise classified_http_exception(
@@ -491,17 +488,7 @@ async def create_object_type_contract(
                     code=ErrorCode.OBJECTIFY_CONTRACT_ERROR,
                 )
             source_schema = extract_schema_columns(version.sample_json or dataset.schema_json)
-            target_schema: List[Dict[str, Any]] = []
-            if isinstance(ontology_payload, dict):
-                properties = ontology_payload.get("properties") or []
-                if isinstance(properties, list):
-                    for prop in properties:
-                        if not isinstance(prop, dict):
-                            continue
-                        name = str(prop.get("name") or "").strip()
-                        if not name:
-                            continue
-                        target_schema.append({"name": name, "type": prop.get("type")})
+            target_schema = _build_target_schema_from_ontology(ontology_payload)
 
             suggestion = MappingSuggestionService().suggest_mappings(
                 source_schema=source_schema,
@@ -556,7 +543,7 @@ async def create_object_type_contract(
                     branch=branch,
                     expected_head_commit=head_commit_id or expected_head_commit,
                 )
-                resource = _extract_resource_payload(response)
+                resource = unwrap_data_payload(response)
 
         data: Dict[str, Any] = {
             "object_type": resource,
@@ -585,13 +572,7 @@ async def create_object_type_contract(
 
 
 def _normalize_field_list(raw_value: Any) -> List[str]:
-    if raw_value is None:
-        return []
-    if isinstance(raw_value, list):
-        return [str(v).strip() for v in raw_value if str(v).strip()]
-    if isinstance(raw_value, str):
-        return [v.strip() for v in raw_value.split(",") if v.strip()]
-    return []
+    return normalize_string_list(raw_value)
 
 
 def _normalize_field_moves(raw_value: Any) -> Dict[str, str]:
@@ -651,7 +632,7 @@ async def update_object_type_contract(
             resource_id=class_id,
             branch=branch,
         )
-        existing_resource = _extract_resource_payload(existing_response)
+        existing_resource = unwrap_data_payload(existing_response)
         existing_spec = existing_resource.get("spec") if isinstance(existing_resource, dict) else {}
         if not isinstance(existing_spec, dict):
             existing_spec = {}
@@ -1105,7 +1086,7 @@ async def update_object_type_contract(
             except Exception as exc:
                 logger.warning("Failed to record migration plan: %s", exc)
 
-        resource = _extract_resource_payload(response)
+        resource = unwrap_data_payload(response)
         data: Dict[str, Any] = {"object_type": resource}
         if reindex_job_id or reindex_error:
             data["reindex_job_id"] = reindex_job_id

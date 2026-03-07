@@ -38,6 +38,10 @@ class _FakeObjectifyJobQueue:
 
     async def publish(self, job, *, require_delivery=False):  # noqa: ANN003
         self.jobs.append(job)
+        return SimpleNamespace(
+            record=SimpleNamespace(job_id=job.job_id, status="ENQUEUE_REQUESTED"),
+            created=True,
+        )
 
 
 class _FakeDatasetRegistry:

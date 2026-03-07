@@ -680,10 +680,10 @@ async def test_foundry_v2_load_object_set_links_returns_locator_payload(
             "data": [
                 {
                     "__apiName": "Order",
-                    "__primaryKey": "order-1",
-                    "owner_id": "user-1",
-                    "owned_by": ["user-1", "user-2"],
-                    "links": {"owned_by": ["user-2", "user-3"]},
+                    "__primaryKey": "Order/order-1",
+                    "owner_id": "User/user-1",
+                    "owned_by": ["User/user-1", "user-2"],
+                    "links": {"owned_by": ["User/user-2", "user-3"]},
                 }
             ],
             "nextPageToken": "next_source_page",

@@ -102,6 +102,12 @@ class ObjectifyOutboxItem:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class ObjectifyJobEnqueueResult:
+    record: ObjectifyJobRecord
+    created: bool
+
+
 class ObjectifyRegistry(PostgresSchemaRegistry):
     def __init__(
         self,
@@ -759,7 +765,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 updated_at=row["updated_at"],
             )
 
-    async def create_objectify_job(
+    async def _create_objectify_job_internal(
         self,
         *,
         job_id: str,
@@ -774,7 +780,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         status: str = "QUEUED",
         outbox_payload: Optional[Dict[str, Any]] = None,
         dedupe_key: Optional[str] = None,
-    ) -> ObjectifyJobRecord:
+    ) -> tuple[ObjectifyJobRecord, bool]:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         dataset_branch = dataset_branch or "main"
@@ -798,6 +804,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = None
+                created = False
                 try:
                     # Use a nested transaction (savepoint) so a conflict on the unique dedupe_key index
                     # doesn't poison the outer transaction (needed for outbox writes).
@@ -825,6 +832,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                             target_class_id,
                             status,
                         )
+                        created = row is not None
                 except UniqueViolationError:
                     row = await conn.fetchrow(
                         f"""
@@ -839,7 +847,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                         """,
                         dedupe_key,
                     )
-                if outbox_payload is not None:
+                if outbox_payload is not None and created:
                     resolved_job_id = str(row["job_id"]) if row is not None else job_id
                     await conn.execute(
                         f"""
@@ -853,7 +861,39 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                     )
             if not row:
                 raise RuntimeError("Failed to create objectify job")
-            return self._row_to_objectify_job(row)
+            return self._row_to_objectify_job(row), created
+
+    async def create_objectify_job(
+        self,
+        *,
+        job_id: str,
+        mapping_spec_id: Optional[str] = None,
+        mapping_spec_version: Optional[int] = None,
+        dataset_id: str,
+        dataset_version_id: Optional[str] = None,
+        artifact_id: Optional[str] = None,
+        artifact_output_name: Optional[str] = None,
+        dataset_branch: str,
+        target_class_id: str,
+        status: str = "QUEUED",
+        outbox_payload: Optional[Dict[str, Any]] = None,
+        dedupe_key: Optional[str] = None,
+    ) -> ObjectifyJobRecord:
+        record, _ = await self._create_objectify_job_internal(
+            job_id=job_id,
+            mapping_spec_id=mapping_spec_id,
+            mapping_spec_version=mapping_spec_version,
+            dataset_id=dataset_id,
+            dataset_version_id=dataset_version_id,
+            artifact_id=artifact_id,
+            artifact_output_name=artifact_output_name,
+            dataset_branch=dataset_branch,
+            target_class_id=target_class_id,
+            status=status,
+            outbox_payload=outbox_payload,
+            dedupe_key=dedupe_key,
+        )
+        return record
 
     async def get_objectify_metrics(self) -> Dict[str, Any]:
         if not self._pool:
@@ -902,6 +942,10 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         }
 
     async def enqueue_objectify_job(self, *, job: ObjectifyJob) -> ObjectifyJobRecord:
+        result = await self.get_or_enqueue_objectify_job(job=job)
+        return result.record
+
+    async def get_or_enqueue_objectify_job(self, *, job: ObjectifyJob) -> ObjectifyJobEnqueueResult:
         payload = job.model_dump(mode="json")
         if isinstance(payload, dict):
             enrich_metadata_with_current_trace(payload)
@@ -914,7 +958,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             artifact_id=job.artifact_id,
             artifact_output_name=job.artifact_output_name,
         )
-        return await self.create_objectify_job(
+        record, created = await self._create_objectify_job_internal(
             job_id=job.job_id,
             mapping_spec_id=job.mapping_spec_id,
             mapping_spec_version=job.mapping_spec_version,
@@ -928,6 +972,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             outbox_payload=payload,
             dedupe_key=dedupe_key,
         )
+        return ObjectifyJobEnqueueResult(record=record, created=created)
 
     async def enqueue_outbox_for_job(
         self,

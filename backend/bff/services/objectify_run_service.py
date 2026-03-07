@@ -136,41 +136,47 @@ async def run_objectify(
                     code=ErrorCode.CONFLICT,
                 )
 
-        # ── Mapping resolution: OMS backing_source (by target_class_id) or PostgreSQL ──
+        # ── Mapping resolution: prefer canonical PostgreSQL spec, fall back to legacy OMS backing_source ──
         mapping_spec = None
         oms_mode = False
         target_class_id = str(body.target_class_id or "").strip() or None
 
-        if target_class_id and not body.mapping_spec_id and oms_client is not None:
-            try:
-                oms_spec = await get_mapping_from_oms(
-                    oms_client.client,
-                    oms_base_url=oms_client.base_url,
-                    db_name=dataset.db_name,
-                    target_class_id=target_class_id,
-                    branch=dataset.branch or "main",
-                    admin_token=oms_client._get_auth_token(),
-                )
-                if oms_spec:
-                    mapping_spec = oms_spec
-                    oms_mode = True
-            except Exception as oms_exc:
-                logger.warning(
-                    "OMS backing_source lookup failed for %s (falling back to PG): %s",
-                    target_class_id,
-                    oms_exc,
-                )
-
-        if not mapping_spec:
-            if body.mapping_spec_id:
-                mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
-            else:
-                mapping_spec = await objectify_registry.get_active_mapping_spec(
-                    dataset_id=dataset_id,
-                    dataset_branch=dataset.branch,
-                    artifact_output_name=resolved_output_name,
-                    schema_hash=resolved_schema_hash,
-                )
+        if body.mapping_spec_id:
+            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
+        elif target_class_id:
+            mapping_spec = await objectify_registry.get_active_mapping_spec(
+                dataset_id=dataset_id,
+                dataset_branch=dataset.branch,
+                target_class_id=target_class_id,
+                artifact_output_name=resolved_output_name,
+                schema_hash=resolved_schema_hash,
+            )
+            if not mapping_spec and oms_client is not None:
+                try:
+                    oms_spec = await get_mapping_from_oms(
+                        oms_client.client,
+                        oms_base_url=oms_client.base_url,
+                        db_name=dataset.db_name,
+                        target_class_id=target_class_id,
+                        branch=dataset.branch or "main",
+                        admin_token=oms_client._get_auth_token(),
+                    )
+                    if oms_spec:
+                        mapping_spec = oms_spec
+                        oms_mode = True
+                except Exception as oms_exc:
+                    logger.warning(
+                        "OMS backing_source lookup failed for %s (falling back to PG): %s",
+                        target_class_id,
+                        oms_exc,
+                    )
+        else:
+            mapping_spec = await objectify_registry.get_active_mapping_spec(
+                dataset_id=dataset_id,
+                dataset_branch=dataset.branch,
+                artifact_output_name=resolved_output_name,
+                schema_hash=resolved_schema_hash,
+            )
         if not mapping_spec:
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,
@@ -240,23 +246,6 @@ async def run_objectify(
             artifact_id=artifact_id,
             artifact_output_name=resolved_output_name,
         )
-        existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
-        if existing:
-            return ApiResponse.success(
-                message="Objectify job already queued",
-                data={
-                    "job_id": existing.job_id,
-                    "mapping_spec_id": mapping_spec.mapping_spec_id,
-                    "dataset_id": dataset_id,
-                    "dataset_version_id": version.version_id if version else None,
-                    "artifact_id": artifact_id,
-                    "artifact_output_name": resolved_output_name,
-                    "artifact_key": artifact_key,
-                    "status": existing.status,
-                    "oms_mode": is_oms,
-                },
-            ).to_dict()
-
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
         override_options = body.options if isinstance(body.options, dict) else {}
@@ -290,19 +279,21 @@ async def run_objectify(
             options=options,
         )
 
-        await job_queue.publish(job, require_delivery=False)
+        enqueue_result = await job_queue.publish(job, require_delivery=False)
+        queued_record = enqueue_result.record
+        created = enqueue_result.created
 
         return ApiResponse.success(
-            message="Objectify job queued",
+            message="Objectify job queued" if created else "Objectify job already queued",
             data={
-                "job_id": job_id,
+                "job_id": queued_record.job_id,
                 "mapping_spec_id": mapping_spec.mapping_spec_id,
                 "dataset_id": dataset_id,
                 "dataset_version_id": (version.version_id if version else None),
                 "artifact_id": artifact_id,
                 "artifact_output_name": resolved_output_name,
                 "artifact_key": artifact_key,
-                "status": "QUEUED",
+                "status": "QUEUED" if created else queued_record.status,
                 "oms_mode": is_oms,
             },
         ).to_dict()

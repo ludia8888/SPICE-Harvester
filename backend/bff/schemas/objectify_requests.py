@@ -38,8 +38,8 @@ class TriggerObjectifyRequest(BaseModel):
     mapping_spec_id: Optional[str] = Field(default=None)
     target_class_id: Optional[str] = Field(
         default=None,
-        description="OMS ontology class id. When provided without mapping_spec_id, "
-        "resolves property_mappings from OMS backing_source (Foundry-style).",
+        description="Ontology class id. When provided without mapping_spec_id, "
+        "the runtime prefers the active PostgreSQL mapping spec for that class and only falls back to legacy OMS backing_source mappings if no matching spec exists.",
     )
     dataset_version_id: Optional[str] = Field(default=None)
     artifact_id: Optional[str] = Field(default=None)

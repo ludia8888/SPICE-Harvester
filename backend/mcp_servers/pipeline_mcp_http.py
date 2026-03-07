@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
 import httpx
+from shared.config.settings import get_settings
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 
 from mcp_servers.bff_auth import bff_admin_token as _bff_admin_token
@@ -180,12 +180,8 @@ async def bff_v2_json(
 
 
 def _oms_admin_token() -> str:
-    """Resolve OMS admin token from environment (same fallback as OMSClient)."""
-    for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-        val = (os.getenv(key) or "").strip()
-        if val:
-            return val
-    return ""
+    """Resolve OMS admin token from centralized settings."""
+    return str(get_settings().clients.oms_client_token or "").strip()
 
 
 async def oms_json(
