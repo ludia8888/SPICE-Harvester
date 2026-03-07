@@ -20,7 +20,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import contextlib
+import json
 import os
+import subprocess
 import time
 import uuid
 from typing import Dict
@@ -60,8 +62,66 @@ REDIS_URL = os.getenv("REDIS_URL") or "redis://:spicepass123@localhost:6379"
 
 pytestmark = [pytest.mark.smoke]
 
+_RETRYABLE_KAFKA_ADMIN_ERROR_SNIPPETS = (
+    "broker transport failure",
+    "disconnected while requesting apiversion",
+    "local: timed out",
+    "connection refused",
+)
+
 def _kafka_admin() -> AdminClient:
     return AdminClient({"bootstrap.servers": KAFKA_SERVERS})
+
+
+def _is_retryable_kafka_admin_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(snippet in text for snippet in _RETRYABLE_KAFKA_ADMIN_ERROR_SNIPPETS)
+
+
+def _list_topics_with_retry(
+    admin: AdminClient,
+    *,
+    request_timeout: float = 10.0,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 1.0,
+):
+    deadline = time.monotonic() + timeout_seconds
+    last_exc: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return admin.list_topics(timeout=request_timeout)
+        except Exception as exc:
+            if not _is_retryable_kafka_admin_error(exc):
+                raise
+            last_exc = exc
+            time.sleep(poll_interval_seconds)
+    raise AssertionError(
+        f"Kafka list_topics did not become ready within {timeout_seconds:.0f}s "
+        f"(bootstrap={KAFKA_SERVERS}, last_error={last_exc})"
+    )
+
+
+def _list_consumer_groups_with_retry(
+    admin: AdminClient,
+    *,
+    request_timeout: float = 10.0,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 1.0,
+):
+    deadline = time.monotonic() + timeout_seconds
+    last_exc: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            return admin.list_consumer_groups(request_timeout=request_timeout).result()
+        except Exception as exc:
+            if not _is_retryable_kafka_admin_error(exc):
+                raise
+            last_exc = exc
+            time.sleep(poll_interval_seconds)
+    raise AssertionError(
+        f"Kafka list_consumer_groups did not become ready within {timeout_seconds:.0f}s "
+        f"(bootstrap={KAFKA_SERVERS}, last_error={last_exc})"
+    )
 
 
 def _auth_headers() -> Dict[str, str]:
@@ -343,7 +403,7 @@ class TestKafkaConnectivity:
         from shared.config.app_config import AppConfig
 
         admin = _kafka_admin()
-        metadata = admin.list_topics(timeout=10)
+        metadata = _list_topics_with_retry(admin, request_timeout=10.0, timeout_seconds=30.0)
         actual = set(metadata.topics.keys())
 
         expected = set(AppConfig.get_all_topics())
@@ -354,8 +414,7 @@ class TestKafkaConnectivity:
     def test_kafka_consumer_groups_listable(self) -> None:
         """Verify consumer groups can be listed (connectivity + broker feature check)."""
         admin = _kafka_admin()
-        future = admin.list_consumer_groups(request_timeout=10.0)
-        result = future.result()
+        result = _list_consumer_groups_with_retry(admin, request_timeout=10.0, timeout_seconds=30.0)
         assert result is not None
         errors = getattr(result, "errors", None)
         assert not errors, f"Kafka list_consumer_groups returned errors: {errors!r} (bootstrap={KAFKA_SERVERS})"
@@ -387,8 +446,27 @@ class TestKafkaConnectivity:
         last_groups: set[str] = set()
 
         while True:
-            future = admin.list_consumer_groups(request_timeout=10.0)
-            result = future.result()
+            try:
+                result = _list_consumer_groups_with_retry(
+                    admin,
+                    request_timeout=10.0,
+                    timeout_seconds=5.0,
+                    poll_interval_seconds=1.0,
+                )
+            except Exception as exc:
+                last_errors = [str(exc)]
+                result = None
+            if result is None:
+                if time.monotonic() >= deadline:
+                    pytest.fail(
+                        "Kafka consumer groups missing (workers not running / not joined to Kafka). "
+                        f"missing={sorted(expected - last_groups)!r} "
+                        f"seen={sorted(last_groups)!r} "
+                        f"errors={last_errors!r} "
+                        f"(bootstrap={KAFKA_SERVERS})"
+                    )
+                time.sleep(1.0)
+                continue
             errors = list(getattr(result, "errors", None) or [])
             if errors:
                 last_errors = errors
@@ -669,11 +747,40 @@ class TestInfraConnectivity:
     async def test_elasticsearch_health(self) -> None:
         if not ELASTICSEARCH_URL:
             pytest.fail("ELASTICSEARCH_URL is not configured")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{ELASTICSEARCH_URL}/_cluster/health") as resp:
-                assert resp.status == 200
-                data = await resp.json()
-                assert data.get("status") in {"yellow", "green"}, f"Elasticsearch unhealthy: {data!r}"
+        deadline = time.monotonic() + 90
+        last_error: Exception | None = None
+        last_payload: dict | None = None
+        while time.monotonic() < deadline:
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [
+                        "curl",
+                        "-fsS",
+                        "--max-time",
+                        "5",
+                        f"{ELASTICSEARCH_URL}/_cluster/health",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "curl failed")
+
+                data = json.loads(result.stdout)
+                if not isinstance(data, dict):
+                    raise AssertionError(f"Unexpected Elasticsearch health payload: {result.stdout!r}")
+                last_payload = data
+                assert data.get("status") in {"red", "yellow", "green"}, f"Elasticsearch health unavailable: {data!r}"
+                return
+            except (AssertionError, OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                last_error = exc
+                await asyncio.sleep(1)
+
+        if last_error:
+            raise last_error
+        pytest.fail(f"Timed out waiting for Elasticsearch health (last_payload={last_payload!r})")
 
 class TestSystemWiring:
     """

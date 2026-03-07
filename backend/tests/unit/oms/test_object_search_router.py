@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 
+from oms.routers import query as query_router
 from oms.routers.query import foundry_router
 from shared.dependencies.providers import get_elasticsearch_service
 from shared.utils.foundry_page_token import encode_offset_page_token
@@ -70,6 +72,57 @@ async def test_search_objects_v2_returns_foundry_shape(mock_es):
     search_query = search_call.kwargs["query"]
     must = search_query["bool"]["must"]
     assert {"term": {"class_id": "Customer"}} in must
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_prefers_hits_over_missing_object_type_guard(
+    mock_es,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_missing_guard(**kwargs):  # noqa: ANN001
+        _ = kwargs
+        return JSONResponse(
+            status_code=404,
+            content={"errorCode": "NOT_FOUND", "errorName": "ObjectTypeNotFound"},
+        )
+
+    monkeypatch.setattr(query_router, "_ensure_object_type_exists", fake_missing_guard)
+
+    payload = {"pageSize": 1}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["totalCount"] == "2"
+    assert body["data"][0]["__apiName"] == "Customer"
+
+
+@pytest.mark.asyncio
+async def test_search_objects_v2_returns_missing_object_type_when_guard_and_search_are_empty(
+    mock_es,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_es.search.return_value = {"total": 0, "hits": [], "aggregations": {}}
+
+    async def fake_missing_guard(**kwargs):  # noqa: ANN001
+        _ = kwargs
+        return JSONResponse(
+            status_code=404,
+            content={"errorCode": "NOT_FOUND", "errorName": "ObjectTypeNotFound"},
+        )
+
+    monkeypatch.setattr(query_router, "_ensure_object_type_exists", fake_missing_guard)
+
+    payload = {"pageSize": 1}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=payload)
+
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["errorName"] == "ObjectTypeNotFound"
 
 
 @pytest.mark.asyncio

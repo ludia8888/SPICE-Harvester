@@ -215,7 +215,7 @@
     {
       "name": "ServiceSettings",
       "docstring": "Service configuration settings",
-      "field_count": 23,
+      "field_count": 33,
       "fields": [
         {
           "name": "oms_host",
@@ -268,6 +268,26 @@
           "required": true
         },
         {
+          "name": "oms_grpc_enabled",
+          "type": "bool",
+          "default": "True",
+          "description": "Enable OMS gRPC bridge server (OMS_GRPC_ENABLED)",
+          "env_vars": [
+            "OMS_GRPC_ENABLED"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_grpc_bind_host",
+          "type": "str",
+          "default": "0.0.0.0",
+          "description": "OMS gRPC bind host (OMS_GRPC_BIND_HOST)",
+          "env_vars": [
+            "OMS_GRPC_BIND_HOST"
+          ],
+          "required": false
+        },
+        {
           "name": "oms_grpc_use_tls",
           "type": "bool",
           "default": "False",
@@ -278,12 +298,92 @@
           "required": false
         },
         {
+          "name": "oms_grpc_server_use_tls",
+          "type": "bool",
+          "default": "False",
+          "description": "Use TLS for OMS gRPC server listeners (OMS_GRPC_SERVER_USE_TLS)",
+          "env_vars": [
+            "OMS_GRPC_SERVER_USE_TLS"
+          ],
+          "required": false
+        },
+        {
+          "name": "oms_grpc_require_mtls",
+          "type": "bool",
+          "default": "False",
+          "description": "Require mTLS client certificates for OMS gRPC server listeners (OMS_GRPC_REQUIRE_MTLS)",
+          "env_vars": [
+            "OMS_GRPC_REQUIRE_MTLS"
+          ],
+          "required": false
+        },
+        {
           "name": "oms_grpc_server_name",
           "type": "Optional[str]",
           "default": null,
           "description": "SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME)",
           "env_vars": [
             "OMS_GRPC_SERVER_NAME"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_client_ca_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "CA bundle path for OMS gRPC client TLS (OMS_GRPC_CLIENT_CA_PATH; fallback SSL_CA_PATH)",
+          "env_vars": [
+            "OMS_GRPC_CLIENT_CA_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_client_cert_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Client cert path for OMS gRPC mTLS (OMS_GRPC_CLIENT_CERT_PATH)",
+          "env_vars": [
+            "OMS_GRPC_CLIENT_CERT_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_client_key_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Client key path for OMS gRPC mTLS (OMS_GRPC_CLIENT_KEY_PATH)",
+          "env_vars": [
+            "OMS_GRPC_CLIENT_KEY_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_server_cert_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Server cert path for OMS gRPC TLS (OMS_GRPC_SERVER_CERT_PATH; fallback SSL_CERT_PATH)",
+          "env_vars": [
+            "OMS_GRPC_SERVER_CERT_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_server_key_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Server key path for OMS gRPC TLS (OMS_GRPC_SERVER_KEY_PATH; fallback SSL_KEY_PATH)",
+          "env_vars": [
+            "OMS_GRPC_SERVER_KEY_PATH"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_server_ca_path",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "CA bundle path for OMS gRPC server mTLS (OMS_GRPC_SERVER_CA_PATH; fallback SSL_CA_PATH)",
+          "env_vars": [
+            "OMS_GRPC_SERVER_CA_PATH"
           ],
           "required": true
         },
@@ -1090,7 +1190,7 @@
     {
       "name": "PipelineSettings",
       "docstring": "Pipeline Builder + pipeline worker settings.",
-      "field_count": 37,
+      "field_count": 38,
       "fields": [
         {
           "name": "require_proposals",
@@ -1249,6 +1349,16 @@
           "description": "Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS)",
           "env_vars": [
             "SPARK_EXECUTOR_THREADS"
+          ],
+          "required": false
+        },
+        {
+          "name": "spark_driver_memory",
+          "type": "str",
+          "default": "512m",
+          "description": "Spark driver heap size (PIPELINE_SPARK_DRIVER_MEMORY)",
+          "env_vars": [
+            "SPARK_DRIVER_MEMORY"
           ],
           "required": false
         },
@@ -2009,7 +2119,7 @@
     {
       "name": "AuthSettings",
       "docstring": "Service auth configuration (BFF/OMS).",
-      "field_count": 31,
+      "field_count": 35,
       "fields": [
         {
           "name": "bff_admin_token",
@@ -2192,6 +2302,16 @@
           "required": false
         },
         {
+          "name": "agent_require_auth",
+          "type": "Optional[bool]",
+          "default": null,
+          "description": "Require auth for Agent (AGENT_REQUIRE_AUTH)",
+          "env_vars": [
+            "AGENT_REQUIRE_AUTH"
+          ],
+          "required": true
+        },
+        {
           "name": "bff_require_auth",
           "type": "Optional[bool]",
           "default": null,
@@ -2312,12 +2432,42 @@
           "required": true
         },
         {
+          "name": "agent_auth_exempt_paths",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Comma-separated exempt paths for Agent (AGENT_AUTH_EXEMPT_PATHS)",
+          "env_vars": [
+            "AGENT_AUTH_EXEMPT_PATHS"
+          ],
+          "required": true
+        },
+        {
           "name": "oms_auth_exempt_paths",
           "type": "Optional[str]",
           "default": null,
           "description": "Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS)",
           "env_vars": [
             "OMS_AUTH_EXEMPT_PATHS"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_service_token",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Dedicated client token for OMS gRPC bridge calls (OMS_GRPC_SERVICE_TOKEN)",
+          "env_vars": [
+            "OMS_GRPC_SERVICE_TOKEN"
+          ],
+          "required": true
+        },
+        {
+          "name": "oms_grpc_service_tokens",
+          "type": "Optional[str]",
+          "default": null,
+          "description": "Dedicated allowed token list for OMS gRPC bridge server (OMS_GRPC_SERVICE_TOKENS)",
+          "env_vars": [
+            "OMS_GRPC_SERVICE_TOKENS"
           ],
           "required": true
         }
@@ -5729,5 +5879,5 @@
       ]
     }
   ],
-  "total_fields": 534
+  "total_fields": 549
 }

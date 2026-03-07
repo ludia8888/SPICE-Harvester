@@ -21,6 +21,7 @@ from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.services.registries.lineage_store import LineageStore
 from shared.utils.number_utils import to_int_or_none
 from shared.observability.tracing import trace_external_call, trace_db_operation
@@ -152,16 +153,14 @@ async def register_google_sheet(
         if (database_name or "").strip():
             db_name = validate_db_name(str(database_name))
             source_ref = f"google_sheets:{sheet_id}"
-            existing_dataset = await dataset_registry.get_dataset_by_source_ref(
-                db_name=db_name,
-                source_type="connector",
-                source_ref=source_ref,
-                branch=branch or "main",
-            )
-            if existing_dataset:
-                dataset = existing_dataset
-            else:
-                dataset = await dataset_registry.create_dataset(
+            dataset, _ = await get_or_create_dataset_record(
+                lookup=lambda: dataset_registry.get_dataset_by_source_ref(
+                    db_name=db_name,
+                    source_type="connector",
+                    source_ref=source_ref,
+                    branch=branch or "main",
+                ),
+                create=lambda: dataset_registry.create_dataset(
                     db_name=db_name,
                     name=f"gsheet_{sheet_id}",
                     description=f"Google Sheets sync: {sheet_url}",
@@ -169,7 +168,9 @@ async def register_google_sheet(
                     source_ref=source_ref,
                     schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
                     branch=branch or "main",
-                )
+                ),
+                conflict_context=f"{db_name}/{source_ref}@{branch or 'main'}",
+            )
 
             dataset_payload = {"dataset_id": dataset.dataset_id, "name": dataset.name, "db_name": dataset.db_name}
             await lineage_store.record_link(

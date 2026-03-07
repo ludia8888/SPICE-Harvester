@@ -68,9 +68,7 @@ from shared.services.pipeline.pipeline_kafka_avro import (
     resolve_kafka_avro_schema_registry_reference,
 )
 from shared.services.pipeline.dataset_output_semantics import (
-    DatasetWriteMode,
     resolve_dataset_write_policy,
-    validate_dataset_output_format_constraints,
     validate_dataset_output_metadata,
 )
 from shared.services.pipeline.output_plugins import (
@@ -81,9 +79,7 @@ from shared.services.pipeline.output_plugins import (
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.services.pipeline.pipeline_definition_validator import (
-    PipelineDefinitionValidationPolicy,
     normalize_transform_metadata,
-    validate_pipeline_definition,
 )
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.pipeline_parameter_utils import normalize_parameters
@@ -347,6 +343,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
         self.spark_adaptive_enabled = pipeline_settings.spark_adaptive_enabled
         self.spark_shuffle_partitions = int(pipeline_settings.spark_shuffle_partitions)
         self.spark_console_progress = pipeline_settings.spark_console_progress
+        self.spark_driver_memory = str(pipeline_settings.spark_driver_memory or "512m").strip() or "512m"
         self.spark_streaming_enabled = bool(pipeline_settings.spark_streaming_enabled)
         self.spark_streaming_default_trigger = str(
             pipeline_settings.spark_streaming_default_trigger or "available_now"
@@ -570,6 +567,7 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
     def _create_spark_session(self) -> SparkSession:
         builder = (
             SparkSession.builder.appName("spice-pipeline-worker")
+            .config("spark.driver.memory", self.spark_driver_memory)
             .config("spark.sql.session.timeZone", "UTC")
             .config("spark.sql.ansi.enabled", "true" if self.spark_ansi_enabled else "false")
         )
@@ -591,9 +589,61 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             builder = builder.config("spark.sql.adaptive.enabled", "false")
 
         if not bool(getattr(self, "spark_console_progress", False)):
-            builder = builder.config("spark.ui.showConsoleProgress", "false")
+            builder = builder.config("spark.ui.showConsoleProgress", "false").config("spark.ui.enabled", "false")
 
         return builder.getOrCreate()
+
+    def _cleanup_spark_gateway(self, spark: Optional[SparkSession]) -> None:
+        if spark is None:
+            return
+
+        spark_context = getattr(spark, "sparkContext", None)
+        gateway = getattr(spark_context, "_gateway", None)
+        if gateway is None:
+            return
+
+        for method_name in ("shutdown_callback_server", "shutdown"):
+            method = getattr(gateway, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+            except Exception as exc:
+                logger.debug("Spark gateway %s cleanup failed: %s", method_name, exc, exc_info=True)
+
+        proc = getattr(gateway, "proc", None) or getattr(gateway, "java_process", None)
+        if proc is None:
+            return
+
+        try:
+            if proc.poll() is not None:
+                return
+        except Exception as exc:
+            logger.debug("Failed to poll Spark gateway process state: %s", exc, exc_info=True)
+
+        try:
+            proc.terminate()
+        except Exception as exc:
+            logger.debug("Failed to terminate Spark gateway process: %s", exc, exc_info=True)
+
+        wait = getattr(proc, "wait", None)
+        if callable(wait):
+            try:
+                wait(timeout=5)
+                return
+            except Exception as exc:
+                logger.debug("Timed out waiting for Spark gateway process termination: %s", exc, exc_info=True)
+
+        try:
+            proc.kill()
+        except Exception as exc:
+            logger.debug("Failed to kill Spark gateway process: %s", exc, exc_info=True)
+
+        if callable(wait):
+            try:
+                wait(timeout=5)
+            except Exception as exc:
+                logger.debug("Failed waiting for Spark gateway process exit: %s", exc, exc_info=True)
 
     def _extract_job_settings(self, definition: Dict[str, Any]) -> Dict[str, Any]:
         settings = definition.get("settings")
@@ -657,10 +707,13 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
 
     def _restart_spark_session(self) -> None:
         if self.spark:
+            old_spark = self.spark
             try:
-                self.spark.stop()
+                old_spark.stop()
             except Exception as exc:
                 logger.warning("Failed to stop Spark session: %s", exc)
+            self._cleanup_spark_gateway(old_spark)
+            self.spark = None
         try:
             from pyspark import SparkContext
 

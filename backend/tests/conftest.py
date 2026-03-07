@@ -31,7 +31,7 @@ def _env_or_dotenv(dotenv: dict[str, str], key: str, default: str) -> str:
     return (os.getenv(key) or dotenv.get(key) or default).strip()
 
 
-def pytest_configure() -> None:
+def _configure_host_run_defaults() -> None:
     """
     Host-run integration defaults for the `backend/tests` suite.
 
@@ -50,8 +50,11 @@ def pytest_configure() -> None:
         os.environ["DOCKER_CONTAINER"] = "false"
 
     dotenv = _load_repo_dotenv()
-    if "ELASTICSEARCH_PORT" not in os.environ:
-        os.environ["ELASTICSEARCH_PORT"] = os.getenv("ELASTICSEARCH_PORT_HOST", "9200")
+    es_host = _env_or_dotenv(dotenv, "ELASTICSEARCH_HOST", "127.0.0.1")
+    es_port = _env_or_dotenv(dotenv, "ELASTICSEARCH_PORT", _env_or_dotenv(dotenv, "ELASTICSEARCH_PORT_HOST", "9200"))
+    os.environ.setdefault("ELASTICSEARCH_HOST", es_host)
+    os.environ.setdefault("ELASTICSEARCH_PORT", es_port)
+    os.environ.setdefault("ELASTICSEARCH_URL", f"http://{es_host}:{es_port}")
     kafka_port = _env_or_dotenv(dotenv, "KAFKA_PORT_HOST", "39092")
     # Use docker-compose.yml defaults for local dev infrastructure
     postgres_port = _env_or_dotenv(dotenv, "POSTGRES_PORT_HOST", "5433")
@@ -81,6 +84,13 @@ def pytest_configure() -> None:
     if "LAKEFS_API_URL" not in os.environ:
         os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{lakefs_port}"
     os.environ.setdefault("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "20")
+
+
+_configure_host_run_defaults()
+
+
+def pytest_configure() -> None:
+    _configure_host_run_defaults()
 
 
 def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:

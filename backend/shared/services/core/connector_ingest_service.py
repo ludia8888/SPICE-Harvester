@@ -12,6 +12,7 @@ from shared.models.import_modes import APPEND_MERGE_IMPORT_MODES, TABLE_IMPORT_M
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import LakeFSConflictError
@@ -332,14 +333,14 @@ class ConnectorIngestService:
                 continue
             incoming_rows.append([row.get(col) for col in normalized_columns])
 
-        dataset = await self._dataset_registry.get_dataset_by_source_ref(
-            db_name=db,
-            source_type="connector",
-            source_ref=source_ref_value,
-            branch=branch_name,
-        )
-        if dataset is None:
-            dataset = await self._dataset_registry.create_dataset(
+        dataset, _ = await get_or_create_dataset_record(
+            lookup=lambda: self._dataset_registry.get_dataset_by_source_ref(
+                db_name=db,
+                source_type="connector",
+                source_ref=source_ref_value,
+                branch=branch_name,
+            ),
+            create=lambda: self._dataset_registry.create_dataset(
                 db_name=db,
                 name=dataset_label,
                 description=f"Connector sync: {source_ref_value}",
@@ -347,7 +348,9 @@ class ConnectorIngestService:
                 source_ref=source_ref_value,
                 schema_json={"columns": [{"name": col, "type": "String"} for col in normalized_columns]},
                 branch=branch_name,
-            )
+            ),
+            conflict_context=f"{db}/{source_ref_value}@{branch_name}",
+        )
 
         final_columns = list(normalized_columns)
         final_rows = list(incoming_rows)

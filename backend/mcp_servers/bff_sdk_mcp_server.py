@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -36,7 +35,8 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import ServerCapabilities, Tool, ToolsCapability
+from mcp.types import Tool
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.foundry.rids import build_rid, parse_rid
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,7 @@ from mcp_servers.pipeline_mcp_http import (  # noqa: E402
     bff_v2_json,
     resolve_db_name_for_bff_call,
 )
+from mcp_servers.pipeline_mcp_errors import tool_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
@@ -708,28 +709,37 @@ async def _handle_tool(name: str, arguments: Dict[str, Any]) -> list:
 
     if name == "bff_start_objectify":
         pid = _coerce_pipeline_id(arguments["pipeline_id"])
+        target_rid = _pipeline_target_rid(arguments["pipeline_id"])
         datasets_resp = await bff_json("GET", f"/pipelines/{pid}/datasets", **ca)
         if datasets_resp.get("error"):
-            return _json_result(
-                {
-                    "status": "error",
-                    "message": "Failed to list pipeline datasets for objectify start",
-                    "pipeline_id": pid,
-                    "targetRid": _pipeline_target_rid(arguments["pipeline_id"]),
-                    "error": datasets_resp.get("error"),
-                }
+            payload = tool_error(
+                "Failed to list pipeline datasets for objectify start",
+                detail=str(datasets_resp.get("error") or "pipeline datasets lookup failed"),
+                status_code=502,
+                code=ErrorCode.UPSTREAM_ERROR,
+                category=ErrorCategory.UPSTREAM,
+                context={"tool": name, "pipeline_id": pid, "targetRid": target_rid},
+                operation="bff_start_objectify.list_pipeline_datasets",
             )
+            payload["pipeline_id"] = pid
+            payload["targetRid"] = target_rid
+            payload["upstream_error"] = datasets_resp.get("error")
+            return _json_result(payload)
         dataset_ids = _extract_dataset_ids(datasets_resp)
         if not dataset_ids:
-            return _json_result(
-                {
-                    "status": "error",
-                    "message": "No datasets found in pipeline; cannot start objectify",
-                    "pipeline_id": pid,
-                    "targetRid": _pipeline_target_rid(arguments["pipeline_id"]),
-                    "datasets_response": datasets_resp,
-                }
+            payload = tool_error(
+                "No datasets found in pipeline; cannot start objectify",
+                detail="Pipeline has no datasets to objectify",
+                status_code=404,
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+                category=ErrorCategory.RESOURCE,
+                context={"tool": name, "pipeline_id": pid, "targetRid": target_rid},
+                operation="bff_start_objectify.validate_pipeline_datasets",
             )
+            payload["pipeline_id"] = pid
+            payload["targetRid"] = target_rid
+            payload["datasets_response"] = datasets_resp
+            return _json_result(payload)
 
         run_body = _build_objectify_run_body(arguments)
         jobs: List[Dict[str, Any]] = []
@@ -836,7 +846,7 @@ def main_sse(host: str = "0.0.0.0", port: int = 9090) -> None:
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.middleware.cors import CORSMiddleware
-    from starlette.routing import Mount, Route
+    from starlette.routing import Route
     from starlette.responses import JSONResponse
     from mcp.server.sse import SseServerTransport
 

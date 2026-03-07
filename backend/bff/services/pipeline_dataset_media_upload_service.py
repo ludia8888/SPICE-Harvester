@@ -23,6 +23,7 @@ from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_inges
 from bff.services.dataset_ingest_failures import mark_ingest_failed
 from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
 from shared.models.requests import ApiResponse
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.s3_uri import build_s3_uri
 from shared.observability.tracing import trace_external_call
@@ -104,14 +105,13 @@ async def upload_media_dataset(
         row_count = len(uploaded)
         ingest_sample_json = {"columns": schema_columns, "rows": []}
 
-        dataset = await dataset_registry.get_dataset_by_name(
-            db_name=db_name,
-            name=resolved_name,
-            branch=dataset_branch,
-        )
-        created_dataset = False
-        if not dataset:
-            dataset = await dataset_registry.create_dataset(
+        dataset, created_dataset = await get_or_create_dataset_record(
+            lookup=lambda: dataset_registry.get_dataset_by_name(
+                db_name=db_name,
+                name=resolved_name,
+                branch=dataset_branch,
+            ),
+            create=lambda: dataset_registry.create_dataset(
                 db_name=db_name,
                 name=resolved_name,
                 description=(description or "").strip() or None,
@@ -119,8 +119,9 @@ async def upload_media_dataset(
                 source_ref=None,
                 schema_json={"columns": schema_columns},
                 branch=dataset_branch,
-            )
-            created_dataset = True
+            ),
+            conflict_context=f"{db_name}/{resolved_name}@{dataset_branch}",
+        )
 
         safe_name = (dataset.name or "media").replace(" ", "_")
         prefix = f"datasets-media/{db_name}/{dataset.dataset_id}/{safe_path_segment(safe_name)}"

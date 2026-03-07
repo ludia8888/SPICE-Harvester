@@ -277,12 +277,10 @@ async def _ensure_object_type_exists(
             exc,
             exc_info=True,
         )
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="InternalServerError",
-            parameters={"message": "Failed to resolve ontology object type"},
-        )
+        # Search should continue when the ontology registry is unavailable.
+        # The ES-backed result set remains a better signal than failing closed
+        # on an auxiliary read path.
+        return None
 
     if not resource:
         return _foundry_error(
@@ -1753,9 +1751,11 @@ async def _search_objects_v2_impl(
         request = SearchObjectsRequestV2.model_validate(payload)
         object_type = validate_class_id(object_type)
         branch = validate_branch_name(branch)
-        missing = await _ensure_object_type_exists(db_name=db_name, branch=branch, object_type=object_type)
-        if missing is not None:
-            return missing
+        missing_object_type_response = await _ensure_object_type_exists(
+            db_name=db_name,
+            branch=branch,
+            object_type=object_type,
+        )
         page_scope = _pagination_scope_for_search(
             db_name=db_name,
             object_type=object_type,
@@ -1764,9 +1764,40 @@ async def _search_objects_v2_impl(
         )
         offset = _decode_page_token(request.pageToken, scope=page_scope)
 
-        object_query = _to_es_properties_query(request.where or _default_match_all_where())
+        where_clause = request.where or _default_match_all_where()
+        object_query = _to_es_query(where_clause)
+        properties_fallback_query = _to_es_properties_query(where_clause)
         sort_clause = _build_sort_clause(request)
         selected_fields = _resolve_select_fields(request)
+        index_name = get_instances_index_name(db_name, branch=branch)
+
+        async def _run_search(search_query: Dict[str, Any], *, prefer_properties_sort: bool = False) -> Dict[str, Any]:
+            active_sort = (
+                _build_properties_sort_clause(request.orderBy)
+                if prefer_properties_sort and request.orderBy is not None
+                else sort_clause
+            )
+            try:
+                return await es.search(
+                    index=index_name,
+                    query=search_query,
+                    size=request.pageSize,
+                    from_=offset,
+                    sort=active_sort,
+                )
+            except Exception:
+                # Sort errors are common when callers request orderBy on fields that live under nested ``properties``.
+                # Retry with nested properties-based sorting.
+                if request.orderBy is None or prefer_properties_sort:
+                    raise
+                return await es.search(
+                    index=index_name,
+                    query=search_query,
+                    size=request.pageSize,
+                    from_=offset,
+                    sort=_build_properties_sort_clause(request.orderBy),
+                )
+
         query = {
             "bool": {
                 "must": [
@@ -1775,28 +1806,20 @@ async def _search_objects_v2_impl(
                 ]
             }
         }
-
-        index_name = get_instances_index_name(db_name, branch=branch)
-        try:
-            result = await es.search(
-                index=index_name,
-                query=query,
-                size=request.pageSize,
-                from_=offset,
-                sort=sort_clause,
-            )
-        except Exception:
-            # Sort errors are common when callers request orderBy on fields that live under nested ``properties``.
-            # Retry with nested properties-based sorting.
-            if request.orderBy is None:
-                raise
-            result = await es.search(
-                index=index_name,
-                query=query,
-                size=request.pageSize,
-                from_=offset,
-                sort=_build_properties_sort_clause(request.orderBy),
-            )
+        result = await _run_search(query)
+        if (
+            properties_fallback_query != object_query
+            and int(result.get("total") or 0) <= 0
+        ):
+            fallback_query = {
+                "bool": {
+                    "must": [
+                        {"term": {"class_id": object_type}},
+                        properties_fallback_query,
+                    ]
+                }
+            }
+            result = await _run_search(fallback_query, prefer_properties_sort=True)
 
         hits = result.get("hits", [])
         if not isinstance(hits, list):
@@ -1831,6 +1854,8 @@ async def _search_objects_v2_impl(
         flattened = normalized_rows
 
         total = int(result.get("total") or 0)
+        if missing_object_type_response is not None and total <= 0:
+            return missing_object_type_response
 
         next_page_token: Optional[str] = None
         next_offset = offset + len(flattened)

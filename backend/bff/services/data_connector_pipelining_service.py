@@ -34,6 +34,7 @@ from shared.services.core.connector_ingest_service import ConnectorIngestService
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorRegistry, ConnectorSource
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
@@ -189,10 +190,7 @@ async def _load_existing_csv(
         if version is None or not version.artifact_key:
             return [], []
 
-        # Extract the object path from the artifact_key (s3://repo/commit_id/path)
-        artifact = str(version.artifact_key)
-        # artifact_key format: s3://raw-datasets/commit_id/path/to/source.csv
-        # We need to read from the branch + path
+        # Stored connector snapshots are read back through the branch/path layout.
         branch_name = (dataset.branch or "main").strip() or "main"
         object_prefix = dataset_ops._dataset_artifact_prefix(
             db_name=dataset.db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name,
@@ -300,23 +298,27 @@ async def start_pipelining_google_sheet(
         schema_columns = dataset_ops._build_schema_columns(columns, inferred_schema)
 
         source_ref = f"google_sheets:{sheet_id_resolved}"
-        dataset = await dataset_registry.get_dataset_by_source_ref(
-            db_name=db_name,
-            source_type="connector",
-            source_ref=source_ref,
-            branch=mapping.target_branch if mapping and mapping.target_branch else "main",
-        )
-        if not dataset:
-            dataset = await dataset_registry.create_dataset(
+        resolved_branch = mapping.target_branch if mapping and mapping.target_branch else "main"
+        dataset, created_dataset = await get_or_create_dataset_record(
+            lookup=lambda: dataset_registry.get_dataset_by_source_ref(
+                db_name=db_name,
+                source_type="connector",
+                source_ref=source_ref,
+                branch=resolved_branch,
+            ),
+            create=lambda: dataset_registry.create_dataset(
                 db_name=db_name,
                 name=f"gsheet_{sheet_id_resolved}",
                 description=f"Google Sheets sync: {sheet_url}",
                 source_type="connector",
                 source_ref=source_ref,
                 schema_json={"columns": schema_columns},
-                branch=mapping.target_branch if mapping and mapping.target_branch else "main",
-            )
+                branch=resolved_branch,
+            ),
+            conflict_context=f"{db_name}/{source_ref}@{resolved_branch}",
+        )
 
+        if created_dataset:
             create_event = build_command_event(
                 event_type="DATASET_CREATED",
                 aggregate_type="Dataset",

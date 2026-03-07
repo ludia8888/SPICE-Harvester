@@ -26,13 +26,11 @@ import ast
 import asyncio
 import json
 import os
-import sys
 import time
-import traceback
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 import pytest
@@ -762,6 +760,29 @@ async def _wait_for_command(
     raise AssertionError(f"Timed out waiting for command {command_id} (last={last_payload})")
 
 
+async def _wait_for_db_absent(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    timeout: int = 240,
+) -> None:
+    deadline = time.monotonic() + timeout
+    last_status: Optional[int] = None
+    last_text: Optional[str] = None
+
+    while time.monotonic() < deadline:
+        resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
+        last_status = resp.status_code
+        last_text = resp.text[:200]
+        if resp.status_code == 404:
+            return
+        await asyncio.sleep(0.5)
+
+    raise AssertionError(
+        f"Timed out waiting for database deletion (db_name={db_name}, last_status={last_status}, last_text={last_text})"
+    )
+
+
 async def _wait_for_pipeline_run_sample(
     client: httpx.AsyncClient,
     *,
@@ -1033,7 +1054,6 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
         csv_bytes = csv_path.read_bytes()
         # Retry CSV upload up to 3 times (infrastructure can be flaky)
         max_upload_retries = 3
-        uploaded = False
         for upload_attempt in range(max_upload_retries):
             try:
                 idem_key = f"idem-{name}-{state.suffix}-{upload_attempt}"
@@ -1074,7 +1094,6 @@ async def phase1_data_ingestion(state: QAState, client: httpx.AsyncClient) -> No
                 if preview.get("rows"):
                     row_info = f", preview={len(preview['rows'])} rows"
                 print(f"    {name}: dataset_id={dataset_id[:12]}...{row_info}")
-                uploaded = True
                 break
             except Exception as exc:
                 err_msg = str(exc)[:200] or f"upload failed (attempt {upload_attempt + 1})"
@@ -2699,9 +2718,9 @@ async def phase5_search_and_query(state: QAState, client: httpx.AsyncClient) -> 
                 json={"pageSize": 5, "pageToken": token},
             )
             resp2.raise_for_status()
-            print(f"    Page 1 + Page 2: OK")
+            print("    Page 1 + Page 2: OK")
         else:
-            print(f"    Page 1: OK (no next token)")
+            print("    Page 1: OK (no next token)")
         state.bug_tracker.record_pass()
     except Exception as exc:
         state.bug_tracker.record(phase, "5-9", "search pagination", "page 1+2", str(exc)[:200])
@@ -4111,6 +4130,8 @@ async def phase10_teardown(state: QAState, client: httpx.AsyncClient) -> None:
                 cmd_id = str(((resp.json().get("data") or {}) or {}).get("command_id") or "").strip()
                 if cmd_id:
                     await _wait_for_command(client, cmd_id, timeout=240)
+            if resp.status_code != 404:
+                await _wait_for_db_absent(client, db_name=state.db_name, timeout=240)
             state.bug_tracker.record_pass()
             print("    Database deleted")
         else:

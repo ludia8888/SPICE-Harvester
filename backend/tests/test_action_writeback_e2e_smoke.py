@@ -124,6 +124,51 @@ async def _wait_for_command_completed(
     raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
 
 
+async def _wait_for_db_absent(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    headers: Optional[Dict[str, str]] = None,
+    timeout_seconds: int = 240,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: Optional[int] = None
+    last_body: Optional[str] = None
+
+    while time.monotonic() < deadline:
+        async with session.get(f"{BFF_URL}/api/v1/databases/{db_name}", headers=headers) as resp:
+            last_status = resp.status
+            last_body = await resp.text()
+            if resp.status == 404:
+                return
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(
+        f"Timed out waiting for database deletion (db_name={db_name}, last_status={last_status}, last_body={last_body})"
+    )
+
+
+async def _delete_db_best_effort(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    headers: Dict[str, str],
+) -> None:
+    resp = await session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=headers)
+    if resp.status == 202:
+        payload = await resp.json()
+        cmd = _extract_command_id(payload)
+        if cmd:
+            await _wait_for_command_completed(session, command_id=cmd, timeout_seconds=240)
+    elif resp.status not in {200, 404}:
+        body = await resp.text()
+        raise AssertionError(f"Unexpected delete response for {db_name}: {resp.status} {body[:200]}")
+
+    if resp.status != 404:
+        await _wait_for_db_absent(session, db_name=db_name, headers=headers, timeout_seconds=240)
+
+
 def _extract_command_id(payload: Any) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
@@ -934,13 +979,8 @@ async def test_action_writeback_e2e_smoke() -> None:
 
             if created_db and _truthy(os.getenv("ACTION_WRITEBACK_SMOKE_CLEANUP", "true")):
                 db_headers = _base_headers(db_name=db_name, actor_id=actor_id)
-                resp = await session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=db_headers)
-                if resp.status == 202:
-                    payload = await resp.json()
-                    cmd = _extract_command_id(payload)
-                    if cmd:
-                        with contextlib.suppress(Exception):
-                            await _wait_for_command_completed(session, command_id=cmd, timeout_seconds=240)
+                with contextlib.suppress(Exception):
+                    await _delete_db_best_effort(session, db_name=db_name, headers=db_headers)
 
 
 @pytest.mark.integration
@@ -1445,13 +1485,8 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 
             if created_db and _truthy(os.getenv("ACTION_WRITEBACK_SMOKE_CLEANUP", "true")):
                 db_headers = _base_headers(db_name=db_name, actor_id=owner_id)
-                resp = await session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=db_headers)
-                if resp.status == 202:
-                    payload = await resp.json()
-                    cmd = _extract_command_id(payload)
-                    if cmd:
-                        with contextlib.suppress(Exception):
-                            await _wait_for_command_completed(session, command_id=cmd, timeout_seconds=240)
+                with contextlib.suppress(Exception):
+                    await _delete_db_best_effort(session, db_name=db_name, headers=db_headers)
 
 
 @pytest.mark.integration
@@ -1781,10 +1816,5 @@ async def test_action_batch_dependency_e2e() -> None:
 
             if created_db and _truthy(os.getenv("ACTION_WRITEBACK_SMOKE_CLEANUP", "true")):
                 db_headers = _base_headers(db_name=db_name, actor_id=owner_id)
-                resp = await session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=db_headers)
-                if resp.status == 202:
-                    payload = await resp.json()
-                    command_id = _extract_command_id(payload)
-                    if command_id:
-                        with contextlib.suppress(Exception):
-                            await _wait_for_command_completed(session, command_id=command_id, timeout_seconds=240)
+                with contextlib.suppress(Exception):
+                    await _delete_db_best_effort(session, db_name=db_name, headers=db_headers)

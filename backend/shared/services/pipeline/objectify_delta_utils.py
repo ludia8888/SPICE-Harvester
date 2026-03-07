@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from shared.utils.time_utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +47,7 @@ class WatermarkState:
     watermark_column: str
     watermark_value: Any
     lakefs_commit_id: Optional[str] = None
-    last_processed_at: datetime = field(default_factory=datetime.utcnow)
+    last_processed_at: datetime = field(default_factory=utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,7 +65,7 @@ class WatermarkState:
         if isinstance(last_processed, str):
             last_processed = datetime.fromisoformat(last_processed.replace("Z", "+00:00"))
         elif last_processed is None:
-            last_processed = datetime.utcnow()
+            last_processed = utcnow()
 
         return cls(
             mapping_spec_id=data["mapping_spec_id"],

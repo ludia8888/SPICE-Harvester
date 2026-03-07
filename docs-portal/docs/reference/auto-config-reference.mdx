@@ -11,7 +11,7 @@ This page is auto-generated from `backend/shared/config/settings.py`.
 Do not edit manually. Run `python scripts/generate_portal_config_reference.py`.
 :::
 
-SPICE Harvester uses **45 configuration classes** with **534 settings** total.
+SPICE Harvester uses **45 configuration classes** with **549 settings** total.
 All settings use Pydantic BaseSettings with environment variable binding.
 
 ## Configuration Classes
@@ -95,7 +95,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Service configuration settings
 
-**23 settings**
+**33 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -104,8 +104,18 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `oms_base_url_override` | `Optional[str]` | **required** | `OMS_BASE_URL_OVERRIDE` | OMS base URL override (OMS_BASE_URL) |
 | `oms_grpc_port` | `int` | `50051` | `OMS_GRPC_PORT` | OMS gRPC service port (OMS_GRPC_PORT) |
 | `oms_grpc_target_override` | `Optional[str]` | **required** | `OMS_GRPC_TARGET_OVERRIDE` | OMS gRPC target override (OMS_GRPC_TARGET) |
+| `oms_grpc_enabled` | `bool` | `True` | `OMS_GRPC_ENABLED` | Enable OMS gRPC bridge server (OMS_GRPC_ENABLED) |
+| `oms_grpc_bind_host` | `str` | `0.0.0.0` | `OMS_GRPC_BIND_HOST` | OMS gRPC bind host (OMS_GRPC_BIND_HOST) |
 | `oms_grpc_use_tls` | `bool` | `False` | `OMS_GRPC_USE_TLS` | Use TLS for OMS gRPC client channels (OMS_GRPC_USE_TLS) |
+| `oms_grpc_server_use_tls` | `bool` | `False` | `OMS_GRPC_SERVER_USE_TLS` | Use TLS for OMS gRPC server listeners (OMS_GRPC_SERVER_USE_TLS) |
+| `oms_grpc_require_mtls` | `bool` | `False` | `OMS_GRPC_REQUIRE_MTLS` | Require mTLS client certificates for OMS gRPC server listeners (OMS_GRPC_REQUIRE_MTLS) |
 | `oms_grpc_server_name` | `Optional[str]` | **required** | `OMS_GRPC_SERVER_NAME` | SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME) |
+| `oms_grpc_client_ca_path` | `Optional[str]` | **required** | `OMS_GRPC_CLIENT_CA_PATH` | CA bundle path for OMS gRPC client TLS (OMS_GRPC_CLIENT_CA_PATH; fallback SSL_CA_PATH) |
+| `oms_grpc_client_cert_path` | `Optional[str]` | **required** | `OMS_GRPC_CLIENT_CERT_PATH` | Client cert path for OMS gRPC mTLS (OMS_GRPC_CLIENT_CERT_PATH) |
+| `oms_grpc_client_key_path` | `Optional[str]` | **required** | `OMS_GRPC_CLIENT_KEY_PATH` | Client key path for OMS gRPC mTLS (OMS_GRPC_CLIENT_KEY_PATH) |
+| `oms_grpc_server_cert_path` | `Optional[str]` | **required** | `OMS_GRPC_SERVER_CERT_PATH` | Server cert path for OMS gRPC TLS (OMS_GRPC_SERVER_CERT_PATH; fallback SSL_CERT_PATH) |
+| `oms_grpc_server_key_path` | `Optional[str]` | **required** | `OMS_GRPC_SERVER_KEY_PATH` | Server key path for OMS gRPC TLS (OMS_GRPC_SERVER_KEY_PATH; fallback SSL_KEY_PATH) |
+| `oms_grpc_server_ca_path` | `Optional[str]` | **required** | `OMS_GRPC_SERVER_CA_PATH` | CA bundle path for OMS gRPC server mTLS (OMS_GRPC_SERVER_CA_PATH; fallback SSL_CA_PATH) |
 | `bff_host` | `str` | `<env-dependent>` | `BFF_HOST` | BFF service host |
 | `bff_port` | `int` | `8002` | `BFF_PORT` | BFF service port |
 | `bff_base_url_override` | `Optional[str]` | **required** | `BFF_BASE_URL_OVERRIDE` | BFF base URL override (BFF_BASE_URL) |
@@ -224,7 +234,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Pipeline Builder + pipeline worker settings.
 
-**37 settings**
+**38 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -244,6 +254,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `spark_shuffle_partitions` | `int` | `16` | `SPARK_SHUFFLE_PARTITIONS` | Default Spark shuffle partitions (PIPELINE_SPARK_SHUFFLE_PARTITIONS) |
 | `spark_console_progress` | `bool` | `False` | `SPARK_CONSOLE_PROGRESS` | Show Spark console progress bars (PIPELINE_SPARK_CONSOLE_PROGRESS) |
 | `spark_executor_threads` | `int` | `1` | `SPARK_EXECUTOR_THREADS` | Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS) |
+| `spark_driver_memory` | `str` | `512m` | `SPARK_DRIVER_MEMORY` | Spark driver heap size (PIPELINE_SPARK_DRIVER_MEMORY) |
 | `spark_streaming_enabled` | `bool` | `True` | `SPARK_STREAMING_ENABLED` | Enable Spark Structured Streaming input mode (PIPELINE_SPARK_STREAMING_ENABLED) |
 | `spark_streaming_default_trigger` | `str` | `available_now` | `SPARK_STREAMING_DEFAULT_TRIGGER` | Default trigger for streaming external inputs: available_now\|once (PIPELINE_SPARK_STREAMING_DEFAULT_TRIGGER) |
 | `spark_streaming_await_timeout_seconds` | `int` | `120` | `SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS` | Streaming query await timeout seconds for external inputs (PIPELINE_SPARK_STREAMING_AWAIT_TIMEOUT_SECONDS) |
@@ -374,7 +385,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 
 > Service auth configuration (BFF/OMS).
 
-**31 settings**
+**35 settings**
 
 | Setting | Type | Default | Env Variable | Description |
 |---------|------|---------|-------------|-------------|
@@ -396,6 +407,7 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `auth_users` | `Optional[str]` | **required** | `AUTH_USERS` | JSON user list for local auth (AUTH_USERS) |
 | `auth_access_token_ttl` | `int` | `3600` | `AUTH_ACCESS_TOKEN_TTL` | Access-token lifetime in seconds (AUTH_ACCESS_TOKEN_TTL) |
 | `auth_refresh_token_ttl` | `int` | `604800` | `AUTH_REFRESH_TOKEN_TTL` | Refresh-token lifetime in seconds (AUTH_REFRESH_TOKEN_TTL) |
+| `agent_require_auth` | `Optional[bool]` | **required** | `AGENT_REQUIRE_AUTH` | Require auth for Agent (AGENT_REQUIRE_AUTH) |
 | `bff_require_auth` | `Optional[bool]` | **required** | `BFF_REQUIRE_AUTH` | Require auth for BFF (BFF_REQUIRE_AUTH) |
 | `oms_require_auth` | `Optional[bool]` | **required** | `OMS_REQUIRE_AUTH` | Require auth for OMS (OMS_REQUIRE_AUTH) |
 | `bff_require_db_scope` | `bool` | `False` | `BFF_REQUIRE_DB_SCOPE` | Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE) |
@@ -408,7 +420,10 @@ All settings use Pydantic BaseSettings with environment variable binding.
 | `dev_master_user_type` | `str` | `user` | `DEV_MASTER_USER_TYPE` | Development-only: master principal type (DEV_MASTER_USER_TYPE) |
 | `dev_master_roles` | `Optional[str]` | `admin,platform_admin` | `DEV_MASTER_ROLES` | Development-only: comma-separated roles for the master principal (DEV_MASTER_ROLES) |
 | `bff_auth_exempt_paths` | `Optional[str]` | **required** | `BFF_AUTH_EXEMPT_PATHS` | Comma-separated exempt paths for BFF (BFF_AUTH_EXEMPT_PATHS) |
+| `agent_auth_exempt_paths` | `Optional[str]` | **required** | `AGENT_AUTH_EXEMPT_PATHS` | Comma-separated exempt paths for Agent (AGENT_AUTH_EXEMPT_PATHS) |
 | `oms_auth_exempt_paths` | `Optional[str]` | **required** | `OMS_AUTH_EXEMPT_PATHS` | Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS) |
+| `oms_grpc_service_token` | `Optional[str]` | **required** | `OMS_GRPC_SERVICE_TOKEN` | Dedicated client token for OMS gRPC bridge calls (OMS_GRPC_SERVICE_TOKEN) |
+| `oms_grpc_service_tokens` | `Optional[str]` | **required** | `OMS_GRPC_SERVICE_TOKENS` | Dedicated allowed token list for OMS gRPC bridge server (OMS_GRPC_SERVICE_TOKENS) |
 
 ## RateLimitSettings
 

@@ -3226,7 +3226,7 @@ async def get_ontology_v2(
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(exc, ontology=str(ontology))
 
@@ -3281,7 +3281,7 @@ async def get_full_metadata_v2(
             strict_compat=strict_compat,
             endpoint="GET /api/v2/ontologies/{ontologyRid}/fullMetadata",
         )
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3458,7 +3458,7 @@ async def list_action_types_v2(
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/actionTypes", db_name, branch, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -3527,7 +3527,7 @@ async def get_action_type_v2(
         action_type = str(actionType or "").strip()
         if not action_type:
             raise ValueError("actionType is required")
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3613,7 +3613,7 @@ async def get_action_type_by_rid_v2(
         action_type_rid = str(actionTypeRid or "").strip()
         if not action_type_rid:
             raise ValueError("actionTypeRid is required")
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -3977,7 +3977,7 @@ async def list_query_types_v2(
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/queryTypes", db_name, page_size)
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -4040,7 +4040,7 @@ async def get_query_type_v2(
         query_api_name = str(queryApiName or "").strip()
         if not query_api_name:
             raise ValueError("queryApiName is required")
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4134,7 +4134,7 @@ async def execute_query_v2(
         query_api_name = str(queryApiName or "").strip()
         if not query_api_name:
             raise ValueError("queryApiName is required")
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4275,7 +4275,7 @@ async def list_interface_types_v2(
             strict_compat=strict_compat,
             endpoint="ontologies/{ontologyRid}/interfaceTypes",
         )
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
         offset = _decode_page_token(page_token, scope=page_scope)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
@@ -4345,7 +4345,7 @@ async def get_interface_type_v2(
         interface_type = str(interfaceType or "").strip()
         if not interface_type:
             raise ValueError("interfaceType is required")
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -7392,7 +7392,7 @@ async def get_timeseries_first_point_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_first_point(
             db_name,
@@ -7450,7 +7450,7 @@ async def get_timeseries_last_point_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_timeseries_last_point(
             db_name,
@@ -7509,7 +7509,7 @@ async def stream_timeseries_points_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         body = await request.json() if await request.body() else {}
         response = await oms_client.stream_timeseries_points(
@@ -7619,7 +7619,7 @@ async def list_attachment_property_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.list_property_attachments(
             db_name,
@@ -7679,7 +7679,7 @@ async def get_attachment_by_rid_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         result = await oms_client.get_attachment_by_rid(
             db_name,
@@ -7739,7 +7739,7 @@ async def get_attachment_content_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content(
             db_name,
@@ -7803,7 +7803,7 @@ async def get_attachment_content_by_rid_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = sdk_package_rid, sdk_version
-        await _require_read_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         forward_headers = _extract_actor_forward_headers(request)
         response = await oms_client.get_attachment_content_by_rid(
             db_name,

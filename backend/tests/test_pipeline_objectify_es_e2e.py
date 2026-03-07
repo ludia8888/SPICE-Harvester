@@ -20,7 +20,7 @@ BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhos
 _ES_PORT = (
     os.getenv("ELASTICSEARCH_PORT")
     or os.getenv("ELASTICSEARCH_PORT_HOST")
-    or "9201"
+    or "9200"
 )
 ELASTICSEARCH_URL = os.getenv(
     "ELASTICSEARCH_URL",
@@ -164,6 +164,47 @@ async def _create_db_with_retry(
     command_id = str(((response.json().get("data") or {}) or {}).get("command_id") or "")
     assert command_id
     await _wait_for_command(client, command_id, db_name=db_name)
+
+
+async def _wait_for_db_absent(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    timeout_seconds: int = 120,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: Optional[int] = None
+    while time.monotonic() < deadline:
+        try:
+            resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
+        except httpx.HTTPError:
+            await asyncio.sleep(1.0)
+            continue
+        last_status = resp.status_code
+        if resp.status_code == 404:
+            return
+        await asyncio.sleep(1.0)
+    raise AssertionError(f"Timed out waiting for database deletion (db_name={db_name}, status={last_status})")
+
+
+async def _delete_db_best_effort(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+) -> None:
+    try:
+        resp = await client.delete(f"{BFF_URL}/api/v1/databases/{db_name}")
+        if resp.status_code not in {200, 202, 404}:
+            raise AssertionError(f"Unexpected delete status: {resp.status_code} {resp.text}")
+        if resp.status_code == 404:
+            return
+        if resp.status_code == 202:
+            command_id = str(((resp.json().get("data") or {}) or {}).get("command_id") or "").strip()
+            if command_id:
+                await _wait_for_command(client, command_id, timeout_seconds=240)
+        await _wait_for_db_absent(client, db_name=db_name, timeout_seconds=120)
+    except Exception:
+        print(f"[cleanup-warning] failed to delete test database {db_name}", flush=True)
 
 
 async def _wait_for_ontology(
@@ -421,210 +462,213 @@ async def test_pipeline_objectify_es_projection() -> None:
 
     async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as raw_client:
         client = PipelinesV2AdapterClient(raw_client)
-        await _create_db_with_retry(client, db_name=db_name, description="pipeline objectify e2e")
-        await _grant_db_role_http(
-            raw_client,
-            db_name=db_name,
-            principal_id=headers["X-User-ID"],
-            principal_type=headers["X-User-Type"],
-        )
-
-        ontology_payload = {
-            "id": class_id,
-            "label": "Product",
-            "description": "Product class for pipeline objectify e2e",
-            "properties": [
-                {
-                    "name": "product_id",
-                    "type": "xsd:string",
-                    "label": "Product ID",
-                    "required": True,
-                    "primaryKey": True,
-                },
-                {
-                    "name": "name",
-                    "type": "xsd:string",
-                    "label": "Name",
-                    "required": True,
-                    "titleKey": True,
-                },
-            ],
-            "relationships": [],
-            "metadata": {"source": "pipeline_objectify_e2e"},
-        }
-        ontology_resp = await client.post(
-            f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
-            params={"branch": ontology_branch},
-            json=ontology_payload,
-        )
-        ontology_resp.raise_for_status()
-        await _wait_for_ontology(client, db_name=db_name, class_id=class_id, branch=ontology_branch)
-
-        create_raw = await _post_with_retry(
-            client,
-            f"{BFF_URL}/api/v1/pipelines/datasets",
-            json_payload={
-                "db_name": db_name,
-                "name": raw_dataset_name,
-                "description": "raw input",
-                "branch": "main",
-                "source_type": "manual",
-                "schema_json": schema_json,
-            },
-        )
-        create_raw.raise_for_status()
-        raw_dataset = (create_raw.json().get("data") or {}).get("dataset") or {}
-        raw_dataset_id = str(raw_dataset.get("dataset_id") or "")
-        assert raw_dataset_id
-
-        raw_version = await _post_with_retry(
-            client,
-            f"{BFF_URL}/api/v1/pipelines/datasets/{raw_dataset_id}/versions",
-            json_payload={"sample_json": sample_json, "schema_json": schema_json},
-        )
-        raw_version.raise_for_status()
-
-        definition_json: dict[str, Any] = {
-            "nodes": [
-                {
-                    "id": "in1",
-                    "type": "input",
-                    "metadata": {"datasetId": raw_dataset_id, "datasetName": raw_dataset_name},
-                },
-                {
-                    "id": "out1",
-                    "type": "output",
-                    "metadata": {"datasetName": clean_dataset_name, "outputFormat": "json"},
-                },
-            ],
-            "edges": [{"from": "in1", "to": "out1"}],
-            "parameters": [],
-            "schemaContract": [
-                {"column": "product_id", "type": "xsd:string", "required": True},
-                {"column": "name", "type": "xsd:string", "required": True},
-            ],
-            "settings": {"engine": "Batch"},
-        }
-
-        pipeline_create_key = f"e2e:{db_name}:pipeline:create:raw_to_clean"
-        create_pipeline = await client.post(
-            f"{BFF_URL}/api/v1/pipelines",
-            json={
-                "db_name": db_name,
-                "name": "raw_to_clean",
-                "location": "e2e",
-                "description": "raw to clean",
-                "branch": "main",
-                "pipeline_type": "batch",
-                "definition_json": definition_json,
-            },
-            headers={"Idempotency-Key": pipeline_create_key},
-        )
-        create_pipeline.raise_for_status()
-        pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
-        pipeline_id = str(pipeline.get("pipeline_id") or "")
-        assert pipeline_id
-
-        pipeline_build_key = f"e2e:{db_name}:pipeline:build:raw_to_clean:out1"
-        build_resp = await _post_with_retry(
-            client,
-            f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
-            json_payload={"db_name": db_name, "node_id": "out1", "limit": 10},
-            headers={"Idempotency-Key": pipeline_build_key},
-        )
-        build_resp.raise_for_status()
-        build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
-        assert build_job_id
-
-        run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
-        assert str(run.get("status") or "").upper() == "SUCCESS"
-
-        artifact = await _wait_for_artifact(client, pipeline_id=pipeline_id, job_id=build_job_id)
-        artifact_id = str(artifact.get("artifact_id") or "")
-        assert artifact_id
-        outputs = artifact.get("outputs") or []
-        assert any(
-            isinstance(item, dict) and item.get("dataset_name") == clean_dataset_name for item in outputs
-        )
-
-        dataset_registry = DatasetRegistry()
-        await dataset_registry.initialize()
         try:
-            output = next(
-                (item for item in outputs if isinstance(item, dict) and item.get("dataset_name") == clean_dataset_name),
-                None,
+            await _create_db_with_retry(client, db_name=db_name, description="pipeline objectify e2e")
+            await _grant_db_role_http(
+                raw_client,
+                db_name=db_name,
+                principal_id=headers["X-User-ID"],
+                principal_type=headers["X-User-Type"],
             )
-            assert output
-            artifact_commit_key = str(output.get("artifact_commit_key") or output.get("artifact_key") or "")
-            assert artifact_commit_key
-            commit_id = _commit_id_from_artifact(artifact_commit_key)
-            schema_columns = output.get("columns") if isinstance(output.get("columns"), list) else schema_columns
-            sample_rows = output.get("rows") if isinstance(output.get("rows"), list) else sample_rows
 
-            clean_dataset = await dataset_registry.get_dataset_by_name(
-                db_name=db_name, name=clean_dataset_name, branch="main"
+            ontology_payload = {
+                "id": class_id,
+                "label": "Product",
+                "description": "Product class for pipeline objectify e2e",
+                "properties": [
+                    {
+                        "name": "product_id",
+                        "type": "xsd:string",
+                        "label": "Product ID",
+                        "required": True,
+                        "primaryKey": True,
+                    },
+                    {
+                        "name": "name",
+                        "type": "xsd:string",
+                        "label": "Name",
+                        "required": True,
+                        "titleKey": True,
+                    },
+                ],
+                "relationships": [],
+                "metadata": {"source": "pipeline_objectify_e2e"},
+            }
+            ontology_resp = await client.post(
+                f"{BFF_URL}/api/v1/databases/{db_name}/ontology",
+                params={"branch": ontology_branch},
+                json=ontology_payload,
             )
-            if not clean_dataset:
-                clean_dataset = await dataset_registry.create_dataset(
-                    db_name=db_name,
-                    name=clean_dataset_name,
-                    description="clean output",
-                    source_type="pipeline",
-                    source_ref=str(pipeline_id),
-                    schema_json={"columns": schema_columns},
-                    branch="main",
+            ontology_resp.raise_for_status()
+            await _wait_for_ontology(client, db_name=db_name, class_id=class_id, branch=ontology_branch)
+
+            create_raw = await _post_with_retry(
+                client,
+                f"{BFF_URL}/api/v1/pipelines/datasets",
+                json_payload={
+                    "db_name": db_name,
+                    "name": raw_dataset_name,
+                    "description": "raw input",
+                    "branch": "main",
+                    "source_type": "manual",
+                    "schema_json": schema_json,
+                },
+            )
+            create_raw.raise_for_status()
+            raw_dataset = (create_raw.json().get("data") or {}).get("dataset") or {}
+            raw_dataset_id = str(raw_dataset.get("dataset_id") or "")
+            assert raw_dataset_id
+
+            raw_version = await _post_with_retry(
+                client,
+                f"{BFF_URL}/api/v1/pipelines/datasets/{raw_dataset_id}/versions",
+                json_payload={"sample_json": sample_json, "schema_json": schema_json},
+            )
+            raw_version.raise_for_status()
+
+            definition_json: dict[str, Any] = {
+                "nodes": [
+                    {
+                        "id": "in1",
+                        "type": "input",
+                        "metadata": {"datasetId": raw_dataset_id, "datasetName": raw_dataset_name},
+                    },
+                    {
+                        "id": "out1",
+                        "type": "output",
+                        "metadata": {"datasetName": clean_dataset_name, "outputFormat": "json"},
+                    },
+                ],
+                "edges": [{"from": "in1", "to": "out1"}],
+                "parameters": [],
+                "schemaContract": [
+                    {"column": "product_id", "type": "xsd:string", "required": True},
+                    {"column": "name", "type": "xsd:string", "required": True},
+                ],
+                "settings": {"engine": "Batch"},
+            }
+
+            pipeline_create_key = f"e2e:{db_name}:pipeline:create:raw_to_clean"
+            create_pipeline = await client.post(
+                f"{BFF_URL}/api/v1/pipelines",
+                json={
+                    "db_name": db_name,
+                    "name": "raw_to_clean",
+                    "location": "e2e",
+                    "description": "raw to clean",
+                    "branch": "main",
+                    "pipeline_type": "batch",
+                    "definition_json": definition_json,
+                },
+                headers={"Idempotency-Key": pipeline_create_key},
+            )
+            create_pipeline.raise_for_status()
+            pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
+            pipeline_id = str(pipeline.get("pipeline_id") or "")
+            assert pipeline_id
+
+            pipeline_build_key = f"e2e:{db_name}:pipeline:build:raw_to_clean:out1"
+            build_resp = await _post_with_retry(
+                client,
+                f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
+                json_payload={"db_name": db_name, "node_id": "out1", "limit": 10},
+                headers={"Idempotency-Key": pipeline_build_key},
+            )
+            build_resp.raise_for_status()
+            build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
+            assert build_job_id
+
+            run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
+            assert str(run.get("status") or "").upper() == "SUCCESS"
+
+            artifact = await _wait_for_artifact(client, pipeline_id=pipeline_id, job_id=build_job_id)
+            artifact_id = str(artifact.get("artifact_id") or "")
+            assert artifact_id
+            outputs = artifact.get("outputs") or []
+            assert any(
+                isinstance(item, dict) and item.get("dataset_name") == clean_dataset_name for item in outputs
+            )
+
+            dataset_registry = DatasetRegistry()
+            await dataset_registry.initialize()
+            try:
+                output = next(
+                    (item for item in outputs if isinstance(item, dict) and item.get("dataset_name") == clean_dataset_name),
+                    None,
                 )
-            clean_dataset_id = str(clean_dataset.dataset_id)
-            clean_version = await dataset_registry.add_version(
-                dataset_id=clean_dataset_id,
-                lakefs_commit_id=commit_id,
-                artifact_key=artifact_commit_key,
-                row_count=output.get("row_count"),
-                sample_json={"columns": schema_columns, "rows": sample_rows},
-                schema_json={"columns": schema_columns},
-                promoted_from_artifact_id=artifact_id,
+                assert output
+                artifact_commit_key = str(output.get("artifact_commit_key") or output.get("artifact_key") or "")
+                assert artifact_commit_key
+                commit_id = _commit_id_from_artifact(artifact_commit_key)
+                schema_columns = output.get("columns") if isinstance(output.get("columns"), list) else schema_columns
+                sample_rows = output.get("rows") if isinstance(output.get("rows"), list) else sample_rows
+
+                clean_dataset = await dataset_registry.get_dataset_by_name(
+                    db_name=db_name, name=clean_dataset_name, branch="main"
+                )
+                if not clean_dataset:
+                    clean_dataset = await dataset_registry.create_dataset(
+                        db_name=db_name,
+                        name=clean_dataset_name,
+                        description="clean output",
+                        source_type="pipeline",
+                        source_ref=str(pipeline_id),
+                        schema_json={"columns": schema_columns},
+                        branch="main",
+                    )
+                clean_dataset_id = str(clean_dataset.dataset_id)
+                clean_version = await dataset_registry.add_version(
+                    dataset_id=clean_dataset_id,
+                    lakefs_commit_id=commit_id,
+                    artifact_key=artifact_commit_key,
+                    row_count=output.get("row_count"),
+                    sample_json={"columns": schema_columns, "rows": sample_rows},
+                    schema_json={"columns": schema_columns},
+                    promoted_from_artifact_id=artifact_id,
+                )
+                clean_version_id = str(clean_version.version_id)
+            finally:
+                await dataset_registry.close()
+
+            await _upsert_object_type_contract(
+                client,
+                db_name=db_name,
+                class_id=class_id,
+                branch=ontology_branch,
+                contract_payload={
+                    "backing_dataset_id": clean_dataset_id,
+                    "pk_spec": {"primary_key": ["product_id"], "title_key": ["name"]},
+                },
             )
-            clean_version_id = str(clean_version.version_id)
+
+            mapping_payload = {
+                "dataset_id": clean_dataset_id,
+                "artifact_output_name": clean_dataset_name,
+                "target_class_id": class_id,
+                "options": {"ontology_branch": ontology_branch},
+                "mappings": [
+                    {"source_field": "product_id", "target_field": "product_id"},
+                    {"source_field": "name", "target_field": "name"},
+                ],
+            }
+            mapping_resp = await client.post(f"{BFF_URL}/api/v1/objectify/mapping-specs", json=mapping_payload)
+            mapping_resp.raise_for_status()
+            mapping_spec = (mapping_resp.json().get("data") or {}).get("mapping_spec") or {}
+            mapping_spec_id = str(mapping_spec.get("mapping_spec_id") or "")
+            assert mapping_spec_id
+
+            run_objectify = await client.post(
+                f"{BFF_URL}/api/v1/objectify/datasets/{clean_dataset_id}/run",
+                json={"dataset_version_id": clean_version_id},
+            )
+            run_objectify.raise_for_status()
+            objectify_job_id = str(((run_objectify.json().get("data") or {}) or {}).get("job_id") or "")
+            assert objectify_job_id
+
+            index_name = get_instances_index_name(db_name, branch=ontology_branch)
+            doc = await _wait_for_es_doc(client, index_name=index_name, doc_id="p1")
+            source = doc.get("_source") or {}
+            assert source.get("instance_id") == "p1"
+            assert source.get("class_id") == class_id
         finally:
-            await dataset_registry.close()
-
-        await _upsert_object_type_contract(
-            client,
-            db_name=db_name,
-            class_id=class_id,
-            branch=ontology_branch,
-            contract_payload={
-                "backing_dataset_id": clean_dataset_id,
-                "pk_spec": {"primary_key": ["product_id"], "title_key": ["name"]},
-            },
-        )
-
-        mapping_payload = {
-            "dataset_id": clean_dataset_id,
-            "artifact_output_name": clean_dataset_name,
-            "target_class_id": class_id,
-            "options": {"ontology_branch": ontology_branch},
-            "mappings": [
-                {"source_field": "product_id", "target_field": "product_id"},
-                {"source_field": "name", "target_field": "name"},
-            ],
-        }
-        mapping_resp = await client.post(f"{BFF_URL}/api/v1/objectify/mapping-specs", json=mapping_payload)
-        mapping_resp.raise_for_status()
-        mapping_spec = (mapping_resp.json().get("data") or {}).get("mapping_spec") or {}
-        mapping_spec_id = str(mapping_spec.get("mapping_spec_id") or "")
-        assert mapping_spec_id
-
-        run_objectify = await client.post(
-            f"{BFF_URL}/api/v1/objectify/datasets/{clean_dataset_id}/run",
-            json={"dataset_version_id": clean_version_id},
-        )
-        run_objectify.raise_for_status()
-        objectify_job_id = str(((run_objectify.json().get("data") or {}) or {}).get("job_id") or "")
-        assert objectify_job_id
-
-        index_name = get_instances_index_name(db_name, branch=ontology_branch)
-        doc = await _wait_for_es_doc(client, index_name=index_name, doc_id="p1")
-        source = doc.get("_source") or {}
-        assert source.get("instance_id") == "p1"
-        assert source.get("class_id") == class_id
+            await _delete_db_best_effort(raw_client, db_name=db_name)

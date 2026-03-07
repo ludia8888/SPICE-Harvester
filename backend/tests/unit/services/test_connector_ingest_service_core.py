@@ -70,6 +70,34 @@ class _DatasetRegistry:
         )
 
 
+class _UniqueViolationError(RuntimeError):
+    sqlstate = "23505"
+
+
+class _RacingDatasetRegistry(_DatasetRegistry):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lookup_calls = 0
+
+    async def get_dataset_by_source_ref(self, **kwargs: Any):  # noqa: ANN401
+        _ = kwargs
+        self.lookup_calls += 1
+        if self.lookup_calls == 1:
+            return None
+        return self.dataset
+
+    async def create_dataset(self, **kwargs: Any):  # noqa: ANN401
+        self.created.append(dict(kwargs))
+        self.dataset = SimpleNamespace(
+            dataset_id="dataset-raced",
+            db_name=kwargs["db_name"],
+            name=kwargs["name"],
+            branch=kwargs.get("branch") or "main",
+            schema_json=kwargs.get("schema_json") or {},
+        )
+        raise _UniqueViolationError("duplicate key value violates unique constraint")
+
+
 class _PipelineRegistry:
     def __init__(self, storage: _Storage) -> None:
         self._storage = storage
@@ -122,6 +150,48 @@ async def test_connector_ingest_service_snapshot_creates_dataset_and_version(mon
     columns, rows = _parse_saved_csv(storage.saved[0]["payload"])
     assert columns == ["id", "name"]
     assert rows == [["1", "Alice"], ["2", "Bob"]]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_connector_ingest_service_snapshot_recovers_from_dataset_create_race(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    storage = _Storage()
+    dataset_registry = _RacingDatasetRegistry()
+    pipeline_registry = _PipelineRegistry(storage)
+    service = ConnectorIngestService(
+        dataset_registry=dataset_registry,
+        pipeline_registry=pipeline_registry,
+    )
+
+    async def _no_branch(*, repository: str, branch: str, source_branch: str = "main") -> None:
+        _ = repository, branch, source_branch
+        return None
+
+    async def _fixed_commit(**kwargs: Any) -> str:  # noqa: ANN401
+        _ = kwargs
+        return "commit-race"
+
+    monkeypatch.setattr(service, "_ensure_branch_exists", _no_branch)
+    monkeypatch.setattr(service, "_commit", _fixed_commit)
+
+    result = await service.ingest_rows(
+        db_name="sales_db",
+        source_type="postgresql",
+        source_id="orders",
+        columns=["id", "name"],
+        rows=[{"id": "1", "name": "Alice"}],
+        branch="main",
+        import_mode="SNAPSHOT",
+        source_ref="postgresql:orders",
+    )
+
+    assert dataset_registry.lookup_calls == 2
+    assert len(dataset_registry.created) == 1
+    assert len(dataset_registry.versions) == 1
+    assert result["dataset"]["dataset_id"] == "dataset-raced"
+    assert result["version"]["lakefs_commit_id"] == "commit-race"
 
 
 @pytest.mark.unit

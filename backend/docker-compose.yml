@@ -82,8 +82,9 @@ services:
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
       - bootstrap.memory_lock=true
-      # NOTE: For the full production gate, prefer >=512m heap. Override via `ES_JAVA_OPTS`.
-      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms512m -Xmx512m}"
+      # Local default: 384m avoids repeated Docker Desktop OOM kills on constrained hosts.
+      # For heavier gates, override via `ES_JAVA_OPTS=-Xms512m -Xmx512m` or higher.
+      - "ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms384m -Xmx384m}"
       - http.host=0.0.0.0
     ulimits:
       memlock:
@@ -96,12 +97,12 @@ services:
     networks:
       - spice_network
     healthcheck:
-      # Elasticsearch can take a few minutes to bootstrap on slower hosts (e.g. emulated amd64).
-      # Mark healthy only once the cluster is at least yellow to avoid false-negatives.
+      # Dev/test clusters can remain red on a single node when stale replicas or
+      # unassigned shards exist, but the HTTP API is still usable for local tests.
       test:
         [
           "CMD-SHELL",
-          "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1",
+          "curl -fsS 'http://localhost:9200/_cluster/health?timeout=5s' > /dev/null || exit 1",
         ]
       interval: 30s
       timeout: 10s
@@ -1017,4 +1018,5 @@ volumes:
 
 networks:
   spice_network:
+    name: ${SPICE_NETWORK_NAME:-spice-harvester_spice_network}
     driver: bridge

@@ -46,6 +46,7 @@ from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expressio
 from shared.services.pipeline.dataset_output_semantics import resolve_dataset_write_policy
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import LakeFSConflictError, LakeFSError
@@ -2406,7 +2407,7 @@ async def _ensure_dataset_key_spec_alignment(
                 extra={"dataset_id": dataset_id, "observed_primary_key": pk_columns},
             )
         return
-    await dataset_registry.create_key_spec(
+    record, created = await dataset_registry.get_or_create_key_spec(
         dataset_id=dataset_id,
         spec={
             "primary_key": pk_columns,
@@ -2414,6 +2415,23 @@ async def _ensure_dataset_key_spec_alignment(
             "node_id": node_id,
         },
     )
+    if created:
+        return
+
+    raced_spec = normalize_key_spec(record.spec)
+    raced_pk = raced_spec.get("primary_key") or []
+    if set(raced_pk) != set(pk_columns):
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "Pipeline output primary key does not match key spec",
+            code=ErrorCode.CONFLICT,
+            category=ErrorCategory.CONFLICT,
+            extra={
+                "dataset_id": dataset_id,
+                "expected_primary_key": raced_pk,
+                "observed_primary_key": pk_columns,
+            },
+        )
 
 
 def _resolve_mapping_spec_from_bundle(
@@ -2489,13 +2507,13 @@ async def _upsert_promoted_dataset_version(
     promoted_artifact_key: str,
     promoted_from_artifact_id: Optional[str],
 ) -> tuple[Any, Any, str]:
-    dataset = await dataset_registry.get_dataset_by_name(
-        db_name=db_name,
-        name=staged_dataset_name,
-        branch=resolved_branch,
-    )
-    if not dataset:
-        dataset = await dataset_registry.create_dataset(
+    dataset, _ = await get_or_create_dataset_record(
+        lookup=lambda: dataset_registry.get_dataset_by_name(
+            db_name=db_name,
+            name=staged_dataset_name,
+            branch=resolved_branch,
+        ),
+        create=lambda: dataset_registry.create_dataset(
             db_name=db_name,
             name=staged_dataset_name,
             description=None,
@@ -2503,7 +2521,9 @@ async def _upsert_promoted_dataset_version(
             source_ref=source_ref,
             schema_json={"columns": schema_columns},
             branch=resolved_branch,
-        )
+        ),
+        conflict_context=f"{db_name}/{staged_dataset_name}@{resolved_branch}",
+    )
     schema_hash = compute_schema_hash(schema_columns)
     sample_json = _build_dataset_sample_json(
         columns=schema_columns,

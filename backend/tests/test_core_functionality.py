@@ -40,7 +40,7 @@ def _get_postgres_url_candidates() -> list[str]:
 MINIO_URL = os.getenv("MINIO_ENDPOINT_URL", "http://localhost:9002")
 ELASTICSEARCH_URL = os.getenv(
     "ELASTICSEARCH_URL",
-    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9201')}",
+    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}",
 )
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:39092")
 
@@ -216,6 +216,32 @@ async def _wait_for_db_exists(
     raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
 
 
+async def _delete_test_database(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    timeout_seconds: int = 60,
+) -> None:
+    """Best-effort cleanup for test databases to keep read-model indices bounded."""
+    try:
+        expected_seq = await _get_write_side_last_sequence(
+            aggregate_type="Database",
+            aggregate_id=db_name,
+        )
+        params = {"expected_seq": expected_seq} if expected_seq is not None else None
+        async with session.delete(
+            f"{CORE_URL}{_path_database_item(db_name)}",
+            params=params,
+            headers=_headers_for_db(db_name),
+        ) as resp:
+            if resp.status not in {200, 202, 404}:
+                body = await resp.text()
+                raise AssertionError(f"Unexpected cleanup response: status={resp.status} body={body}")
+        await _wait_for_db_exists(session, db_name=db_name, expected=False, timeout_seconds=timeout_seconds)
+    except Exception:
+        print(f"[cleanup-warning] failed to delete test database {db_name}", flush=True)
+
+
 async def _wait_for_command_terminal_state(
     session: aiohttp.ClientSession,
     *,
@@ -371,80 +397,82 @@ class TestCoreOntologyManagement:
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_db_{uuid.uuid4().hex[:12]}"
             ontology_branch = "main"
-            
-            # Create database first
-            async with session.post(
-                f"{CORE_URL}{_path_database_create()}",
-                json={"name": db_name, "description": "Ontology test"}
-            ) as resp:
-                assert resp.status == 202
+            try:
+                # Create database first
+                async with session.post(
+                    f"{CORE_URL}{_path_database_create()}",
+                    json={"name": db_name, "description": "Ontology test"}
+                ) as resp:
+                    assert resp.status == 202
 
-            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+                await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
-            # Relationship targets must exist in schema (create Customer first)
-            customer_ontology = {
-                "id": "Customer",
-                "label": "Customer",
-                "description": "Customer for relationship target",
-                "properties": [
-                    {"name": "customer_id", "type": "string", "label": "Customer ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
-                ],
-                "relationships": [],
-            }
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                params={"branch": ontology_branch},
-                json=customer_ontology,
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
+                # Relationship targets must exist in schema (create Customer first)
+                customer_ontology = {
+                    "id": "Customer",
+                    "label": "Customer",
+                    "description": "Customer for relationship target",
+                    "properties": [
+                        {"name": "customer_id", "type": "string", "label": "Customer ID", "required": True},
+                        {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
+                    ],
+                    "relationships": [],
+                }
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    params={"branch": ontology_branch},
+                    json=customer_ontology,
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 202
 
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="Customer",
-                branch=ontology_branch,
-            )
-            
-            # Create ontology
-            ontology_data = {
-                "id": "TestProduct",
-                "label": "Test Product",
-                "description": "Product for testing",
-                "properties": [
-                    {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
-                    {"name": "price", "type": "decimal", "label": "Price"},
-                    {"name": "tags", "type": "array", "label": "Tags"}
-                ],
-                "relationships": [
-                    {
-                        "predicate": "owned_by",
-                        "target": "Customer",
-                        "label": "Owned By",
-                        "cardinality": "n:1"
-                    }
-                ]
-            }
-            
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                params={"branch": ontology_branch},
-                json=ontology_data,
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
-                result = await resp.json()
-                assert result.get("status") == "accepted"
-                assert "command_id" in (result.get("data") or {})
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="Customer",
+                    branch=ontology_branch,
+                )
 
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="TestProduct",
-                branch=ontology_branch,
-            )
+                # Create ontology
+                ontology_data = {
+                    "id": "TestProduct",
+                    "label": "Test Product",
+                    "description": "Product for testing",
+                    "properties": [
+                        {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
+                        {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
+                        {"name": "price", "type": "decimal", "label": "Price"},
+                        {"name": "tags", "type": "array", "label": "Tags"}
+                    ],
+                    "relationships": [
+                        {
+                            "predicate": "owned_by",
+                            "target": "Customer",
+                            "label": "Owned By",
+                            "cardinality": "n:1"
+                        }
+                    ]
+                }
+
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    params={"branch": ontology_branch},
+                    json=ontology_data,
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 202
+                    result = await resp.json()
+                    assert result.get("status") == "accepted"
+                    assert "command_id" in (result.get("data") or {})
+
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="TestProduct",
+                    branch=ontology_branch,
+                )
+            finally:
+                await _delete_test_database(session, db_name=db_name)
 
     @pytest.mark.asyncio
     async def test_ontology_i18n_label_projection(self):
@@ -452,127 +480,129 @@ class TestCoreOntologyManagement:
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:12]}"
             ontology_branch = "main"
+            try:
+                async with session.post(
+                    f"{CORE_URL}{_path_database_create()}",
+                    json={"name": db_name, "description": "Ontology i18n test"},
+                ) as resp:
+                    assert resp.status == 202
 
-            async with session.post(
-                f"{CORE_URL}{_path_database_create()}",
-                json={"name": db_name, "description": "Ontology i18n test"},
-            ) as resp:
-                assert resp.status == 202
+                await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
-            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+                customer = {
+                    "id": "Customer",
+                    "label": {"en": "Customer", "ko": "고객"},
+                    "description": {"en": "Customer target", "ko": "관계 대상 고객"},
+                    "properties": [
+                        {
+                            "name": "customer_id",
+                            "type": "string",
+                            "label": {"en": "Customer ID", "ko": "고객 ID"},
+                            "required": True,
+                            "titleKey": True,
+                        }
+                    ],
+                    "relationships": [],
+                }
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    params={"branch": ontology_branch},
+                    json=customer,
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 202
 
-            customer = {
-                "id": "Customer",
-                "label": {"en": "Customer", "ko": "고객"},
-                "description": {"en": "Customer target", "ko": "관계 대상 고객"},
-                "properties": [
-                    {
-                        "name": "customer_id",
-                        "type": "string",
-                        "label": {"en": "Customer ID", "ko": "고객 ID"},
-                        "required": True,
-                        "titleKey": True,
-                    }
-                ],
-                "relationships": [],
-            }
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                params={"branch": ontology_branch},
-                json=customer,
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="Customer",
+                    branch=ontology_branch,
+                )
 
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="Customer",
-                branch=ontology_branch,
-            )
+                product = {
+                    "id": "I18nProduct",
+                    "label": {"en": "Product", "ko": "제품"},
+                    "description": {"en": "Product data", "ko": "제품 데이터"},
+                    "properties": [
+                        {
+                            "name": "product_id",
+                            "type": "string",
+                            "label": {"en": "Product ID", "ko": "제품 ID"},
+                            "description": {"en": "Primary product identifier", "ko": "제품 기본 ID"},
+                            "required": True,
+                            "titleKey": True,
+                        }
+                    ],
+                    "relationships": [
+                        {
+                            "predicate": "owned_by",
+                            "target": "Customer",
+                            "label": {"en": "Owned By", "ko": "소유자"},
+                            "inverse_label": {"en": "Owns", "ko": "소유"},
+                            "description": {"en": "Ownership link", "ko": "소유 관계"},
+                            "cardinality": "n:1",
+                        }
+                    ],
+                }
 
-            product = {
-                "id": "I18nProduct",
-                "label": {"en": "Product", "ko": "제품"},
-                "description": {"en": "Product data", "ko": "제품 데이터"},
-                "properties": [
-                    {
-                        "name": "product_id",
-                        "type": "string",
-                        "label": {"en": "Product ID", "ko": "제품 ID"},
-                        "description": {"en": "Primary product identifier", "ko": "제품 기본 ID"},
-                        "required": True,
-                        "titleKey": True,
-                    }
-                ],
-                "relationships": [
-                    {
-                        "predicate": "owned_by",
-                        "target": "Customer",
-                        "label": {"en": "Owned By", "ko": "소유자"},
-                        "inverse_label": {"en": "Owns", "ko": "소유"},
-                        "description": {"en": "Ownership link", "ko": "소유 관계"},
-                        "cardinality": "n:1",
-                    }
-                ],
-            }
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    params={"branch": ontology_branch},
+                    json=product,
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 202
+                    result = await resp.json()
+                    assert result.get("status") == "accepted"
 
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                params={"branch": ontology_branch},
-                json=product,
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
-                result = await resp.json()
-                assert result.get("status") == "accepted"
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="I18nProduct",
+                    branch=ontology_branch,
+                )
 
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="I18nProduct",
-                branch=ontology_branch,
-            )
+                index_name = get_ontologies_index_name(db_name, branch=ontology_branch)
+                es_doc = await _wait_for_es_doc(
+                    session,
+                    index_name=index_name,
+                    doc_id="I18nProduct",
+                    timeout_seconds=420,
+                )
+                source = es_doc.get("_source") or {}
 
-            index_name = get_ontologies_index_name(db_name, branch=ontology_branch)
-            es_doc = await _wait_for_es_doc(
-                session,
-                index_name=index_name,
-                doc_id="I18nProduct",
-                timeout_seconds=420,
-            )
-            source = es_doc.get("_source") or {}
+                label_value = source.get("label")
+                assert isinstance(label_value, str)
+                assert label_value == "제품"
+                label_i18n = source.get("label_i18n") or {}
+                assert label_i18n.get("en") == "Product"
+                assert label_i18n.get("ko") == "제품"
 
-            label_value = source.get("label")
-            assert isinstance(label_value, str)
-            assert label_value == "제품"
-            label_i18n = source.get("label_i18n") or {}
-            assert label_i18n.get("en") == "Product"
-            assert label_i18n.get("ko") == "제품"
+                props = {p.get("name"): p for p in (source.get("properties") or [])}
+                prop = props.get("product_id")
+                assert prop is not None
+                assert isinstance(prop.get("label"), str)
+                assert prop.get("label") == "제품 ID"
+                prop_label_i18n = prop.get("label_i18n") or {}
+                assert prop_label_i18n.get("en") == "Product ID"
+                assert prop_label_i18n.get("ko") == "제품 ID"
+                prop_desc_i18n = prop.get("description_i18n") or {}
+                assert prop_desc_i18n.get("en") == "Primary product identifier"
+                assert prop_desc_i18n.get("ko") == "제품 기본 ID"
 
-            props = {p.get("name"): p for p in (source.get("properties") or [])}
-            prop = props.get("product_id")
-            assert prop is not None
-            assert isinstance(prop.get("label"), str)
-            assert prop.get("label") == "제품 ID"
-            prop_label_i18n = prop.get("label_i18n") or {}
-            assert prop_label_i18n.get("en") == "Product ID"
-            assert prop_label_i18n.get("ko") == "제품 ID"
-            prop_desc_i18n = prop.get("description_i18n") or {}
-            assert prop_desc_i18n.get("en") == "Primary product identifier"
-            assert prop_desc_i18n.get("ko") == "제품 기본 ID"
-
-            rels = {(r.get("predicate"), r.get("target")): r for r in (source.get("relationships") or [])}
-            rel = rels.get(("owned_by", "Customer"))
-            assert rel is not None
-            assert isinstance(rel.get("label"), str)
-            assert rel.get("label") == "소유자"
-            rel_label_i18n = rel.get("label_i18n") or {}
-            assert rel_label_i18n.get("en") == "Owned By"
-            assert rel_label_i18n.get("ko") == "소유자"
-            rel_inverse_i18n = rel.get("inverse_label_i18n") or {}
-            assert rel_inverse_i18n.get("en") == "Owns"
-            assert rel_inverse_i18n.get("ko") == "소유"
+                rels = {(r.get("predicate"), r.get("target")): r for r in (source.get("relationships") or [])}
+                rel = rels.get(("owned_by", "Customer"))
+                assert rel is not None
+                assert isinstance(rel.get("label"), str)
+                assert rel.get("label") == "소유자"
+                rel_label_i18n = rel.get("label_i18n") or {}
+                assert rel_label_i18n.get("en") == "Owned By"
+                assert rel_label_i18n.get("ko") == "소유자"
+                rel_inverse_i18n = rel.get("inverse_label_i18n") or {}
+                assert rel_inverse_i18n.get("en") == "Owns"
+                assert rel_inverse_i18n.get("ko") == "소유"
+            finally:
+                await _delete_test_database(session, db_name=db_name)
 
     @pytest.mark.asyncio
     async def test_ontology_creation_advanced_relationships(self):
@@ -580,117 +610,119 @@ class TestCoreOntologyManagement:
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:12]}"
             ontology_branch = "main"
+            try:
+                async with session.post(
+                    f"{CORE_URL}{_path_database_create()}",
+                    json={"name": db_name, "description": "Advanced ontology test"},
+                ) as resp:
+                    assert resp.status == 202
 
-            async with session.post(
-                f"{CORE_URL}{_path_database_create()}",
-                json={"name": db_name, "description": "Advanced ontology test"},
-            ) as resp:
-                assert resp.status == 202
+                await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
-            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+                # Create target class first so relationship validation can succeed.
+                customer = {
+                    "id": "Customer",
+                    "label": "Customer",
+                    "description": "Customer for relationship target",
+                    "properties": [
+                        {
+                            "name": "customer_id",
+                            "type": "string",
+                            "label": "Customer ID",
+                            "required": True,
+                            "titleKey": True,
+                        }
+                    ],
+                    "relationships": [],
+                }
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    params={"branch": ontology_branch},
+                    json=customer,
+                    headers=_headers_for_db(db_name),
+                ) as resp:
+                    assert resp.status == 202
+                    body = await resp.json()
+                    assert body.get("status") == "accepted"
 
-            # Create target class first so relationship validation can succeed.
-            customer = {
-                "id": "Customer",
-                "label": "Customer",
-                "description": "Customer for relationship target",
-                "properties": [
-                    {
-                        "name": "customer_id",
-                        "type": "string",
-                        "label": "Customer ID",
-                        "required": True,
-                        "titleKey": True,
-                    }
-                ],
-                "relationships": [],
-            }
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                params={"branch": ontology_branch},
-                json=customer,
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
-                body = await resp.json()
-                assert body.get("status") == "accepted"
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="Customer",
+                    branch=ontology_branch,
+                )
 
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="Customer",
-                branch=ontology_branch,
-            )
+                product_adv = {
+                    "id": "AdvProduct",
+                    "label": "Advanced Product",
+                    "description": "Product created via ontology endpoint",
+                    "properties": [
+                        {
+                            "name": "product_id",
+                            "type": "string",
+                            "label": "Product ID",
+                            "required": True,
+                            "titleKey": True,
+                        }
+                    ],
+                    "relationships": [
+                        {
+                            "predicate": "owned_by",
+                            "target": "Customer",
+                            "label": "Owned By",
+                            "cardinality": "n:1",
+                        }
+                    ],
+                }
 
-            product_adv = {
-                "id": "AdvProduct",
-                "label": "Advanced Product",
-                "description": "Product created via ontology endpoint",
-                "properties": [
-                    {
-                        "name": "product_id",
-                        "type": "string",
-                        "label": "Product ID",
-                        "required": True,
-                        "titleKey": True,
-                    }
-                ],
-                "relationships": [
-                    {
-                        "predicate": "owned_by",
-                        "target": "Customer",
-                        "label": "Owned By",
-                        "cardinality": "n:1",
-                    }
-                ],
-            }
-
-            async with session.post(
-                f"{CORE_URL}{_path_ontology_collection(db_name)}",
-                json=product_adv,
-                params={"branch": ontology_branch},
-                headers=_headers_for_db(db_name),
-            ) as resp:
-                assert resp.status == 202
-                body = await resp.json()
-                assert body.get("status") == "accepted"
-                command_id = (body.get("data") or {}).get("command_id")
-                assert command_id
-
-            await _wait_for_ontology_present(
-                session,
-                db_name=db_name,
-                ontology_id="AdvProduct",
-                branch=ontology_branch,
-            )
-            await _wait_for_command_terminal_state(session, command_id=str(command_id))
-
-            # Verify relationship payload was persisted on read path.
-            if USE_OMS_DIRECT:
-                async with session.get(
-                    f"{CORE_URL}{_path_ontology_item(db_name, 'AdvProduct')}",
+                async with session.post(
+                    f"{CORE_URL}{_path_ontology_collection(db_name)}",
+                    json=product_adv,
                     params={"branch": ontology_branch},
                     headers=_headers_for_db(db_name),
                 ) as resp:
-                    assert resp.status == 200
+                    assert resp.status == 202
                     body = await resp.json()
-                    assert body.get("status") == "success"
-                    ontology = body.get("data") or {}
-                    relationships = ontology.get("relationships") or []
-                    assert any(rel.get("predicate") == "owned_by" for rel in relationships)
-            else:
-                async with session.get(
-                    f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/AdvProduct/outgoingLinkTypes",
-                    params={"branch": ontology_branch},
-                    headers=_headers_for_db(db_name),
-                ) as resp:
-                    assert resp.status == 200
-                    body = await resp.json()
-                    links = (body.get("data") if isinstance(body, dict) else None) or []
-                    assert any(
-                        isinstance(link, dict) and str(link.get("apiName") or "").strip() == "owned_by"
-                        for link in links
-                    )
+                    assert body.get("status") == "accepted"
+                    command_id = (body.get("data") or {}).get("command_id")
+                    assert command_id
+
+                await _wait_for_ontology_present(
+                    session,
+                    db_name=db_name,
+                    ontology_id="AdvProduct",
+                    branch=ontology_branch,
+                )
+                await _wait_for_command_terminal_state(session, command_id=str(command_id))
+
+                # Verify relationship payload was persisted on read path.
+                if USE_OMS_DIRECT:
+                    async with session.get(
+                        f"{CORE_URL}{_path_ontology_item(db_name, 'AdvProduct')}",
+                        params={"branch": ontology_branch},
+                        headers=_headers_for_db(db_name),
+                    ) as resp:
+                        assert resp.status == 200
+                        body = await resp.json()
+                        assert body.get("status") == "success"
+                        ontology = body.get("data") or {}
+                        relationships = ontology.get("relationships") or []
+                        assert any(rel.get("predicate") == "owned_by" for rel in relationships)
+                else:
+                    async with session.get(
+                        f"{BFF_URL}/api/v2/ontologies/{db_name}/objectTypes/AdvProduct/outgoingLinkTypes",
+                        params={"branch": ontology_branch},
+                        headers=_headers_for_db(db_name),
+                    ) as resp:
+                        assert resp.status == 200
+                        body = await resp.json()
+                        links = (body.get("data") if isinstance(body, dict) else None) or []
+                        assert any(
+                            isinstance(link, dict) and str(link.get("apiName") or "").strip() == "owned_by"
+                            for link in links
+                        )
+            finally:
+                await _delete_test_database(session, db_name=db_name)
 
 
 class TestBFFGraphFederation:

@@ -14,6 +14,10 @@ from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
 from shared.observability.tracing import trace_db_operation
 from shared.services.pipeline.pipeline_udf_runtime import compile_udf, PipelineUdfError
+from shared.services.registries.pipeline_registry import (
+    PipelineUdfAlreadyExistsError,
+    PipelineUdfVersionConflictError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,8 @@ async def create_udf(
         ).to_dict()
     except HTTPException:
         raise
+    except PipelineUdfAlreadyExistsError as exc:
+        raise classified_http_exception(status.HTTP_409_CONFLICT, str(exc), code=ErrorCode.CONFLICT) from exc
     except Exception as exc:
         logger.error("Failed to create UDF: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
@@ -172,6 +178,8 @@ async def create_udf_version(
         ).to_dict()
     except HTTPException:
         raise
+    except PipelineUdfVersionConflictError as exc:
+        raise classified_http_exception(status.HTTP_409_CONFLICT, str(exc), code=ErrorCode.CONFLICT) from exc
     except Exception as exc:
         logger.error("Failed to create UDF version: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
@@ -205,4 +213,3 @@ async def get_udf_version(
     except Exception as exc:
         logger.error("Failed to get UDF version: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
-

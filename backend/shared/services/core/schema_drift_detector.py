@@ -14,6 +14,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 
 from shared.utils.schema_hash import compute_schema_hash
+from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class SchemaDrift:
     drift_type: str  # Primary drift type: "column_added", "column_removed", "type_changed", "mixed"
     changes: List[SchemaChange] = field(default_factory=list)
     severity: str = "info"  # "info", "warning", "breaking"
-    detected_at: datetime = field(default_factory=datetime.utcnow)
+    detected_at: datetime = field(default_factory=utcnow)
 
     @property
     def is_breaking(self) -> bool:

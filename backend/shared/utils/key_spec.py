@@ -89,6 +89,40 @@ def normalize_unique_keys(value: Any) -> List[List[str]]:
     return []
 
 
+def derive_key_spec_from_properties(properties: Any) -> Dict[str, Any]:
+    if not isinstance(properties, list):
+        return {}
+
+    primary_key = [
+        str(item.get("name")).strip()
+        for item in properties
+        if isinstance(item, dict) and item.get("primary_key") and str(item.get("name") or "").strip()
+    ]
+    title_key = [
+        str(item.get("name")).strip()
+        for item in properties
+        if isinstance(item, dict) and item.get("title_key") and str(item.get("name") or "").strip()
+    ]
+    if not primary_key and not title_key:
+        return {}
+    return {
+        "primary_key": _dedupe(primary_key),
+        "title_key": _dedupe(title_key),
+    }
+
+
+def normalize_object_type_key_spec(
+    spec: Optional[Dict[str, Any]],
+    *,
+    columns: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    payload = spec or {}
+    raw_key_spec = payload.get("pk_spec") if isinstance(payload, dict) else None
+    if not raw_key_spec and isinstance(payload, dict):
+        raw_key_spec = derive_key_spec_from_properties(payload.get("properties"))
+    return normalize_key_spec(raw_key_spec if isinstance(raw_key_spec, dict) else {}, columns=columns)
+
+
 def normalize_key_spec(
     spec: Optional[Dict[str, Any]],
     *,

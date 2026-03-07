@@ -295,13 +295,53 @@ class ServiceSettings(BaseSettings):
         default=None,
         description="OMS gRPC target override (OMS_GRPC_TARGET)",
     )
+    oms_grpc_enabled: bool = Field(
+        default=True,
+        description="Enable OMS gRPC bridge server (OMS_GRPC_ENABLED)",
+    )
+    oms_grpc_bind_host: str = Field(
+        default="0.0.0.0",
+        description="OMS gRPC bind host (OMS_GRPC_BIND_HOST)",
+    )
     oms_grpc_use_tls: bool = Field(
         default=False,
         description="Use TLS for OMS gRPC client channels (OMS_GRPC_USE_TLS)",
     )
+    oms_grpc_server_use_tls: bool = Field(
+        default=False,
+        description="Use TLS for OMS gRPC server listeners (OMS_GRPC_SERVER_USE_TLS)",
+    )
+    oms_grpc_require_mtls: bool = Field(
+        default=False,
+        description="Require mTLS client certificates for OMS gRPC server listeners (OMS_GRPC_REQUIRE_MTLS)",
+    )
     oms_grpc_server_name: Optional[str] = Field(
         default=None,
         description="SNI/server name override for OMS gRPC TLS (OMS_GRPC_SERVER_NAME)",
+    )
+    oms_grpc_client_ca_path: Optional[str] = Field(
+        default=None,
+        description="CA bundle path for OMS gRPC client TLS (OMS_GRPC_CLIENT_CA_PATH; fallback SSL_CA_PATH)",
+    )
+    oms_grpc_client_cert_path: Optional[str] = Field(
+        default=None,
+        description="Client cert path for OMS gRPC mTLS (OMS_GRPC_CLIENT_CERT_PATH)",
+    )
+    oms_grpc_client_key_path: Optional[str] = Field(
+        default=None,
+        description="Client key path for OMS gRPC mTLS (OMS_GRPC_CLIENT_KEY_PATH)",
+    )
+    oms_grpc_server_cert_path: Optional[str] = Field(
+        default=None,
+        description="Server cert path for OMS gRPC TLS (OMS_GRPC_SERVER_CERT_PATH; fallback SSL_CERT_PATH)",
+    )
+    oms_grpc_server_key_path: Optional[str] = Field(
+        default=None,
+        description="Server key path for OMS gRPC TLS (OMS_GRPC_SERVER_KEY_PATH; fallback SSL_KEY_PATH)",
+    )
+    oms_grpc_server_ca_path: Optional[str] = Field(
+        default=None,
+        description="CA bundle path for OMS gRPC server mTLS (OMS_GRPC_SERVER_CA_PATH; fallback SSL_CA_PATH)",
     )
     bff_host: str = Field(
         default_factory=lambda: ("bff" if _is_docker_environment() else "127.0.0.1"),
@@ -371,6 +411,21 @@ class ServiceSettings(BaseSettings):
         default=8.0,
         description="Funnel dataset analysis timeout seconds (FUNNEL_INFER_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
     )
+
+    _normalize_optional_service_strings = field_validator(
+        "oms_grpc_target_override",
+        "oms_grpc_bind_host",
+        "oms_grpc_server_name",
+        "oms_grpc_client_ca_path",
+        "oms_grpc_client_cert_path",
+        "oms_grpc_client_key_path",
+        "oms_grpc_server_cert_path",
+        "oms_grpc_server_key_path",
+        "oms_grpc_server_ca_path",
+        "bff_base_url_override",
+        "agent_base_url_override",
+        mode="before",
+    )(_strip_optional_text)
 
     @field_validator("oms_base_url_override", mode="before")
     @classmethod
@@ -1063,6 +1118,10 @@ class PipelineSettings(BaseSettings):
         default=1,
         description="Spark executor thread pool size (PIPELINE_SPARK_EXECUTOR_THREADS)",
     )
+    spark_driver_memory: str = Field(
+        default="512m",
+        description="Spark driver heap size (PIPELINE_SPARK_DRIVER_MEMORY)",
+    )
     spark_streaming_enabled: bool = Field(
         default=True,
         description="Enable Spark Structured Streaming input mode (PIPELINE_SPARK_STREAMING_ENABLED)",
@@ -1206,6 +1265,12 @@ class PipelineSettings(BaseSettings):
     @classmethod
     def clamp_spark_executor_threads(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=1, min_value=1, max_value=128)
+
+    @field_validator("spark_driver_memory", mode="before")
+    @classmethod
+    def normalize_spark_driver_memory(cls, v):  # noqa: ANN001
+        text = str(v or "").strip()
+        return text or "512m"
 
     @field_validator("spark_shuffle_partitions", mode="before")
     @classmethod
@@ -1806,6 +1871,10 @@ class AuthSettings(BaseSettings):
     )
 
     # Require flags (Optional so 'unset' can use heuristics)
+    agent_require_auth: Optional[bool] = Field(
+        default=None,
+        description="Require auth for Agent (AGENT_REQUIRE_AUTH)",
+    )
     bff_require_auth: Optional[bool] = Field(
         default=None,
         description="Require auth for BFF (BFF_REQUIRE_AUTH)",
@@ -1860,9 +1929,21 @@ class AuthSettings(BaseSettings):
         default=None,
         description="Comma-separated exempt paths for BFF (BFF_AUTH_EXEMPT_PATHS)",
     )
+    agent_auth_exempt_paths: Optional[str] = Field(
+        default=None,
+        description="Comma-separated exempt paths for Agent (AGENT_AUTH_EXEMPT_PATHS)",
+    )
     oms_auth_exempt_paths: Optional[str] = Field(
         default=None,
         description="Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS)",
+    )
+    oms_grpc_service_token: Optional[str] = Field(
+        default=None,
+        description="Dedicated client token for OMS gRPC bridge calls (OMS_GRPC_SERVICE_TOKEN)",
+    )
+    oms_grpc_service_tokens: Optional[str] = Field(
+        default=None,
+        description="Dedicated allowed token list for OMS gRPC bridge server (OMS_GRPC_SERVICE_TOKENS)",
     )
 
     _normalize_auth_strings = field_validator(
@@ -1880,7 +1961,10 @@ class AuthSettings(BaseSettings):
         "user_jwt_hs256_secret",
         "user_jwt_algorithms",
         "bff_auth_exempt_paths",
+        "agent_auth_exempt_paths",
         "oms_auth_exempt_paths",
+        "oms_grpc_service_token",
+        "oms_grpc_service_tokens",
         "dev_master_user_id",
         "dev_master_user_type",
         "dev_master_roles",
@@ -1937,6 +2021,29 @@ class AuthSettings(BaseSettings):
         return tokens[0] if tokens else None
 
     @property
+    def oms_grpc_service_token_effective(self) -> Optional[str]:
+        tokens = self._split_tokens(self.oms_grpc_service_token)
+        if tokens:
+            return tokens[0]
+        tokens = self.oms_grpc_expected_service_tokens
+        return tokens[0] if tokens else None
+
+    @property
+    def oms_grpc_expected_service_tokens(self) -> tuple[str, ...]:
+        tokens = self._split_tokens(self.oms_grpc_service_tokens)
+        if tokens:
+            return tokens
+        return tuple(
+            token
+            for token in (
+                *self.bff_agent_tokens,
+                *self.bff_expected_tokens,
+                *self.oms_expected_tokens,
+            )
+            if str(token or "").strip()
+        )
+
+    @property
     def oms_expected_token(self) -> Optional[str]:
         tokens = self.oms_expected_tokens
         return tokens[0] if tokens else None
@@ -1962,6 +2069,13 @@ class AuthSettings(BaseSettings):
             return True
         return bool(default_required)
 
+    def is_agent_auth_required(self, *, default_required: bool = True) -> bool:
+        if self.agent_require_auth is not None:
+            return bool(self.agent_require_auth)
+        if self.allow_insecure_auth_disable:
+            return False
+        return bool(default_required)
+
     def is_oms_auth_required(self, *, default_required: bool = True) -> bool:
         if self.oms_require_auth is not None:
             return bool(self.oms_require_auth)
@@ -1979,6 +2093,9 @@ class AuthSettings(BaseSettings):
 
     def resolve_bff_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
         return self._parse_exempt_paths(self.bff_auth_exempt_paths, defaults)
+
+    def resolve_agent_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
+        return self._parse_exempt_paths(self.agent_auth_exempt_paths, defaults)
 
     def resolve_oms_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
         return self._parse_exempt_paths(self.oms_auth_exempt_paths, defaults)

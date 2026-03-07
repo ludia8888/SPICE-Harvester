@@ -25,6 +25,7 @@ from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilde
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
 from shared.observability.tracing import trace_external_call
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 
 logger = logging.getLogger(__name__)
 
@@ -118,14 +119,13 @@ async def upload_tabular_dataset(
 ) -> TabularDatasetUploadResult:
     ingest_request = None
     try:
-        dataset = await dataset_registry.get_dataset_by_name(
-            db_name=inputs.db_name,
-            name=inputs.dataset_name,
-            branch=inputs.dataset_branch,
-        )
-        created_dataset = False
-        if not dataset:
-            dataset = await dataset_registry.create_dataset(
+        dataset, created_dataset = await get_or_create_dataset_record(
+            lookup=lambda: dataset_registry.get_dataset_by_name(
+                db_name=inputs.db_name,
+                name=inputs.dataset_name,
+                branch=inputs.dataset_branch,
+            ),
+            create=lambda: dataset_registry.create_dataset(
                 db_name=inputs.db_name,
                 name=inputs.dataset_name,
                 description=inputs.description,
@@ -133,8 +133,9 @@ async def upload_tabular_dataset(
                 source_ref=inputs.source_ref,
                 schema_json={},
                 branch=inputs.dataset_branch,
-            )
-            created_dataset = True
+            ),
+            conflict_context=f"{inputs.db_name}/{inputs.dataset_name}@{inputs.dataset_branch}",
+        )
 
         fingerprint_payload = dict(inputs.request_fingerprint_payload or {})
         fingerprint_payload["dataset_id"] = dataset.dataset_id

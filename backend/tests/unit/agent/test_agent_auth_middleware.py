@@ -82,6 +82,7 @@ def test_agent_auth_configuration_requires_token() -> None:
         AGENT_REQUIRE_AUTH="true",
         BFF_AGENT_TOKEN=None,
         AGENT_BFF_TOKEN=None,
+        BFF_ADMIN_TOKEN="admin-secret",
         ADMIN_TOKEN=None,
         ADMIN_API_KEY=None,
     ):

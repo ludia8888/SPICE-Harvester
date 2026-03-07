@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, AsyncIterator, Mapping, Optional
 
 import grpc
@@ -28,19 +27,7 @@ def _metadata_to_dict(context: grpc.aio.ServicerContext) -> dict[str, str]:
 
 def _extract_service_tokens() -> tuple[str, ...]:
     settings = get_settings()
-    raw = (os.getenv("OMS_GRPC_SERVICE_TOKENS") or "").strip()
-    if raw:
-        return tuple(part.strip() for part in raw.split(",") if part.strip())
-    auth = settings.auth
-    return tuple(
-        token
-        for token in (
-            *auth.bff_agent_tokens,
-            *auth.bff_expected_tokens,
-            *auth.oms_expected_tokens,
-        )
-        if str(token or "").strip()
-    )
+    return settings.auth.oms_grpc_expected_service_tokens
 
 
 class OmsGatewayServicer(oms_gateway_pb2_grpc.OmsGatewayServiceServicer):
@@ -581,15 +568,17 @@ class OMSGrpcServer:
 
     async def start(self) -> None:
         settings = get_settings()
-        enabled = str(os.getenv("OMS_GRPC_ENABLED", "true")).strip().lower() not in {"0", "false", "no", "off"}
+        services = settings.services
+
+        enabled = bool(services.oms_grpc_enabled)
         if not enabled:
             logger.info("OMS gRPC server is disabled by OMS_GRPC_ENABLED")
             return
 
-        bind_host = str(os.getenv("OMS_GRPC_BIND_HOST") or "0.0.0.0").strip()
-        port = int(os.getenv("OMS_GRPC_PORT") or settings.services.oms_grpc_port or 50051)
-        require_tls = str(os.getenv("OMS_GRPC_SERVER_USE_TLS", "false")).strip().lower() in {"1", "true", "yes", "on"}
-        require_mtls = str(os.getenv("OMS_GRPC_REQUIRE_MTLS", "false")).strip().lower() in {"1", "true", "yes", "on"}
+        bind_host = str(services.oms_grpc_bind_host or "0.0.0.0").strip() or "0.0.0.0"
+        port = int(services.oms_grpc_port or 50051)
+        require_tls = bool(services.oms_grpc_server_use_tls)
+        require_mtls = bool(services.oms_grpc_require_mtls)
         service_tokens = _extract_service_tokens()
 
         if settings.is_production:
@@ -615,9 +604,9 @@ class OMSGrpcServer:
 
         bind_addr = f"{bind_host}:{port}"
         if require_tls:
-            cert_path = os.getenv("OMS_GRPC_SERVER_CERT_PATH") or settings.services.ssl_cert_path
-            key_path = os.getenv("OMS_GRPC_SERVER_KEY_PATH") or settings.services.ssl_key_path
-            ca_path = os.getenv("OMS_GRPC_SERVER_CA_PATH") or settings.services.ssl_ca_path
+            cert_path = services.oms_grpc_server_cert_path or services.ssl_cert_path
+            key_path = services.oms_grpc_server_key_path or services.ssl_key_path
+            ca_path = services.oms_grpc_server_ca_path or services.ssl_ca_path
             if not cert_path or not key_path:
                 raise RuntimeError("OMS gRPC TLS enabled but cert/key path is missing.")
             if require_mtls and not ca_path:

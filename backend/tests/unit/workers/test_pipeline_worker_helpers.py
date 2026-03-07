@@ -1,6 +1,7 @@
 from __future__ import annotations
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-import os
 import pytest
 
 from pipeline_worker.main import (
@@ -228,3 +229,81 @@ def test_sampling_strategy_defaults_to_limit_for_preview_inputs() -> None:
         preview_limit=500,
     )
     assert explicit_limit == {"type": "limit", "limit": 500}
+
+
+def test_restart_spark_session_terminates_stale_gateway_process(monkeypatch) -> None:
+    pytest.importorskip("pyspark")
+    import pipeline_worker.main as pipeline_main
+    import pyspark
+
+    worker = PipelineWorker()
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.terminate_calls = 0
+            self.kill_calls = 0
+            self.wait_calls: list[int] = []
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+
+        def wait(self, timeout=None):
+            self.wait_calls.append(timeout)
+            return 0
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+
+    class _FakeGateway:
+        def __init__(self, proc: _FakeProc) -> None:
+            self.proc = proc
+            self.shutdown_calls = 0
+            self.callback_shutdown_calls = 0
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        def shutdown_callback_server(self) -> None:
+            self.callback_shutdown_calls += 1
+
+    proc = _FakeProc()
+    gateway = _FakeGateway(proc)
+    stale_spark = SimpleNamespace(
+        sparkContext=SimpleNamespace(_gateway=gateway),
+        stop=Mock(side_effect=ConnectionRefusedError("gateway already dead")),
+    )
+    new_spark = object()
+
+    class _FakeSparkSession:
+        _instantiatedContext = object()
+        _activeSession = object()
+        _defaultSession = object()
+
+    class _FakeSparkContext:
+        _active_spark_context = object()
+        _gateway = object()
+        _jvm = object()
+
+    worker.spark = stale_spark
+    monkeypatch.setattr(worker, "_create_spark_session", lambda: new_spark)
+    monkeypatch.setattr(pipeline_main, "SparkSession", _FakeSparkSession)
+    monkeypatch.setattr(pyspark, "SparkContext", _FakeSparkContext, raising=False)
+
+    worker._restart_spark_session()
+
+    stale_spark.stop.assert_called_once()
+    assert gateway.callback_shutdown_calls == 1
+    assert gateway.shutdown_calls == 1
+    assert proc.terminate_calls == 1
+    assert proc.kill_calls == 0
+    assert proc.wait_calls == [5]
+    assert worker.spark is new_spark
+    assert _FakeSparkSession._instantiatedContext is None
+    assert _FakeSparkSession._activeSession is None
+    assert _FakeSparkSession._defaultSession is None
+    assert _FakeSparkContext._active_spark_context is None
+    assert _FakeSparkContext._gateway is None
+    assert _FakeSparkContext._jvm is None

@@ -32,7 +32,7 @@ from shared.security.input_sanitizer import sanitize_input, validate_class_id
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.import_type_normalization import normalize_import_target_type
-from shared.utils.key_spec import normalize_key_spec
+from shared.utils.key_spec import normalize_key_spec, normalize_object_type_key_spec
 from shared.utils.object_type_backing import select_primary_backing_source
 from shared.observability.tracing import trace_db_operation
 
@@ -271,16 +271,7 @@ async def create_mapping_spec(
                 external_code=ExternalErrorCode.OBJECT_TYPE_INACTIVE,
                 extra={"status": status_value},
             )
-        # Resolve pk_spec: prefer explicit pk_spec, fallback to properties-level flags
-        raw_pk_spec = object_type_spec.get("pk_spec") or {}
-        if not raw_pk_spec:
-            # Auto-derive pk_spec from properties[].primary_key / title_key flags
-            _props = object_type_spec.get("properties") or []
-            _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
-            _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
-            if _pk_cols or _tk_cols:
-                raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
-        normalized_pk_spec = normalize_key_spec(raw_pk_spec, columns=list(prop_map.keys()))
+        normalized_pk_spec = normalize_object_type_key_spec(object_type_spec, columns=list(prop_map.keys()))
         if not normalized_pk_spec.get("primary_key"):
             raise classified_http_exception(
                 status.HTTP_409_CONFLICT,

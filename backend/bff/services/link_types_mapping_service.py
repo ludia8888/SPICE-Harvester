@@ -27,9 +27,10 @@ from bff.schemas.objectify_requests import CreateMappingSpecRequest, MappingSpec
 from bff.services.oms_client import OMSClient
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.services.pipeline.pipeline_schema_utils import normalize_schema_type
 from shared.utils.import_type_normalization import normalize_import_target_type
-from shared.utils.key_spec import normalize_key_spec
+from shared.utils.key_spec import normalize_object_type_key_spec
 from shared.utils.payload_utils import unwrap_data_payload
 from shared.utils.schema_columns import (
     extract_schema_columns as _extract_schema_columns_raw,
@@ -188,15 +189,15 @@ async def ensure_join_dataset(
         name = (join_dataset_name or default_name or "").strip()
         if not name:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "join_dataset_name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
-        dataset = await dataset_registry.get_dataset_by_name(db_name=db_name, name=name, branch=dataset_branch)
-        if not dataset:
-            schema_json = build_join_schema(
-                source_key_column=source_key_column,
-                target_key_column=target_key_column,
-                source_key_type=source_key_type,
-                target_key_type=target_key_type,
-            )
-            dataset = await dataset_registry.create_dataset(
+        schema_json = build_join_schema(
+            source_key_column=source_key_column,
+            target_key_column=target_key_column,
+            source_key_type=source_key_type,
+            target_key_type=target_key_type,
+        )
+        dataset, _ = await get_or_create_dataset_record(
+            lookup=lambda: dataset_registry.get_dataset_by_name(db_name=db_name, name=name, branch=dataset_branch),
+            create=lambda: dataset_registry.create_dataset(
                 db_name=db_name,
                 name=name,
                 description=f"Auto-created join table for {default_name}",
@@ -204,7 +205,9 @@ async def ensure_join_dataset(
                 source_ref=None,
                 schema_json=schema_json,
                 branch=dataset_branch,
-            )
+            ),
+            conflict_context=f"{db_name}/{name}@{dataset_branch}",
+        )
 
     enforce_db_scope(request.headers, db_name=dataset.db_name)
     if dataset.db_name != db_name:
@@ -221,12 +224,6 @@ async def ensure_join_dataset(
     if not version:
         version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
     if not version and auto_create:
-        schema_json = build_join_schema(
-            source_key_column=source_key_column,
-            target_key_column=target_key_column,
-            source_key_type=source_key_type,
-            target_key_type=target_key_type,
-        )
         version = await dataset_registry.add_version(
             dataset_id=dataset.dataset_id,
             lakefs_commit_id=f"auto_join_{uuid4().hex}",
@@ -253,15 +250,7 @@ def resolve_property_type(prop_map: Dict[str, Dict[str, Any]], field: str) -> Op
 
 
 def _extract_pk_fields(*, contract: Dict[str, Any], props: Dict[str, Dict[str, Any]]) -> List[str]:
-    raw_pk_spec = contract.get("pk_spec") or {}
-    if not raw_pk_spec:
-        # Auto-derive pk_spec from properties[].primary_key / title_key flags
-        _props = contract.get("properties") or []
-        _pk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("primary_key")]
-        _tk_cols = [p["name"] for p in _props if isinstance(p, dict) and p.get("title_key")]
-        if _pk_cols or _tk_cols:
-            raw_pk_spec = {"primary_key": _pk_cols, "title_key": _tk_cols}
-    pk = normalize_key_spec(raw_pk_spec, columns=list(props.keys()))
+    pk = normalize_object_type_key_spec(contract, columns=list(props.keys()))
     return [str(v).strip() for v in pk.get("primary_key") or [] if str(v).strip()]
 
 

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
-from typing import Any, Dict, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 import grpc
 import httpx
@@ -23,16 +22,16 @@ def _read_file_bytes(path: str | None) -> bytes | None:
 
 def _infer_service_token() -> str:
     settings = get_settings()
-    env_override = (os.getenv("OMS_GRPC_SERVICE_TOKEN") or "").strip()
-    if env_override:
-        return env_override
-
     auth = settings.auth
+    effective = str(auth.oms_grpc_service_token_effective or "").strip()
+    if effective:
+        return effective
+
+    if settings.agent.bff_token:
+        return str(settings.agent.bff_token).strip()
+
     candidates: Iterable[str] = (
-        *auth.bff_agent_tokens,
-        *auth.bff_expected_tokens,
-        *auth.oms_expected_tokens,
-        *(tuple([settings.agent.bff_token]) if settings.agent.bff_token else ()),
+        *auth.oms_grpc_expected_service_tokens,
     )
     for token in candidates:
         cleaned = str(token or "").strip()
@@ -43,16 +42,17 @@ def _infer_service_token() -> str:
 
 def _build_grpc_channel(target: str) -> grpc.aio.Channel:
     settings = get_settings()
+    services = settings.services
     options = [
         ("grpc.max_send_message_length", _DEFAULT_MAX_MESSAGE_BYTES),
         ("grpc.max_receive_message_length", _DEFAULT_MAX_MESSAGE_BYTES),
     ]
-    if not settings.services.oms_grpc_use_tls:
+    if not services.oms_grpc_use_tls:
         return grpc.aio.insecure_channel(target, options=options)
 
-    ca_path = os.getenv("OMS_GRPC_CLIENT_CA_PATH") or settings.services.ssl_ca_path
-    cert_path = os.getenv("OMS_GRPC_CLIENT_CERT_PATH")
-    key_path = os.getenv("OMS_GRPC_CLIENT_KEY_PATH")
+    ca_path = services.oms_grpc_client_ca_path or services.ssl_ca_path
+    cert_path = services.oms_grpc_client_cert_path
+    key_path = services.oms_grpc_client_key_path
 
     root_ca = _read_file_bytes(ca_path)
     cert_chain = _read_file_bytes(cert_path) if cert_path else None
@@ -63,8 +63,8 @@ def _build_grpc_channel(target: str) -> grpc.aio.Channel:
         private_key=private_key,
         certificate_chain=cert_chain,
     )
-    if settings.services.oms_grpc_server_name:
-        options.append(("grpc.ssl_target_name_override", settings.services.oms_grpc_server_name))
+    if services.oms_grpc_server_name:
+        options.append(("grpc.ssl_target_name_override", services.oms_grpc_server_name))
     return grpc.aio.secure_channel(target, credentials, options=options)
 
 

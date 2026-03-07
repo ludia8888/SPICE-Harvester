@@ -12,11 +12,12 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Request, status
 from jose import jwt
 from pydantic import BaseModel, Field
 
 from shared.config.settings import get_settings
+from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.security.user_store import UserInfo, get_user_store
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ def _build_refresh_token(user: UserInfo, ttl: int) -> str:
 
 
 def _decode_token(token: str, *, expected_type: str = "access") -> Dict[str, Any]:
-    """Decode and validate a JWT. Raises HTTPException on failure."""
+    """Decode and validate a JWT."""
     try:
         claims = jwt.decode(
             token,
@@ -106,20 +107,26 @@ def _decode_token(token: str, *, expected_type: str = "access") -> Dict[str, Any
             options={"verify_aud": False},
         )
     except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Token expired",
+            code=ErrorCode.AUTH_EXPIRED,
+            category=ErrorCategory.AUTH,
         )
     except jwt.JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {exc}",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            f"Invalid token: {exc}",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
         )
 
     if claims.get("type") != expected_type:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Expected {expected_type} token",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            f"Expected {expected_type} token",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
         )
     return claims
 
@@ -133,18 +140,22 @@ async def login(body: LoginRequest) -> TokenResponse:
     """Authenticate with username/password and receive JWT tokens."""
     auth = get_settings().auth
     if not auth.auth_login_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Login endpoint is disabled",
+        raise classified_http_exception(
+            status.HTTP_403_FORBIDDEN,
+            "Login endpoint is disabled",
+            code=ErrorCode.PERMISSION_DENIED,
+            category=ErrorCategory.PERMISSION,
         )
 
     store = get_user_store()
     user = store.authenticate(body.username, body.password)
     if user is None:
         logger.warning("Login failed for user=%s", body.username)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid username or password",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
         )
 
     access_ttl = auth.auth_access_token_ttl
@@ -180,9 +191,11 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
     store = get_user_store()
     user = store.get_user(username)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "User not found",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
         )
 
     auth = get_settings().auth
@@ -219,9 +232,11 @@ async def me(request: Request) -> UserMeResponse:
     # Manual fallback: extract Bearer token from header
     auth_header = request.headers.get("authorization", "")
     if not auth_header.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+        raise classified_http_exception(
+            status.HTTP_401_UNAUTHORIZED,
+            "Not authenticated",
+            code=ErrorCode.AUTH_REQUIRED,
+            category=ErrorCategory.AUTH,
         )
 
     token = auth_header[7:].strip()

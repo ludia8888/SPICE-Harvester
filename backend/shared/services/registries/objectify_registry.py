@@ -122,6 +122,20 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             command_timeout=int(perf.objectify_pg_command_timeout_seconds),
         )
 
+    @staticmethod
+    def _mapping_spec_version_lock_key(
+        *,
+        dataset_id: str,
+        dataset_branch: str,
+        target_class_id: str,
+        artifact_output_name: str,
+        schema_hash: str,
+    ) -> str:
+        return (
+            "objectify_mapping_spec_version:"
+            f"{dataset_id}:{dataset_branch}:{target_class_id}:{artifact_output_name}:{schema_hash}"
+        )
+
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
             f"""
@@ -418,6 +432,15 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         options = options or {}
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                lock_key = self._mapping_spec_version_lock_key(
+                    dataset_id=dataset_id,
+                    dataset_branch=dataset_branch,
+                    target_class_id=target_class_id,
+                    artifact_output_name=artifact_output_name,
+                    schema_hash=schema_hash,
+                )
+                # Serialize user-visible version allocation for the same mapping-spec identity.
+                await conn.fetchval("SELECT pg_advisory_xact_lock(hashtext($1))", lock_key)
                 row = await conn.fetchrow(
                     f"""
                     SELECT COALESCE(MAX(version), 0) AS current_version

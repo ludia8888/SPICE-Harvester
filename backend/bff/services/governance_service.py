@@ -31,6 +31,7 @@ from shared.security.database_access import (
 )
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_record
 from shared.utils.key_spec import normalize_key_spec
 from shared.observability.tracing import trace_db_operation
 
@@ -53,29 +54,26 @@ async def create_backing_datasource(
     enforce_db_scope_or_403(request, db_name=dataset.db_name)
     await enforce_required_database_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
-    existing = await dataset_registry.get_backing_datasource_by_dataset(
-        dataset_id=dataset.dataset_id,
-        branch=dataset.branch,
-    )
-    if existing:
-        return ApiResponse.success(
-            message="Backing datasource already exists",
-            data={"backing_datasource": existing.__dict__},
-        )
-
     name = str(payload.get("name") or dataset.name or "").strip() or dataset.name
     description = str(payload.get("description") or dataset.description or "").strip() or None
-    record = await dataset_registry.create_backing_datasource(
-        dataset_id=dataset.dataset_id,
-        db_name=dataset.db_name,
-        name=name,
-        description=description,
-        source_type=dataset.source_type,
-        source_ref=dataset.source_ref,
-        branch=dataset.branch,
+    record, created = await get_or_create_record(
+        lookup=lambda: dataset_registry.get_backing_datasource_by_dataset(
+            dataset_id=dataset.dataset_id,
+            branch=dataset.branch,
+        ),
+        create=lambda: dataset_registry.create_backing_datasource(
+            dataset_id=dataset.dataset_id,
+            db_name=dataset.db_name,
+            name=name,
+            description=description,
+            source_type=dataset.source_type,
+            source_ref=dataset.source_ref,
+            branch=dataset.branch,
+        ),
+        conflict_context=f"governance-backing-datasource:{dataset.db_name}/{name}@{dataset.branch}",
     )
     return ApiResponse.success(
-        message="Backing datasource created",
+        message="Backing datasource created" if created else "Backing datasource already exists",
         data={"backing_datasource": record.__dict__},
     )
 
@@ -233,25 +231,21 @@ async def create_key_spec(
     if not normalized.get("primary_key"):
         raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "primary_key is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)
 
-    existing = await dataset_registry.get_key_spec_for_dataset(
+    record, created = await dataset_registry.get_or_create_key_spec(
         dataset_id=dataset_id,
         dataset_version_id=dataset_version_id,
+        spec=normalized,
     )
-    if existing:
-        existing_spec = normalize_key_spec(existing.spec)
+    existing_spec = normalize_key_spec(record.spec)
+    if not created:
         if existing_spec == normalized:
-            return ApiResponse.success(message="Key spec already exists", data={"key_spec": existing.__dict__})
+            return ApiResponse.success(message="Key spec already exists", data={"key_spec": record.__dict__})
         raise classified_http_exception(
             status.HTTP_409_CONFLICT,
             "Key spec already exists with different spec",
             code=ErrorCode.CONFLICT,
         )
 
-    record = await dataset_registry.create_key_spec(
-        dataset_id=dataset_id,
-        dataset_version_id=dataset_version_id,
-        spec=normalized,
-    )
     return ApiResponse.success(message="Key spec created", data={"key_spec": record.__dict__})
 
 

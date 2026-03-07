@@ -72,6 +72,7 @@ from shared.services.core.schema_drift_detector import SchemaDriftDetector
 # Auth middleware
 from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
 from bff.routers.admin_deps import require_admin_strict
+from bff.schemas.pipeline_datasets import TabularAnalysisApiResponse
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient
@@ -125,6 +126,32 @@ logging.basicConfig(
 )
 install_trace_context_filter()
 logger = logging.getLogger(__name__)
+
+
+def _install_bff_openapi_schema_extensions(app: FastAPI) -> None:
+    """
+    Preserve explicit component schemas for deprecated-but-supported tabular ingest payloads.
+
+    These schemas are still referenced by generated portal artifacts and drift guards even
+    though the legacy endpoints are hidden from the public OpenAPI path surface.
+    """
+
+    base_openapi = app.openapi
+
+    def custom_openapi():
+        schema = base_openapi()
+        components = schema.setdefault("components", {}).setdefault("schemas", {})
+        if "TabularAnalysisApiResponse" not in components:
+            extra_schema = TabularAnalysisApiResponse.model_json_schema(
+                ref_template="#/components/schemas/{model}"
+            )
+            defs = extra_schema.pop("$defs", {})
+            for name, definition in defs.items():
+                components.setdefault(name, definition)
+            components["TabularAnalysisApiResponse"] = extra_schema
+        return schema
+
+    app.openapi = custom_openapi
 
 
 class BFFServiceContainer:
@@ -863,6 +890,7 @@ app = create_fastapi_service(
     include_health_check=False,  # Handled by existing router
     include_logging_middleware=True
 )
+_install_bff_openapi_schema_extensions(app)
 install_bff_auth_middleware(app)
 app.add_exception_handler(FoundryAPIError, foundry_exception_handler)
 

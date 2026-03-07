@@ -120,8 +120,6 @@ def _post_process_myst(path: Path) -> None:
     content = re.sub(r"```\{mermaid\}", "```mermaid", content)
     # Remove :caption: directives
     content = re.sub(r"^\s*:caption:.*$", "", content, flags=re.MULTILINE)
-    # Avoid MDX parsing errors on raw '<=' inside markdown tables/text.
-    content = content.replace("<=", "≤")
     # Escape ${...} shell variable references that MDX tries to parse as JSX
     # Use backtick-wrapped code spans for these values
     content = re.sub(r"\$\{([^}]+)\}", r"`${\1}`", content)

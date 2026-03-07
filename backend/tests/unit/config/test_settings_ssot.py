@@ -4,6 +4,7 @@ import pytest
 
 from shared.config.settings import (
     AgentRuntimeSettings,
+    AuthSettings,
     ClientSettings,
     DatabaseSettings,
     FeatureFlagsSettings,
@@ -37,6 +38,22 @@ def test_pipeline_publish_lock_timeout_fallback(monkeypatch: pytest.MonkeyPatch)
     assert explicit.publish_lock_acquire_timeout_seconds == 10
 
 
+def test_pipeline_spark_driver_memory_default_and_blank(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("PIPELINE_SPARK_DRIVER_MEMORY", raising=False)
+
+    defaults = PipelineSettings()
+    assert defaults.spark_driver_memory == "512m"
+
+    monkeypatch.setenv("PIPELINE_SPARK_DRIVER_MEMORY", "   ")
+    blank = PipelineSettings()
+    assert blank.spark_driver_memory == "512m"
+
+    monkeypatch.setenv("PIPELINE_SPARK_DRIVER_MEMORY", "384m")
+    explicit = PipelineSettings()
+    assert explicit.spark_driver_memory == "384m"
+
+
 def test_agent_bff_token_and_command_timeout_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     _disable_env_file(monkeypatch)
     monkeypatch.delenv("AGENT_BFF_TOKEN", raising=False)
@@ -53,6 +70,21 @@ def test_agent_bff_token_and_command_timeout_fallback(monkeypatch: pytest.Monkey
     monkeypatch.setenv("AGENT_COMMAND_TIMEOUT_SECONDS", "13")
     settings = AgentRuntimeSettings()
     assert settings.command_timeout_seconds == 13.0
+
+
+def test_auth_settings_agent_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("AGENT_REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("AGENT_AUTH_EXEMPT_PATHS", raising=False)
+    auth = AuthSettings()
+    assert auth.is_agent_auth_required(default_required=True) is True
+    assert auth.resolve_agent_exempt_paths(defaults=("/health",)) == {"/health"}
+
+    monkeypatch.setenv("AGENT_REQUIRE_AUTH", "false")
+    monkeypatch.setenv("AGENT_AUTH_EXEMPT_PATHS", "/health,/metrics")
+    auth = AuthSettings()
+    assert auth.is_agent_auth_required(default_required=True) is False
+    assert auth.resolve_agent_exempt_paths(defaults=("/health",)) == {"/health", "/metrics"}
 
 
 def test_client_token_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,6 +105,42 @@ def test_client_token_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
 
     settings = ClientSettings()
     assert settings.bff_admin_token == "bffadm"
+
+
+def test_oms_grpc_service_settings_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.setenv("OMS_GRPC_ENABLED", "false")
+    monkeypatch.setenv("OMS_GRPC_BIND_HOST", "127.0.0.9")
+    monkeypatch.setenv("OMS_GRPC_SERVER_USE_TLS", "true")
+    monkeypatch.setenv("OMS_GRPC_REQUIRE_MTLS", "true")
+    monkeypatch.setenv("OMS_GRPC_CLIENT_CA_PATH", "/tmp/client-ca.pem")
+    monkeypatch.setenv("OMS_GRPC_CLIENT_CERT_PATH", "/tmp/client.crt")
+    monkeypatch.setenv("OMS_GRPC_CLIENT_KEY_PATH", "/tmp/client.key")
+    monkeypatch.setenv("OMS_GRPC_SERVER_CERT_PATH", "/tmp/server.crt")
+    monkeypatch.setenv("OMS_GRPC_SERVER_KEY_PATH", "/tmp/server.key")
+    monkeypatch.setenv("OMS_GRPC_SERVER_CA_PATH", "/tmp/server-ca.pem")
+
+    services = ServiceSettings()
+    assert services.oms_grpc_enabled is False
+    assert services.oms_grpc_bind_host == "127.0.0.9"
+    assert services.oms_grpc_server_use_tls is True
+    assert services.oms_grpc_require_mtls is True
+    assert services.oms_grpc_client_ca_path == "/tmp/client-ca.pem"
+    assert services.oms_grpc_client_cert_path == "/tmp/client.crt"
+    assert services.oms_grpc_client_key_path == "/tmp/client.key"
+    assert services.oms_grpc_server_cert_path == "/tmp/server.crt"
+    assert services.oms_grpc_server_key_path == "/tmp/server.key"
+    assert services.oms_grpc_server_ca_path == "/tmp/server-ca.pem"
+
+
+def test_auth_settings_oms_grpc_service_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.setenv("OMS_GRPC_SERVICE_TOKEN", "svc-client")
+    monkeypatch.setenv("OMS_GRPC_SERVICE_TOKENS", "svc-a,svc-b")
+
+    auth = AuthSettings()
+    assert auth.oms_grpc_service_token_effective == "svc-client"
+    assert auth.oms_grpc_expected_service_tokens == ("svc-a", "svc-b")
 
 
 def test_lakefs_repository_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

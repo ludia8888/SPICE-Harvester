@@ -414,4 +414,5 @@ volumes:
 
 networks:
   spice_network:
+    name: ${SPICE_NETWORK_NAME:-spice-harvester_spice_network}
     driver: bridge

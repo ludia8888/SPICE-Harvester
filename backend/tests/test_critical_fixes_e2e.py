@@ -23,6 +23,7 @@ from tests.utils.auth import bff_auth_headers
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+_CREATED_DB_NAMES: list[str] = []
 
 
 def _docker(*args: str) -> str:
@@ -122,6 +123,49 @@ async def _wait_for_command_status_ok(
     raise AssertionError(
         f"Timed out waiting for command status 200 (status={last_status}, body={last_body})"
     )
+
+
+async def _wait_for_db_absent(
+    session: aiohttp.ClientSession,
+    db_name: str,
+    timeout_seconds: int = 120,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_status: Optional[int] = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{BFF_URL}/api/v1/databases/{db_name}", headers=_auth_headers()) as resp:
+            last_status = resp.status
+            if resp.status == 404:
+                return
+        await asyncio.sleep(1.0)
+    raise AssertionError(f"Timed out waiting for database deletion (db_name={db_name}, status={last_status})")
+
+
+async def _delete_db_best_effort(
+    session: aiohttp.ClientSession,
+    db_name: str,
+) -> None:
+    try:
+        async with session.delete(f"{BFF_URL}/api/v1/databases/{db_name}", headers=_auth_headers()) as resp:
+            if resp.status not in {200, 202, 404}:
+                body = await resp.text()
+                raise AssertionError(f"Unexpected delete status: {resp.status} {body}")
+        if resp.status != 404:
+            await _wait_for_db_absent(session, db_name)
+    except Exception:
+        print(f"[cleanup-warning] failed to delete test database {db_name}", flush=True)
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_created_databases() -> None:
+    _CREATED_DB_NAMES.clear()
+    yield
+    if not _CREATED_DB_NAMES:
+        return
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        for db_name in reversed(_CREATED_DB_NAMES):
+            await _delete_db_best_effort(session, db_name)
+    _CREATED_DB_NAMES.clear()
 
 
 @asynccontextmanager
@@ -226,6 +270,8 @@ async def test_redis_down_rate_limit_and_command_status_fallback():
         ) as resp:
             assert resp.status in {200, 202}
             payload = await resp.json()
+        if db_name not in _CREATED_DB_NAMES:
+            _CREATED_DB_NAMES.append(db_name)
 
         command_id = (
             (payload.get("data") or {}).get("command_id")
@@ -270,7 +316,7 @@ async def test_bff_sensitive_get_requires_auth():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_command_status_dual_outage_returns_503():
+async def test_command_status_dual_outage_remains_available():
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=90),
         headers=_auth_headers(),
@@ -284,6 +330,8 @@ async def test_command_status_dual_outage_returns_503():
         ) as resp:
             assert resp.status in {200, 202}
             payload = await resp.json()
+        if db_name not in _CREATED_DB_NAMES:
+            _CREATED_DB_NAMES.append(db_name)
 
         command_id = (
             (payload.get("data") or {}).get("command_id")
@@ -294,4 +342,13 @@ async def test_command_status_dual_outage_returns_503():
 
         async with _redis_down(), _postgres_down():
             async with session.get(f"{BFF_URL}/api/v1/commands/{command_id}/status") as resp:
-                assert resp.status == 503
+                assert resp.status == 200
+                payload = await resp.json()
+                assert str(payload.get("status") or "").upper() in {
+                    "PENDING",
+                    "PROCESSING",
+                    "COMPLETED",
+                    "FAILED",
+                    "CANCELLED",
+                    "RETRYING",
+                }

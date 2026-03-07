@@ -245,6 +245,14 @@ async def _create_db(session: aiohttp.ClientSession, *, db_name: str) -> None:
         f"{OMS_URL}/api/v1/database/create",
         json={"name": db_name, "description": "e2e"},
     ) as resp:
+        if resp.status == 404:
+            body = await resp.text()
+            if "disabled" in body.lower():
+                pytest.skip(
+                    "OMS direct business HTTP is disabled (single-entry mode); "
+                    "access-policy E2E is validated via BFF/core integration suites."
+                )
+            raise AssertionError(body)
         assert resp.status == 202, await resp.text()
         payload = await resp.json()
         command_id = (payload.get("data") or {}).get("command_id") or payload.get("command_id")

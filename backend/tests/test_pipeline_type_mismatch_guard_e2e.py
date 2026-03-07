@@ -32,6 +32,7 @@ ADMIN_TOKEN = _resolve_admin_token()
 HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "120") or 120)
 RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 COMMAND_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_COMMAND_TIMEOUT_SECONDS", "120") or 120)
+_CREATED_DB_NAMES: list[str] = []
 
 def _idem_key(prefix: str) -> str:
     raw = str(prefix or "").strip() or "idem"
@@ -148,6 +149,50 @@ async def _create_db_with_retry(
     command_id = str(((response.json().get("data") or {}) or {}).get("command_id") or "")
     assert command_id
     await _wait_for_command(client, command_id, db_name=db_name)
+    if db_name not in _CREATED_DB_NAMES:
+        _CREATED_DB_NAMES.append(db_name)
+
+
+async def _wait_for_db_absent(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    timeout_seconds: int = 180,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
+        if resp.status_code == 404:
+            return
+        await asyncio.sleep(1.0)
+    raise AssertionError(f"Timed out waiting for database deletion (db_name={db_name})")
+
+
+async def _delete_db_best_effort(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+) -> None:
+    try:
+        resp = await client.delete(f"{BFF_URL}/api/v1/databases/{db_name}")
+        if resp.status_code not in {200, 202, 404}:
+            raise AssertionError(f"Unexpected delete status: {resp.status_code} {resp.text}")
+        if resp.status_code != 404:
+            await _wait_for_db_absent(client, db_name=db_name, timeout_seconds=180)
+    except Exception:
+        print(f"[cleanup-warning] failed to delete test database {db_name}", flush=True)
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_created_databases() -> None:
+    _CREATED_DB_NAMES.clear()
+    yield
+    if not _CREATED_DB_NAMES:
+        return
+    async with httpx.AsyncClient(headers={"X-Admin-Token": ADMIN_TOKEN}, timeout=HTTPX_TIMEOUT) as raw_client:
+        for db_name in reversed(_CREATED_DB_NAMES):
+            await _delete_db_best_effort(raw_client, db_name=db_name)
+    _CREATED_DB_NAMES.clear()
 
 
 @pytest.mark.integration

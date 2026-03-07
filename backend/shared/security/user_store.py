@@ -11,9 +11,10 @@ import hashlib
 import hmac
 import json
 import logging
-import os
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Sequence
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +74,16 @@ class UserStore:
     (suitable for dev environments only).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, auth_users_json: Optional[str] = None) -> None:
         self._users: Dict[str, Dict[str, Any]] = {}
+        self._auth_users_json = str(auth_users_json or "").strip()
         self._load()
 
     # ------------------------------------------------------------------
     def _load(self) -> None:
-        raw = (os.getenv("AUTH_USERS") or "").strip()
+        raw = self._auth_users_json
+        if not raw:
+            raw = str(get_settings().auth.auth_users or "").strip()
         if raw:
             try:
                 parsed = json.loads(raw)
@@ -160,6 +164,7 @@ _store: Optional[UserStore] = None
 def get_user_store() -> UserStore:
     """Return the global singleton ``UserStore``."""
     global _store
-    if _store is None:
-        _store = UserStore()
+    raw_auth_users = str(get_settings().auth.auth_users or "").strip()
+    if _store is None or getattr(_store, "_auth_users_json", "") != raw_auth_users:
+        _store = UserStore(auth_users_json=raw_auth_users)
     return _store

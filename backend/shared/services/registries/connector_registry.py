@@ -423,6 +423,38 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         sid = (source_id or "").strip()
         return str(uuid5(self._MAPPING_NAMESPACE, f"{st}:{sid}"))
 
+    async def _ensure_sync_state_row(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        source_type: str,
+        source_id: str,
+        updated_at: datetime,
+        last_polled_at: Optional[datetime] = None,
+        sync_state_json: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        payload = normalize_json_payload(coerce_json_strict(sync_state_json))
+        await conn.execute(
+            f"""
+            INSERT INTO {self._schema}.connector_sync_state (
+                source_type,
+                source_id,
+                last_seen_cursor,
+                last_emitted_seq,
+                last_polled_at,
+                sync_state_json,
+                updated_at
+            )
+            VALUES ($1, $2, NULL, 0, $3, $4::jsonb, $5)
+            ON CONFLICT (source_type, source_id) DO NOTHING
+            """,
+            source_type,
+            source_id,
+            last_polled_at,
+            payload,
+            updated_at,
+        )
+
     async def upsert_mapping(
         self,
         *,
@@ -676,6 +708,13 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                     sid,
                 )
 
+                await self._ensure_sync_state_row(
+                    conn,
+                    source_type=st,
+                    source_id=sid,
+                    updated_at=now,
+                    last_polled_at=now,
+                )
                 state = await conn.fetchrow(
                     f"""
                     SELECT last_seen_cursor, last_emitted_seq
@@ -687,29 +726,9 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                     sid,
                 )
                 if not state:
-                    await conn.execute(
-                        f"""
-                        INSERT INTO {self._schema}.connector_sync_state (
-                            source_type,
-                            source_id,
-                            last_seen_cursor,
-                            last_emitted_seq,
-                            last_polled_at,
-                            sync_state_json,
-                            updated_at
-                        )
-                        VALUES ($1, $2, NULL, 0, $3, '{{}}'::jsonb, $3)
-                        ON CONFLICT (source_type, source_id) DO NOTHING
-                        """,
-                        st,
-                        sid,
-                        now,
-                    )
-                    previous_cursor = None
-                    last_emitted_seq = 0
-                else:
-                    previous_cursor = state["last_seen_cursor"]
-                    last_emitted_seq = int(state["last_emitted_seq"] or 0)
+                    raise RuntimeError(f"Failed to materialize connector sync state for {st}:{sid}")
+                previous_cursor = state["last_seen_cursor"]
+                last_emitted_seq = int(state["last_emitted_seq"] or 0)
 
                 # Always update last_polled_at for observability.
                 await conn.execute(
@@ -877,15 +896,11 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         error_norm = (error or "").strip()[:4000] if error else None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self._schema}.connector_sync_state (source_type, source_id, last_seen_cursor, last_emitted_seq, updated_at)
-                    VALUES ($1, $2, NULL, 0, $3)
-                    ON CONFLICT (source_type, source_id) DO NOTHING
-                    """,
-                    st,
-                    sid,
-                    now,
+                await self._ensure_sync_state_row(
+                    conn,
+                    source_type=st,
+                    source_id=sid,
+                    updated_at=now,
                 )
 
                 if success:
@@ -949,23 +964,12 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         now = utcnow()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self._schema}.connector_sync_state (
-                        source_type,
-                        source_id,
-                        last_seen_cursor,
-                        last_emitted_seq,
-                        sync_state_json,
-                        updated_at
-                    )
-                    VALUES ($1, $2, NULL, 0, $3::jsonb, $4)
-                    ON CONFLICT (source_type, source_id) DO NOTHING
-                    """,
-                    st,
-                    sid,
-                    payload_json,
-                    now,
+                await self._ensure_sync_state_row(
+                    conn,
+                    source_type=st,
+                    source_id=sid,
+                    updated_at=now,
+                    sync_state_json=payload,
                 )
                 if merge:
                     row = await conn.fetchrow(

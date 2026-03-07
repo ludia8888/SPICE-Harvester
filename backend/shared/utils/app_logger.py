@@ -14,6 +14,16 @@ DEFAULT_LOG_FORMAT = (
     "req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
 )
 
+_NOISY_DEPENDENCY_LOG_LEVELS = {
+    "py4j.clientserver": logging.WARNING,
+    "py4j.java_gateway": logging.WARNING,
+}
+
+
+def _configure_noisy_dependency_loggers() -> None:
+    for logger_name, logger_level in _NOISY_DEPENDENCY_LOG_LEVELS.items():
+        logging.getLogger(logger_name).setLevel(logger_level)
+
 
 def _normalize_log_level(level: Union[str, int, None]) -> int:
     if level is None:
@@ -38,6 +48,7 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
 
     # Ensure trace fields exist for any formatter contract (global record factory).
     install_trace_context_filter()
+    _configure_noisy_dependency_loggers()
 
     # Set log level
     log_level = _normalize_log_level(level)
@@ -87,6 +98,7 @@ def configure_logging(level: Union[str, int] = "INFO") -> None:
 
     # Always install trace context support, even if handlers are already present.
     install_trace_context_filter()
+    _configure_noisy_dependency_loggers()
 
     # Set root logger level (works even when handlers exist)
     logging.root.setLevel(log_level)

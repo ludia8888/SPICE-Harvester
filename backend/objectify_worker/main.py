@@ -437,9 +437,20 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
             backing_version_id = mapping_spec.backing_datasource_version_id if mapping_spec else None
             if not backing_version_id and job.dataset_version_id:
-                backing_version = await self.dataset_registry.get_backing_datasource_version_by_dataset_version(
-                    dataset_version_id=job.dataset_version_id
-                )
+                backing_ref = str(
+                    backing_source.get("ref")
+                    or backing_source.get("backing_datasource_id")
+                    or ""
+                ).strip()
+                if backing_ref:
+                    backing_version = await self.dataset_registry.get_backing_datasource_version_for_dataset(
+                        backing_id=backing_ref,
+                        dataset_version_id=job.dataset_version_id,
+                    )
+                else:
+                    backing_version = await self.dataset_registry.get_backing_datasource_version_by_dataset_version(
+                        dataset_version_id=job.dataset_version_id
+                    )
                 if backing_version:
                     backing_version_id = backing_version.version_id
                     backing_source.setdefault("schema_hash", backing_version.schema_hash)

@@ -17,12 +17,12 @@ import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
 
+from shared.utils.time_utils import utcnow
 from tests.utils.auth import bff_auth_headers, oms_auth_headers
 
 
@@ -40,7 +40,7 @@ class BugRecord:
     persona: Optional[str] = None
     status_code: Optional[int] = None
     traceback_str: str = ""
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: utcnow().isoformat())
 
 
 class BugTracker:

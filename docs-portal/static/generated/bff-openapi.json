@@ -790,6 +790,167 @@
         "title": "BulkInstanceCreateRequest",
         "type": "object"
       },
+      "ColumnAnalysisResult": {
+        "description": "Analysis result for a single column",
+        "example": {
+          "column_name": "order_date",
+          "inferred_type": {
+            "confidence": 0.93,
+            "metadata": {
+              "detected_format": "YYYY-MM-DD"
+            },
+            "reason": "47/50 values (94%) match date pattern YYYY-MM-DD",
+            "type": "xsd:date"
+          },
+          "non_empty_count": 47,
+          "null_count": 3,
+          "null_ratio": 0.06,
+          "sample_values": [
+            "2023-01-15",
+            "2023-02-20",
+            "2023-03-10"
+          ],
+          "total_count": 50,
+          "unique_count": 47,
+          "unique_ratio": 1.0
+        },
+        "properties": {
+          "column_name": {
+            "title": "Column Name",
+            "type": "string"
+          },
+          "inferred_type": {
+            "$ref": "#/components/schemas/TypeInferenceResult"
+          },
+          "non_empty_count": {
+            "default": 0,
+            "description": "Non-empty analyzed values",
+            "minimum": 0,
+            "title": "Non Empty Count",
+            "type": "integer"
+          },
+          "null_count": {
+            "default": 0,
+            "description": "Number of null/empty values",
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "null_ratio": {
+            "default": 0.0,
+            "description": "Null/total ratio",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Null Ratio",
+            "type": "number"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sample-based profile"
+          },
+          "risk_flags": {
+            "description": "Suggestion-only risk signals",
+            "items": {
+              "$ref": "#/components/schemas/TabularRiskItem"
+            },
+            "title": "Risk Flags",
+            "type": "array"
+          },
+          "sample_values": {
+            "description": "Sample values used for analysis",
+            "items": {},
+            "title": "Sample Values",
+            "type": "array"
+          },
+          "total_count": {
+            "default": 0,
+            "description": "Total analyzed values (incl. null/empty)",
+            "minimum": 0,
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "unique_count": {
+            "default": 0,
+            "description": "Number of unique values",
+            "title": "Unique Count",
+            "type": "integer"
+          },
+          "unique_ratio": {
+            "default": 0.0,
+            "description": "Unique/non-empty ratio",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Unique Ratio",
+            "type": "number"
+          }
+        },
+        "required": [
+          "column_name",
+          "inferred_type"
+        ],
+        "title": "ColumnAnalysisResult",
+        "type": "object"
+      },
+      "ColumnProfile": {
+        "description": "Lightweight column profiling summary (sample-based).",
+        "properties": {
+          "format_stats": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Format-related hints",
+            "title": "Format Stats"
+          },
+          "length_stats": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "String length stats",
+            "title": "Length Stats"
+          },
+          "numeric_stats": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Numeric stats",
+            "title": "Numeric Stats"
+          }
+        },
+        "title": "ColumnProfile",
+        "type": "object"
+      },
       "CommandResult": {
         "description": "명령 실행 결과",
         "properties": {
@@ -3049,6 +3210,186 @@
         "title": "SubscriptionCreateRequest",
         "type": "object"
       },
+      "TabularAnalysisApiResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TabularAnalysisData"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "TabularAnalysisApiResponse",
+        "type": "object"
+      },
+      "TabularAnalysisData": {
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Dataset"
+          },
+          "ingest_request": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ingest Request"
+          },
+          "tabular_analysis": {
+            "$ref": "#/components/schemas/TabularAnalysisPayload"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          }
+        },
+        "required": [
+          "tabular_analysis"
+        ],
+        "title": "TabularAnalysisData",
+        "type": "object"
+      },
+      "TabularAnalysisPayload": {
+        "description": "Tabular analysis payload (suggestion-only).",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnAnalysisResult"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "risk_policy": {
+            "additionalProperties": true,
+            "title": "Risk Policy",
+            "type": "object"
+          },
+          "risk_summary": {
+            "items": {
+              "$ref": "#/components/schemas/TabularRiskItem"
+            },
+            "title": "Risk Summary",
+            "type": "array"
+          }
+        },
+        "title": "TabularAnalysisPayload",
+        "type": "object"
+      },
+      "TabularRiskItem": {
+        "description": "Risk signal emitted by tabular inference runtime (suggestion-only).",
+        "properties": {
+          "code": {
+            "description": "Machine-readable risk identifier",
+            "title": "Code",
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Column name when applicable",
+            "title": "Column"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "description": "Structured context",
+            "title": "Evidence",
+            "type": "object"
+          },
+          "is_suggestion": {
+            "default": true,
+            "description": "Tabular inference signals are suggestions only",
+            "title": "Is Suggestion",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Human-readable risk summary",
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "description": "info | warning (suggestion-only)",
+            "title": "Severity",
+            "type": "string"
+          },
+          "stage": {
+            "default": "tabular_inference",
+            "description": "Origin stage for the risk signal",
+            "title": "Stage",
+            "type": "string"
+          },
+          "suggested_actions": {
+            "description": "Recommended follow-up actions",
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Actions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "title": "TabularRiskItem",
+        "type": "object"
+      },
       "TaskListResponse": {
         "description": "Task list response model.",
         "properties": {
@@ -3460,6 +3801,49 @@
           }
         },
         "title": "TriggerObjectifyRequest",
+        "type": "object"
+      },
+      "TypeInferenceResult": {
+        "description": "Type inference result with confidence and reasoning",
+        "properties": {
+          "confidence": {
+            "description": "Confidence score (0.0-1.0)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Additional metadata",
+            "title": "Metadata"
+          },
+          "reason": {
+            "description": "Reasoning for the inference",
+            "title": "Reason",
+            "type": "string"
+          },
+          "type": {
+            "description": "Inferred data type",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "confidence",
+          "reason"
+        ],
+        "title": "TypeInferenceResult",
         "type": "object"
       },
       "UdfCreateRequest": {

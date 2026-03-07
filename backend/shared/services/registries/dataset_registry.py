@@ -16,6 +16,7 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
+from shared.services.registries.dataset_registry_get_or_create import get_or_create_record
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -361,6 +362,10 @@ class DatasetRegistry(PostgresSchemaRegistry):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    @staticmethod
+    def _key_spec_scope_lock_key(*, dataset_id: str, dataset_version_id: Optional[str]) -> str:
+        return f"dataset-key-spec:{dataset_id}:{dataset_version_id or 'dataset-default'}"
 
     @staticmethod
     def _row_to_gate_policy(row: asyncpg.Record) -> GatePolicyRecord:
@@ -1824,21 +1829,23 @@ class DatasetRegistry(PostgresSchemaRegistry):
         source_type: str = "dataset",
         source_ref: Optional[str] = None,
     ) -> BackingDatasourceRecord:
-        existing = await self.get_backing_datasource_by_dataset(
-            dataset_id=dataset.dataset_id,
-            branch=dataset.branch,
+        record, _ = await get_or_create_record(
+            lookup=lambda: self.get_backing_datasource_by_dataset(
+                dataset_id=dataset.dataset_id,
+                branch=dataset.branch,
+            ),
+            create=lambda: self.create_backing_datasource(
+                dataset_id=dataset.dataset_id,
+                db_name=dataset.db_name,
+                name=dataset.name,
+                description=dataset.description,
+                source_type=source_type,
+                source_ref=source_ref,
+                branch=dataset.branch,
+            ),
+            conflict_context=f"backing-datasource:{dataset.db_name}/{dataset.name}@{dataset.branch}",
         )
-        if existing:
-            return existing
-        return await self.create_backing_datasource(
-            dataset_id=dataset.dataset_id,
-            db_name=dataset.db_name,
-            name=dataset.name,
-            description=dataset.description,
-            source_type=source_type,
-            source_ref=source_ref,
-            branch=dataset.branch,
-        )
+        return record
 
     async def create_backing_datasource_version(
         self,
@@ -1850,22 +1857,65 @@ class DatasetRegistry(PostgresSchemaRegistry):
     ) -> BackingDatasourceVersionRecord:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
+        _, version, schema_hash = await self._resolve_backing_datasource_version_materialization(
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+        )
+        metadata_payload = normalize_json_payload(metadata or {})
+        return await self._insert_backing_datasource_version(
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+            artifact_key=version.artifact_key,
+            metadata_payload=metadata_payload,
+        )
+
+    async def _resolve_backing_datasource_version_materialization(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+        schema_hash: Optional[str] = None,
+    ) -> tuple[BackingDatasourceRecord, DatasetVersionRecord, str]:
         backing = await self.get_backing_datasource(backing_id=backing_id)
         if not backing:
             raise RuntimeError("Backing datasource not found")
         version = await self.get_version(version_id=dataset_version_id)
         if not version or version.dataset_id != backing.dataset_id:
             raise RuntimeError("Dataset version mismatch")
-        if not schema_hash:
-            schema_hash = compute_schema_hash_from_payload(version.sample_json)
-            if not schema_hash:
-                dataset = await self.get_dataset(dataset_id=backing.dataset_id)
-                schema_hash = compute_schema_hash_from_payload(
-                    dataset.schema_json if dataset else {}
+
+        provided_schema_hash = str(schema_hash or "").strip() or None
+        canonical_schema_hash = compute_schema_hash_from_payload(version.sample_json)
+        if not canonical_schema_hash:
+            dataset = await self.get_dataset(dataset_id=backing.dataset_id)
+            canonical_schema_hash = compute_schema_hash_from_payload(
+                dataset.schema_json if dataset else {}
+            )
+        if canonical_schema_hash:
+            if provided_schema_hash and provided_schema_hash != canonical_schema_hash:
+                logger.warning(
+                    "Backing datasource version schema_hash mismatch; using canonical hash "
+                    "(backing_id=%s dataset_version_id=%s provided=%s canonical=%s)",
+                    backing_id,
+                    dataset_version_id,
+                    provided_schema_hash,
+                    canonical_schema_hash,
                 )
-        if not schema_hash:
-            raise RuntimeError("schema_hash is required for backing datasource version")
-        metadata_payload = normalize_json_payload(metadata or {})
+            return backing, version, canonical_schema_hash
+        if provided_schema_hash:
+            return backing, version, provided_schema_hash
+        raise RuntimeError("schema_hash is required for backing datasource version")
+
+    async def _insert_backing_datasource_version(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+        schema_hash: str,
+        artifact_key: Optional[str],
+        metadata_payload: Dict[str, Any],
+    ) -> BackingDatasourceVersionRecord:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
@@ -1879,11 +1929,40 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 backing_id,
                 dataset_version_id,
                 schema_hash,
-                version.artifact_key,
+                artifact_key,
                 metadata_payload,
             )
             if not row:
                 raise RuntimeError("Failed to create backing datasource version")
+            return self._row_to_backing_version(row)
+
+    async def _reconcile_backing_datasource_version(
+        self,
+        *,
+        record: BackingDatasourceVersionRecord,
+        schema_hash: str,
+        artifact_key: Optional[str],
+    ) -> BackingDatasourceVersionRecord:
+        if record.schema_hash == schema_hash and record.artifact_key == artifact_key:
+            return record
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.backing_datasource_versions
+                SET schema_hash = $2,
+                    artifact_key = $3
+                WHERE backing_version_id = $1::uuid
+                RETURNING backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                          metadata, status, created_at
+                """,
+                record.version_id,
+                schema_hash,
+                artifact_key,
+            )
+            if not row:
+                raise RuntimeError("Failed to reconcile backing datasource version")
             return self._row_to_backing_version(row)
 
     async def get_backing_datasource_version(
@@ -1930,6 +2009,31 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 return None
             return self._row_to_backing_version(row)
 
+    async def get_backing_datasource_version_for_dataset(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+    ) -> Optional[BackingDatasourceVersionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                       metadata, status, created_at
+                FROM {self._schema}.backing_datasource_versions
+                WHERE backing_id = $1::uuid
+                  AND dataset_version_id = $2::uuid
+                LIMIT 1
+                """,
+                backing_id,
+                dataset_version_id,
+            )
+            if not row:
+                return None
+            return self._row_to_backing_version(row)
+
     async def list_backing_datasource_versions(
         self,
         *,
@@ -1961,16 +2065,29 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_hash: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> BackingDatasourceVersionRecord:
-        existing = await self.get_backing_datasource_version_by_dataset_version(
-            dataset_version_id=dataset_version_id,
-        )
-        if existing and existing.backing_id == backing_id:
-            return existing
-        return await self.create_backing_datasource_version(
+        _, version, resolved_schema_hash = await self._resolve_backing_datasource_version_materialization(
             backing_id=backing_id,
             dataset_version_id=dataset_version_id,
             schema_hash=schema_hash,
-            metadata=metadata,
+        )
+        record, _ = await get_or_create_record(
+            lookup=lambda: self.get_backing_datasource_version_for_dataset(
+                backing_id=backing_id,
+                dataset_version_id=dataset_version_id,
+            ),
+            create=lambda: self._insert_backing_datasource_version(
+                backing_id=backing_id,
+                dataset_version_id=dataset_version_id,
+                schema_hash=resolved_schema_hash,
+                artifact_key=version.artifact_key,
+                metadata_payload=normalize_json_payload(metadata or {}),
+            ),
+            conflict_context=f"backing-datasource-version:{backing_id}:{dataset_version_id}",
+        )
+        return await self._reconcile_backing_datasource_version(
+            record=record,
+            schema_hash=resolved_schema_hash,
+            artifact_key=version.artifact_key,
         )
 
     async def create_key_spec(
@@ -2004,6 +2121,87 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 raise RuntimeError("Failed to create key spec")
             return self._row_to_key_spec(row)
 
+    async def _get_key_spec_for_scope(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        dataset_id: str,
+        dataset_version_id: Optional[str] = None,
+    ) -> Optional[asyncpg.Record]:
+        if dataset_version_id:
+            return await conn.fetchrow(
+                f"""
+                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                FROM {self._schema}.key_specs
+                WHERE dataset_id = $1::uuid
+                  AND dataset_version_id = $2::uuid
+                  AND status = 'ACTIVE'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                dataset_id,
+                dataset_version_id,
+            )
+        return await conn.fetchrow(
+            f"""
+            SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+            FROM {self._schema}.key_specs
+            WHERE dataset_id = $1::uuid
+              AND dataset_version_id IS NULL
+              AND status = 'ACTIVE'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            dataset_id,
+        )
+
+    async def get_or_create_key_spec(
+        self,
+        *,
+        dataset_id: str,
+        spec: Dict[str, Any],
+        dataset_version_id: Optional[str] = None,
+        status: str = "ACTIVE",
+        key_spec_id: Optional[str] = None,
+    ) -> tuple[KeySpecRecord, bool]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        key_spec_id = key_spec_id or str(uuid4())
+        payload = normalize_json_payload(spec or {})
+        lock_key = self._key_spec_scope_lock_key(
+            dataset_id=dataset_id,
+            dataset_version_id=dataset_version_id,
+        )
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                # `(dataset_id, NULL)` is not unique in Postgres, so dataset-level key specs
+                # must be serialized explicitly to keep creation idempotent.
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", lock_key)
+                existing = await self._get_key_spec_for_scope(
+                    conn,
+                    dataset_id=dataset_id,
+                    dataset_version_id=dataset_version_id,
+                )
+                if existing:
+                    return self._row_to_key_spec(existing), False
+
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {self._schema}.key_specs (
+                        key_spec_id, dataset_id, dataset_version_id, spec, status
+                    ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5)
+                    RETURNING key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                    """,
+                    key_spec_id,
+                    dataset_id,
+                    dataset_version_id,
+                    payload,
+                    status,
+                )
+                if not row:
+                    raise RuntimeError("Failed to create key spec")
+                return self._row_to_key_spec(row), True
+
     async def get_key_spec(self, *, key_spec_id: str) -> Optional[KeySpecRecord]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
@@ -2030,32 +2228,16 @@ class DatasetRegistry(PostgresSchemaRegistry):
             raise RuntimeError("DatasetRegistry not connected")
         async with self._pool.acquire() as conn:
             if dataset_version_id:
-                row = await conn.fetchrow(
-                    f"""
-                    SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                    FROM {self._schema}.key_specs
-                    WHERE dataset_id = $1::uuid
-                      AND dataset_version_id = $2::uuid
-                      AND status = 'ACTIVE'
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                    """,
-                    dataset_id,
-                    dataset_version_id,
+                row = await self._get_key_spec_for_scope(
+                    conn,
+                    dataset_id=dataset_id,
+                    dataset_version_id=dataset_version_id,
                 )
                 if row:
                     return self._row_to_key_spec(row)
-            row = await conn.fetchrow(
-                f"""
-                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                FROM {self._schema}.key_specs
-                WHERE dataset_id = $1::uuid
-                  AND dataset_version_id IS NULL
-                  AND status = 'ACTIVE'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                dataset_id,
+            row = await self._get_key_spec_for_scope(
+                conn,
+                dataset_id=dataset_id,
             )
             if not row:
                 return None
@@ -4325,7 +4507,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
             raise RuntimeError("DatasetRegistry not connected")
 
         results = {"published": 0, "outbox_repaired": 0, "aborted": 0, "committed_tx": 0, "skipped": 0}
-        cutoff = datetime.utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
+        cutoff = utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
 
         lock_conn: Optional[asyncpg.Connection] = None
         resolved_lock_key = int(lock_key) if lock_key is not None else int(get_settings().workers.ingest_reconciler.lock_key)

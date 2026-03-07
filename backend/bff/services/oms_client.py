@@ -35,9 +35,10 @@ class OntologyRef:
 class OMSClient(ManagedAsyncClient):
     """OMS gRPC client with HTTP-like compatibility helpers for existing BFF services."""
 
-    def __init__(self, _base_url: Optional[str] = None):
+    def __init__(self, _base_url: Optional[str] = None, *, base_url: Optional[str] = None):
         self._settings = get_settings()
         self._debug_payload = self._settings.clients.oms_client_debug_payload
+        self._base_url_override = (base_url or _base_url or "").strip() or None
         self.client = OMSGatewayGrpcClient()
         logger.info("OMS gRPC client initialized (target=%s)", self._settings.services.oms_grpc_target)
 
@@ -48,7 +49,7 @@ class OMSClient(ManagedAsyncClient):
 
     @property
     def base_url(self) -> str:
-        return f"grpc://{self._settings.services.oms_grpc_target}"
+        return self._base_url_override or f"grpc://{self._settings.services.oms_grpc_target}"
 
     def _default_headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -63,6 +64,28 @@ class OMSClient(ManagedAsyncClient):
         if headers:
             merged.update({str(k): str(v) for k, v in headers.items() if str(k).strip()})
         return merged
+
+    async def _request_http_compat(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        json_body: Optional[Any] = None,
+        binary_body: Optional[bytes] = None,
+    ) -> Optional[httpx.Response]:
+        client = getattr(self, "client", None)
+        if not isinstance(client, httpx.AsyncClient):
+            return None
+        return await client.request(
+            method,
+            path,
+            headers=self._merged_headers(headers),
+            params=params,
+            json=json_body,
+            content=binary_body,
+        )
 
     async def _call_unary(
         self,
@@ -97,49 +120,80 @@ class OMSClient(ManagedAsyncClient):
         response.raise_for_status()
 
     async def get(self, path: str, **kwargs) -> Dict[str, Any]:
-        response = await self._call_unary(
-            "GenericGet",
-            path_for_error=path,
-            path=path,
+        response = await self._request_http_compat(
+            "GET",
+            path,
             headers=kwargs.get("headers"),
-            query=kwargs.get("params"),
+            params=kwargs.get("params"),
         )
+        if response is None:
+            response = await self._call_unary(
+                "GenericGet",
+                path_for_error=path,
+                path=path,
+                headers=kwargs.get("headers"),
+                query=kwargs.get("params"),
+            )
         self._raise_for_status(response)
         return self._decode_json_or_empty(response)
 
     async def post(self, path: str, **kwargs) -> Dict[str, Any]:
-        response = await self._call_unary(
-            "GenericPost",
-            path_for_error=path,
-            path=path,
+        response = await self._request_http_compat(
+            "POST",
+            path,
             headers=kwargs.get("headers"),
-            query=kwargs.get("params"),
+            params=kwargs.get("params"),
             json_body=kwargs.get("json"),
             binary_body=kwargs.get("content"),
         )
+        if response is None:
+            response = await self._call_unary(
+                "GenericPost",
+                path_for_error=path,
+                path=path,
+                headers=kwargs.get("headers"),
+                query=kwargs.get("params"),
+                json_body=kwargs.get("json"),
+                binary_body=kwargs.get("content"),
+            )
         self._raise_for_status(response)
         return self._decode_json_or_empty(response)
 
     async def put(self, path: str, **kwargs) -> Dict[str, Any]:
-        response = await self._call_unary(
-            "GenericPut",
-            path_for_error=path,
-            path=path,
+        response = await self._request_http_compat(
+            "PUT",
+            path,
             headers=kwargs.get("headers"),
-            query=kwargs.get("params"),
+            params=kwargs.get("params"),
             json_body=kwargs.get("json"),
         )
+        if response is None:
+            response = await self._call_unary(
+                "GenericPut",
+                path_for_error=path,
+                path=path,
+                headers=kwargs.get("headers"),
+                query=kwargs.get("params"),
+                json_body=kwargs.get("json"),
+            )
         self._raise_for_status(response)
         return self._decode_json_or_empty(response)
 
     async def delete(self, path: str, **kwargs) -> Dict[str, Any]:
-        response = await self._call_unary(
-            "GenericDelete",
-            path_for_error=path,
-            path=path,
+        response = await self._request_http_compat(
+            "DELETE",
+            path,
             headers=kwargs.get("headers"),
-            query=kwargs.get("params"),
+            params=kwargs.get("params"),
         )
+        if response is None:
+            response = await self._call_unary(
+                "GenericDelete",
+                path_for_error=path,
+                path=path,
+                headers=kwargs.get("headers"),
+                query=kwargs.get("params"),
+            )
         self._raise_for_status(response)
         return self._decode_json_or_empty(response)
 

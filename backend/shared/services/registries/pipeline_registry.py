@@ -64,6 +64,20 @@ class PipelineAlreadyExistsError(RuntimeError):
         self.branch = branch
 
 
+class PipelineUdfAlreadyExistsError(RuntimeError):
+    def __init__(self, *, db_name: str, name: str) -> None:
+        super().__init__(f"Pipeline UDF already exists (db_name={db_name} name={name})")
+        self.db_name = db_name
+        self.name = name
+
+
+class PipelineUdfVersionConflictError(RuntimeError):
+    def __init__(self, *, udf_id: str, attempted_version: int) -> None:
+        super().__init__(f"Pipeline UDF version conflict (udf_id={udf_id} version={attempted_version})")
+        self.udf_id = udf_id
+        self.attempted_version = attempted_version
+
+
 def _ensure_json_string(value: Any) -> str:
     normalized = normalize_json_payload(value, default_handler=str)
     if isinstance(normalized, str):
@@ -1406,6 +1420,28 @@ class PipelineRegistry(PostgresSchemaRegistry):
                 raise RuntimeError("Failed to create pipeline")
             return _row_to_pipeline_record(row)
 
+    async def _get_or_create_pipeline_by_name(
+        self,
+        *,
+        db_name: str,
+        name: str,
+        branch: str,
+        create_kwargs: Dict[str, Any],
+    ) -> tuple[PipelineRecord, bool]:
+        existing = await self.get_pipeline_by_name(db_name=db_name, name=name, branch=branch)
+        if existing:
+            return existing, False
+
+        try:
+            created = await self.create_pipeline(**create_kwargs)
+        except PipelineAlreadyExistsError:
+            existing = await self.get_pipeline_by_name(db_name=db_name, name=name, branch=branch)
+            if existing:
+                return existing, False
+            raise
+
+        return created, True
+
     async def list_pipelines(self, *, db_name: str, branch: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")
@@ -1685,23 +1721,26 @@ class PipelineRegistry(PostgresSchemaRegistry):
         except LakeFSError as e:
             raise RuntimeError(f"lakeFS merge failed: {e}") from e
 
-        target = await self.get_pipeline_by_name(db_name=source.db_name, name=source.name, branch=resolved_to)
-        if not target:
-            target = await self.create_pipeline(
-                db_name=source.db_name,
-                name=source.name,
-                description=source.description,
-                pipeline_type=source.pipeline_type,
-                location=source.location,
-                status=source.status,
-                branch=resolved_to,
-                lakefs_repository=repository,
-                proposal_status=None,
-                proposal_title=None,
-                proposal_description=None,
-                schedule_interval_seconds=source.schedule_interval_seconds,
-                schedule_cron=source.schedule_cron,
-            )
+        target, _ = await self._get_or_create_pipeline_by_name(
+            db_name=source.db_name,
+            name=source.name,
+            branch=resolved_to,
+            create_kwargs={
+                "db_name": source.db_name,
+                "name": source.name,
+                "description": source.description,
+                "pipeline_type": source.pipeline_type,
+                "location": source.location,
+                "status": source.status,
+                "branch": resolved_to,
+                "lakefs_repository": repository,
+                "proposal_status": None,
+                "proposal_title": None,
+                "proposal_description": None,
+                "schedule_interval_seconds": source.schedule_interval_seconds,
+                "schedule_cron": source.schedule_cron,
+            },
+        )
 
         definition_key = _definition_object_key(db_name=source.db_name, pipeline_name=source.name)
         merged_definition: Dict[str, Any] = {}
@@ -3009,39 +3048,30 @@ class PipelineRegistry(PostgresSchemaRegistry):
         except LakeFSError as e:
             raise RuntimeError(f"lakeFS create_branch failed: {e}") from e
 
-        existing = await self.get_pipeline_by_name(
+        created, _ = await self._get_or_create_pipeline_by_name(
             db_name=source.db_name,
             name=source.name,
             branch=new_branch,
+            create_kwargs={
+                "db_name": source.db_name,
+                "name": source.name,
+                "description": source.description,
+                "pipeline_type": source.pipeline_type,
+                "location": source.location,
+                "status": source.status,
+                "branch": new_branch,
+                "lakefs_repository": repository,
+                "proposal_status": None,
+                "proposal_title": None,
+                "proposal_description": None,
+                "schedule_interval_seconds": source.schedule_interval_seconds,
+                "schedule_cron": source.schedule_cron,
+            },
         )
-        if existing:
-            return existing
 
-        try:
-            created = await self.create_pipeline(
-                db_name=source.db_name,
-                name=source.name,
-                description=source.description,
-                pipeline_type=source.pipeline_type,
-                location=source.location,
-                status=source.status,
-                branch=new_branch,
-                lakefs_repository=repository,
-                proposal_status=None,
-                proposal_title=None,
-                proposal_description=None,
-                schedule_interval_seconds=source.schedule_interval_seconds,
-                schedule_cron=source.schedule_cron,
-            )
-        except PipelineAlreadyExistsError:
-            existing = await self.get_pipeline_by_name(
-                db_name=source.db_name,
-                name=source.name,
-                branch=new_branch,
-            )
-            if existing:
-                return existing
-            raise
+        target_latest = await self.get_latest_version(pipeline_id=created.pipeline_id, branch=new_branch)
+        if target_latest is not None:
+            return created
 
         # Seed the branch with the latest committed definition (no new commit).
         latest = await self.get_latest_version(pipeline_id=pipeline_id, branch=source.branch)
@@ -3057,7 +3087,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
                     ON CONFLICT (pipeline_id, branch, lakefs_commit_id) DO NOTHING
                     """,
                     version_id,
-                    created.pipeline_id,
+                        created.pipeline_id,
                     new_branch,
                     latest.lakefs_commit_id,
                     definition_payload,
@@ -3084,33 +3114,36 @@ class PipelineRegistry(PostgresSchemaRegistry):
         udf_id = str(uuid4())
         version_id = str(uuid4())
 
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self._schema}.pipeline_udfs (
-                        udf_id, db_name, name, description, latest_version
-                    ) VALUES ($1, $2, $3, $4, 1)
-                    """,
-                    udf_id,
-                    db_name,
-                    name,
-                    description,
-                )
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self._schema}.pipeline_udf_versions (
-                        version_id, udf_id, version, code
-                    ) VALUES ($1, $2, 1, $3)
-                    """,
-                    version_id,
-                    udf_id,
-                    code,
-                )
-                row = await conn.fetchrow(
-                    f"SELECT * FROM {self._schema}.pipeline_udfs WHERE udf_id = $1",
-                    udf_id,
-                )
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {self._schema}.pipeline_udfs (
+                            udf_id, db_name, name, description, latest_version
+                        ) VALUES ($1, $2, $3, $4, 1)
+                        """,
+                        udf_id,
+                        db_name,
+                        name,
+                        description,
+                    )
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {self._schema}.pipeline_udf_versions (
+                            version_id, udf_id, version, code
+                        ) VALUES ($1, $2, 1, $3)
+                        """,
+                        version_id,
+                        udf_id,
+                        code,
+                    )
+                    row = await conn.fetchrow(
+                        f"SELECT * FROM {self._schema}.pipeline_udfs WHERE udf_id = $1",
+                        udf_id,
+                    )
+        except asyncpg.UniqueViolationError as exc:
+            raise PipelineUdfAlreadyExistsError(db_name=db_name, name=name) from exc
         if not row:
             raise RuntimeError("Failed to create UDF")
         return PipelineUdfRecord(
@@ -3137,43 +3170,47 @@ class PipelineRegistry(PostgresSchemaRegistry):
         udf_id = str(udf_id)
 
         version_id = str(uuid4())
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                current = await conn.fetchrow(
-                    f"SELECT latest_version FROM {self._schema}.pipeline_udfs WHERE udf_id = $1",
-                    udf_id,
-                )
-                if not current:
-                    raise RuntimeError("UDF not found")
-                next_version = int(current["latest_version"] or 0) + 1
-                await conn.execute(
-                    f"""
-                    INSERT INTO {self._schema}.pipeline_udf_versions (
-                        version_id, udf_id, version, code
-                    ) VALUES ($1, $2, $3, $4)
-                    """,
-                    version_id,
-                    udf_id,
-                    next_version,
-                    code,
-                )
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.pipeline_udfs
-                    SET latest_version = $1, updated_at = NOW()
-                    WHERE udf_id = $2
-                    """,
-                    next_version,
-                    udf_id,
-                )
-                row = await conn.fetchrow(
-                    f"""
-                    SELECT * FROM {self._schema}.pipeline_udf_versions
-                    WHERE udf_id = $1 AND version = $2
-                    """,
-                    udf_id,
-                    next_version,
-                )
+        next_version = 1
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    current = await conn.fetchrow(
+                        f"SELECT latest_version FROM {self._schema}.pipeline_udfs WHERE udf_id = $1 FOR UPDATE",
+                        udf_id,
+                    )
+                    if not current:
+                        raise RuntimeError("UDF not found")
+                    next_version = int(current["latest_version"] or 0) + 1
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {self._schema}.pipeline_udf_versions (
+                            version_id, udf_id, version, code
+                        ) VALUES ($1, $2, $3, $4)
+                        """,
+                        version_id,
+                        udf_id,
+                        next_version,
+                        code,
+                    )
+                    await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.pipeline_udfs
+                        SET latest_version = $1, updated_at = NOW()
+                        WHERE udf_id = $2
+                        """,
+                        next_version,
+                        udf_id,
+                    )
+                    row = await conn.fetchrow(
+                        f"""
+                        SELECT * FROM {self._schema}.pipeline_udf_versions
+                        WHERE udf_id = $1 AND version = $2
+                        """,
+                        udf_id,
+                        next_version,
+                    )
+        except asyncpg.UniqueViolationError as exc:
+            raise PipelineUdfVersionConflictError(udf_id=udf_id, attempted_version=next_version) from exc
         if not row:
             raise RuntimeError("Failed to create UDF version")
         return PipelineUdfVersionRecord(
