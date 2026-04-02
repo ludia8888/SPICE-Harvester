@@ -70,6 +70,33 @@ class _InMemoryOntologyResourceService:
         return dict(row) if row else None
 
 
+class _ApplyThenRaiseOnUpdateService(_InMemoryOntologyResourceService):
+    def __init__(self) -> None:
+        super().__init__()
+        self._failed_once = False
+
+    async def update_resource(
+        self,
+        db_name: str,
+        *,
+        branch: str,
+        resource_type: str,
+        resource_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = await super().update_resource(
+            db_name,
+            branch=branch,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            payload=payload,
+        )
+        if not self._failed_once:
+            self._failed_once = True
+            raise RuntimeError("transient failure after apply")
+        return updated
+
+
 class _ObservabilityStub:
     def __init__(self) -> None:
         self.links: list[dict[str, Any]] = []
@@ -236,3 +263,55 @@ async def test_delete_ontology_uses_object_type_resource_registry_in_postgres_pr
         resource_id="Ticket",
     )
     assert deleted is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_update_ontology_treats_partial_localized_retry_as_already_applied() -> None:
+    store = _ApplyThenRaiseOnUpdateService()
+    worker, _, _ = _build_worker_with_resource_store(store)
+
+    await store.create_resource(
+        "demo",
+        branch="main",
+        resource_type="object_type",
+        resource_id="Ticket",
+        payload={
+            "id": "Ticket",
+            "label": {"en": "Ticket", "ko": "기존"},
+            "description": None,
+            "metadata": {},
+            "spec": {
+                "id": "Ticket",
+                "label": {"en": "Ticket", "ko": "기존"},
+                "description": None,
+                "parent_class": None,
+                "abstract": False,
+                "properties": [],
+                "relationships": [],
+            },
+        },
+    )
+
+    await worker.handle_update_ontology(
+        {
+            "command_id": "00000000-0000-0000-0000-000000000304",
+            "created_by": "tester",
+            "payload": {
+                "db_name": "demo",
+                "branch": "main",
+                "class_id": "Ticket",
+                "updates": {"label": {"ko": "새 이름"}},
+            },
+        }
+    )
+
+    updated = await store.get_resource(
+        "demo",
+        branch="main",
+        resource_type="object_type",
+        resource_id="Ticket",
+    )
+    assert updated is not None
+    assert updated.get("label") == {"en": "Ticket", "ko": "새 이름"}
+    worker.publish_event.assert_awaited_once()

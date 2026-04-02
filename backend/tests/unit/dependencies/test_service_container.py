@@ -35,6 +35,18 @@ def test_service_container_duplicate_registration_fails_fast() -> None:
 
 
 @pytest.mark.unit
+def test_service_container_ensure_singleton_is_idempotent() -> None:
+    class ExampleService:
+        pass
+
+    settings = ApplicationSettings()
+    container = ServiceContainer(settings)
+
+    assert container.ensure_singleton(ExampleService, lambda settings: ExampleService()) is True
+    assert container.ensure_singleton(ExampleService, lambda settings: ExampleService()) is False
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_service_container_token_registration_is_explicit() -> None:
     class ExampleService:

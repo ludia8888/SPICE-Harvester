@@ -183,6 +183,19 @@ class ServiceContainer:
             replace=replace,
         )
 
+    def ensure_singleton(
+        self,
+        service_type: Type[T],
+        factory: Callable[[ApplicationSettings], T],
+    ) -> bool:
+        try:
+            self.register_singleton(service_type, factory)
+            return True
+        except ValueError:
+            if self.has(service_type):
+                return False
+            raise
+
     def register_singleton_token(
         self,
         token: ServiceToken[T],
@@ -196,6 +209,19 @@ class ServiceContainer:
             factory=factory,
             replace=replace,
         )
+
+    def ensure_singleton_token(
+        self,
+        token: ServiceToken[T],
+        factory: Callable[[ApplicationSettings], T],
+    ) -> bool:
+        try:
+            self.register_singleton_token(token, factory)
+            return True
+        except ValueError:
+            if self.has_token(token):
+                return False
+            raise
 
     def register_instance(self, service_type: Type[T], instance: T, *, replace: bool = False) -> None:
         """
@@ -213,6 +239,15 @@ class ServiceContainer:
             replace=replace,
         )
 
+    def ensure_instance(self, service_type: Type[T], instance: T) -> bool:
+        try:
+            self.register_instance(service_type, instance)
+            return True
+        except ValueError:
+            if self.has(service_type):
+                return False
+            raise
+
     def register_instance_token(self, token: ServiceToken[T], instance: T, *, replace: bool = False) -> None:
         self._register(
             key=token,
@@ -221,6 +256,15 @@ class ServiceContainer:
             initialized=True,
             replace=replace,
         )
+
+    def ensure_instance_token(self, token: ServiceToken[T], instance: T) -> bool:
+        try:
+            self.register_instance_token(token, instance)
+            return True
+        except ValueError:
+            if self.has_token(token):
+                return False
+            raise
     
     async def get(self, service_type: Type[T]) -> T:
         """

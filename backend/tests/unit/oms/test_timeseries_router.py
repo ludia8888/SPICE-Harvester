@@ -164,6 +164,28 @@ async def test_get_first_point_supports_id_only_property_entries(mock_es, mock_s
     assert body["time"] == "2024-01-01T00:00:00Z"
 
 
+@pytest.mark.asyncio
+async def test_get_first_point_orders_points_by_timestamp_not_string(mock_storage):
+    mock_storage.load_json = AsyncMock(
+        return_value={
+            "points": [
+                {"time": "2023-12-31T16:00:00Z", "value": 20.5},
+                {"time": "2024-01-01T00:30:00+09:00", "value": 10.0},
+            ]
+        }
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/firstPoint",
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["time"] == "2024-01-01T00:30:00+09:00"
+
+
 # ---------------------------------------------------------------------------
 # streamPoints
 # ---------------------------------------------------------------------------
@@ -206,6 +228,36 @@ async def test_stream_points_with_absolute_range(mock_es, mock_storage):
     points = [json.loads(line) for line in lines]
     assert points[0]["time"] == "2024-01-02T00:00:00Z"
     assert points[1]["time"] == "2024-01-03T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_stream_points_with_absolute_range_uses_timestamp_semantics(mock_storage):
+    mock_storage.load_json = AsyncMock(
+        return_value={
+            "points": [
+                {"time": "2023-12-31T16:00:00Z", "value": 20.5},
+                {"time": "2024-01-01T00:30:00+09:00", "value": 10.0},
+            ]
+        }
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/streamPoints",
+            json={
+                "range": {
+                    "type": "absolute",
+                    "startTime": "2023-12-31T15:00:00Z",
+                    "endTime": "2023-12-31T15:45:00Z",
+                },
+            },
+        )
+
+    assert resp.status_code == 200
+    lines = [line for line in resp.text.strip().split("\n") if line.strip()]
+    assert len(lines) == 1
+    assert json.loads(lines[0])["time"] == "2024-01-01T00:30:00+09:00"
 
 
 @pytest.mark.asyncio

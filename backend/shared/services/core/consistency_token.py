@@ -17,6 +17,8 @@ import redis.asyncio as aioredis
 from dataclasses import dataclass, asdict
 import logging
 
+from shared.config.search_config import get_instances_index_name
+
 @dataclass
 class ConsistencyToken:
     """
@@ -27,6 +29,8 @@ class ConsistencyToken:
     sequence_number: int
     aggregate_id: str
     version: int
+    db_name: Optional[str] = None
+    branch: Optional[str] = None
     projection_lag_ms: int = 0
     
     def to_string(self) -> str:
@@ -39,6 +43,8 @@ class ConsistencyToken:
             'seq': self.sequence_number,
             'aid': self.aggregate_id,
             'ver': self.version,
+            'db': self.db_name,
+            'br': self.branch,
             'lag': self.projection_lag_ms
         }
         # Create a compact JSON string
@@ -76,6 +82,8 @@ class ConsistencyToken:
             sequence_number=data['seq'],
             aggregate_id=data['aid'],
             version=data['ver'],
+            db_name=data.get('db'),
+            branch=data.get('br'),
             projection_lag_ms=data.get('lag', 0)
         )
 
@@ -104,7 +112,10 @@ class ConsistencyTokenService:
         command_id: str,
         aggregate_id: str,
         sequence_number: int,
-        version: int = 1
+        version: int = 1,
+        *,
+        db_name: Optional[str] = None,
+        branch: Optional[str] = None,
     ) -> ConsistencyToken:
         """
         Create a new consistency token after a write operation
@@ -127,6 +138,8 @@ class ConsistencyTokenService:
             sequence_number=sequence_number,
             aggregate_id=aggregate_id,
             version=version,
+            db_name=db_name,
+            branch=branch,
             projection_lag_ms=projection_lag_ms
         )
         
@@ -181,7 +194,9 @@ class ConsistencyTokenService:
         self,
         token: ConsistencyToken,
         es_client,
-        max_wait_ms: int = 5000
+        max_wait_ms: int = 5000,
+        *,
+        index_name: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         """
         Wait until the write represented by the token is visible
@@ -199,7 +214,7 @@ class ConsistencyTokenService:
         
         while (time.time() * 1000 - start_time) < max_wait_ms:
             # Check if the write is visible
-            visible = await self._check_write_visible(token, es_client)
+            visible = await self._check_write_visible(token, es_client, index_name=index_name)
             
             if visible:
                 return True, {
@@ -223,15 +238,18 @@ class ConsistencyTokenService:
     async def _check_write_visible(
         self,
         token: ConsistencyToken,
-        es_client
+        es_client,
+        *,
+        index_name: Optional[str] = None,
     ) -> bool:
         """
         Check if a write is visible in Elasticsearch
         """
+        resolved_index = index_name or self._resolve_instances_index_name(token)
         try:
             # Check if document exists with expected version
             response = await es_client.get(
-                index=f"instances_integration_test_db",
+                index=resolved_index,
                 id=token.aggregate_id
             )
             
@@ -249,6 +267,16 @@ class ConsistencyTokenService:
             pass
         
         return False
+
+    @staticmethod
+    def _resolve_instances_index_name(token: ConsistencyToken) -> str:
+        db_name = str(token.db_name or "").strip()
+        if not db_name:
+            raise ValueError(
+                "Consistency token is missing db_name; provide wait_for_consistency(..., index_name=...) "
+                "or create the token with db_name."
+            )
+        return get_instances_index_name(db_name, branch=str(token.branch or "main"))
     
     async def validate_token(self, token_str: str) -> Tuple[bool, Optional[ConsistencyToken]]:
         """

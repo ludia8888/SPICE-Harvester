@@ -81,10 +81,23 @@ async def _check_service_instance(instance: Any) -> Dict[str, Any]:
     }
 
 
+def _runtime_status_from_request(request: Optional[Request]) -> Optional[Dict[str, Any]]:
+    if request is None:
+        return None
+    runtime_status = getattr(request.app.state, "bff_runtime_status", None)
+    if not isinstance(runtime_status, dict):
+        return None
+    return {
+        "ready": bool(runtime_status.get("ready", True)),
+        "issues": list(runtime_status.get("issues") or []),
+        "background_tasks": dict(runtime_status.get("background_tasks") or {}),
+    }
+
+
 @router.get("/health", 
            summary="Basic Health Check",
            description="Readiness/liveness signal for traffic routing")
-async def basic_health_check():
+async def basic_health_check(request: Request):
     """
     Readiness/liveness health endpoint for routing decisions.
 
@@ -94,18 +107,24 @@ async def basic_health_check():
     - returns only whether this process should receive traffic
     """
     container = await get_container()
-    ready = bool(container.is_initialized)
+    runtime_status = _runtime_status_from_request(request)
+    runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
+    ready = bool(container.is_initialized) if runtime_ready is None else bool(container.is_initialized and runtime_ready)
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    payload = {
+        "status": "ok" if ready else "unready",
+        "alive": True,
+        "ready": ready,
+        "accepting_traffic": ready,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "service": "spice-harvester",
+    }
+    if runtime_status is not None:
+        payload["issues"] = runtime_status["issues"]
+        payload["background_tasks"] = runtime_status["background_tasks"]
     return JSONResponse(
         status_code=status_code,
-        content={
-            "status": "ok" if ready else "unready",
-            "alive": True,
-            "ready": ready,
-            "accepting_traffic": ready,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "service": "spice-harvester",
-        },
+        content=payload,
     )
 
 
@@ -178,22 +197,31 @@ async def detailed_health_check(
 @router.get("/health/readiness",
            summary="Kubernetes Readiness Probe",
            description="Readiness probe for Kubernetes deployments")
-async def readiness_probe(
-    container: ServiceContainer = Depends(get_container)
-):
+async def readiness_probe(request: Request):
     """
     Kubernetes readiness probe
     
     Returns 200 if the service is ready to receive traffic,
     503 if not ready yet.
     """
+    runtime_status = _runtime_status_from_request(request)
+    runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
+    try:
+        container = await get_container()
+        container_ready = bool(container.is_initialized)
+    except RuntimeError:
+        container_ready = True if runtime_status is not None else False
+    ready = container_ready if runtime_ready is None else bool(container_ready and runtime_ready)
+    payload = {
+        "ready": ready,
+        "reason": "Container initialized" if ready else "Startup degraded",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if runtime_status is not None:
+        payload["issues"] = runtime_status["issues"]
     return JSONResponse(
-        content={
-            "ready": bool(container.is_initialized),
-            "reason": "Container initialized",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-        status_code=status.HTTP_200_OK if container.is_initialized else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=payload,
+        status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
     )
 
 

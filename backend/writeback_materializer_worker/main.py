@@ -99,7 +99,7 @@ class WritebackMaterializerWorker:
         *,
         repository: str,
         branch: str,
-    ) -> tuple[Set[Tuple[str, str, str]], int, list[str]]:
+    ) -> tuple[Set[Tuple[str, str, str]], int, list[str], Dict[Tuple[str, str, str], list[int]]]:
         if not self.lakefs_storage:
             raise RuntimeError("lakefs_storage not initialized")
 
@@ -107,6 +107,7 @@ class WritebackMaterializerWorker:
         objects: Set[Tuple[str, str, str]] = set()
         max_seq = -1
         keys: list[str] = []
+        object_sequences: Dict[Tuple[str, str, str], list[int]] = {}
 
         async for obj in self.lakefs_storage.iter_objects(bucket=repository, prefix=root_prefix):
             key = str(obj.get("Key") or "")
@@ -119,13 +120,15 @@ class WritebackMaterializerWorker:
             if len(parts) < 4:
                 continue
             object_type, instance_id, lifecycle_id = parts[0], parts[1], parts[2]
-            objects.add((object_type, instance_id, lifecycle_id))
+            object_ref = (object_type, instance_id, lifecycle_id)
+            objects.add(object_ref)
 
             seq = _parse_queue_seq(parts[3])
             if seq is not None:
                 max_seq = max(max_seq, int(seq))
+                object_sequences.setdefault(object_ref, []).append(int(seq))
 
-        return objects, max_seq, keys
+        return objects, max_seq, keys, object_sequences
 
     async def materialize_db(self, *, db_name: str) -> None:
         if not self.lakefs_client or not self.lakefs_storage or not self.base_storage:
@@ -150,7 +153,7 @@ class WritebackMaterializerWorker:
 
         await self._ensure_branch(repository=repo, branch=branch)
 
-        objects, max_seq, queue_keys = await self._scan_queue(repository=repo, branch=branch)
+        objects, max_seq, queue_keys, object_sequences = await self._scan_queue(repository=repo, branch=branch)
         if not objects:
             logger.info("No queue entries found (db=%s); skipping snapshot", db_name)
             return
@@ -174,7 +177,11 @@ class WritebackMaterializerWorker:
         written = 0
         base_dataset_version_ids: Set[str] = set()
         ontology_commit_ids: Set[str] = set()
+        successful_max_seq = -1
+        failed_min_seq: Optional[int] = None
         for object_type, instance_id, lifecycle_id in sorted(objects):
+            object_ref = (object_type, instance_id, lifecycle_id)
+            seqs = object_sequences.get(object_ref) or []
             try:
                 merged = await merger.merge_instance(
                     db_name=db_name,
@@ -186,6 +193,9 @@ class WritebackMaterializerWorker:
                     writeback_branch=branch,
                 )
             except FileNotFoundError:
+                if seqs:
+                    object_min_seq = min(seqs)
+                    failed_min_seq = object_min_seq if failed_min_seq is None else min(failed_min_seq, object_min_seq)
                 continue
             except Exception as e:
                 logger.warning(
@@ -195,14 +205,21 @@ class WritebackMaterializerWorker:
                     instance_id,
                     e,
                 )
+                if seqs:
+                    object_min_seq = min(seqs)
+                    failed_min_seq = object_min_seq if failed_min_seq is None else min(failed_min_seq, object_min_seq)
                 continue
 
             if merged.lifecycle_id != lifecycle_id:
                 # Skip stale lifecycle entries; snapshot is for the active lineage.
+                if seqs:
+                    successful_max_seq = max(successful_max_seq, max(seqs))
                 continue
 
             payload = merged.document.get("data")
             if not isinstance(payload, dict):
+                if seqs:
+                    successful_max_seq = max(successful_max_seq, max(seqs))
                 continue
 
             base_version = _extract_base_dataset_version_id(payload)
@@ -222,6 +239,16 @@ class WritebackMaterializerWorker:
             )
             await self.lakefs_storage.save_json(bucket=repo, key=obj_key, data=payload)
             written += 1
+            if seqs:
+                successful_max_seq = max(successful_max_seq, max(seqs))
+
+        queue_high_watermark = int(max_seq) if max_seq >= 0 else 0
+        if failed_min_seq is not None:
+            queue_high_watermark = max(0, min(queue_high_watermark, int(failed_min_seq) - 1))
+        if successful_max_seq >= 0:
+            queue_high_watermark = min(queue_high_watermark, int(successful_max_seq))
+        elif failed_min_seq is not None:
+            queue_high_watermark = 0
 
         if len(base_dataset_version_ids) == 1:
             manifest_base_dataset_version_id = next(iter(base_dataset_version_ids))
@@ -239,8 +266,8 @@ class WritebackMaterializerWorker:
 
         manifest = {
             "snapshot_id": snapshot_id,
-            "snapshot_revision": int(max_seq) if max_seq >= 0 else 0,
-            "queue_high_watermark": int(max_seq) if max_seq >= 0 else 0,
+            "snapshot_revision": queue_high_watermark,
+            "queue_high_watermark": queue_high_watermark,
             "created_at": utcnow().isoformat(),
             "db_name": db_name,
             "base_branch": base_branch,

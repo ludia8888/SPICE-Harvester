@@ -201,6 +201,19 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             "metadata": metadata,
         }
 
+    @staticmethod
+    def _is_update_fragment_applied(current: Any, expected: Any) -> bool:
+        if isinstance(expected, dict):
+            if not isinstance(current, dict):
+                return False
+            for key, value in expected.items():
+                if key not in current or not OntologyWorker._is_update_fragment_applied(current.get(key), value):
+                    return False
+            return True
+        if isinstance(expected, list):
+            return current == expected
+        return current == expected
+
     async def initialize(self):
         """워커 초기화"""
         settings = get_settings()
@@ -593,7 +606,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 already_applied = True
                 if isinstance(updates, dict):
                     for k, v in updates.items():
-                        if current_dict.get(k) != v:
+                        if not self._is_update_fragment_applied(current_dict.get(k), v):
                             already_applied = False
                             break
                 if already_applied:
@@ -937,21 +950,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 "Database create adapter is postgres-native (db=%s)",
                 db_name,
             )
-            try:
-                await upsert_database_owner(
-                    db_name=db_name,
-                    principal_type="user",
-                    principal_id="system",
-                    principal_name="system",
-                )
-            except Exception as registry_exc:
-                logger.warning(
-                    "Database access owner sync failed for %s during create; continuing with authoritative event: %s",
-                    db_name,
-                    registry_exc,
-                    exc_info=True,
-                )
-            
+
             # 성공 이벤트 생성
             event = DatabaseEvent(
                 event_type=EventType.DATABASE_CREATED,
@@ -967,6 +966,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             
             # 이벤트 발행
             await self.publish_event(event)
+
+            try:
+                await upsert_database_owner(
+                    db_name=db_name,
+                    principal_type="user",
+                    principal_id="system",
+                    principal_name="system",
+                )
+            except Exception as registry_exc:
+                logger.warning(
+                    "Database access owner sync failed for %s after create success; continuing with authoritative event: %s",
+                    db_name,
+                    registry_exc,
+                    exc_info=True,
+                )
 
             # Redis에 완료 상태 업데이트 (202 Accepted observability contract)
             if command_id and self.command_status_service:

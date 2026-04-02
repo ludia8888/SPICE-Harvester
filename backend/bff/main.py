@@ -20,7 +20,7 @@ Key improvements:
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
 # Third party imports
 import httpx
@@ -126,6 +126,70 @@ logging.basicConfig(
 )
 install_trace_context_filter()
 logger = logging.getLogger(__name__)
+
+
+def _ensure_bff_runtime_status(app: FastAPI) -> dict[str, Any]:
+    state = getattr(app.state, "bff_runtime_status", None)
+    if isinstance(state, dict):
+        return state
+    state = {
+        "ready": True,
+        "degraded": False,
+        "issues": [],
+        "background_tasks": {},
+    }
+    app.state.bff_runtime_status = state
+    return state
+
+
+def _record_bff_runtime_issue(
+    app: FastAPI,
+    *,
+    component: str,
+    message: str,
+    affects_readiness: bool,
+) -> None:
+    runtime_status = _ensure_bff_runtime_status(app)
+    runtime_status["degraded"] = True
+    if affects_readiness:
+        runtime_status["ready"] = False
+    runtime_status.setdefault("issues", []).append(
+        {
+            "component": component,
+            "message": message,
+            "affects_readiness": bool(affects_readiness),
+        }
+    )
+
+
+def _track_bff_background_task(app: FastAPI, *, component: str, task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+    runtime_status = _ensure_bff_runtime_status(app)
+    runtime_status.setdefault("background_tasks", {})[component] = {"status": "running"}
+
+    def _on_done(completed_task: asyncio.Task[Any]) -> None:
+        task_status = _ensure_bff_runtime_status(app).setdefault("background_tasks", {}).setdefault(component, {})
+        if completed_task.cancelled():
+            task_status["status"] = "cancelled"
+            return
+
+        exc = completed_task.exception()
+        if exc is None:
+            task_status["status"] = "completed"
+            logger.info("Background task completed (component=%s)", component)
+            return
+
+        task_status["status"] = "failed"
+        task_status["error"] = str(exc)
+        _record_bff_runtime_issue(
+            app,
+            component=component,
+            message=f"Background task failed: {exc}",
+            affects_readiness=True,
+        )
+        logger.error("Background task failed (component=%s): %s", component, exc, exc_info=True)
+
+    task.add_done_callback(_on_done)
+    return task
 
 
 def _install_bff_openapi_schema_extensions(app: FastAPI) -> None:
@@ -650,6 +714,11 @@ async def lifespan(app: FastAPI):
     global _bff_container
     
     logger.info("BFF Service startup beginning...")
+    runtime_status = _ensure_bff_runtime_status(app)
+    runtime_status["ready"] = True
+    runtime_status["degraded"] = False
+    runtime_status["issues"] = []
+    runtime_status["background_tasks"] = {}
     
     dataset_outbox_task: Optional[asyncio.Task] = None
     dataset_outbox_stop: Optional[asyncio.Event] = None
@@ -694,18 +763,28 @@ async def lifespan(app: FastAPI):
                 lineage_store = await asyncio.wait_for(container.get(LineageStore), timeout=15.0)
             except Exception as exc:
                 dataset_outbox_stop = None
+                _record_bff_runtime_issue(
+                    app,
+                    component="dataset_ingest_outbox",
+                    message=f"LineageStore init failed; worker not started: {exc}",
+                    affects_readiness=True,
+                )
                 logger.warning(
                     "Skipping dataset ingest outbox worker startup due to LineageStore init failure: %s",
                     exc,
                 )
             else:
-                dataset_outbox_task = asyncio.create_task(
-                    run_dataset_ingest_outbox_worker(
-                        dataset_registry=dataset_registry,
-                        lineage_store=lineage_store,
-                        poll_interval_seconds=int(settings.workers.dataset_ingest_outbox.poll_seconds),
-                        stop_event=dataset_outbox_stop,
-                    )
+                dataset_outbox_task = _track_bff_background_task(
+                    app,
+                    component="dataset_ingest_outbox",
+                    task=asyncio.create_task(
+                        run_dataset_ingest_outbox_worker(
+                            dataset_registry=dataset_registry,
+                            lineage_store=lineage_store,
+                            poll_interval_seconds=int(settings.workers.dataset_ingest_outbox.poll_seconds),
+                            stop_event=dataset_outbox_stop,
+                        )
+                    ),
                 )
                 app.state.dataset_ingest_outbox_task = dataset_outbox_task
                 app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
@@ -714,13 +793,17 @@ async def lifespan(app: FastAPI):
         if enable_reconciler:
             dataset_reconcile_stop = asyncio.Event()
             dataset_registry = _bff_container.get_dataset_registry()
-            dataset_reconcile_task = asyncio.create_task(
-                run_dataset_ingest_reconciler(
-                    dataset_registry=dataset_registry,
-                    poll_interval_seconds=int(settings.workers.ingest_reconciler.poll_seconds),
-                    stale_after_seconds=int(settings.workers.ingest_reconciler.stale_seconds),
-                    stop_event=dataset_reconcile_stop,
-                )
+            dataset_reconcile_task = _track_bff_background_task(
+                app,
+                component="dataset_ingest_reconciler",
+                task=asyncio.create_task(
+                    run_dataset_ingest_reconciler(
+                        dataset_registry=dataset_registry,
+                        poll_interval_seconds=int(settings.workers.ingest_reconciler.poll_seconds),
+                        stale_after_seconds=int(settings.workers.ingest_reconciler.stale_seconds),
+                        stop_event=dataset_reconcile_stop,
+                    )
+                ),
             )
             app.state.dataset_ingest_reconciler_task = dataset_reconcile_task
             app.state.dataset_ingest_reconciler_stop = dataset_reconcile_stop
@@ -729,13 +812,17 @@ async def lifespan(app: FastAPI):
         if enable_objectify_outbox:
             objectify_outbox_stop = asyncio.Event()
             objectify_registry = _bff_container.get_objectify_registry()
-            objectify_outbox_task = asyncio.create_task(
-                run_objectify_outbox_worker(
-                    objectify_registry=objectify_registry,
-                    poll_interval_seconds=int(settings.workers.objectify_outbox.poll_seconds),
-                    batch_size=int(settings.workers.objectify_outbox.batch_size),
-                    stop_event=objectify_outbox_stop,
-                )
+            objectify_outbox_task = _track_bff_background_task(
+                app,
+                component="objectify_outbox",
+                task=asyncio.create_task(
+                    run_objectify_outbox_worker(
+                        objectify_registry=objectify_registry,
+                        poll_interval_seconds=int(settings.workers.objectify_outbox.poll_seconds),
+                        batch_size=int(settings.workers.objectify_outbox.batch_size),
+                        stop_event=objectify_outbox_stop,
+                    )
+                ),
             )
             app.state.objectify_outbox_task = objectify_outbox_task
             app.state.objectify_outbox_stop = objectify_outbox_stop
@@ -747,16 +834,20 @@ async def lifespan(app: FastAPI):
             dataset_registry = _bff_container.get_dataset_registry()
             pipeline_registry = _bff_container.get_pipeline_registry()
             enqueued_stale_seconds = settings.workers.objectify_reconciler.enqueued_stale_seconds_effective
-            objectify_reconcile_task = asyncio.create_task(
-                run_objectify_reconciler(
-                    objectify_registry=objectify_registry,
-                    dataset_registry=dataset_registry,
-                    pipeline_registry=pipeline_registry,
-                    poll_interval_seconds=int(settings.workers.objectify_reconciler.poll_seconds),
-                    stale_after_seconds=int(settings.workers.objectify_reconciler.stale_after_seconds),
-                    enqueued_stale_seconds=enqueued_stale_seconds,
-                    stop_event=objectify_reconcile_stop,
-                )
+            objectify_reconcile_task = _track_bff_background_task(
+                app,
+                component="objectify_reconciler",
+                task=asyncio.create_task(
+                    run_objectify_reconciler(
+                        objectify_registry=objectify_registry,
+                        dataset_registry=dataset_registry,
+                        pipeline_registry=pipeline_registry,
+                        poll_interval_seconds=int(settings.workers.objectify_reconciler.poll_seconds),
+                        stale_after_seconds=int(settings.workers.objectify_reconciler.stale_after_seconds),
+                        enqueued_stale_seconds=enqueued_stale_seconds,
+                        stop_event=objectify_reconcile_stop,
+                    )
+                ),
             )
             app.state.objectify_reconciler_task = objectify_reconcile_task
             app.state.objectify_reconciler_stop = objectify_reconcile_stop
@@ -772,16 +863,20 @@ async def lifespan(app: FastAPI):
                 storage_service = await _bff_container.container.get(StorageService)
             except Exception as exc:
                 logger.warning("Storage service unavailable for agent retention worker: %s", exc)
-            agent_retention_task = asyncio.create_task(
-                run_agent_session_retention_worker(
-                    session_registry=session_registry,
-                    poll_interval_seconds=int(settings.workers.agent_retention.poll_seconds),
-                    retention_days=int(settings.workers.agent_retention.retention_days),
-                    stop_event=agent_retention_stop,
-                    action=str(settings.workers.agent_retention.action),
-                    retention_policy_json=settings.workers.agent_retention.policy_json,
-                    storage_service=storage_service,
-                )
+            agent_retention_task = _track_bff_background_task(
+                app,
+                component="agent_retention",
+                task=asyncio.create_task(
+                    run_agent_session_retention_worker(
+                        session_registry=session_registry,
+                        poll_interval_seconds=int(settings.workers.agent_retention.poll_seconds),
+                        retention_days=int(settings.workers.agent_retention.retention_days),
+                        stop_event=agent_retention_stop,
+                        action=str(settings.workers.agent_retention.action),
+                        retention_policy_json=settings.workers.agent_retention.policy_json,
+                        storage_service=storage_service,
+                    )
+                ),
             )
             app.state.agent_retention_task = agent_retention_task
             app.state.agent_retention_stop = agent_retention_stop
@@ -811,20 +906,36 @@ async def lifespan(app: FastAPI):
                 app.state.schema_change_monitor = schema_monitor
                 logger.info("Schema Change Monitor started (interval=%ds)", monitor_config.check_interval_seconds)
             except Exception as exc:
+                _record_bff_runtime_issue(
+                    app,
+                    component="schema_change_monitor",
+                    message=f"Schema Change Monitor failed to start: {exc}",
+                    affects_readiness=True,
+                )
                 logger.warning("Failed to start Schema Change Monitor: %s", exc)
 
         # 8. Middleware setup is handled during app creation (service_factory)
-        logger.info("BFF Service startup completed successfully")
+        if runtime_status["ready"] and not runtime_status["degraded"]:
+            logger.info("BFF Service startup completed successfully")
+        else:
+            logger.warning("BFF Service startup completed with degraded readiness: %s", runtime_status["issues"])
         
         yield
         
     except Exception as e:
+        _record_bff_runtime_issue(
+            app,
+            component="startup",
+            message=str(e),
+            affects_readiness=True,
+        )
         logger.error(f"BFF Service startup failed: {e}")
         raise
     
     finally:
         # Shutdown in reverse order
         logger.info("BFF Service shutdown beginning...")
+        runtime_status["ready"] = False
 
         if agent_retention_stop is not None:
             agent_retention_stop.set()

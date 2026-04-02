@@ -119,6 +119,54 @@ async def test_process_create_instance_does_not_mark_failed_before_terminal_retr
 
 
 @pytest.mark.asyncio
+async def test_create_side_effects_append_event_before_es_and_use_event_sequence() -> None:
+    worker = StrictInstanceWorker()
+    call_order: list[str] = []
+    captured_build: dict[str, object] = {}
+
+    class _FakeEventStore:
+        async def append_event(self, envelope) -> None:  # noqa: ANN001
+            call_order.append("event_store")
+            envelope.sequence_number = 42
+
+    class _FakeElasticsearchService:
+        async def index_document(self, *, index: str, document, doc_id: str) -> None:  # noqa: ANN001
+            call_order.append("elasticsearch")
+
+    async def _fake_s3_call(*args, **kwargs):  # noqa: ANN002, ANN003
+        return {}
+
+    def _fake_build_es_document(**kwargs):  # noqa: ANN003
+        captured_build.update(kwargs)
+        return {"instance_id": kwargs["instance_id"]}
+
+    worker.s3_client = SimpleNamespace(put_object=object())
+    worker.elasticsearch_service = _FakeElasticsearchService()
+    worker.event_store = _FakeEventStore()
+    worker.observability = SimpleNamespace(record_link=AsyncMock(), audit_log=AsyncMock())
+    worker._s3_call = _fake_s3_call  # type: ignore[assignment]
+    worker.extract_relationships = AsyncMock(return_value={})  # type: ignore[assignment]
+    worker._ensure_instances_index = AsyncMock(return_value="instances_demo_main")  # type: ignore[assignment]
+    worker._build_es_document = _fake_build_es_document  # type: ignore[assignment]
+
+    result = await worker._apply_create_instance_side_effects(
+        command_id="cmd-1",
+        db_name="demo",
+        class_id="Account",
+        branch="main",
+        payload={"account_id": "acc-1", "name": "Alice"},
+        instance_id="acc-1",
+        command_log={"command_type": "CREATE_INSTANCE"},
+        ontology_version={"ref": "branch:main"},
+        created_by="tester",
+    )
+
+    assert call_order == ["event_store", "elasticsearch"]
+    assert captured_build["event_sequence"] == 42
+    assert result["domain_event_id"]
+
+
+@pytest.mark.asyncio
 async def test_shutdown_uses_disconnect_for_elasticsearch_service(monkeypatch) -> None:
     worker = StrictInstanceWorker()
     worker._close_consumer_runtime = AsyncMock()  # type: ignore[assignment]

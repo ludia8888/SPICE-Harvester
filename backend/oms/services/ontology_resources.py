@@ -417,6 +417,7 @@ class OntologyResourceService:
         )
         if not existing:
             raise OntologyNotFoundError(f"Resource '{resource_id}' not found")
+        expected_version = int(existing.get("version") or 1)
 
         doc_id = _resource_doc_id(normalized_type, resource_id)
         doc = self._payload_to_document(
@@ -431,6 +432,7 @@ class OntologyResourceService:
             db_name=db_name,
             branch=write_branch,
             doc=doc,
+            expected_version=expected_version,
         )
         return self._document_to_payload(persisted)
 
@@ -666,42 +668,29 @@ class OntologyResourceService:
         db_name: str,
         branch: str,
         doc: Dict[str, Any],
+        expected_version: int,
     ) -> Dict[str, Any]:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
                     """
-                    INSERT INTO ontology_resources (
-                        db_name,
-                        branch,
-                        resource_type,
-                        resource_id,
-                        label,
-                        description,
-                        label_i18n,
-                        description_i18n,
-                        spec,
-                        metadata,
-                        version,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (
-                        $1, $2, $3, $4, $5, $6,
-                        $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb,
-                        $11::bigint, $12::timestamptz, $13::timestamptz
-                    )
-                    ON CONFLICT (db_name, branch, resource_type, resource_id) DO UPDATE SET
-                        label = EXCLUDED.label,
-                        description = EXCLUDED.description,
-                        label_i18n = EXCLUDED.label_i18n,
-                        description_i18n = EXCLUDED.description_i18n,
-                        spec = EXCLUDED.spec,
-                        metadata = EXCLUDED.metadata,
-                        version = EXCLUDED.version,
-                        created_at = COALESCE(ontology_resources.created_at, EXCLUDED.created_at),
-                        updated_at = EXCLUDED.updated_at
+                    UPDATE ontology_resources
+                    SET
+                        label = $5,
+                        description = $6,
+                        label_i18n = $7::jsonb,
+                        description_i18n = $8::jsonb,
+                        spec = $9::jsonb,
+                        metadata = $10::jsonb,
+                        version = $11::bigint,
+                        created_at = COALESCE(created_at, $12::timestamptz),
+                        updated_at = $13::timestamptz
+                    WHERE db_name = $1
+                      AND branch = $2
+                      AND resource_type = $3
+                      AND resource_id = $4
+                      AND version = $14::bigint
                     RETURNING
                         db_name, branch, resource_type, resource_id, label, description,
                         label_i18n, description_i18n, spec, metadata, version, created_at, updated_at
@@ -719,9 +708,28 @@ class OntologyResourceService:
                     int(doc.get("version") or 1),
                     _to_datetime(doc.get("created_at") or datetime.now(timezone.utc)),
                     _to_datetime(doc.get("updated_at") or datetime.now(timezone.utc)),
+                    int(expected_version),
                 )
                 if not row:
-                    raise DatabaseError("Failed to upsert ontology resource")
+                    exists = await conn.fetchval(
+                        """
+                        SELECT 1
+                        FROM ontology_resources
+                        WHERE db_name = $1
+                          AND branch = $2
+                          AND resource_type = $3
+                          AND resource_id = $4
+                        """,
+                        str(db_name),
+                        str(branch),
+                        str(doc.get("resource_type") or ""),
+                        str(doc.get("resource_id") or ""),
+                    )
+                    if exists:
+                        raise DatabaseError(
+                            f"Resource '{doc.get('resource_id')}' was modified concurrently; retry with the latest version"
+                        )
+                    raise OntologyNotFoundError(f"Resource '{doc.get('resource_id')}' not found")
                 persisted = self._row_to_document(row)
                 await self._append_resource_version_postgres(
                     conn,

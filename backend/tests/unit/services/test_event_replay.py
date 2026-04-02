@@ -81,6 +81,56 @@ def _put_event(client, bucket: str, key: str, payload: dict) -> None:
     client.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload).encode("utf-8"))
 
 
+def _put_current_layout_event(
+    client,
+    bucket: str,
+    *,
+    class_id: str,
+    aggregate_id: str,
+    event_id: str,
+    sequence_number: int,
+    payload: dict,
+    command_type: str,
+) -> None:
+    event_key = f"events/2026/01/01/{class_id}/{aggregate_id}/{event_id}.json"
+    _put_event(
+        client,
+        bucket,
+        event_key,
+        {
+            "event_id": event_id,
+            "event_type": f"{command_type}_REQUESTED",
+            "aggregate_type": class_id,
+            "aggregate_id": aggregate_id,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "actor": "tester",
+            "data": {
+                "db_name": payload["db_name"],
+                "payload": payload["payload"],
+            },
+            "metadata": {
+                "command_type": command_type,
+                "command_id": payload["command_id"],
+            },
+            "schema_version": "1",
+            "sequence_number": sequence_number,
+        },
+    )
+    _put_event(
+        client,
+        bucket,
+        f"indexes/by-aggregate/{class_id}/{aggregate_id}/{sequence_number:020d}_{event_id}.json",
+        {
+            "event_id": event_id,
+            "event_type": f"{command_type}_REQUESTED",
+            "aggregate_type": class_id,
+            "aggregate_id": aggregate_id,
+            "sequence_number": sequence_number,
+            "s3_key": event_key,
+        },
+    )
+
+
 def _cleanup_prefix(client, bucket: str, prefix: str) -> None:
     response = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     contents = response.get("Contents", [])
@@ -212,3 +262,47 @@ async def test_event_replay_paginates_and_not_found_is_deterministic() -> None:
         assert missing["hashes"] == ["status:NOT_FOUND", "status:NOT_FOUND", "status:NOT_FOUND"]
     finally:
         _cleanup_prefix(client, bucket, f"{db_name}/{class_id}/")
+
+
+@pytest.mark.asyncio
+async def test_event_replay_supports_current_event_store_layout() -> None:
+    client = _s3_client()
+    bucket = "instance-events"
+    _ensure_bucket(client, bucket)
+
+    db_name = "demo-db"
+    class_id = "Invoice"
+    aggregate_id = "inv-1"
+
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
+
+    _put_current_layout_event(
+        client,
+        bucket,
+        class_id=class_id,
+        aggregate_id=aggregate_id,
+        event_id="evt-1",
+        sequence_number=1,
+        command_type="CREATE_INSTANCE",
+        payload={"db_name": db_name, "command_id": "cmd-1", "payload": {"amount": 10}},
+    )
+    _put_current_layout_event(
+        client,
+        bucket,
+        class_id=class_id,
+        aggregate_id=aggregate_id,
+        event_id="evt-2",
+        sequence_number=2,
+        command_type="UPDATE_INSTANCE",
+        payload={"db_name": db_name, "command_id": "cmd-2", "payload": {"amount": 25}},
+    )
+
+    replay = await service.replay_aggregate(db_name, class_id, aggregate_id)
+    history = await service.get_aggregate_history(db_name, class_id, aggregate_id)
+    replay_all = await service.replay_all_aggregates(db_name, class_id)
+
+    assert replay["status"] == "REPLAYED"
+    assert replay["event_count"] == 2
+    assert replay["final_state"]["data"]["amount"] == 25
+    assert [item["command_id"] for item in history] == ["cmd-1", "cmd-2"]
+    assert replay_all["aggregates"][aggregate_id]["event_count"] == 2

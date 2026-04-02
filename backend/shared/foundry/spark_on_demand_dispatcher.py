@@ -54,6 +54,7 @@ class SparkOnDemandDispatcher:
         self._started = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._inflight_jobs = 0
+        self._shutdown_task: Optional[asyncio.Task[None]] = None
 
     async def dispatch(
         self,
@@ -93,6 +94,11 @@ class SparkOnDemandDispatcher:
     async def _ensure_started(self) -> None:
         current_loop = asyncio.get_running_loop()
         async with self._start_lock:
+            if self._shutdown_task is not None and not self._shutdown_task.done():
+                self._shutdown_task.cancel()
+                await asyncio.gather(self._shutdown_task, return_exceptions=True)
+            self._shutdown_task = None
+
             if self._loop is not current_loop:
                 await self._reset_workers_for_loop_change()
                 self._loop = current_loop
@@ -111,6 +117,10 @@ class SparkOnDemandDispatcher:
             self._started = True
 
     async def _reset_workers_for_loop_change(self) -> None:
+        if self._shutdown_task is not None and not self._shutdown_task.done():
+            self._shutdown_task.cancel()
+            await asyncio.gather(self._shutdown_task, return_exceptions=True)
+        self._shutdown_task = None
         if not self._workers:
             self._started = False
             return
@@ -134,9 +144,29 @@ class SparkOnDemandDispatcher:
             self._workers = []
             self._started = False
             self._loop = None
+            self._shutdown_task = None
         for task in workers:
             task.cancel()
         await asyncio.gather(*workers, return_exceptions=True)
+
+    async def shutdown(self) -> None:
+        async with self._start_lock:
+            shutdown_task = self._shutdown_task
+            self._shutdown_task = None
+            workers = list(self._workers)
+            self._workers = []
+            self._started = False
+            self._loop = None
+            self._inflight_jobs = 0
+
+        if shutdown_task is not None and not shutdown_task.done():
+            shutdown_task.cancel()
+            await asyncio.gather(shutdown_task, return_exceptions=True)
+
+        for task in workers:
+            task.cancel()
+        if workers:
+            await asyncio.gather(*workers, return_exceptions=True)
 
     async def _worker_loop(self, *, worker_index: int) -> None:
         while True:
@@ -152,9 +182,39 @@ class SparkOnDemandDispatcher:
                 route=queue_item.route,
                 payload=dict(queue_item.payload),
             )
+            execute_task: Optional[asyncio.Task[Any]] = None
             self._inflight_jobs += 1
             try:
-                result_value = await queue_item.execute(job_context)
+                if queue_item.result_future.cancelled():
+                    logger.debug(
+                        "Skipping cancelled spark on-demand job before execution (worker=%s route=%s job_id=%s)",
+                        worker_index,
+                        queue_item.route,
+                        queue_item.job_id,
+                    )
+                    continue
+
+                execute_task = asyncio.create_task(
+                    queue_item.execute(job_context),
+                    name=f"spark-on-demand-job-{queue_item.job_id}",
+                )
+                done, _pending = await asyncio.wait(
+                    {execute_task, queue_item.result_future},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if queue_item.result_future in done:
+                    if not execute_task.done():
+                        execute_task.cancel()
+                        await asyncio.gather(execute_task, return_exceptions=True)
+                    logger.debug(
+                        "Cancelled spark on-demand execution after caller timeout (worker=%s route=%s job_id=%s)",
+                        worker_index,
+                        queue_item.route,
+                        queue_item.job_id,
+                    )
+                    continue
+
+                result_value = await execute_task
                 finished_at = time.monotonic()
                 dispatch_result = SparkOnDemandDispatchResult(
                     job_id=queue_item.job_id,
@@ -166,6 +226,9 @@ class SparkOnDemandDispatcher:
                 if not queue_item.result_future.cancelled():
                     queue_item.result_future.set_result(dispatch_result)
             except asyncio.CancelledError:
+                if execute_task is not None and not execute_task.done():
+                    execute_task.cancel()
+                    await asyncio.gather(execute_task, return_exceptions=True)
                 raise
             except Exception as exc:
                 logger.warning(
@@ -181,6 +244,17 @@ class SparkOnDemandDispatcher:
             finally:
                 self._inflight_jobs = max(0, self._inflight_jobs - 1)
                 self._queue.task_done()
+                self._schedule_shutdown_if_idle()
+
+    def _schedule_shutdown_if_idle(self) -> None:
+        if not self._started or not self._queue.empty() or self._inflight_jobs != 0:
+            return
+        if self._shutdown_task is not None and not self._shutdown_task.done():
+            return
+        try:
+            self._shutdown_task = asyncio.create_task(self._shutdown_if_idle())
+        except RuntimeError:
+            self._shutdown_task = None
 
 
 _DISPATCHER: SparkOnDemandDispatcher | None = None

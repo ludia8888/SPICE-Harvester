@@ -284,6 +284,9 @@ class PipelineScheduler:
                 else nullcontext()
             )
             with ctx:
+                # Persist the schedule tick before enqueue so a retrying scheduler
+                # process does not publish the same due run repeatedly.
+                await self.registry.record_schedule_tick(pipeline_id=pipeline_id, scheduled_at=now)
                 await self.queue.publish(job)
                 if self.metrics and hasattr(self.metrics, "record_business_metric"):
                     try:
@@ -313,7 +316,6 @@ class PipelineScheduler:
                         "dependencies": dependency_evaluation.details if dependency_evaluation else None,
                     },
                 )
-                await self.registry.record_schedule_tick(pipeline_id=pipeline_id, scheduled_at=now)
 
     async def _record_scheduler_config_error(
         self,

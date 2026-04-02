@@ -46,6 +46,7 @@ async def create_dataset_version(
 ) -> Dict[str, Any]:
     ingest_request = None
     ingest_transaction = None
+    published_version = None
     try:
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
         lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
@@ -281,23 +282,43 @@ async def create_dataset_version(
                 schema_json=schema_json,
                 outbox_entries=outbox_entries,
             )
+            published_version = version
         except ValueError as exc:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, str(exc), code=ErrorCode.REQUEST_VALIDATION_FAILED) from exc
 
-        objectify_job_id = await ops._maybe_enqueue_objectify_job(
-            dataset=dataset,
-            version=version,
-            objectify_registry=objectify_registry,
-            job_queue=objectify_job_queue,
-            dataset_registry=dataset_registry,
-            actor_user_id=actor_user_id,
-        )
+        try:
+            await maybe_flush_dataset_ingest_outbox_inline(
+                dataset_registry=dataset_registry,
+                lineage_store=lineage_store,
+                flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dataset version publish succeeded but inline outbox flush failed (dataset_id=%s ingest_request_id=%s): %s",
+                dataset_id,
+                getattr(ingest_request, "ingest_request_id", None),
+                exc,
+                exc_info=True,
+            )
 
-        await maybe_flush_dataset_ingest_outbox_inline(
-            dataset_registry=dataset_registry,
-            lineage_store=lineage_store,
-            flush_dataset_ingest_outbox=flush_dataset_ingest_outbox,
-        )
+        objectify_job_id = None
+        try:
+            objectify_job_id = await ops._maybe_enqueue_objectify_job(
+                dataset=dataset,
+                version=version,
+                objectify_registry=objectify_registry,
+                job_queue=objectify_job_queue,
+                dataset_registry=dataset_registry,
+                actor_user_id=actor_user_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Dataset version publish succeeded but objectify enqueue failed (dataset_id=%s ingest_request_id=%s): %s",
+                dataset_id,
+                getattr(ingest_request, "ingest_request_id", None),
+                exc,
+                exc_info=True,
+            )
 
         return ApiResponse.success(
             message="Dataset version created",
@@ -306,11 +327,12 @@ async def create_dataset_version(
     except HTTPException:
         raise
     except Exception as exc:
-        await mark_ingest_failed(
-            dataset_registry=dataset_registry,
-            ingest_request=ingest_request,
-            error=str(exc),
-            stage="manual",
-        )
+        if published_version is None:
+            await mark_ingest_failed(
+                dataset_registry=dataset_registry,
+                ingest_request=ingest_request,
+                error=str(exc),
+                stage="manual",
+            )
         logger.error("Failed to create dataset version: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc

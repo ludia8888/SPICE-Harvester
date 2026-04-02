@@ -61,3 +61,49 @@ async def test_instance_lineage_records_dataset_version():
     assert metadata["column_lineage_storage"] == "postgres.objectify_registry"
     assert metadata["column_lineage_schema_version"] == "v1"
     assert metadata["column_lineage_pairs"] == []
+
+
+@pytest.mark.asyncio
+async def test_instance_lineage_uses_ontology_branch_for_created_instances():
+    worker = ObjectifyWorker()
+    worker.lineage_store = _FakeLineageStore()
+
+    job = ObjectifyJob(
+        job_id="job-2",
+        db_name="test_db",
+        dataset_id="ds-1",
+        dataset_version_id="ver-1",
+        artifact_output_name="accounts",
+        dedupe_key="dedupe",
+        dataset_branch="data-branch",
+        ontology_branch="ontology-branch",
+        artifact_key="s3://bucket/accounts",
+        mapping_spec_id="map-1",
+        mapping_spec_version=1,
+        target_class_id="Account",
+    )
+
+    await worker._record_instance_lineage(
+        job=job,
+        job_node_id="ObjectifyJob:job-2",
+        instance_ids=["acc-1"],
+        mapping_spec_id="map-1",
+        mapping_spec_version=1,
+        column_lineage_pairs=[],
+        ontology_version={},
+        limit_remaining=10,
+        input_type="dataset_version",
+        artifact_output_name="accounts",
+    )
+
+    dataset_link = next(
+        link for link in worker.lineage_store.links if link.get("edge_type") == "dataset_version_objectified"
+    )
+    created_link = next(
+        link for link in worker.lineage_store.links if link.get("edge_type") == "objectify_job_created_instance"
+    )
+
+    assert dataset_link["branch"] == "ontology-branch"
+    assert dataset_link["edge_metadata"]["branch"] == "ontology-branch"
+    assert created_link["to_node_id"] == "agg:Instance:test_db:ontology-branch:Account:acc-1"
+    assert created_link["branch"] == "ontology-branch"

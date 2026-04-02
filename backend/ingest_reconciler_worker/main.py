@@ -97,10 +97,10 @@ class IngestReconcilerWorker:
         if self.alert_cooldown_seconds <= 0:
             return True
         now = time.monotonic()
-        if now - self._last_alert_at >= self.alert_cooldown_seconds:
-            self._last_alert_at = now
-            return True
-        return False
+        return now - self._last_alert_at >= self.alert_cooldown_seconds
+
+    def _mark_alert_delivered(self) -> None:
+        self._last_alert_at = time.monotonic()
 
     async def _emit_alert(self, payload: Dict[str, Any]) -> None:
         logger.warning("Ingest reconciler alert: %s", payload)
@@ -110,6 +110,7 @@ class IngestReconcilerWorker:
             return
         try:
             await self.http.post(self.alert_webhook_url, json=payload)
+            self._mark_alert_delivered()
             self._record_alert_metric()
         except Exception:
             self._record_alert_failure_metric()

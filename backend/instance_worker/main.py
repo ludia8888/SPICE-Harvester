@@ -684,6 +684,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             raise RuntimeError("S3 client not initialized")
         if not self.elasticsearch_service:
             raise RuntimeError("Elasticsearch service not initialized")
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
 
         # 1) Save FULL data to S3 (instance command log bucket)
         s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
@@ -748,7 +750,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             },
         )
 
-        # 2) Extract relationships and index to Elasticsearch
+        # 2) Extract relationships and persist the authoritative domain event first.
         relationships = await self.extract_relationships(
             db_name,
             class_id,
@@ -757,10 +759,44 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             allow_pattern_fallback=allow_pattern_fallback,
             strict_schema=self.strict_relationship_schema,
         )
+        event_payload = {
+            "db_name": db_name,
+            "branch": branch,
+            "class_id": class_id,
+            "instance_id": instance_id,
+            **payload,
+        }
+        aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
 
-        # 3) Index instance document to Elasticsearch.
+        domain_event_id = (
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_CREATED", aggregate_id=aggregate_id)
+            if command_id
+            else str(uuid4())
+        )
+
+        envelope = EventEnvelope(
+            event_id=domain_event_id,
+            event_type="INSTANCE_CREATED",
+            aggregate_type="Instance",
+            aggregate_id=aggregate_id,
+            occurred_at=datetime.now(timezone.utc),
+            actor=created_by or "system",
+            data=event_payload,
+            metadata={
+                "kind": "domain",
+                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
+                "service": "instance_worker",
+                "command_id": command_id,
+                "ontology": ontology_version,
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
+            },
+        )
+        await self.event_store.append_event(envelope)
+
+        # 3) Index the document with the authoritative event sequence.
         now_iso = datetime.now(timezone.utc).isoformat()
-        event_sequence = int(datetime.now(timezone.utc).timestamp() * 1000)
+        event_sequence = int(envelope.sequence_number or 0)
         index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
 
         es_doc = self._build_es_document(
@@ -799,6 +835,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "instance_id": instance_id,
                     "class_id": class_id,
                     "ontology": ontology_version,
+                    "sequence_number": event_sequence,
                 },
             )
             await self.observability.audit_log(
@@ -816,6 +853,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "instance_id": instance_id,
                     "index_name": index_name,
                     "ontology": ontology_version,
+                    "sequence_number": event_sequence,
                 },
             )
         except Exception as e:
@@ -834,49 +872,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "instance_id": instance_id,
                     "index_name": index_name,
                     "ontology": ontology_version,
+                    "sequence_number": event_sequence,
                 },
                 error=str(e),
             )
             raise
-
-        # 4) Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
-        event_payload = {
-            "db_name": db_name,
-            "branch": branch,
-            "class_id": class_id,
-            "instance_id": instance_id,
-            **payload,
-        }
-        aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
-
-        domain_event_id = (
-            spice_event_id(command_id=str(command_id), event_type="INSTANCE_CREATED", aggregate_id=aggregate_id)
-            if command_id
-            else str(uuid4())
-        )
-
-        envelope = EventEnvelope(
-            event_id=domain_event_id,
-            event_type="INSTANCE_CREATED",
-            aggregate_type="Instance",
-            aggregate_id=aggregate_id,
-            occurred_at=datetime.now(timezone.utc),
-            actor=created_by or "system",
-            data=event_payload,
-            metadata={
-                "kind": "domain",
-                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
-                "service": "instance_worker",
-                "command_id": command_id,
-                "ontology": ontology_version,
-                "run_id": self.run_id,
-                "code_sha": self.code_sha,
-            },
-        )
-
-        if not self.event_store:
-            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
-        await self.event_store.append_event(envelope)
 
         return {
             "instance_id": instance_id,
@@ -1590,7 +1590,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     error=str(e),
                 )
 
-        # Update instance in Elasticsearch.
+        # Resolve relationships and persist the source-of-truth event before the direct ES write.
         relationships = await self.extract_relationships(
             db_name,
             class_id,
@@ -1600,8 +1600,44 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             strict_schema=self.strict_relationship_schema,
         )
 
+        # Publish domain event (SSoT: Event Store)
+        domain_event_id = (
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_UPDATED", aggregate_id=aggregate_id)
+            if command_id
+            else str(uuid4())
+        )
+        envelope = EventEnvelope(
+            event_id=domain_event_id,
+            event_type="INSTANCE_UPDATED",
+            aggregate_type="Instance",
+            aggregate_id=aggregate_id,
+            occurred_at=datetime.now(timezone.utc),
+            actor=command.get("created_by") or "system",
+            data={
+                "db_name": db_name,
+                "branch": branch,
+                "class_id": class_id,
+                "instance_id": instance_id,
+                **merged_payload,
+            },
+            metadata={
+                "kind": "domain",
+                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
+                "service": "instance_worker",
+                "command_id": command_id,
+                "ontology": ontology_version,
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
+            },
+        )
+
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+        await self.event_store.append_event(envelope)
+        logger.info(f"  ✅ Stored INSTANCE_UPDATED in Event Store (seq={envelope.sequence_number})")
+
+        event_sequence = int(envelope.sequence_number or 0)
         now_iso = datetime.now(timezone.utc).isoformat()
-        event_sequence = int(datetime.now(timezone.utc).timestamp() * 1000)
         index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
 
         # Preserve created_at from existing document
@@ -1658,6 +1694,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         "instance_id": instance_id,
                         "class_id": class_id,
                         "ontology": ontology_version,
+                        "sequence_number": event_sequence,
                     },
                 )
                 await self.observability.audit_log(
@@ -1675,6 +1712,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         "instance_id": instance_id,
                         "index_name": index_name,
                         "ontology": ontology_version,
+                        "sequence_number": event_sequence,
                     },
                 )
         except Exception as e:
@@ -1695,46 +1733,11 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         "instance_id": instance_id,
                         "index_name": index_name,
                         "ontology": ontology_version,
+                        "sequence_number": event_sequence,
                     },
                     error=str(e),
                 )
             raise
-
-        # Publish domain event (SSoT: Event Store)
-        domain_event_id = (
-            spice_event_id(command_id=str(command_id), event_type="INSTANCE_UPDATED", aggregate_id=aggregate_id)
-            if command_id
-            else str(uuid4())
-        )
-        envelope = EventEnvelope(
-            event_id=domain_event_id,
-            event_type="INSTANCE_UPDATED",
-            aggregate_type="Instance",
-            aggregate_id=aggregate_id,
-            occurred_at=datetime.now(timezone.utc),
-            actor=command.get("created_by") or "system",
-            data={
-                "db_name": db_name,
-                "branch": branch,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                **merged_payload,
-            },
-            metadata={
-                "kind": "domain",
-                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
-                "service": "instance_worker",
-                "command_id": command_id,
-                "ontology": ontology_version,
-                "run_id": self.run_id,
-                "code_sha": self.code_sha,
-            },
-        )
-
-        if not self.event_store:
-            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
-        await self.event_store.append_event(envelope)
-        logger.info(f"  ✅ Stored INSTANCE_UPDATED in Event Store (seq={envelope.sequence_number})")
 
         if not skip_status:
             await self.set_command_status(
@@ -1805,7 +1808,37 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 f"expected={expected_aggregate_id}"
             )
 
-        # Delete instance from Elasticsearch.
+        aggregate_id = expected_aggregate_id
+        domain_event_id = (
+            spice_event_id(command_id=str(command_id), event_type="INSTANCE_DELETED", aggregate_id=aggregate_id)
+            if command_id
+            else str(uuid4())
+        )
+        envelope = EventEnvelope(
+            event_id=domain_event_id,
+            event_type="INSTANCE_DELETED",
+            aggregate_type="Instance",
+            aggregate_id=aggregate_id,
+            occurred_at=datetime.now(timezone.utc),
+            actor=command.get("created_by") or "system",
+            data={"db_name": db_name, "branch": branch, "class_id": class_id, "instance_id": instance_id},
+            metadata={
+                "kind": "domain",
+                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
+                "service": "instance_worker",
+                "command_id": command_id,
+                "ontology": ontology_version,
+                "objectify": bool(is_objectify),
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
+            },
+        )
+
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+        await self.event_store.append_event(envelope)
+        logger.info(f"  ✅ Stored INSTANCE_DELETED in Event Store (seq={envelope.sequence_number})")
+
         index_name = await self._ensure_instances_index(db_name=db_name, branch=branch)
         es_deleted = False
         es_already_missing = False
@@ -1844,6 +1877,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "instance_id": instance_id,
                     "class_id": class_id,
                     "ontology": ontology_version,
+                    "sequence_number": int(envelope.sequence_number or 0),
                 },
             )
 
@@ -1864,6 +1898,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "index_name": index_name,
                     "already_missing": es_already_missing,
                     "ontology": ontology_version,
+                    "sequence_number": int(envelope.sequence_number or 0),
                 },
                 error=None if es_deleted else (es_error or "delete_failed"),
             )
@@ -1916,6 +1951,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         "bucket": self.instance_bucket,
                         "key": s3_path,
                         "ontology": ontology_version,
+                        "sequence_number": int(envelope.sequence_number or 0),
                     },
                     error=str(e),
                 )
@@ -1938,6 +1974,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "etag": etag,
                     "version_id": version_id,
                     "ontology": ontology_version,
+                    "sequence_number": int(envelope.sequence_number or 0),
                 },
             )
             await self.observability.audit_log(
@@ -1957,39 +1994,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     "etag": etag,
                     "version_id": version_id,
                     "ontology": ontology_version,
+                    "sequence_number": int(envelope.sequence_number or 0),
                 },
             )
-
-        aggregate_id = expected_aggregate_id
-        domain_event_id = (
-            spice_event_id(command_id=str(command_id), event_type="INSTANCE_DELETED", aggregate_id=aggregate_id)
-            if command_id
-            else str(uuid4())
-        )
-        envelope = EventEnvelope(
-            event_id=domain_event_id,
-            event_type="INSTANCE_DELETED",
-            aggregate_type="Instance",
-            aggregate_id=aggregate_id,
-            occurred_at=datetime.now(timezone.utc),
-            actor=command.get("created_by") or "system",
-            data={"db_name": db_name, "branch": branch, "class_id": class_id, "instance_id": instance_id},
-            metadata={
-                "kind": "domain",
-                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
-                "service": "instance_worker",
-                "command_id": command_id,
-                "ontology": ontology_version,
-                "objectify": bool(is_objectify),
-                "run_id": self.run_id,
-                "code_sha": self.code_sha,
-            },
-        )
-
-        if not self.event_store:
-            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
-        await self.event_store.append_event(envelope)
-        logger.info(f"  ✅ Stored INSTANCE_DELETED in Event Store (seq={envelope.sequence_number})")
 
         await self.set_command_status(command_id, "completed", {"instance_id": instance_id})
 

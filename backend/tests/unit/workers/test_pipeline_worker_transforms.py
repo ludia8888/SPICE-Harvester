@@ -147,6 +147,38 @@ def test_apply_transform_basic_ops(worker: PipelineWorker) -> None:
     assert "a_plus_1" in udfed.columns
 
 
+def test_compute_assignment_overwrites_existing_column(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(1, 10), (2, 20)], ["a", "b"])
+
+    computed = worker._apply_transform({"operation": "compute", "expression": "a = b + 1"}, [df], {})
+
+    assert "computed" not in computed.columns
+    assert [row["a"] for row in computed.orderBy("b").collect()] == [11, 21]
+
+
+def test_udf_schema_sampling_does_not_false_empty_when_first_rows_emit_nothing(worker: PipelineWorker) -> None:
+    df = worker.spark.createDataFrame([(idx,) for idx in range(130)], ["a"])
+
+    udfed = worker._apply_transform(
+        {
+            "operation": "udf",
+            "__resolved_udf_code": (
+                "def transform(row):\n"
+                "    value = int(row.get('a') or 0)\n"
+                "    if value < 129:\n"
+                "        return []\n"
+                "    return [{'only_late_row': value}]"
+            ),
+        },
+        [df],
+        {},
+    )
+
+    rows = udfed.collect()
+    assert len(rows) == 1
+    assert rows[0]["only_late_row"] == 129
+
+
 def test_apply_transform_join_union_groupby_pivot_window(worker: PipelineWorker) -> None:
     left = worker.spark.createDataFrame([(1, "x"), (2, "y")], ["id", "val"])
     right = worker.spark.createDataFrame([(1, "a"), (3, "b")], ["id", "name"])

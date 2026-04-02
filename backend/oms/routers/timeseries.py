@@ -161,6 +161,19 @@ def _extract_ts_property(source: Dict[str, Any], property_name: str) -> Optional
     return None
 
 
+def _parse_point_time(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 async def _load_ts_points(
     storage: StorageServiceDep,
     bucket: str,
@@ -177,7 +190,12 @@ async def _load_ts_points(
     points = data.get("points") if isinstance(data, dict) else None
     if not isinstance(points, list):
         return []
-    return [p for p in points if isinstance(p, dict) and "time" in p]
+    normalized = [p for p in points if isinstance(p, dict) and "time" in p]
+    parsed_points = [(_parse_point_time(point.get("time")), idx, point) for idx, point in enumerate(normalized)]
+    if normalized and all(parsed is not None for parsed, _, _ in parsed_points):
+        parsed_points.sort(key=lambda item: (item[0], item[1]))
+        return [point for _, _, point in parsed_points]
+    return normalized
 
 
 def _filter_points_by_range(
@@ -206,13 +224,22 @@ def _filter_absolute(
     start_time: Optional[str],
     end_time: Optional[str],
 ) -> List[Dict[str, Any]]:
+    start_dt = _parse_point_time(start_time)
+    end_dt = _parse_point_time(end_time)
     filtered = []
     for p in points:
         t = str(p.get("time") or "")
-        if start_time and t < start_time:
-            continue
-        if end_time and t > end_time:
-            continue
+        point_dt = _parse_point_time(t)
+        if point_dt is not None and (start_dt is not None or end_dt is not None):
+            if start_dt is not None and point_dt < start_dt:
+                continue
+            if end_dt is not None and point_dt > end_dt:
+                continue
+        else:
+            if start_time and t < start_time:
+                continue
+            if end_time and t > end_time:
+                continue
         filtered.append(p)
     return filtered
 

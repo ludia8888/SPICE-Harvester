@@ -12,6 +12,8 @@ from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+_LUCENE_RESERVED_CHAR_RE = re.compile(r'(?<!\\)([+\-=&|><!(){}\[\]^"~*?:/\\])')
+
 
 class SecurityViolationError(Exception):
     """보안 위반 시 발생하는 예외"""
@@ -809,6 +811,15 @@ class InputSanitizer:
         if len(normalized) > 100:
             raise SecurityViolationError("Branch name too long")
 
+        if normalized.startswith("/") or normalized.endswith("/"):
+            raise SecurityViolationError("Branch name must not start or end with slash")
+
+        if "//" in normalized:
+            raise SecurityViolationError("Branch name must not contain empty path segments")
+
+        if any(segment in {".", ".."} for segment in normalized.split("/")):
+            raise SecurityViolationError("Branch name must not contain path traversal segments")
+
         # 예약된 이름 확인
         reserved_names = {"head", "refs", "objects", "info", "hooks"}
         if normalized.lower() in reserved_names:
@@ -901,23 +912,23 @@ def sanitize_es_query(query: str) -> str:
     Returns:
         안전하게 정제된 쿼리 문자열
     """
-    # Lucene 특수 문자: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
-    # 참고: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#_reserved_characters
-    special_chars = r'+-=&|><!()\{\}[\]^"~*?:\/'
-    
-    # 각 특수 문자 앞에 백슬래시 추가
-    for char in special_chars:
-        query = query.replace(char, f'\\{char}')
-    
-    # 와일드카드로만 이루어진 쿼리 방지 (DoS 공격 방지)
-    if query.strip() in ['*', '?', '**', '??', '***']:
+    normalized = str(query or "").strip()
+    if not normalized:
         return ''
-    
+
+    # 와일드카드로만 이루어진 쿼리 방지 (DoS 공격 방지)
+    if normalized in ['*', '?', '**', '??', '***']:
+        return ''
+
     # 쿼리 시작 부분의 와일드카드 제거 (성능 문제 방지)
-    query = re.sub(r'^[*?]+', '', query)
-    
+    normalized = re.sub(r'^[*?]+', '', normalized)
+
     # 연속된 와일드카드 제한
-    query = re.sub(r'\*{2,}', '*', query)
-    query = re.sub(r'\?{2,}', '?', query)
-    
-    return query.strip()
+    normalized = re.sub(r'\*{2,}', '*', normalized)
+    normalized = re.sub(r'\?{2,}', '?', normalized)
+    if not normalized:
+        return ''
+
+    # Lucene 특수 문자는 한 번만 이스케이프한다.
+    escaped = _LUCENE_RESERVED_CHAR_RE.sub(r'\\\1', normalized)
+    return escaped.strip()

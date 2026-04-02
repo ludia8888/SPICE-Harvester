@@ -23,19 +23,14 @@ async def test_list_databases_returns_503_when_registry_is_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_create_database_returns_202_when_owner_sync_fails(
+async def test_create_database_returns_202_without_touching_access_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _append_command(**kwargs):  # noqa: ANN001
         _ = kwargs
         return None
 
-    async def _raise_sync(**kwargs):  # noqa: ANN001
-        _ = kwargs
-        raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
-
     monkeypatch.setattr(database_router, "append_event_sourcing_command", _append_command)
-    monkeypatch.setattr(database_router, "upsert_database_owner", _raise_sync)
 
     response = await database_router.create_database(
         {"name": "demo", "description": "desc"},

@@ -128,3 +128,26 @@ async def test_run_with_tracking_registers_current_task_for_dead_task_cleanup() 
     finally:
         release.set()
         await runner
+
+
+@pytest.mark.asyncio
+async def test_create_task_does_not_inject_task_id_when_callable_does_not_accept_it() -> None:
+    manager = BackgroundTaskManager(redis_service=_RedisStub(), websocket_service=None)  # type: ignore[arg-type]
+
+    observed: dict[str, str] = {}
+
+    async def _listener(command_id: str) -> str:
+        observed["command_id"] = command_id
+        return "ok"
+
+    task_id = await manager.create_task(
+        _listener,
+        "cmd-1",
+        task_name="listener-without-task-id",
+    )
+    await _wait_until_complete(manager, task_id)
+
+    task = await manager.get_task_status(task_id)
+    assert task is not None
+    assert task.status == TaskStatus.COMPLETED
+    assert observed == {"command_id": "cmd-1"}

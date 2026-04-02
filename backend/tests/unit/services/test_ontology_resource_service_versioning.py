@@ -43,6 +43,13 @@ class _Conn:
             self._existing_relations.add("ontology_resource_versions")
         return None
 
+    def transaction(self):
+        return _AcquireCtx(self)
+
+    async def fetchrow(self, sql: str, *_args):
+        self.executed.append(sql)
+        return None
+
 
 @pytest.mark.unit
 def test_payload_to_document_sets_initial_version_and_rev() -> None:
@@ -214,3 +221,105 @@ async def test_ensure_postgres_schema_bootstraps_when_enabled(monkeypatch: pytes
     await service._ensure_postgres_schema()  # noqa: SLF001
 
     assert any("CREATE TABLE IF NOT EXISTS ontology_resources" in sql for sql in conn.executed)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_update_resource_passes_expected_version_to_postgres_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = OntologyResourceService(postgres_url="postgresql://localhost/test")
+    captured: dict[str, int] = {}
+
+    async def _fake_ensure() -> None:
+        return None
+
+    async def _fake_get(**kwargs):  # noqa: ANN003, ANN201
+        _ = kwargs
+        return {
+            "resource_type": "object_type",
+            "resource_id": "Ticket",
+            "label": "Ticket",
+            "description": None,
+            "label_i18n": None,
+            "description_i18n": None,
+            "spec": {"id": "Ticket"},
+            "metadata": {"rev": 7},
+            "version": 7,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+
+    async def _fake_update(*, expected_version: int, **kwargs):  # noqa: ANN003, ANN201
+        captured["expected_version"] = expected_version
+        _ = kwargs
+        return {
+            "resource_type": "object_type",
+            "resource_id": "Ticket",
+            "label": "Ticket",
+            "description": "updated",
+            "label_i18n": None,
+            "description_i18n": None,
+            "spec": {"id": "Ticket"},
+            "metadata": {"rev": 8},
+            "version": 8,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-02T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(service, "_ensure_postgres_schema", _fake_ensure)
+    monkeypatch.setattr(service, "_get_resource_document_postgres", _fake_get)
+    monkeypatch.setattr(service, "_upsert_resource_document_postgres", _fake_update)
+
+    payload = await service.update_resource(
+        "demo",
+        branch="main",
+        resource_type="object_type",
+        resource_id="Ticket",
+        payload={"description": "updated"},
+    )
+
+    assert captured["expected_version"] == 7
+    assert payload["version"] == 8
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_upsert_resource_document_raises_conflict_on_version_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = OntologyResourceService(postgres_url="postgresql://localhost/test")
+    conn = _Conn(existing_relations={"ontology_resources", "ontology_resource_versions"})
+
+    async def _fake_fetchval(sql: str, *args):  # noqa: ANN001, ANN201
+        conn.executed.append(sql)
+        if "SELECT 1" in sql:
+            return 1
+        return await _Conn.fetchval(conn, sql, *args)
+
+    conn.fetchval = _fake_fetchval  # type: ignore[method-assign]
+
+    async def _fake_pool():
+        return _Pool(conn)
+
+    monkeypatch.setattr(service, "_ensure_pool", _fake_pool)
+
+    with pytest.raises(DatabaseError, match="modified concurrently"):
+        await service._upsert_resource_document_postgres(  # noqa: SLF001
+            db_name="demo",
+            branch="main",
+            doc={
+                "resource_type": "object_type",
+                "resource_id": "Ticket",
+                "label": "Ticket",
+                "description": None,
+                "spec": {"id": "Ticket"},
+                "metadata": {"rev": 2},
+                "version": 2,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-02T00:00:00+00:00",
+            },
+            expected_version=1,
+        )
+
+    assert any("AND version = $14::bigint" in sql for sql in conn.executed)

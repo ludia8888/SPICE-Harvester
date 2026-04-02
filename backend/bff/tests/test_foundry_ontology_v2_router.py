@@ -1032,7 +1032,6 @@ async def test_get_ontology_v2_unknown_returns_ontology_not_found():
     assert response.status_code == 404
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "NOT_FOUND"
-    assert payload["errorName"] == "LinkTypeNotFound"
     assert payload["errorName"] == "OntologyNotFound"
 
 
@@ -2871,6 +2870,78 @@ async def test_load_object_set_objects_v2_search_around_routes_to_spark_on_thres
     assert captured_routing["selected_backend"] == "spark_on_demand"
     assert captured_routing["execution_backend"] == "spark_on_demand"
     assert captured_routing["spark_job_id"]
+
+
+@pytest.mark.asyncio
+async def test_search_around_audit_retry_recovers_after_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_store = router_v2._SEARCH_ROUTING_AUDIT_STORE
+    original_disabled_until = router_v2._SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
+    original_cooldown = router_v2._SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
+    init_counter = {"count": 0}
+    clock = {"now": 100.0}
+
+    class _FailingStore:
+        def __init__(self) -> None:
+            init_counter["count"] += 1
+
+        async def log(self, **kwargs: Any) -> None:
+            _ = kwargs
+            raise RuntimeError("audit store unavailable")
+
+    class _WorkingStore:
+        def __init__(self) -> None:
+            init_counter["count"] += 1
+
+        async def log(self, **kwargs: Any) -> None:
+            _ = kwargs
+            return None
+
+    monkeypatch.setattr(router_v2.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(router_v2, "_SEARCH_ROUTING_AUDIT_STORE", None)
+    monkeypatch.setattr(router_v2, "_SEARCH_ROUTING_AUDIT_DISABLED_UNTIL", 0.0)
+    monkeypatch.setattr(router_v2, "_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS", 5.0)
+    monkeypatch.setattr(router_v2, "AuditLogStore", _FailingStore)
+
+    try:
+        await router_v2._audit_search_around_compute_routing(
+            db_name="test_db",
+            branch="main",
+            endpoint_scope="objects",
+            actor="user-1",
+            link_type="owned_by",
+            target_object_types=["User"],
+            decision_metadata={"selected_backend": "index_pruning"},
+        )
+        assert init_counter["count"] == 1
+
+        await router_v2._audit_search_around_compute_routing(
+            db_name="test_db",
+            branch="main",
+            endpoint_scope="objects",
+            actor="user-1",
+            link_type="owned_by",
+            target_object_types=["User"],
+            decision_metadata={"selected_backend": "index_pruning"},
+        )
+        assert init_counter["count"] == 1
+
+        clock["now"] = 106.0
+        monkeypatch.setattr(router_v2, "AuditLogStore", _WorkingStore)
+
+        await router_v2._audit_search_around_compute_routing(
+            db_name="test_db",
+            branch="main",
+            endpoint_scope="objects",
+            actor="user-1",
+            link_type="owned_by",
+            target_object_types=["User"],
+            decision_metadata={"selected_backend": "index_pruning"},
+        )
+        assert init_counter["count"] == 2
+    finally:
+        router_v2._SEARCH_ROUTING_AUDIT_STORE = original_store
+        router_v2._SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = original_disabled_until
+        router_v2._SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = original_cooldown
 
 
 @pytest.mark.asyncio

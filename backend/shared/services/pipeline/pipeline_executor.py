@@ -547,12 +547,15 @@ class PipelineExecutor:
             return []
         prefix = f"{prefix}/"
         try:
-            objects = await self._storage_service.list_objects(bucket, prefix=prefix)
+            candidate_keys = [
+                obj.get("Key")
+                async for obj in self._iter_artifact_objects(bucket=bucket, prefix=prefix)
+                if isinstance(obj, dict) and obj.get("Key")
+            ]
         except Exception as exc:
             logger.warning("Failed to list artifact objects (bucket=%s prefix=%s): %s", bucket, prefix, exc, exc_info=True)
             return []
-        keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
-        for candidate in keys:
+        for candidate in candidate_keys:
             ext = os.path.splitext(candidate)[1].lower()
             if ext not in {".json", ".csv", ".xlsx", ".xlsm"}:
                 continue
@@ -574,6 +577,30 @@ class PipelineExecutor:
             if ext == ".json":
                 return _parse_json_bytes(candidate_bytes, max_rows=resolved_limit)
         return []
+
+    async def _iter_artifact_objects(self, *, bucket: str, prefix: str):
+        if not self._storage_service:
+            return
+        if hasattr(self._storage_service, "iter_objects"):
+            async for obj in self._storage_service.iter_objects(bucket=bucket, prefix=prefix):
+                yield obj
+            return
+        if hasattr(self._storage_service, "list_objects_paginated"):
+            token: Optional[str] = None
+            while True:
+                contents, token = await self._storage_service.list_objects_paginated(
+                    bucket=bucket,
+                    prefix=prefix,
+                    continuation_token=token,
+                )
+                for obj in contents or []:
+                    yield obj
+                if not token:
+                    break
+            return
+        objects = await self._storage_service.list_objects(bucket, prefix=prefix)
+        for obj in objects or []:
+            yield obj
 
     async def _load_fk_reference_rows(
         self,

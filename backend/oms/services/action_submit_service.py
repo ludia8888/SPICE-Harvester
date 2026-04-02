@@ -91,6 +91,7 @@ async def submit_action_request(
     Submit an async action command and return ActionSubmitResponse-compatible dict.
     """
     dataset_registry: Optional[DatasetRegistry] = None
+    action_log_registry: Optional[ActionLogRegistry] = None
     try:
         action_type_id = str(action_type_id or "").strip()
         if not action_type_id:
@@ -379,10 +380,10 @@ async def submit_action_request(
                 "observed_at": datetime.now(timezone.utc).isoformat(),
                 "targets": snapshot_targets,
             }
-        registry = ActionLogRegistry()
-        await registry.connect()
+        action_log_registry = ActionLogRegistry()
+        await action_log_registry.connect()
         effective_correlation_id = (request_correlation_id or get_correlation_id() or "").strip() or None
-        await registry.create_log(
+        await action_log_registry.create_log(
             action_log_id=action_log_id,
             db_name=db_name,
             action_type_id=action_type_id,
@@ -420,7 +421,23 @@ async def submit_action_request(
             kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
             metadata={"service": "oms", "mode": "action_writeback"},
         )
-        await event_store.append_event(envelope)
+        try:
+            await event_store.append_event(envelope)
+        except Exception as exc:
+            try:
+                await action_log_registry.mark_failed(
+                    action_log_id=str(action_log_id),
+                    result={
+                        "error": "command_append_failed",
+                        "message": str(exc),
+                    },
+                )
+            except Exception as mark_exc:
+                # Preserve the original append failure while surfacing cleanup trouble for operators.
+                raise RuntimeError(
+                    f"action_command_append_failed and action_log_mark_failed_failed: {mark_exc}"
+                ) from exc
+            raise
 
         return {
             "action_log_id": str(action_log_id),
@@ -448,3 +465,5 @@ async def submit_action_request(
     finally:
         if dataset_registry:
             await dataset_registry.close()
+        if action_log_registry:
+            await action_log_registry.close()

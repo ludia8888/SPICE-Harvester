@@ -874,7 +874,7 @@ async def bulk_create_instances_with_tracking(
         "task_id": task_id,
         "status": "accepted",
         "message": f"Bulk creation task started for {len(sanitized_instances)} instances",
-        "status_url": f"/api/v1/tasks/{task_id}/status",
+        "status_url": f"/api/v1/instances/{db_name}/async/command/{task_id}/status",
         "instance_count": len(sanitized_instances)
     }
 

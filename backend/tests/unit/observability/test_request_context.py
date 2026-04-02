@@ -17,6 +17,15 @@ def test_parse_baggage_header_best_effort():
 
 
 @pytest.mark.unit
+def test_context_from_headers_derives_principal_from_typed_headers():
+    from shared.observability.request_context import context_from_headers
+
+    context = context_from_headers({"X-Principal-Id": "alice", "X-Principal-Type": "service"})
+
+    assert context["principal"] == "service:alice"
+
+
+@pytest.mark.unit
 def test_trace_context_filter_includes_request_context_fields():
     from shared.observability.logging import TraceContextFilter
     from shared.observability.request_context import request_context
@@ -106,4 +115,3 @@ def test_event_envelope_from_command_prefers_command_metadata_over_context():
 
     assert envelope.metadata.get("request_id") == "req-cmd"
     assert envelope.metadata.get("correlation_id") == "corr-cmd"
-

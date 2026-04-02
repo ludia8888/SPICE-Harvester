@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
+from bff.services import pipeline_dataset_version_service
 from bff.services.pipeline_dataset_version_service import create_dataset_version
 
 
@@ -101,6 +102,39 @@ class _LineageStore:
         return None
 
 
+@dataclass
+class _IngestRequest:
+    ingest_request_id: str
+
+
+@dataclass
+class _IngestTransaction:
+    transaction_id: str
+
+
+class _IdempotentDatasetRegistry(_DatasetRegistry):
+    def __init__(self, *, dataset: _Dataset) -> None:
+        super().__init__(dataset=dataset)
+        self.publish_calls = 0
+
+    async def create_ingest_request(self, **kwargs: Any) -> tuple[_IngestRequest, bool]:
+        _ = kwargs
+        return _IngestRequest(ingest_request_id="ing-1"), True
+
+    async def publish_ingest_request(self, **kwargs: Any) -> Any:
+        _ = kwargs
+        self.publish_calls += 1
+        return type(
+            "_PublishedVersion",
+            (),
+            {
+                "version_id": "version-1",
+                "lakefs_commit_id": "commit-1",
+                "artifact_key": "s3://dataset-artifacts-test/commit-1/data.json",
+            },
+        )()
+
+
 @pytest.mark.asyncio
 async def test_create_dataset_version_materializes_manual_sample_to_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     class _EventStore:
@@ -165,3 +199,71 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
     assert saved["bucket"] == "dataset-artifacts-test"
     assert saved["key"] == "main/datasets/testdb/ds-1/My_Dataset/data.json"
     assert saved["data"] == sample_json
+
+
+@pytest.mark.asyncio
+async def test_create_dataset_version_does_not_mark_failed_after_successful_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = _Dataset(dataset_id="ds-2", db_name="testdb", name="My Dataset", source_type="manual")
+    registry = _IdempotentDatasetRegistry(dataset=dataset)
+    storage = _LakeFSStorageService()
+    pipeline_registry = _PipelineRegistry(storage=storage, client=object())
+    marked_failed: list[dict[str, Any]] = []
+
+    async def _fake_resolve_existing_version_or_raise(**kwargs: Any) -> None:
+        _ = kwargs
+        return None
+
+    async def _fake_persist_ingest_commit_state(**kwargs: Any) -> _IngestRequest:
+        return kwargs["ingest_request"]
+
+    async def _fake_flush_inline(**kwargs: Any) -> None:
+        _ = kwargs
+        raise RuntimeError("flush failed")
+
+    async def _fake_mark_ingest_failed(**kwargs: Any) -> None:
+        marked_failed.append(kwargs)
+
+    class _FakeOutboxBuilder:
+        def __init__(self, **kwargs: Any) -> None:
+            _ = kwargs
+
+        def version_created(self, **kwargs: Any) -> dict[str, Any]:
+            return dict(kwargs)
+
+    async def _fake_ensure_ingest_transaction(*args: Any, **kwargs: Any) -> _IngestTransaction:
+        _ = args, kwargs
+        return _IngestTransaction(transaction_id="txn-1")
+
+    async def _fake_maybe_enqueue_objectify_job(**kwargs: Any) -> None:
+        _ = kwargs
+        raise RuntimeError("enqueue failed")
+
+    monkeypatch.setattr(pipeline_dataset_version_service, "resolve_existing_version_or_raise", _fake_resolve_existing_version_or_raise)
+    monkeypatch.setattr(pipeline_dataset_version_service, "persist_ingest_commit_state", _fake_persist_ingest_commit_state)
+    monkeypatch.setattr(pipeline_dataset_version_service, "maybe_flush_dataset_ingest_outbox_inline", _fake_flush_inline)
+    monkeypatch.setattr(pipeline_dataset_version_service, "mark_ingest_failed", _fake_mark_ingest_failed)
+    monkeypatch.setattr(pipeline_dataset_version_service, "DatasetIngestOutboxBuilder", _FakeOutboxBuilder)
+    monkeypatch.setattr(pipeline_dataset_version_service.ops, "_ensure_ingest_transaction", _fake_ensure_ingest_transaction)
+    monkeypatch.setattr(pipeline_dataset_version_service.ops, "_maybe_enqueue_objectify_job", _fake_maybe_enqueue_objectify_job)
+
+    response = await create_dataset_version(
+        dataset_id=dataset.dataset_id,
+        payload={
+            "sample_json": {"rows": [{"id": "1"}]},
+            "artifact_key": "s3://dataset-artifacts-test/commit-1/datasets/testdb/ds-2/My_Dataset/data.json",
+            "lakefs_commit_id": "commit-1",
+        },
+        request=_Request(headers={"X-DB-Name": "testdb", "Idempotency-Key": "idem-ds-2"}),
+        pipeline_registry=pipeline_registry,  # type: ignore[arg-type]
+        dataset_registry=registry,
+        objectify_registry=None,
+        objectify_job_queue=None,
+        lineage_store=_LineageStore(),  # type: ignore[arg-type]
+        flush_dataset_ingest_outbox=lambda **_: None,
+        build_dataset_event_payload=lambda **_: {},
+    )
+
+    assert response["status"] == "success"
+    assert response["data"]["objectify_job_id"] is None
+    assert registry.publish_calls == 1
+    assert marked_failed == []

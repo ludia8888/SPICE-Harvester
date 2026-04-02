@@ -33,7 +33,7 @@ def resolve_principal_from_headers(
 
     principal_id = ""
     for key in principal_id_headers:
-        candidate = str(header_map.get(key) or "").strip()
+        candidate = _header_value(header_map, key)
         if candidate:
             principal_id = candidate
             break
@@ -42,7 +42,7 @@ def resolve_principal_from_headers(
 
     principal_type = ""
     for key in principal_type_headers:
-        candidate = str(header_map.get(key) or "").strip()
+        candidate = _header_value(header_map, key)
         if candidate:
             principal_type = candidate
             break
@@ -55,3 +55,13 @@ def resolve_principal_from_headers(
 def actor_label(principal_type: str, principal_id: str) -> str:
     return f"{(principal_type or 'user')}:{(principal_id or 'unknown')}"
 
+
+def _header_value(headers: Mapping[str, Any], key: str) -> str:
+    for candidate in (key, key.lower(), key.upper()):
+        value = headers.get(candidate)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""

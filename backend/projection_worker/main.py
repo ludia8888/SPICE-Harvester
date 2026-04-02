@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+from uuid import uuid4
 
 from confluent_kafka import Producer
 
@@ -1888,9 +1889,10 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                     return cached_label
                 
                 # 2. 분산 락 획득 시도 (SETNX with TTL)
+                lock_token = uuid4().hex
                 lock_acquired = await self.redis_service.client.set(
                     lock_key, 
-                    "1", 
+                    lock_token, 
                     ex=lock_timeout,  # TTL 설정으로 데드락 방지
                     nx=True  # SET if Not eXists
                 )
@@ -1945,7 +1947,19 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
                         
                     finally:
                         # 4. 락 해제 (반드시 실행)
-                        await self.redis_service.client.delete(lock_key)
+                        release_script = (
+                            "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+                            "return redis.call('DEL', KEYS[1]) else return 0 end"
+                        )
+                        try:
+                            await self.redis_service.client.eval(release_script, 1, lock_key, lock_token)
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to release class label lock safely (key=%s): %s",
+                                lock_key,
+                                exc,
+                                exc_info=True,
+                            )
                         
                 else:
                     # 5. 락 획득 실패 시 잠시 대기 후 재시도

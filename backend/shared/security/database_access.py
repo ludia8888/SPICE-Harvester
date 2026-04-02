@@ -10,6 +10,7 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.errors.infra_errors import RegistryUnavailableError
+from shared.security.principal_utils import resolve_principal_from_headers
 from shared.services.registries.runtime_ddl import (
     allow_runtime_ddl_bootstrap,
     find_missing_schema_objects,
@@ -82,14 +83,14 @@ class DatabaseAccessInspection:
 
 
 def resolve_database_actor(headers: Mapping[str, str]) -> Tuple[str, str]:
-    principal_type = (headers.get("X-User-Type") or "user").strip().lower() or "user"
-    principal_id = (
-        headers.get("X-User-ID")
-        or headers.get("X-User")
-        or headers.get("X-User-Id")
-        or ""
-    ).strip() or "system"
-    return principal_type, principal_id
+    return resolve_principal_from_headers(
+        headers,
+        principal_id_headers=("X-User-ID", "X-User", "X-User-Id", "X-Principal-Id", "X-Principal-ID"),
+        principal_type_headers=("X-User-Type", "X-Principal-Type", "X-Principal-TYPE"),
+        default_principal_type="user",
+        default_principal_id="system",
+        allowed_principal_types={"user", "service"},
+    )
 
 
 def normalize_database_role(value: Optional[str]) -> Optional[str]:

@@ -88,3 +88,14 @@ async def test_process_events_propagates_checkpoint_load_failures() -> None:
 
     with pytest.raises(RuntimeError, match="checkpoint unavailable"):
         await EventPublisher.process_events(publisher)
+
+
+def test_s3_client_kwargs_derive_tls_from_endpoint_scheme() -> None:
+    publisher = EventPublisher.__new__(EventPublisher)
+    publisher.endpoint_url = "https://minio.example.com"
+    publisher.access_key = "access"
+    publisher.secret_key = "secret"
+
+    kwargs = EventPublisher._s3_client_kwargs(publisher)
+
+    assert kwargs["use_ssl"] is True

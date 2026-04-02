@@ -1,3 +1,4 @@
+from shared.security.database_access import resolve_database_actor
 from shared.security.principal_utils import actor_label, resolve_principal_from_headers
 
 
@@ -42,3 +43,8 @@ def test_resolve_principal_uses_custom_header_keys() -> None:
 def test_actor_label_defaults() -> None:
     assert actor_label("", "") == "user:unknown"
 
+
+def test_resolve_database_actor_uses_shared_header_resolution() -> None:
+    headers = {"x-principal-id": "svc-1", "x-principal-type": "service"}
+
+    assert resolve_database_actor(headers) == ("service", "svc-1")

@@ -144,6 +144,63 @@ class DatasetRegistry(PostgresSchemaRegistry):
         return row_to_backing_version(row)
 
     @staticmethod
+    def _resolve_version_schema_hash(
+        *,
+        sample_json: Optional[Dict[str, Any]],
+        schema_json: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if isinstance(sample_json, dict) and isinstance(sample_json.get("columns"), list):
+            return compute_schema_hash(sample_json.get("columns") or [])
+        if isinstance(schema_json, dict) and isinstance(schema_json.get("columns"), list):
+            return compute_schema_hash(schema_json.get("columns") or [])
+        return None
+
+    async def _upsert_backing_version_for_dataset_version(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        dataset_id: str,
+        dataset_version_id: str,
+        artifact_key: Optional[str],
+        schema_hash: Optional[str],
+    ) -> None:
+        if not schema_hash:
+            return
+        backing = await conn.fetchrow(
+            f"""
+            SELECT backing_id
+            FROM {self._schema}.backing_datasources
+            WHERE dataset_id = $1::uuid
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            dataset_id,
+        )
+        if not backing:
+            return
+        metadata_payload = normalize_json_payload({"artifact_key": artifact_key} if artifact_key else {})
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO {self._schema}.backing_datasource_versions (
+                backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key, metadata
+            ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)
+            ON CONFLICT (backing_id, dataset_version_id) DO UPDATE
+              SET schema_hash = EXCLUDED.schema_hash,
+                  artifact_key = EXCLUDED.artifact_key,
+                  metadata = EXCLUDED.metadata
+            RETURNING backing_version_id
+            """,
+            str(uuid4()),
+            str(backing["backing_id"]),
+            dataset_version_id,
+            schema_hash,
+            artifact_key,
+            metadata_payload,
+        )
+        if not row:
+            raise RuntimeError("Failed to upsert backing datasource version")
+
+    @staticmethod
     def _row_to_key_spec(row: asyncpg.Record) -> KeySpecRecord:
         return row_to_key_spec(row)
 
@@ -1233,36 +1290,47 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_payload = None
         if schema_json is not None:
             schema_payload = normalize_json_payload(schema_json)
+        schema_hash = self._resolve_version_schema_hash(sample_json=sample_json, schema_json=schema_json)
 
         async with self._pool.acquire() as conn:
-            if schema_payload is not None:
-                await conn.execute(
+            async with conn.transaction():
+                if schema_payload is not None:
+                    await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.datasets
+                        SET schema_json = $2::jsonb, updated_at = NOW()
+                        WHERE dataset_id = $1
+                        """,
+                        dataset_id,
+                        schema_payload,
+                    )
+                row = await conn.fetchrow(
                     f"""
-                    UPDATE {self._schema}.datasets
-                    SET schema_json = $2::jsonb, updated_at = NOW()
-                    WHERE dataset_id = $1
+                    INSERT INTO {self._schema}.dataset_versions (
+                        version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                        ingest_request_id, promoted_from_artifact_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, $8::uuid)
+                    RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                              ingest_request_id, promoted_from_artifact_id, created_at
                     """,
+                    version_id,
                     dataset_id,
-                    schema_payload,
+                    lakefs_commit_id,
+                    artifact_key,
+                    row_count,
+                    sample_payload,
+                    ingest_request_id,
+                    promoted_from_artifact_id,
                 )
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.dataset_versions (
-                    version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                    ingest_request_id, promoted_from_artifact_id
-                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, $8::uuid)
-                RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                          ingest_request_id, promoted_from_artifact_id, created_at
-                """,
-                version_id,
-                dataset_id,
-                lakefs_commit_id,
-                artifact_key,
-                row_count,
-                sample_payload,
-                ingest_request_id,
-                promoted_from_artifact_id,
-            )
+                if not row:
+                    raise RuntimeError("Failed to create dataset version")
+                await self._upsert_backing_version_for_dataset_version(
+                    conn,
+                    dataset_id=dataset_id,
+                    dataset_version_id=str(row["version_id"]),
+                    artifact_key=artifact_key,
+                    schema_hash=schema_hash,
+                )
             if not row:
                 raise RuntimeError("Failed to create dataset version")
             record = DatasetVersionRecord(
@@ -1278,24 +1346,6 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 ),
                 created_at=row["created_at"],
             )
-
-        try:
-            backing = await self.get_backing_datasource_by_dataset(dataset_id=dataset_id)
-            if backing:
-                schema_hash = None
-                if isinstance(sample_json, dict) and isinstance(sample_json.get("columns"), list):
-                    schema_hash = compute_schema_hash(sample_json.get("columns") or [])
-                elif isinstance(schema_json, dict) and isinstance(schema_json.get("columns"), list):
-                    schema_hash = compute_schema_hash(schema_json.get("columns") or [])
-                if schema_hash:
-                    await self.get_or_create_backing_datasource_version(
-                        backing_id=backing.backing_id,
-                        dataset_version_id=record.version_id,
-                        schema_hash=schema_hash,
-                        metadata={"artifact_key": record.artifact_key} if record.artifact_key else None,
-                    )
-        except Exception as exc:
-            logger.warning("Failed to create backing datasource version: %s", exc)
 
         return record
 
@@ -3701,6 +3751,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_payload = None
         if schema_json is not None:
             schema_payload = normalize_json_payload(schema_json)
+        schema_hash = self._resolve_version_schema_hash(sample_json=sample_json, schema_json=schema_json)
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
@@ -3725,6 +3776,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 )
                 if existing:
                     dataset_version_id = str(existing["version_id"])
+                    await self._upsert_backing_version_for_dataset_version(
+                        conn,
+                        dataset_id=dataset_id,
+                        dataset_version_id=dataset_version_id,
+                        artifact_key=artifact_key,
+                        schema_hash=schema_hash,
+                    )
                     await conn.execute(
                         f"""
                         UPDATE {self._schema}.dataset_ingest_requests
@@ -3811,15 +3869,41 @@ class DatasetRegistry(PostgresSchemaRegistry):
                         SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
                                ingest_request_id, promoted_from_artifact_id, created_at
                         FROM {self._schema}.dataset_versions
-                        WHERE dataset_id = $1 AND lakefs_commit_id = $2
+                        WHERE ingest_request_id = $1::uuid
                         LIMIT 1
                         """,
-                        dataset_id,
-                        lakefs_commit_id,
+                        ingest_request_id,
                     )
+                    if not existing:
+                        existing = await conn.fetchrow(
+                            f"""
+                            SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                                   ingest_request_id, promoted_from_artifact_id, created_at
+                            FROM {self._schema}.dataset_versions
+                            WHERE dataset_id = $1 AND lakefs_commit_id = $2
+                            LIMIT 1
+                            """,
+                            dataset_id,
+                            lakefs_commit_id,
+                        )
+                    if (
+                        existing
+                        and existing["ingest_request_id"]
+                        and str(existing["ingest_request_id"]) != ingest_request_id
+                    ):
+                        raise RuntimeError(
+                            "dataset version already linked to a different ingest_request_id"
+                        )
                     if not existing:
                         raise
                     dataset_version_id = str(existing["version_id"])
+                    await self._upsert_backing_version_for_dataset_version(
+                        conn,
+                        dataset_id=dataset_id,
+                        dataset_version_id=dataset_version_id,
+                        artifact_key=artifact_key,
+                        schema_hash=schema_hash,
+                    )
                     await conn.execute(
                         f"""
                         UPDATE {self._schema}.dataset_ingest_requests
@@ -3891,6 +3975,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
                 if not row:
                     raise RuntimeError("Failed to publish dataset version")
                 dataset_version_id = str(row["version_id"])
+                await self._upsert_backing_version_for_dataset_version(
+                    conn,
+                    dataset_id=dataset_id,
+                    dataset_version_id=dataset_version_id,
+                    artifact_key=artifact_key,
+                    schema_hash=schema_hash,
+                )
                 await conn.execute(
                     f"""
                     UPDATE {self._schema}.dataset_ingest_requests

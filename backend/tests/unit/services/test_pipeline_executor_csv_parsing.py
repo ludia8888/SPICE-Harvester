@@ -43,8 +43,14 @@ class _DatasetRegistry:
 
 
 class _StorageService:
-    def __init__(self, objects: dict[tuple[str, str], bytes]) -> None:
+    def __init__(
+        self,
+        objects: dict[tuple[str, str], bytes],
+        *,
+        paginated_objects: Optional[dict[tuple[str, str], list[list[dict[str, Any]]]]] = None,
+    ) -> None:
         self._objects = dict(objects)
+        self._paginated_objects = paginated_objects or {}
 
     async def load_bytes_lines(self, bucket: str, key: str, *, max_lines: int, max_bytes=None) -> bytes:  # noqa: ANN001
         # The executor only needs a small head sample for CSV parsing tests.
@@ -58,6 +64,22 @@ class _StorageService:
 
     async def list_objects(self, bucket: str, prefix: str):  # noqa: ANN001
         return []
+
+    async def list_objects_paginated(
+        self,
+        bucket: str,
+        prefix: str,
+        *,
+        continuation_token: Optional[str] = None,
+        max_keys: int = 1000,
+    ):  # noqa: ANN001
+        _ = max_keys
+        pages = self._paginated_objects.get((bucket, prefix), [])
+        page_index = int(continuation_token or 0)
+        if page_index >= len(pages):
+            return [], None
+        next_token = str(page_index + 1) if page_index + 1 < len(pages) else None
+        return pages[page_index], next_token
 
 
 @pytest.mark.unit
@@ -140,3 +162,57 @@ async def test_executor_parses_quoted_csv_headers_and_joins_correctly() -> None:
     preview = await executor.preview(definition=definition, db_name=db_name, node_id="out", limit=20)
     assert preview["row_count"] == 1
     assert preview["rows"] == [{"order_id": "o1", "customer_unique_id": "u1"}]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_executor_lists_artifact_directories_across_pages() -> None:
+    db_name = "demo"
+    dataset_name = "paged"
+    dataset_id = "ds-paged"
+    bucket = "raw-datasets"
+    prefix_key = "datasets/paged"
+    artifact_file = "datasets/paged/part-1001.json"
+
+    registry = _DatasetRegistry()
+    registry.datasets_by_name[(db_name, dataset_name, "main")] = _Dataset(
+        dataset_id=dataset_id,
+        db_name=db_name,
+        name=dataset_name,
+        branch="main",
+        schema_json={"columns": [{"name": "customer_id", "type": "xsd:string"}]},
+    )
+    registry.versions_by_dataset_id[dataset_id] = _Version(
+        dataset_id=dataset_id,
+        artifact_key=f"s3://{bucket}/{prefix_key}",
+        sample_json={},
+    )
+
+    executor = PipelineExecutor(
+        dataset_registry=registry,
+        storage_service=_StorageService(
+            {
+                (bucket, artifact_file): b'[{"customer_id":"c-1001"}]',
+            },
+            paginated_objects={
+                (bucket, f"{prefix_key}/"): [
+                    [{"Key": "datasets/paged/part-0001.txt"}],
+                    [{"Key": artifact_file}],
+                ]
+            },
+        ),  # type: ignore[arg-type]
+    )
+
+    definition = {
+        "__preview_meta__": {"sample_limit": 10},
+        "nodes": [
+            {"id": "in", "type": "input", "metadata": {"datasetName": dataset_name}},
+            {"id": "out", "type": "output"},
+        ],
+        "edges": [{"from": "in", "to": "out"}],
+    }
+
+    preview = await executor.preview(definition=definition, db_name=db_name, node_id="out", limit=20)
+
+    assert preview["row_count"] == 1
+    assert preview["rows"] == [{"customer_id": "c-1001"}]

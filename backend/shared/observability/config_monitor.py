@@ -142,25 +142,25 @@ class ConfigurationMonitor:
         # Database connection validation
         self.validation_rules.extend([
             ConfigValidationRule(
-                name="database_port_range",
+                name="postgres_port_range",
                 description="Database port should be in valid range",
-                key_pattern="database.port",
+                key_pattern="database.postgres.port",
                 validator=lambda x: isinstance(x, int) and 1024 <= x <= 65535,
                 severity=ConfigSeverity.WARNING,
                 recommendation="Use ports between 1024-65535 for database connections"
             ),
             ConfigValidationRule(
-                name="database_host_not_localhost_in_prod",
+                name="postgres_host_not_localhost_in_prod",
                 description="Database host should not be localhost in production",
-                key_pattern="database.host",
+                key_pattern="database.postgres.host",
                 validator=lambda x: not (self.settings.is_production and x in ["localhost", "127.0.0.1"]),
                 severity=ConfigSeverity.ERROR,
                 recommendation="Use proper database host in production environment"
             ),
             ConfigValidationRule(
-                name="strong_database_password",
+                name="strong_postgres_password",
                 description="Database password should be strong in production",
-                key_pattern="database.password",
+                key_pattern="database.postgres.password",
                 validator=lambda x: not self.settings.is_production or (isinstance(x, str) and len(x) >= 12),
                 severity=ConfigSeverity.CRITICAL,
                 recommendation="Use strong passwords (12+ characters) in production"
@@ -180,22 +180,10 @@ class ConfigurationMonitor:
             ConfigValidationRule(
                 name="redis_auth_in_prod",
                 description="Redis should have authentication in production",
-                key_pattern="services.redis_password",
+                key_pattern="database.redis.password",
                 validator=lambda x: not self.settings.is_production or (x is not None and len(str(x)) > 0),
                 severity=ConfigSeverity.WARNING,
                 recommendation="Enable Redis authentication in production"
-            )
-        ])
-        
-        # Performance validation
-        self.validation_rules.extend([
-            ConfigValidationRule(
-                name="redis_connection_pooling",
-                description="Redis connection pool should be configured properly",
-                key_pattern="services.redis_max_connections",
-                validator=lambda x: isinstance(x, int) and x >= 10,
-                severity=ConfigSeverity.INFO,
-                recommendation="Configure adequate Redis connection pool size"
             )
         ])
     
@@ -210,39 +198,51 @@ class ConfigurationMonitor:
     
     def get_config_snapshot(self) -> Dict[str, Any]:
         """Get current configuration snapshot"""
-        # Convert settings to dictionary for comparison
-        config_dict = {}
-        
-        # Basic settings
-        config_dict["environment"] = self.settings.environment.value
-        config_dict["debug"] = self.settings.debug
-        
-        # Database settings (prefer postgres_* fields from DatabaseSettings)
+        return self._build_snapshot(include_sensitive=False)
+
+    def _build_snapshot(self, *, include_sensitive: bool) -> Dict[str, Any]:
         db_settings = self.settings.database
-        config_dict["database"] = {
-            "host": getattr(db_settings, "host", None) or getattr(db_settings, "postgres_host", None),
-            "port": getattr(db_settings, "port", None) or getattr(db_settings, "postgres_port", None),
-            "name": getattr(db_settings, "name", None) or getattr(db_settings, "postgres_db", None),
-            "user": getattr(db_settings, "user", None) or getattr(db_settings, "postgres_user", None),
-            # Don't include password in snapshot for security
-        }
-        
-        # Service settings
         service_settings = self.settings.services
-        config_dict["services"] = {
-            "oms_base_url": getattr(service_settings, "oms_base_url", None),
-            "bff_base_url": getattr(service_settings, "bff_base_url", None),
-            "agent_base_url": getattr(service_settings, "agent_base_url", None),
-            "funnel_runtime": "internal",
-            "redis_host": getattr(self.settings.database, "redis_host", None),
-            "redis_port": getattr(self.settings.database, "redis_port", None),
-            "redis_db": getattr(self.settings.database, "redis_db", None),
-            "elasticsearch_host": getattr(self.settings.database, "elasticsearch_host", None),
-            "elasticsearch_port": getattr(self.settings.database, "elasticsearch_port", None),
-            "elasticsearch_username": getattr(self.settings.database, "elasticsearch_username", None),
-            # Don't include passwords/keys in snapshot for security
+        observability_settings = self.settings.observability
+
+        config_dict = {
+            "environment": self.settings.environment.value,
+            "debug": self.settings.debug,
+            "database": {
+                "postgres": {
+                    "host": db_settings.postgres_host,
+                    "port": db_settings.postgres_port,
+                    "name": db_settings.postgres_db,
+                    "user": db_settings.postgres_user,
+                    "password": db_settings.postgres_password if include_sensitive else None,
+                },
+                "redis": {
+                    "host": db_settings.redis_host,
+                    "port": db_settings.redis_port,
+                    "password": db_settings.redis_password if include_sensitive else None,
+                },
+                "elasticsearch": {
+                    "host": db_settings.elasticsearch_host,
+                    "port": db_settings.elasticsearch_port,
+                    "username": db_settings.elasticsearch_username,
+                    "password": db_settings.elasticsearch_password if include_sensitive else None,
+                    "request_timeout": db_settings.elasticsearch_request_timeout,
+                },
+            },
+            "services": {
+                "oms_base_url": service_settings.oms_base_url,
+                "bff_base_url": service_settings.bff_base_url,
+                "agent_base_url": service_settings.agent_base_url,
+                "use_https": service_settings.use_https,
+                "verify_ssl": service_settings.verify_ssl,
+            },
+            "observability": {
+                "log_level": observability_settings.log_level,
+                "enable_lineage": observability_settings.enable_lineage,
+                "enable_audit_logs": observability_settings.enable_audit_logs,
+                "otel_enable_tracing": observability_settings.otel_enable_tracing,
+            },
         }
-        
         return config_dict
     
     def calculate_config_hash(self, config_dict: Dict[str, Any]) -> str:
@@ -377,7 +377,7 @@ class ConfigurationMonitor:
     def validate_configuration(self) -> List[Dict[str, Any]]:
         """Validate current configuration against rules"""
         violations = []
-        config_snapshot = self.get_config_snapshot()
+        config_snapshot = self._build_snapshot(include_sensitive=True)
         
         for rule in self.validation_rules:
             try:
@@ -465,15 +465,13 @@ class ConfigurationMonitor:
         
         # Check database password strength
         if self.settings.is_production:
-            db_password = getattr(self.settings.database, 'password', None)
-            if db_password is None:
-                db_password = getattr(self.settings.database, 'postgres_password', '')
+            db_password = getattr(self.settings.database, 'postgres_password', '')
             if not db_password or len(db_password) < 12:
                 issues.append({
                     "type": "weak_database_password",
                     "severity": "critical",
                     "description": "Database password is weak or missing in production",
-                    "key_path": "database.password",
+                    "key_path": "database.postgres.password",
                     "risk_level": "high"
                 })
                 recommendations.append("Use strong database passwords (12+ characters) in production")
@@ -529,7 +527,7 @@ class ConfigurationMonitor:
                     "type": "redis_no_auth",
                     "severity": "warning",
                     "description": "Redis authentication is not configured in production",
-                    "key_path": "services.redis_password",
+                    "key_path": "database.redis.password",
                     "risk_level": "medium"
                 })
                 recommendations.append("Enable Redis authentication in production")

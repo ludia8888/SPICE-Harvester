@@ -14,11 +14,7 @@ from oms.routers._event_sourcing import append_event_sourcing_command, build_com
 from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
-from shared.security.database_access import (
-    DatabaseAccessRegistryUnavailableError,
-    list_database_names,
-    upsert_database_owner,
-)
+from shared.security.database_access import DatabaseAccessRegistryUnavailableError, list_database_names
 from shared.config.app_config import AppConfig
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
@@ -26,23 +22,6 @@ from shared.observability.tracing import trace_endpoint
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database", tags=["Database Management"])
-
-
-async def _sync_database_owner_best_effort(*, db_name: str) -> None:
-    try:
-        await upsert_database_owner(
-            db_name=db_name,
-            principal_type="user",
-            principal_id="system",
-            principal_name="system",
-        )
-    except Exception as exc:
-        logger.warning(
-            "Database access owner sync failed for %s after authoritative command acceptance: %s",
-            db_name,
-            exc,
-            exc_info=True,
-        )
 
 
 # Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
@@ -133,9 +112,6 @@ async def create_database(
                 extra={"db_name": db_name},
             ),
         )
-
-        # Foundry-style runtime stores project namespace/access in Postgres.
-        await _sync_database_owner_best_effort(db_name=db_name)
 
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,

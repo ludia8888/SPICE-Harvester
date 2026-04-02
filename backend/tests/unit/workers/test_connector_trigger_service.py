@@ -191,6 +191,43 @@ async def test_trigger_service_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_trigger_service_is_due_uses_default_when_polling_interval_is_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
+    service = ConnectorTriggerService()
+    registry = _FakeRegistry()
+    service.registry = registry
+
+    source = ConnectorSource(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        enabled=True,
+        config_json={"polling_interval": "not-a-number"},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.sync_state = SyncState(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        last_seen_cursor=None,
+        last_emitted_seq=0,
+        last_polled_at=datetime.now(timezone.utc) - timedelta(seconds=301),
+        last_success_at=None,
+        last_failure_at=None,
+        last_error=None,
+        attempt_count=0,
+        rate_limit_until=None,
+        next_retry_at=None,
+        last_command_id=None,
+        sync_state_json={},
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    assert await service._is_due(source) is True
+
+
+@pytest.mark.asyncio
 async def test_trigger_service_poll_source_uses_adapter_and_records_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
     monkeypatch.setattr(trigger_module, "ConnectorAdapterFactory", _FakeAdapterFactory)

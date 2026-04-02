@@ -511,7 +511,7 @@ def _apply_compute(ctx: _SparkTransformContext) -> DataFrame:
         target_clean = target_candidate.strip().lstrip("\ufeff")
         if target_clean.startswith("`") and target_clean.endswith("`") and len(target_clean) > 1:
             target_clean = target_clean[1:-1].replace("``", "`")
-        if target_clean and target_clean not in df.columns:
+        if target_clean:
             return df.withColumn(target_clean, F.expr(formula_candidate.replace("\ufeff", "")))
     return df.withColumn("computed", F.expr(expr))
 
@@ -966,34 +966,37 @@ def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
     code = str(ctx.metadata.get("__resolved_udf_code") or "").strip()
     if not code:
         raise ValueError("udf requires resolved code (__resolved_udf_code)")
-    fn = compile_udf(code)
-    # Resolve a stable output schema from a bounded sample before distributing execution.
-    # Foundry custom functions are row-in/row-out with deterministic contract; fail-fast
-    # when schema drifts across rows.
-    sample_rows = source.limit(128).collect()
-    if not sample_rows:
+    if not source.limit(1).collect():
         return source.limit(0)
 
-    expected_keys: Optional[tuple[str, ...]] = None
-    sampled_outputs: List[Dict[str, Any]] = []
-    for row in sample_rows:
-        transformed_rows = fn(row.asDict(recursive=True))
-        for transformed in transformed_rows:
+    code_bc = source.sparkSession.sparkContext.broadcast(code)
+    try:
+        def _sample_partition(rows: Any) -> Any:
+            local_fn = compile_udf(code_bc.value)
+            for row in rows:
+                transformed_rows = local_fn(row.asDict(recursive=True))
+                for transformed in transformed_rows:
+                    yield dict(transformed)
+
+        sampled_outputs = source.rdd.mapPartitions(_sample_partition).take(128)
+        if not sampled_outputs:
+            return source.limit(0)
+
+        expected_keys: Optional[tuple[str, ...]] = None
+        for transformed in sampled_outputs:
             transformed_keys = tuple(transformed.keys())
             if expected_keys is None:
                 expected_keys = transformed_keys
             elif transformed_keys != expected_keys:
                 raise ValueError("udf must return a consistent output schema for every row")
-            sampled_outputs.append(dict(transformed))
 
-    if expected_keys is None or not sampled_outputs:
-        return source.limit(0)
-    normalized_sampled = [{key: payload.get(key) for key in expected_keys} for payload in sampled_outputs]
-    sampled_schema = source.sparkSession.createDataFrame(normalized_sampled).schema
+        if expected_keys is None:
+            return source.limit(0)
 
-    code_bc = source.sparkSession.sparkContext.broadcast(code)
-    expected_keys_bc = source.sparkSession.sparkContext.broadcast(expected_keys)
-    try:
+        normalized_sampled = [{key: payload.get(key) for key in expected_keys} for payload in sampled_outputs]
+        sampled_schema = source.sparkSession.createDataFrame(normalized_sampled).schema
+        expected_keys_bc = source.sparkSession.sparkContext.broadcast(expected_keys)
+
         def _map_partition(rows: Any) -> Any:
             local_fn = compile_udf(code_bc.value)
             local_expected_keys = expected_keys_bc.value
@@ -1008,7 +1011,8 @@ def _apply_udf(ctx: _SparkTransformContext) -> DataFrame:
         return source.sparkSession.createDataFrame(transformed_rdd, schema=sampled_schema)
     finally:
         code_bc.unpersist(blocking=False)
-        expected_keys_bc.unpersist(blocking=False)
+        if "expected_keys_bc" in locals():
+            expected_keys_bc.unpersist(blocking=False)
 
 
 _HANDLERS: Dict[str, SparkTransformHandler] = {
