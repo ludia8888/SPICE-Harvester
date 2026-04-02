@@ -165,12 +165,15 @@ async def get_background_task_manager(
     """FastAPI dependency to get BackgroundTaskManager instance."""
     try:
         if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
-            return await container.get(BackgroundTaskManager)
+            task_manager = await container.get(BackgroundTaskManager)
+            await task_manager.start()
+            return task_manager
 
         container.ensure_singleton(RedisService, create_redis_service)
         redis_service = await container.get(RedisService)
 
         task_manager = create_background_task_manager(redis_service)
+        await task_manager.start()
         container.ensure_instance(BackgroundTaskManager, task_manager)
         return await container.get(BackgroundTaskManager)
     except Exception as e:

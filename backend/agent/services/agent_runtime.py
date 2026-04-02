@@ -912,6 +912,8 @@ class AgentRuntime:
             "x-admin-token",
             "authorization",
             "x-request-id",
+            "idempotency-key",
+            "x-agent-session-id",
         }
         output = {
             key: value for key, value in headers.items() if key.lower() in allowlist and value

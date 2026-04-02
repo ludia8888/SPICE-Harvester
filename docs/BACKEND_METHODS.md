@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-04-02T19:25:39+09:00
+> Generated: 2026-04-02T20:31:37+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -131,17 +131,18 @@
   - `_resolve_principal(request)` (line 24): no docstring
   - `_resolve_tenant_id(request)` (line 29): no docstring
   - `_actor_label(principal_type, principal_id)` (line 36): no docstring
-  - `_request_meta(request, body)` (line 40): no docstring
-  - `_step_id(index)` (line 48): no docstring
-  - `_resolve_tool_id(tool_call)` (line 52): no docstring
-  - `_extract_plan_id(context)` (line 61): no docstring
-  - `_extract_plan_snapshot(context)` (line 75): no docstring
-  - `_extract_risk_level(context)` (line 84): no docstring
-  - `async _record_run_start(agent_registry, run_id, tenant_id, actor, requester, delegated_actor, body, request_meta)` (line 91): no docstring
-  - `async _execute_agent_run(runtime, state, request_id, agent_registry, tenant_id)` (line 139): no docstring
-  - `async create_agent_run(request, body)` (line 240): no docstring
-  - `async get_agent_run(request, run_id, include_events, limit)` (line 332): no docstring
-  - `async list_agent_run_events(request, run_id, limit, offset)` (line 428): no docstring
+  - `_require_event_store(request)` (line 40): no docstring
+  - `_request_meta(request, body)` (line 51): no docstring
+  - `_step_id(index)` (line 59): no docstring
+  - `_resolve_tool_id(tool_call)` (line 63): no docstring
+  - `_extract_plan_id(context)` (line 72): no docstring
+  - `_extract_plan_snapshot(context)` (line 86): no docstring
+  - `_extract_risk_level(context)` (line 95): no docstring
+  - `async _record_run_start(agent_registry, run_id, tenant_id, actor, requester, delegated_actor, body, request_meta)` (line 102): no docstring
+  - `async _execute_agent_run(runtime, state, request_id, agent_registry, tenant_id)` (line 150): no docstring
+  - `async create_agent_run(request, body)` (line 257): no docstring
+  - `async get_agent_run(request, run_id, include_events, limit)` (line 354): no docstring
+  - `async list_agent_run_events(request, run_id, limit, offset)` (line 450): no docstring
 
 ### `backend/agent/services/__init__.py`
 
@@ -218,17 +219,17 @@
     - `_preview_payload(self, obj)` (line 881): no docstring
     - `_payload_size(self, obj)` (line 886): no docstring
     - `_forward_headers(self, headers, actor)` (line 893): no docstring
-    - `_resolve_status_url(self, command_id, payload)` (line 938): no docstring
-    - `_resolve_ws_token(self, request_headers)` (line 948): no docstring
-    - `_resolve_ws_url(self, command_id, token)` (line 964): no docstring
-    - `_update_progress_context(self, context, command_id, status, progress_payload)` (line 977): no docstring
-    - `async _fetch_command_status(self, status_url, actor, request_headers)` (line 996): no docstring
-    - `async _wait_for_command_completion(self, run_id, actor, step_index, attempt, command_id, initial_payload, request_id, request_headers, context)` (line 1018): no docstring
-    - `_update_pipeline_progress_context(self, context, pipeline_id, job_id, build_rid, status, build_payload)` (line 1157): no docstring
-    - `async _fetch_orchestration_build(self, build_rid, actor, request_headers)` (line 1186): no docstring
-    - `async _wait_for_pipeline_run_completion(self, run_id, actor, step_index, attempt, pipeline_id, job_id, build_rid, initial_payload, request_id, request_headers, context)` (line 1212): no docstring
-    - `async record_event(self, event_type, run_id, actor, status, data, request_id, step_index, resource_type, resource_id, error)` (line 1321): no docstring
-    - `async execute_tool_call(self, run_id, actor, step_index, attempt, tool_call, context, dry_run, request_headers, request_id)` (line 1371): no docstring
+    - `_resolve_status_url(self, command_id, payload)` (line 940): no docstring
+    - `_resolve_ws_token(self, request_headers)` (line 950): no docstring
+    - `_resolve_ws_url(self, command_id, token)` (line 966): no docstring
+    - `_update_progress_context(self, context, command_id, status, progress_payload)` (line 979): no docstring
+    - `async _fetch_command_status(self, status_url, actor, request_headers)` (line 998): no docstring
+    - `async _wait_for_command_completion(self, run_id, actor, step_index, attempt, command_id, initial_payload, request_id, request_headers, context)` (line 1020): no docstring
+    - `_update_pipeline_progress_context(self, context, pipeline_id, job_id, build_rid, status, build_payload)` (line 1159): no docstring
+    - `async _fetch_orchestration_build(self, build_rid, actor, request_headers)` (line 1188): no docstring
+    - `async _wait_for_pipeline_run_completion(self, run_id, actor, step_index, attempt, pipeline_id, job_id, build_rid, initial_payload, request_id, request_headers, context)` (line 1214): no docstring
+    - `async record_event(self, event_type, run_id, actor, status, data, request_id, step_index, resource_type, resource_id, error)` (line 1323): no docstring
+    - `async execute_tool_call(self, run_id, actor, step_index, attempt, tool_call, context, dry_run, request_headers, request_id)` (line 1373): no docstring
 
 ## analysis
 
@@ -1767,9 +1768,9 @@
   - `_coerce_sort_timestamp(doc)` (line 298): no docstring
   - `_sort_instances_desc(instances)` (line 316): no docstring
   - `async list_class_instances(db_name, class_id, request_headers, base_branch, overlay_branch, branch, limit, offset, search, status_filter, action_type_id, submitted_by, elasticsearch_service, dataset_registry, action_logs)` (line 325): no docstring
-  - `async get_class_sample_values(db_name, class_id, property_name, base_branch, branch, limit, elasticsearch_service, dataset_registry)` (line 582): no docstring
-  - `async _server_merge_fallback(db_name, class_id, instance_id, resolved_base_branch, resolved_overlay_branch, writeback_enabled, dataset_registry)` (line 696): no docstring
-  - `async get_instance_detail(db_name, class_id, instance_id, request_headers, base_branch, overlay_branch, branch, elasticsearch_service, dataset_registry, action_logs)` (line 764): no docstring
+  - `async get_class_sample_values(db_name, class_id, property_name, base_branch, branch, limit, elasticsearch_service, dataset_registry)` (line 581): no docstring
+  - `async _server_merge_fallback(db_name, class_id, instance_id, resolved_base_branch, resolved_overlay_branch, writeback_enabled, dataset_registry)` (line 695): no docstring
+  - `async get_instance_detail(db_name, class_id, instance_id, request_headers, base_branch, overlay_branch, branch, elasticsearch_service, dataset_registry, action_logs)` (line 763): no docstring
 - **Classes**
   - `OverlayContext` (line 46): no docstring
 
@@ -2944,30 +2945,34 @@
 
 ### `backend/bff/tests/test_pipeline_catalog_service.py`
 - **Functions**
-  - `async _noop_async(*args, **kwargs)` (line 135): no docstring
-  - `_noop_sync(*args, **kwargs)` (line 140): no docstring
-  - `async test_create_pipeline_reuses_existing_record_for_same_idempotency_key(monkeypatch)` (line 146): no docstring
-  - `async test_create_pipeline_rejects_same_idempotency_key_with_different_payload(monkeypatch)` (line 185): no docstring
+  - `async _noop_async(*args, **kwargs)` (line 152): no docstring
+  - `_noop_sync(*args, **kwargs)` (line 157): no docstring
+  - `async test_create_pipeline_reuses_existing_record_for_same_idempotency_key(monkeypatch)` (line 163): no docstring
+  - `async test_create_pipeline_rejects_same_idempotency_key_with_different_payload(monkeypatch)` (line 202): no docstring
+  - `async test_idempotent_resume_does_not_grant_admin_before_equivalence_checks(monkeypatch)` (line 237): no docstring
+  - `async test_create_pipeline_recovers_when_permission_grant_fails_after_row_create(monkeypatch)` (line 277): no docstring
+  - `async test_create_pipeline_recovers_when_add_version_fails_after_row_create(monkeypatch)` (line 307): no docstring
+  - `async test_create_pipeline_recovers_when_dependencies_fail_after_row_create(monkeypatch)` (line 337): no docstring
 - **Classes**
   - `_Request` (line 14): no docstring
   - `_PipelineRecord` (line 19): no docstring
   - `_PipelineVersion` (line 40): no docstring
   - `_PipelineRegistry` (line 46): no docstring
     - `__init__(self)` (line 47): no docstring
-    - `async create_pipeline(self, **kwargs)` (line 55): no docstring
-    - `async get_pipeline(self, pipeline_id)` (line 86): no docstring
-    - `async grant_permission(self, **kwargs)` (line 89): no docstring
-    - `async add_version(self, pipeline_id, branch, definition_json)` (line 93): no docstring
-    - `async get_latest_version(self, pipeline_id, branch)` (line 104): no docstring
-    - `async replace_dependencies(self, pipeline_id, dependencies)` (line 108): no docstring
-    - `async list_dependencies(self, pipeline_id)` (line 111): no docstring
-  - `_AuditStore` (line 115): no docstring
-    - `__init__(self)` (line 116): no docstring
-    - `async log(self, **kwargs)` (line 119): no docstring
-  - `_EventStore` (line 123): no docstring
-    - `__init__(self)` (line 124): no docstring
-    - `async connect(self)` (line 127): no docstring
-    - `async append_event(self, event)` (line 130): no docstring
+    - `async create_pipeline(self, **kwargs)` (line 60): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 91): no docstring
+    - `async grant_permission(self, **kwargs)` (line 94): no docstring
+    - `async add_version(self, pipeline_id, branch, definition_json)` (line 103): no docstring
+    - `async get_latest_version(self, pipeline_id, branch)` (line 117): no docstring
+    - `async replace_dependencies(self, pipeline_id, dependencies)` (line 121): no docstring
+    - `async list_dependencies(self, pipeline_id)` (line 128): no docstring
+  - `_AuditStore` (line 132): no docstring
+    - `__init__(self)` (line 133): no docstring
+    - `async log(self, **kwargs)` (line 136): no docstring
+  - `_EventStore` (line 140): no docstring
+    - `__init__(self)` (line 141): no docstring
+    - `async connect(self)` (line 144): no docstring
+    - `async append_event(self, event)` (line 147): no docstring
 
 ### `backend/bff/tests/test_pipeline_dataset_version_materialization.py`
 - **Functions**
@@ -3197,24 +3202,25 @@
 
 ### `backend/connector_sync_worker/main.py`
 - **Classes**
-  - `ConnectorSyncWorker` (line 61): no docstring
-    - `__init__(self)` (line 62): no docstring
-    - `async initialize(self)` (line 107): no docstring
-    - `async close(self)` (line 169): no docstring
-    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 209): no docstring
-    - `async _process_payload(self, payload)` (line 229): no docstring
-    - `_span_name(self, payload)` (line 232): no docstring
-    - `_is_retryable_error(self, exc, payload)` (line 235): no docstring
-    - `_in_progress_sleep_seconds(self, claim, payload)` (line 238): no docstring
-    - `_should_seek_on_in_progress(self, claim, payload)` (line 241): no docstring
-    - `_should_seek_on_retry(self, attempt_count, payload)` (line 244): no docstring
-    - `_should_mark_done_after_dlq(self, payload, error)` (line 247): no docstring
-    - `async _on_success(self, payload, result, duration_s)` (line 250): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 263): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 285): no docstring
-    - `async _process_connector_update(self, envelope)` (line 307): no docstring
-    - `async _handle_envelope(self, envelope)` (line 449): no docstring
-    - `async run(self)` (line 465): no docstring
+  - `_SyncStatePersistenceError` (line 61): Raised when sync-state persistence fails after ingest side effects already completed.
+  - `ConnectorSyncWorker` (line 65): no docstring
+    - `__init__(self)` (line 66): no docstring
+    - `async initialize(self)` (line 111): no docstring
+    - `async close(self)` (line 173): no docstring
+    - `async _send_to_dlq(self, msg, payload, raw_payload, error, attempt_count)` (line 213): no docstring
+    - `async _process_payload(self, payload)` (line 233): no docstring
+    - `_span_name(self, payload)` (line 236): no docstring
+    - `_is_retryable_error(self, exc, payload)` (line 239): no docstring
+    - `_in_progress_sleep_seconds(self, claim, payload)` (line 244): no docstring
+    - `_should_seek_on_in_progress(self, claim, payload)` (line 247): no docstring
+    - `_should_seek_on_retry(self, attempt_count, payload)` (line 250): no docstring
+    - `_should_mark_done_after_dlq(self, payload, error)` (line 253): no docstring
+    - `async _on_success(self, payload, result, duration_s)` (line 256): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 269): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 291): no docstring
+    - `async _process_connector_update(self, envelope)` (line 313): no docstring
+    - `async _handle_envelope(self, envelope)` (line 460): no docstring
+    - `async run(self)` (line 476): no docstring
 
 ## connector_trigger_service
 
@@ -3222,18 +3228,18 @@
 
 ### `backend/connector_trigger_service/main.py`
 - **Classes**
-  - `ConnectorTriggerService` (line 53): no docstring
-    - `__init__(self)` (line 54): no docstring
-    - `async initialize(self)` (line 75): no docstring
-    - `async close(self)` (line 106): no docstring
-    - `_get_producer_ops(self)` (line 135): no docstring
-    - `_resolve_polling_interval_seconds(self, source)` (line 146): no docstring
-    - `async _is_due(self, source)` (line 160): no docstring
-    - `async _poll_with_adapter(self, source)` (line 170): no docstring
-    - `async _poll_source(self, source, sem)` (line 204): no docstring
-    - `async _poll_loop(self)` (line 218): no docstring
-    - `async _publish_outbox_loop(self)` (line 239): no docstring
-    - `async run(self)` (line 331): no docstring
+  - `ConnectorTriggerService` (line 54): no docstring
+    - `__init__(self)` (line 55): no docstring
+    - `async initialize(self)` (line 77): no docstring
+    - `async close(self)` (line 108): no docstring
+    - `_get_producer_ops(self)` (line 138): no docstring
+    - `_resolve_polling_interval_seconds(self, source)` (line 149): no docstring
+    - `async _is_due(self, source)` (line 163): no docstring
+    - `async _poll_with_adapter(self, source)` (line 177): no docstring
+    - `async _poll_source(self, source, sem)` (line 211): no docstring
+    - `async _poll_loop(self)` (line 247): no docstring
+    - `async _publish_outbox_loop(self)` (line 268): no docstring
+    - `async run(self)` (line 360): no docstring
 
 ## data_connector
 
@@ -3260,24 +3266,24 @@
 ### `backend/data_connector/adapters/factory.py`
 - **Functions**
   - `connection_source_type_for_kind(connector_kind)` (line 51): no docstring
-  - `table_import_source_type_for_kind(connector_kind)` (line 56): no docstring
-  - `file_import_source_type_for_kind(connector_kind)` (line 61): no docstring
-  - `virtual_table_source_type_for_kind(connector_kind)` (line 66): no docstring
-  - `connector_kind_from_source_type(source_type, strict)` (line 71): no docstring
-  - `import_config_key_for_source_type(source_type, strict)` (line 88): no docstring
-  - `resolve_connector_kind_from_connection_config(configuration)` (line 99): no docstring
+  - `table_import_source_type_for_kind(connector_kind)` (line 58): no docstring
+  - `file_import_source_type_for_kind(connector_kind)` (line 65): no docstring
+  - `virtual_table_source_type_for_kind(connector_kind)` (line 72): no docstring
+  - `connector_kind_from_source_type(source_type, strict)` (line 79): no docstring
+  - `import_config_key_for_source_type(source_type, strict)` (line 96): no docstring
+  - `resolve_connector_kind_from_connection_config(configuration)` (line 107): no docstring
 - **Classes**
-  - `_GoogleSheetsAdapter` (line 136): no docstring
-    - `__init__(self, service)` (line 139): no docstring
-    - `async get_public_configuration(self, config)` (line 142): no docstring
-    - `async test_connection(self, config, secrets)` (line 156): no docstring
-    - `async snapshot_extract(self, config, secrets, import_config)` (line 174): no docstring
-    - `async incremental_extract(self, config, secrets, import_config, sync_state)` (line 196): no docstring
-    - `async cdc_extract(self, config, secrets, import_config, sync_state)` (line 199): no docstring
-    - `async peek_change_token(self, config, secrets, import_config)` (line 202): no docstring
-  - `ConnectorAdapterFactory` (line 218): no docstring
-    - `__init__(self, google_sheets_service)` (line 219): no docstring
-    - `get_adapter(self, connector_kind)` (line 227): no docstring
+  - `_GoogleSheetsAdapter` (line 144): no docstring
+    - `__init__(self, service)` (line 147): no docstring
+    - `async get_public_configuration(self, config)` (line 150): no docstring
+    - `async test_connection(self, config, secrets)` (line 164): no docstring
+    - `async snapshot_extract(self, config, secrets, import_config)` (line 182): no docstring
+    - `async incremental_extract(self, config, secrets, import_config, sync_state)` (line 204): no docstring
+    - `async cdc_extract(self, config, secrets, import_config, sync_state)` (line 207): no docstring
+    - `async peek_change_token(self, config, secrets, import_config)` (line 210): no docstring
+  - `ConnectorAdapterFactory` (line 226): no docstring
+    - `__init__(self, google_sheets_service)` (line 227): no docstring
+    - `get_adapter(self, connector_kind)` (line 235): no docstring
 
 ### `backend/data_connector/adapters/import_config_validators.py`
 - **Functions**
@@ -3810,14 +3816,14 @@
 ### `backend/mcp_servers/pipeline_mcp_http.py`
 - **Functions**
   - `async http_json(method, url, headers, json_body, params, timeout_seconds, error_prefix, error_path)` (line 22): no docstring
-  - `bff_headers(db_name, principal_id, principal_type)` (line 52): no docstring
-  - `resolve_db_name_for_bff_call(db_name, path, params, json_body)` (line 84): Resolve db_name for generic BFF calls from explicit args, payload, or path.
-  - `async bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 124): no docstring
-  - `async bff_v2_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 153): Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create).
-  - `_oms_admin_token()` (line 182): Resolve OMS admin token from centralized settings.
-  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 187): Make an OMS request through gRPC bridge and return JSON response.
-  - `async _get_oms_grpc_compat_client()` (line 259): no docstring
-  - `async close_oms_grpc_compat_client()` (line 269): no docstring
+  - `bff_headers(db_name, principal_id, principal_type)` (line 67): no docstring
+  - `resolve_db_name_for_bff_call(db_name, path, params, json_body)` (line 99): Resolve db_name for generic BFF calls from explicit args, payload, or path.
+  - `async bff_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 139): no docstring
+  - `async bff_v2_json(method, path, db_name, principal_id, principal_type, json_body, params, timeout_seconds)` (line 168): Make a request to BFF v2 API. *path* should start with /v2/... (e.g. /v2/orchestration/builds/create).
+  - `_oms_admin_token()` (line 197): Resolve OMS admin token from centralized settings.
+  - `async oms_json(method, path, params, json_body, timeout_seconds)` (line 202): Make an OMS request through gRPC bridge and return JSON response.
+  - `async _get_oms_grpc_compat_client()` (line 274): no docstring
+  - `async close_oms_grpc_compat_client()` (line 284): no docstring
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - **Functions**
@@ -3964,7 +3970,7 @@
 ### `backend/message_relay/main.py`
 - **Functions**
   - `_client_error_code(exc)` (line 50): no docstring
-  - `async main()` (line 776): 메인 진입점
+  - `async main()` (line 812): 메인 진입점
 - **Classes**
   - `_RecentPublishedEventIds` (line 54): Best-effort in-memory dedup window (publisher is still at-least-once).
     - `__init__(self, max_events)` (line 57): no docstring
@@ -3984,9 +3990,9 @@
     - `_initial_checkpoint(self)` (line 323): no docstring
     - `_advance_checkpoint(checkpoint, ts_ms, idx_key)` (line 337): Advance the durable checkpoint monotonically (never move backwards).
     - `async _list_next_index_keys(self, checkpoint)` (line 361): no docstring
-    - `async process_events(self)` (line 436): Tail S3 by-date index and publish to Kafka.
-    - `async run(self)` (line 742): 메인 실행 루프
-    - `async shutdown(self)` (line 762): 서비스 종료
+    - `async process_events(self)` (line 438): Tail S3 by-date index and publish to Kafka.
+    - `async run(self)` (line 778): 메인 실행 루프
+    - `async shutdown(self)` (line 798): 서비스 종료
 
 ## monitoring
 
@@ -4970,7 +4976,7 @@
   - `_schema_column_names(columns)` (line 169): no docstring
   - `_resolve_declared_output_kind(declared_outputs, output_node_id, output_name)` (line 228): no docstring
   - `_validate_output_kind_metadata(output_kind, output_metadata, node_id)` (line 283): no docstring
-  - `async main()` (line 5999): no docstring
+  - `async main()` (line 6013): no docstring
 - **Classes**
   - `_PipelinePayloadParseError` (line 181): no docstring
     - `__init__(self, stage, payload_text, payload_obj, cause)` (line 182): no docstring
@@ -5038,101 +5044,101 @@
     - `_merge_watermark_keys(self, next_watermark, previous_watermark, previous_watermark_keys, next_watermark_keys)` (line 2714): no docstring
     - `async _persist_deploy_watermarks(self, resolved_pipeline_id, branch, execution_semantics, input_snapshots, watermark_column, previous_watermark, previous_watermark_keys)` (line 2745): no docstring
     - `async _run_deploy_mode(self, job, lock, tables, target_node_ids, output_nodes, definition, declared_outputs, pipeline_ref, run_ref, execution_semantics, diff_empty_inputs, has_incremental_input, incremental_inputs_have_additive_updates, preview_limit, temp_dirs, persisted_dfs, input_snapshots, input_commit_payload, inputs_payload, pipeline_spec_hash, pipeline_spec_commit_id, code_version, spark_conf, resolved_pipeline_id, previous_watermark, previous_watermark_keys, watermark_column, record_build, record_run, record_artifact, emit_job_event)` (line 2815): no docstring
-    - `async _resolve_execution_node_dataframe(self, job, node_id, node, tables, incoming, parameters, preview_meta, preview_sampling_seed, input_snapshots, input_sampling, temp_dirs, previous_input_commits, use_lakefs_diff, execution_semantics, watermark_column, previous_watermark, previous_watermark_keys, is_preview, preview_input_sample_limit)` (line 3007): no docstring
-    - `async _record_schema_check_failure(self, job, node_id, schema_errors, execution_semantics, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3085): no docstring
-    - `async _record_validation_failure(self, job, validation_errors, execution_semantics, pipeline_spec_hash, pipeline_spec_commit_id, is_preview, is_build, run_mode, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3140): no docstring
-    - `_derive_post_node_execution_state(self, input_snapshots, execution_semantics, preview_limit)` (line 3198): no docstring
-    - `_validate_execution_prerequisites(self)` (line 3241): no docstring
-    - `_build_execution_graph(self, definition)` (line 3244): no docstring
-    - `async _resolve_execution_pipeline_context(self, job, definition, execution_semantics)` (line 3269): no docstring
-    - `_resolve_run_mode(self, job)` (line 3330): no docstring
-    - `_resolve_execution_semantics(self, job, definition)` (line 3337): no docstring
-    - `_resolve_code_version(self)` (line 3340): no docstring
-    - `_build_run_record_callbacks(self, resolved_pipeline_id, pipeline_spec_hash, pipeline_spec_commit_id, spark_conf, code_version)` (line 3343): no docstring
-    - `_build_artifact_recorder_callback(self, job, resolved_pipeline_id, run_mode, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id)` (line 3380): no docstring
-    - `_build_job_event_callback(self, job, pipeline_ref, run_mode, execution_semantics)` (line 3436): no docstring
-    - `_build_artifact_event_callbacks(self, job, resolved_pipeline_id, pipeline_ref, run_mode, execution_semantics, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id)` (line 3480): no docstring
-    - `_build_execution_recorders(self, job, resolved_pipeline_id, pipeline_ref, run_mode, execution_semantics, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id, spark_conf, code_version)` (line 3512): no docstring
-    - `async _start_execution_tracking(self, job, resolved_pipeline_id, run_mode, is_preview, is_build, artifact_state, record_preview, record_build, record_run, record_artifact)` (line 3552): no docstring
-    - `async _execute_ordered_nodes(self, job, order_run, nodes, tables, incoming, parameters, preview_meta, preview_sampling_seed, input_snapshots, input_sampling, temp_dirs, previous_input_commits, use_lakefs_diff, execution_semantics, watermark_column, previous_watermark, previous_watermark_keys, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3601): no docstring
-    - `async _record_execution_failure(self, job, exc, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, emit_job_event)` (line 3693): no docstring
-    - `async _cleanup_execution_resources(self, lock, temp_dirs, persisted_dfs, prev_spark_conf, prev_cast_mode)` (line 3720): no docstring
-    - `async _execute_job(self, job)` (line 3737): no docstring
-    - `async _maybe_enqueue_objectify_job(self, dataset, version)` (line 3740): no docstring
-    - `async _maybe_enqueue_relationship_jobs(self, dataset, version)` (line 3871): no docstring
-    - `async _materialize_output_by_kind(self, output_kind, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3981): no docstring
-    - `async _materialize_dataset_output(self, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 4018): no docstring
-    - `async _materialize_geotemporal_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4053): no docstring
-    - `async _materialize_media_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4076): no docstring
-    - `async _materialize_virtual_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols, row_count_hint)` (line 4099): no docstring
-    - `async _materialize_ontology_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4124): no docstring
-    - `_ensure_output_columns_present(self, df, required_columns, output_kind)` (line 4147): no docstring
-    - `async _load_existing_output_dataset(self, db_name, branch, dataset_name)` (line 4160): no docstring
-    - `_align_columns(self, df, columns)` (line 4196): no docstring
-    - `_select_new_or_changed_rows(self, input_df, existing_df, pk_columns, dedupe_input)` (line 4206): no docstring
-    - `_post_filter_false_expr(self, post_filtering_column)` (line 4234): no docstring
-    - `async _materialize_output_dataframe(self, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4238): no docstring
-    - `_row_hash_expr(self, df)` (line 4259): no docstring
-    - `_apply_watermark_filter(self, df, watermark_column, watermark_after, watermark_keys)` (line 4272): no docstring
-    - `_collect_watermark_keys(self, df, watermark_column, watermark_value)` (line 4287): no docstring
-    - `_build_dataset_input_snapshot(self, node_id, context, lakefs_commit_id)` (line 4300): no docstring
-    - `_annotate_diff_snapshot(self, snapshot, previous_commit_id, diff_ok, diff_paths_count)` (line 4319): no docstring
-    - `_append_input_snapshot(self, input_snapshots, snapshot)` (line 4337): no docstring
-    - `async _load_external_input_dataframe_with_snapshot(self, read_config, node_id, temp_dirs, input_snapshots)` (line 4346): no docstring
-    - `async _resolve_dataset_input_load_context(self, db_name, node_id, selection, input_snapshots)` (line 4398): no docstring
-    - `async _load_full_dataset_input_dataframe(self, context, metadata, temp_dirs, node_id)` (line 4468): no docstring
-    - `async _apply_input_watermark_and_snapshot(self, df, node_id, snapshot, watermark_column, watermark_after, watermark_keys, label_scope, tolerate_max_errors, always_compute_watermark_max)` (line 4489): no docstring
-    - `async _try_load_diff_input_dataframe(self, context, node_id, temp_dirs, input_snapshots, base_snapshot, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 4514): no docstring
-    - `async _load_input_dataframe(self, db_name, metadata, temp_dirs, branch, node_id, input_snapshots, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 4587): no docstring
-    - `_preview_sampling_seed(self, job_id)` (line 4656): no docstring
-    - `_resolve_preview_flag(self, preview_meta, snake_case_key, camel_case_key, default)` (line 4660): no docstring
-    - `_resolve_preview_limit(self, preview_limit, preview_meta, default)` (line 4675): no docstring
-    - `_resolve_sampling_strategy(self, metadata, preview_meta, preview_limit)` (line 4688): no docstring
-    - `_attach_sampling_snapshot(self, input_snapshots, node_id, sampling_strategy)` (line 4701): no docstring
-    - `_apply_sampling_strategy(self, df, sampling_strategy, node_id, seed)` (line 4714): no docstring
-    - `_strip_commit_prefix(self, key, commit_id)` (line 4729): no docstring
-    - `async _list_lakefs_diff_paths(self, repository, ref, since, prefix, node_id)` (line 4735): no docstring
-    - `async _load_parquet_keys_dataframe(self, bucket, keys, temp_dirs, prefix)` (line 4781): no docstring
-    - `async _load_media_prefix_dataframe(self, bucket, key, node_id)` (line 4815): Treat the artifact_key as an unstructured/media prefix.
-    - `async _resolve_pipeline_id(self, job)` (line 4866): no docstring
-    - `_collect_spark_conf(self)` (line 4885): no docstring
-    - `_build_input_commit_payload(self, input_snapshots)` (line 4901): no docstring
-    - `async _acquire_pipeline_lock(self, job)` (line 4925): no docstring
-    - `_validate_required_subgraph(self, nodes, incoming, required_node_ids)` (line 4956): no docstring
-    - `_validate_definition(self, definition, require_output)` (line 4968): no docstring
-    - `_build_table_ops(self, df)` (line 4974): no docstring
-    - `_sql_ident(self, name)` (line 5045): no docstring
-    - `_clean_string_column(self, column)` (line 5048): no docstring
-    - `_try_cast_column(self, column, spark_type)` (line 5052): no docstring
-    - `_safe_cast_column(self, column, target_type)` (line 5078): no docstring
-    - `_apply_casts(self, df, casts)` (line 5089): no docstring
-    - `_apply_schema_casts(self, df, dataset, version)` (line 5101): no docstring
-    - `_parse_fk_expectation(self, expectation, default_branch)` (line 5110): no docstring
-    - `async _load_fk_reference_dataframe(self, db_name, dataset_id, dataset_name, branch, temp_dirs)` (line 5158): no docstring
-    - `async _evaluate_fk_expectations(self, expectations, output_df, db_name, branch, temp_dirs)` (line 5189): no docstring
-    - `_normalize_read_options(self, read_config)` (line 5258): no docstring
-    - `_mask_sensitive_options(self, options)` (line 5294): no docstring
-    - `_schema_ddl_from_read_config(self, read_config)` (line 5315): no docstring
-    - `_resolve_read_format(self, path, read_config)` (line 5338): no docstring
-    - `_resolve_streaming_checkpoint_location(self, read_config, node_id)` (line 5357): no docstring
-    - `_resolve_kafka_value_format(self, read_config)` (line 5372): no docstring
-    - `_resolve_kafka_schema_registry_headers(self, read_config)` (line 5387): no docstring
-    - `_resolve_kafka_avro_schema(self, read_config, node_id)` (line 5433): no docstring
-    - `_apply_kafka_value_parsing(self, df, read_config, node_id)` (line 5465): no docstring
-    - `_load_external_streaming_dataframe(self, read_config, node_id, fmt, temp_dirs)` (line 5516): no docstring
-    - `_load_external_input_dataframe(self, read_config, node_id, temp_dirs)` (line 5617): Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
-    - `async _load_artifact_dataframe(self, bucket, key, temp_dirs, read_config)` (line 5717): no docstring
-    - `async _collect_prefix_local_paths(self, bucket, prefix, temp_dirs)` (line 5739): no docstring
-    - `async _read_prefix_dataframe_from_local_paths(self, temp_dir, local_paths, read_config, bucket, prefix)` (line 5772): no docstring
-    - `async _load_prefix_dataframe(self, bucket, prefix, temp_dirs, read_config)` (line 5837): no docstring
-    - `async _download_object_to_path(self, bucket, key, local_path)` (line 5861): no docstring
-    - `async _download_object(self, bucket, key, temp_dirs, temp_dir)` (line 5874): no docstring
-    - `_read_local_file(self, path, read_config)` (line 5890): no docstring
-    - `_strip_bom_headers(self, df)` (line 5917): Normalize UTF-8 BOM artifacts in CSV headers.
-    - `_load_excel_path(self, path)` (line 5957): no docstring
-    - `_load_json_path(self, path, reader)` (line 5963): no docstring
-    - `_empty_dataframe(self)` (line 5980): no docstring
-    - `_apply_transform(self, metadata, inputs, parameters)` (line 5983): no docstring
+    - `async _resolve_execution_node_dataframe(self, job, node_id, node, tables, incoming, parameters, preview_meta, preview_sampling_seed, input_snapshots, input_sampling, temp_dirs, previous_input_commits, use_lakefs_diff, execution_semantics, watermark_column, previous_watermark, previous_watermark_keys, is_preview, preview_input_sample_limit)` (line 3021): no docstring
+    - `async _record_schema_check_failure(self, job, node_id, schema_errors, execution_semantics, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3099): no docstring
+    - `async _record_validation_failure(self, job, validation_errors, execution_semantics, pipeline_spec_hash, pipeline_spec_commit_id, is_preview, is_build, run_mode, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3154): no docstring
+    - `_derive_post_node_execution_state(self, input_snapshots, execution_semantics, preview_limit)` (line 3212): no docstring
+    - `_validate_execution_prerequisites(self)` (line 3255): no docstring
+    - `_build_execution_graph(self, definition)` (line 3258): no docstring
+    - `async _resolve_execution_pipeline_context(self, job, definition, execution_semantics)` (line 3283): no docstring
+    - `_resolve_run_mode(self, job)` (line 3344): no docstring
+    - `_resolve_execution_semantics(self, job, definition)` (line 3351): no docstring
+    - `_resolve_code_version(self)` (line 3354): no docstring
+    - `_build_run_record_callbacks(self, resolved_pipeline_id, pipeline_spec_hash, pipeline_spec_commit_id, spark_conf, code_version)` (line 3357): no docstring
+    - `_build_artifact_recorder_callback(self, job, resolved_pipeline_id, run_mode, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id)` (line 3394): no docstring
+    - `_build_job_event_callback(self, job, pipeline_ref, run_mode, execution_semantics)` (line 3450): no docstring
+    - `_build_artifact_event_callbacks(self, job, resolved_pipeline_id, pipeline_ref, run_mode, execution_semantics, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id)` (line 3494): no docstring
+    - `_build_execution_recorders(self, job, resolved_pipeline_id, pipeline_ref, run_mode, execution_semantics, declared_outputs, pipeline_spec_hash, pipeline_spec_commit_id, spark_conf, code_version)` (line 3526): no docstring
+    - `async _start_execution_tracking(self, job, resolved_pipeline_id, run_mode, is_preview, is_build, artifact_state, record_preview, record_build, record_run, record_artifact)` (line 3566): no docstring
+    - `async _execute_ordered_nodes(self, job, order_run, nodes, tables, incoming, parameters, preview_meta, preview_sampling_seed, input_snapshots, input_sampling, temp_dirs, previous_input_commits, use_lakefs_diff, execution_semantics, watermark_column, previous_watermark, previous_watermark_keys, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, record_artifact, emit_job_event)` (line 3615): no docstring
+    - `async _record_execution_failure(self, job, exc, is_preview, is_build, run_mode, input_commit_payload, record_preview, record_build, record_run, emit_job_event)` (line 3707): no docstring
+    - `async _cleanup_execution_resources(self, lock, temp_dirs, persisted_dfs, prev_spark_conf, prev_cast_mode)` (line 3734): no docstring
+    - `async _execute_job(self, job)` (line 3751): no docstring
+    - `async _maybe_enqueue_objectify_job(self, dataset, version)` (line 3754): no docstring
+    - `async _maybe_enqueue_relationship_jobs(self, dataset, version)` (line 3885): no docstring
+    - `async _materialize_output_by_kind(self, output_kind, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 3995): no docstring
+    - `async _materialize_dataset_output(self, output_metadata, df, artifact_bucket, prefix, db_name, branch, dataset_name, execution_semantics, incremental_inputs_have_additive_updates, write_mode, file_prefix, file_format, partition_cols, base_row_count)` (line 4032): no docstring
+    - `async _materialize_geotemporal_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4067): no docstring
+    - `async _materialize_media_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4090): no docstring
+    - `async _materialize_virtual_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols, row_count_hint)` (line 4113): no docstring
+    - `async _materialize_ontology_output(self, output_metadata, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4138): no docstring
+    - `_ensure_output_columns_present(self, df, required_columns, output_kind)` (line 4161): no docstring
+    - `async _load_existing_output_dataset(self, db_name, branch, dataset_name)` (line 4174): no docstring
+    - `_align_columns(self, df, columns)` (line 4210): no docstring
+    - `_select_new_or_changed_rows(self, input_df, existing_df, pk_columns, dedupe_input)` (line 4220): no docstring
+    - `_post_filter_false_expr(self, post_filtering_column)` (line 4248): no docstring
+    - `async _materialize_output_dataframe(self, df, artifact_bucket, prefix, write_mode, file_prefix, file_format, partition_cols)` (line 4252): no docstring
+    - `_row_hash_expr(self, df)` (line 4273): no docstring
+    - `_apply_watermark_filter(self, df, watermark_column, watermark_after, watermark_keys)` (line 4286): no docstring
+    - `_collect_watermark_keys(self, df, watermark_column, watermark_value)` (line 4301): no docstring
+    - `_build_dataset_input_snapshot(self, node_id, context, lakefs_commit_id)` (line 4314): no docstring
+    - `_annotate_diff_snapshot(self, snapshot, previous_commit_id, diff_ok, diff_paths_count)` (line 4333): no docstring
+    - `_append_input_snapshot(self, input_snapshots, snapshot)` (line 4351): no docstring
+    - `async _load_external_input_dataframe_with_snapshot(self, read_config, node_id, temp_dirs, input_snapshots)` (line 4360): no docstring
+    - `async _resolve_dataset_input_load_context(self, db_name, node_id, selection, input_snapshots)` (line 4412): no docstring
+    - `async _load_full_dataset_input_dataframe(self, context, metadata, temp_dirs, node_id)` (line 4482): no docstring
+    - `async _apply_input_watermark_and_snapshot(self, df, node_id, snapshot, watermark_column, watermark_after, watermark_keys, label_scope, tolerate_max_errors, always_compute_watermark_max)` (line 4503): no docstring
+    - `async _try_load_diff_input_dataframe(self, context, node_id, temp_dirs, input_snapshots, base_snapshot, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 4528): no docstring
+    - `async _load_input_dataframe(self, db_name, metadata, temp_dirs, branch, node_id, input_snapshots, previous_commit_id, use_lakefs_diff, watermark_column, watermark_after, watermark_keys)` (line 4601): no docstring
+    - `_preview_sampling_seed(self, job_id)` (line 4670): no docstring
+    - `_resolve_preview_flag(self, preview_meta, snake_case_key, camel_case_key, default)` (line 4674): no docstring
+    - `_resolve_preview_limit(self, preview_limit, preview_meta, default)` (line 4689): no docstring
+    - `_resolve_sampling_strategy(self, metadata, preview_meta, preview_limit)` (line 4702): no docstring
+    - `_attach_sampling_snapshot(self, input_snapshots, node_id, sampling_strategy)` (line 4715): no docstring
+    - `_apply_sampling_strategy(self, df, sampling_strategy, node_id, seed)` (line 4728): no docstring
+    - `_strip_commit_prefix(self, key, commit_id)` (line 4743): no docstring
+    - `async _list_lakefs_diff_paths(self, repository, ref, since, prefix, node_id)` (line 4749): no docstring
+    - `async _load_parquet_keys_dataframe(self, bucket, keys, temp_dirs, prefix)` (line 4795): no docstring
+    - `async _load_media_prefix_dataframe(self, bucket, key, node_id)` (line 4829): Treat the artifact_key as an unstructured/media prefix.
+    - `async _resolve_pipeline_id(self, job)` (line 4880): no docstring
+    - `_collect_spark_conf(self)` (line 4899): no docstring
+    - `_build_input_commit_payload(self, input_snapshots)` (line 4915): no docstring
+    - `async _acquire_pipeline_lock(self, job)` (line 4939): no docstring
+    - `_validate_required_subgraph(self, nodes, incoming, required_node_ids)` (line 4970): no docstring
+    - `_validate_definition(self, definition, require_output)` (line 4982): no docstring
+    - `_build_table_ops(self, df)` (line 4988): no docstring
+    - `_sql_ident(self, name)` (line 5059): no docstring
+    - `_clean_string_column(self, column)` (line 5062): no docstring
+    - `_try_cast_column(self, column, spark_type)` (line 5066): no docstring
+    - `_safe_cast_column(self, column, target_type)` (line 5092): no docstring
+    - `_apply_casts(self, df, casts)` (line 5103): no docstring
+    - `_apply_schema_casts(self, df, dataset, version)` (line 5115): no docstring
+    - `_parse_fk_expectation(self, expectation, default_branch)` (line 5124): no docstring
+    - `async _load_fk_reference_dataframe(self, db_name, dataset_id, dataset_name, branch, temp_dirs)` (line 5172): no docstring
+    - `async _evaluate_fk_expectations(self, expectations, output_df, db_name, branch, temp_dirs)` (line 5203): no docstring
+    - `_normalize_read_options(self, read_config)` (line 5272): no docstring
+    - `_mask_sensitive_options(self, options)` (line 5308): no docstring
+    - `_schema_ddl_from_read_config(self, read_config)` (line 5329): no docstring
+    - `_resolve_read_format(self, path, read_config)` (line 5352): no docstring
+    - `_resolve_streaming_checkpoint_location(self, read_config, node_id)` (line 5371): no docstring
+    - `_resolve_kafka_value_format(self, read_config)` (line 5386): no docstring
+    - `_resolve_kafka_schema_registry_headers(self, read_config)` (line 5401): no docstring
+    - `_resolve_kafka_avro_schema(self, read_config, node_id)` (line 5447): no docstring
+    - `_apply_kafka_value_parsing(self, df, read_config, node_id)` (line 5479): no docstring
+    - `_load_external_streaming_dataframe(self, read_config, node_id, fmt, temp_dirs)` (line 5530): no docstring
+    - `_load_external_input_dataframe(self, read_config, node_id, temp_dirs)` (line 5631): Load an input DataFrame directly from Spark using metadata.read (no DatasetRegistry artifact).
+    - `async _load_artifact_dataframe(self, bucket, key, temp_dirs, read_config)` (line 5731): no docstring
+    - `async _collect_prefix_local_paths(self, bucket, prefix, temp_dirs)` (line 5753): no docstring
+    - `async _read_prefix_dataframe_from_local_paths(self, temp_dir, local_paths, read_config, bucket, prefix)` (line 5786): no docstring
+    - `async _load_prefix_dataframe(self, bucket, prefix, temp_dirs, read_config)` (line 5851): no docstring
+    - `async _download_object_to_path(self, bucket, key, local_path)` (line 5875): no docstring
+    - `async _download_object(self, bucket, key, temp_dirs, temp_dir)` (line 5888): no docstring
+    - `_read_local_file(self, path, read_config)` (line 5904): no docstring
+    - `_strip_bom_headers(self, df)` (line 5931): Normalize UTF-8 BOM artifacts in CSV headers.
+    - `_load_excel_path(self, path)` (line 5971): no docstring
+    - `_load_json_path(self, path, reader)` (line 5977): no docstring
+    - `_empty_dataframe(self)` (line 5994): no docstring
+    - `_apply_transform(self, metadata, inputs, parameters)` (line 5997): no docstring
 
 ### `backend/pipeline_worker/output_domain.py`
 - **Classes**
@@ -5974,9 +5980,9 @@
   - `async get_audit_log_store(container)` (line 148): FastAPI dependency to get AuditLogStore instance.
   - `async get_llm_gateway(container)` (line 155): FastAPI dependency to get LLMGateway instance.
   - `async get_background_task_manager(container)` (line 162): FastAPI dependency to get BackgroundTaskManager instance.
-  - `async get_initialized_background_task_manager(container)` (line 184): FastAPI dependency to get an already-initialized BackgroundTaskManager, if present.
-  - `register_core_services(container)` (line 212): Register all core services with the container
-  - `async health_check_core_services(container)` (line 236): Perform health check on all core services
+  - `async get_initialized_background_task_manager(container)` (line 187): FastAPI dependency to get an already-initialized BackgroundTaskManager, if present.
+  - `register_core_services(container)` (line 215): Register all core services with the container
+  - `async health_check_core_services(container)` (line 239): Perform health check on all core services
 
 ### `backend/shared/errors/__init__.py`
 
@@ -6811,21 +6817,23 @@
 
 ### `backend/shared/routers/monitoring.py`
 - **Functions**
-  - `_resolve_service_name(request)` (line 33): no docstring
-  - `async _check_service_instance(instance)` (line 41): Best-effort, runtime-validated service health check.
-  - `_runtime_status_from_request(request)` (line 84): no docstring
-  - `async basic_health_check(request)` (line 100): Readiness/liveness health endpoint for routing decisions.
-  - `async detailed_health_check(include_metrics, settings, container)` (line 134): Detailed health check with comprehensive service information
-  - `async readiness_probe(request)` (line 200): Kubernetes readiness probe
-  - `async liveness_probe(container)` (line 231): Kubernetes liveness probe
-  - `async get_service_metrics(service_name)` (line 266): Get comprehensive service metrics
-  - `async get_service_status(container)` (line 294): Get current status of all services
-  - `async get_configuration_overview(include_sensitive, settings)` (line 322): Get current application configuration
-  - `async restart_service(service_name, _)` (line 387): Restart a specific service
-  - `async get_service_dependencies(_)` (line 408): Get service dependency information
-  - `async get_background_task_metrics(request, task_manager)` (line 428): Get background task execution metrics
-  - `async get_active_background_tasks(request, limit, task_manager)` (line 494): Get list of all active background tasks
-  - `async get_background_task_health(request, task_manager)` (line 572): Get health status of background task processing system
+  - `_resolve_service_name(request)` (line 34): no docstring
+  - `async _check_service_instance(instance)` (line 42): Best-effort, runtime-validated service health check.
+  - `_runtime_status_from_request(request)` (line 85): no docstring
+  - `async _safe_get_container()` (line 98): no docstring
+  - `_service_registration_key(key)` (line 105): no docstring
+  - `async basic_health_check(request)` (line 124): Readiness/liveness health endpoint for routing decisions.
+  - `async detailed_health_check(request, include_metrics, settings)` (line 159): Detailed health check with comprehensive service information
+  - `async readiness_probe(request)` (line 253): Kubernetes readiness probe
+  - `async liveness_probe(request)` (line 281): Kubernetes liveness probe
+  - `async get_service_metrics(service_name)` (line 318): Get comprehensive service metrics
+  - `async get_service_status(container)` (line 346): Get current status of all services
+  - `async get_configuration_overview(include_sensitive, settings)` (line 374): Get current application configuration
+  - `async restart_service(service_name, _)` (line 439): Restart a specific service
+  - `async get_service_dependencies(_)` (line 460): Get service dependency information
+  - `async get_background_task_metrics(request, task_manager)` (line 480): Get background task execution metrics
+  - `async get_active_background_tasks(request, limit, task_manager)` (line 546): Get list of all active background tasks
+  - `async get_background_task_health(request, task_manager)` (line 624): Get health status of background task processing system
 
 ### `backend/shared/schemas/__init__.py`
 
@@ -7173,27 +7181,27 @@
 
 ### `backend/shared/services/core/consistency_token.py`
 - **Functions**
-  - `async demo_consistency_token()` (line 385): Demo the consistency token functionality
+  - `async demo_consistency_token()` (line 389): Demo the consistency token functionality
 - **Classes**
-  - `ConsistencyToken` (line 23): Token containing sufficient information to ensure read-your-writes consistency
-    - `to_string(self)` (line 36): Encode token as a compact string
-    - `from_string(cls, token_str)` (line 57): Decode token from string
-  - `ConsistencyTokenService` (line 91): Service for managing consistency tokens
-    - `__init__(self, redis_url)` (line 97): no docstring
-    - `async connect(self)` (line 101): Initialize Redis connection
-    - `async disconnect(self)` (line 105): Close Redis connection
-    - `async create_token(self, command_id, aggregate_id, sequence_number, version, db_name, branch)` (line 110): Create a new consistency token after a write operation
-    - `async _estimate_projection_lag(self)` (line 151): Estimate current projection lag in milliseconds
-    - `async _store_token_metadata(self, token)` (line 168): Store token metadata for validation
-    - `async wait_for_consistency(self, token, es_client, max_wait_ms, index_name)` (line 193): Wait until the write represented by the token is visible
-    - `async _check_write_visible(self, token, es_client, index_name)` (line 238): Check if a write is visible in Elasticsearch
-    - `_resolve_instances_index_name(token)` (line 272): no docstring
-    - `async validate_token(self, token_str)` (line 281): Validate a consistency token
-    - `async get_read_timestamp(self, token)` (line 310): Get the minimum timestamp that guarantees consistency
-    - `async update_projection_lag(self, actual_lag_ms)` (line 323): Update the estimated projection lag based on actual measurements
-  - `CommandResponseWithToken` (line 348): Enhanced command response that includes consistency token
-    - `__init__(self, command_id, status, result, consistency_token)` (line 353): no docstring
-    - `to_dict(self)` (line 365): Convert to dictionary for API response
+  - `ConsistencyToken` (line 25): Token containing sufficient information to ensure read-your-writes consistency
+    - `to_string(self)` (line 38): Encode token as a compact string
+    - `from_string(cls, token_str)` (line 59): Decode token from string
+  - `ConsistencyTokenService` (line 93): Service for managing consistency tokens
+    - `__init__(self, redis_url)` (line 99): no docstring
+    - `async connect(self)` (line 103): Initialize Redis connection
+    - `async disconnect(self)` (line 107): Close Redis connection
+    - `async create_token(self, command_id, aggregate_id, sequence_number, version, db_name, branch)` (line 112): Create a new consistency token after a write operation
+    - `async _estimate_projection_lag(self)` (line 153): Estimate current projection lag in milliseconds
+    - `async _store_token_metadata(self, token)` (line 170): Store token metadata for validation
+    - `async wait_for_consistency(self, token, es_client, max_wait_ms, index_name)` (line 195): Wait until the write represented by the token is visible
+    - `async _check_write_visible(self, token, es_client, index_name)` (line 240): Check if a write is visible in Elasticsearch
+    - `_resolve_instances_index_name(token)` (line 276): no docstring
+    - `async validate_token(self, token_str)` (line 285): Validate a consistency token
+    - `async get_read_timestamp(self, token)` (line 314): Get the minimum timestamp that guarantees consistency
+    - `async update_projection_lag(self, actual_lag_ms)` (line 327): Update the estimated projection lag based on actual measurements
+  - `CommandResponseWithToken` (line 352): Enhanced command response that includes consistency token
+    - `__init__(self, command_id, status, result, consistency_token)` (line 357): no docstring
+    - `to_dict(self)` (line 369): Convert to dictionary for API response
 
 ### `backend/shared/services/core/graph_federation_service_es.py`
 - **Classes**
@@ -7494,8 +7502,8 @@
 ### `backend/shared/services/core/websocket_service.py`
 - **Functions**
   - `utc_now()` (line 23): no docstring
-  - `get_connection_manager()` (line 627): WebSocket 연결 관리자 싱글톤 인스턴스 반환
-  - `get_notification_service(redis_service)` (line 635): WebSocket 알림 서비스 싱글톤 인스턴스 반환
+  - `get_connection_manager()` (line 630): WebSocket 연결 관리자 싱글톤 인스턴스 반환
+  - `get_notification_service(redis_service)` (line 638): WebSocket 알림 서비스 싱글톤 인스턴스 반환
 - **Classes**
   - `WebSocketConnection` (line 28): WebSocket 연결 정보
   - `WebSocketConnectionManager` (line 39): WebSocket 연결 관리자
@@ -7519,12 +7527,12 @@
     - `__init__(self, redis_service, connection_manager, task_manager)` (line 431): no docstring
     - `async start(self)` (line 444): 알림 서비스 시작 with proper task tracking
     - `async stop(self)` (line 466): 알림 서비스 중지 with proper cleanup
-    - `_handle_pubsub_task_done(self, task)` (line 485): Handle completion of pubsub task.
-    - `async _restart_pubsub_listener(self)` (line 498): Restart the pubsub listener after a failure.
-    - `async _listen_redis_updates(self)` (line 507): Redis Pub/Sub 채널을 수신하여 WebSocket으로 전달 with improved error handling
-    - `async notify_task_update(self, update_data)` (line 568): Send task update notification to all connected clients.
-    - `async publish_schema_drift(self, db_name, drift_payload)` (line 580): Publish schema drift notification via Redis Pub/Sub.
-    - `async notify_schema_drift_direct(self, db_name, drift_payload)` (line 602): Send schema drift notification directly to WebSocket clients.
+    - `_handle_pubsub_task_done(self, task)` (line 488): Handle completion of pubsub task.
+    - `async _restart_pubsub_listener(self)` (line 501): Restart the pubsub listener after a failure.
+    - `async _listen_redis_updates(self)` (line 510): Redis Pub/Sub 채널을 수신하여 WebSocket으로 전달 with improved error handling
+    - `async notify_task_update(self, update_data)` (line 571): Send task update notification to all connected clients.
+    - `async publish_schema_drift(self, db_name, drift_payload)` (line 583): Publish schema drift notification via Redis Pub/Sub.
+    - `async notify_schema_drift_direct(self, db_name, drift_payload)` (line 605): Send schema drift notification directly to WebSocket clients.
 
 ### `backend/shared/services/core/worker_stores.py`
 - **Functions**
@@ -7607,7 +7615,7 @@
 
 ### `backend/shared/services/events/event_replay.py`
 - **Functions**
-  - `async demo_replay()` (line 499): Demo the replay functionality
+  - `async demo_replay()` (line 594): Demo the replay functionality
 - **Classes**
   - `EventReplayService` (line 18): Deterministic event replay from S3 storage
     - `__init__(self, s3_endpoint, s3_access_key, s3_secret_key, bucket_name, s3_client)` (line 24): no docstring
@@ -7617,15 +7625,21 @@
     - `_list_current_layout_index_entries(self, class_id, aggregate_id)` (line 90): no docstring
     - `_is_event_envelope(payload)` (line 120): no docstring
     - `_normalize_event_payload(self, payload)` (line 126): no docstring
-    - `_event_matches_db_name(self, payload, db_name)` (line 166): no docstring
-    - `_load_current_layout_events(self, db_name, class_id, aggregate_id)` (line 173): no docstring
-    - `_load_legacy_events(self, db_name, class_id, aggregate_id)` (line 198): no docstring
-    - `async replay_aggregate(self, db_name, class_id, aggregate_id, up_to_sequence, up_to_timestamp)` (line 218): Replay all events for a specific aggregate
-    - `_apply_event(self, state, event)` (line 315): Apply a single event to the current state
-    - `async replay_all_aggregates(self, db_name, class_id, limit)` (line 351): Replay all aggregates of a specific class
-    - `async point_in_time_replay(self, db_name, class_id, aggregate_id, target_time)` (line 401): Replay aggregate state at a specific point in time
-    - `async verify_replay_determinism(self, db_name, class_id, aggregate_id)` (line 422): Verify that replaying produces deterministic results
-    - `async get_aggregate_history(self, db_name, class_id, aggregate_id)` (line 453): Get complete event history for an aggregate
+    - `_coerce_timestamp(value)` (line 167): no docstring
+    - `_event_identity(event)` (line 180): no docstring
+    - `_event_matches_db_name(self, payload, db_name)` (line 191): no docstring
+    - `async _list_all_objects_async(self, prefix)` (line 198): no docstring
+    - `async _load_json_object_async(self, key)` (line 201): no docstring
+    - `_load_current_layout_events(self, db_name, class_id, aggregate_id)` (line 204): no docstring
+    - `async _load_current_layout_events_from_objects(self, db_name, class_id, aggregate_id)` (line 230): no docstring
+    - `_load_legacy_events(self, db_name, class_id, aggregate_id)` (line 257): no docstring
+    - `_merge_event_collections(cls, *collections)` (line 279): no docstring
+    - `async replay_aggregate(self, db_name, class_id, aggregate_id, up_to_sequence, up_to_timestamp)` (line 297): Replay all events for a specific aggregate
+    - `_apply_event(self, state, event)` (line 401): Apply a single event to the current state
+    - `async replay_all_aggregates(self, db_name, class_id, limit)` (line 437): Replay all aggregates of a specific class
+    - `async point_in_time_replay(self, db_name, class_id, aggregate_id, target_time)` (line 487): Replay aggregate state at a specific point in time
+    - `async verify_replay_determinism(self, db_name, class_id, aggregate_id)` (line 508): Verify that replaying produces deterministic results
+    - `async get_aggregate_history(self, db_name, class_id, aggregate_id)` (line 539): Get complete event history for an aggregate
 
 ### `backend/shared/services/events/idempotency_service.py`
 - **Classes**
@@ -9159,8 +9173,8 @@
 
 ### `backend/shared/services/registries/processed_event_registry.py`
 - **Functions**
-  - `validate_lease_settings(lease_timeout_seconds, heartbeat_interval_seconds)` (line 675): no docstring
-  - `validate_registry_enabled()` (line 705): no docstring
+  - `validate_lease_settings(lease_timeout_seconds, heartbeat_interval_seconds)` (line 677): no docstring
+  - `validate_registry_enabled()` (line 707): no docstring
 - **Classes**
   - `ClaimDecision` (line 30): no docstring
   - `ClaimResult` (line 38): no docstring
@@ -9175,11 +9189,11 @@
     - `async _bootstrap_schema(self, conn, missing_objects)` (line 128): no docstring
     - `async _lock_aggregate(self, conn, handler, aggregate_id)` (line 196): no docstring
     - `async claim(self, handler, event_id, aggregate_id, sequence_number)` (line 203): Try to claim an event for processing.
-    - `async heartbeat(self, handler, event_id)` (line 407): Extend processing lease for a claimed event (owner-scoped).
-    - `async get_event_record(self, event_id)` (line 429): no docstring
-    - `async mark_done(self, handler, event_id, aggregate_id, sequence_number)` (line 499): no docstring
-    - `async mark_failed(self, handler, event_id, error)` (line 567): no docstring
-    - `async mark_retrying(self, handler, event_id, error)` (line 618): Mark a claimed event as retrying without finalizing it as failed.
+    - `async heartbeat(self, handler, event_id)` (line 409): Extend processing lease for a claimed event (owner-scoped).
+    - `async get_event_record(self, event_id)` (line 431): no docstring
+    - `async mark_done(self, handler, event_id, aggregate_id, sequence_number)` (line 501): no docstring
+    - `async mark_failed(self, handler, event_id, error)` (line 569): no docstring
+    - `async mark_retrying(self, handler, event_id, error)` (line 620): Mark a claimed event as retrying without finalizing it as failed.
 
 ### `backend/shared/services/registries/processed_event_registry_factory.py`
 - **Functions**
@@ -9236,7 +9250,7 @@
 
 ### `backend/shared/services/storage/event_store.py`
 - **Functions**
-  - `async get_event_store()` (line 1282): Dependency to get the Event Store instance
+  - `async get_event_store()` (line 1288): Dependency to get the Event Store instance
 - **Classes**
   - `EventStore` (line 54): The REAL Event Store using S3/MinIO as Single Source of Truth.
     - `__init__(self)` (line 69): no docstring
@@ -9267,11 +9281,11 @@
     - `_dedup_events(events)` (line 938): Best-effort dedup to hide historical duplicates during migration.
     - `_dedup_key(event)` (line 951): no docstring
     - `async replay_events(self, from_timestamp, to_timestamp, event_types)` (line 963): Replay events from S3/MinIO for a time range.
-    - `async get_aggregate_version(self, aggregate_type, aggregate_id, allow_full_scan)` (line 1056): Get the current version of an aggregate (max sequence_number).
-    - `async _update_indexes(self, event, key, s3)` (line 1099): Update various indexes for efficient querying.
-    - `async _write_index_entries(self, s3, aggregate_index_key, date_index_key, event_id_index_key, payload)` (line 1167): no docstring
-    - `async get_snapshot(self, aggregate_type, aggregate_id, version)` (line 1197): Get a snapshot of an aggregate at a specific version.
-    - `async save_snapshot(self, aggregate_type, aggregate_id, version, state)` (line 1227): Save a snapshot for performance optimization.
+    - `async get_aggregate_version(self, aggregate_type, aggregate_id, allow_full_scan)` (line 1062): Get the current version of an aggregate (max sequence_number).
+    - `async _update_indexes(self, event, key, s3)` (line 1105): Update various indexes for efficient querying.
+    - `async _write_index_entries(self, s3, aggregate_index_key, date_index_key, event_id_index_key, payload)` (line 1173): no docstring
+    - `async get_snapshot(self, aggregate_type, aggregate_id, version)` (line 1203): Get a snapshot of an aggregate at a specific version.
+    - `async save_snapshot(self, aggregate_type, aggregate_id, version, state)` (line 1233): Save a snapshot for performance optimization.
 
 ### `backend/shared/services/storage/lakefs_branch_utils.py`
 - **Functions**
@@ -9346,7 +9360,7 @@
 ### `backend/shared/services/storage/storage_service.py`
 - **Functions**
   - `_client_error_code(exc)` (line 36): no docstring
-  - `create_storage_service(settings)` (line 998): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
+  - `create_storage_service(settings)` (line 1008): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
 - **Classes**
   - `StorageService` (line 42): S3/MinIO 스토리지 서비스 - Event Sourcing 지원
     - `__init__(self, endpoint_url, access_key, secret_key, region, use_ssl, ssl_verify)` (line 66): 스토리지 서비스 초기화
@@ -9354,25 +9368,25 @@
     - `_read_body_and_close(body)` (line 122): no docstring
     - `async create_bucket(self, bucket_name)` (line 131): 버킷 생성
     - `async bucket_exists(self, bucket_name)` (line 153): 버킷 존재 여부 확인
-    - `async save_json(self, bucket, key, data, metadata)` (line 173): JSON 데이터를 S3에 저장하고 체크섬 반환
-    - `async save_bytes(self, bucket, key, data, content_type, metadata)` (line 221): Raw bytes를 S3에 저장하고 체크섬 반환
-    - `async save_fileobj(self, bucket, key, fileobj, content_type, metadata, checksum)` (line 269): Stream a file-like object into S3 and return a checksum.
-    - `async load_json(self, bucket, key)` (line 326): S3에서 JSON 데이터 로드
-    - `async load_bytes(self, bucket, key)` (line 353): S3에서 Raw bytes 로드
-    - `async load_bytes_lines(self, bucket, key, max_lines, max_bytes)` (line 378): Load up to `max_lines` newline-delimited lines from the start of an object.
-    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 437): 저장된 파일의 체크섬 검증
-    - `async delete_object(self, bucket, key)` (line 470): S3 객체 삭제
-    - `async delete_prefix(self, bucket, prefix)` (line 488): Delete all objects under a prefix.
-    - `async list_objects(self, bucket, prefix, max_keys)` (line 558): 버킷의 객체 목록 조회
-    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 592): Paginated object listing (returns next continuation token if more).
-    - `async iter_objects(self, bucket, prefix, max_keys)` (line 619): Async iterator over all objects under prefix (pagination-aware).
-    - `async get_object_metadata(self, bucket, key)` (line 643): 객체 메타데이터 조회
-    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 671): 인스턴스 이벤트 저장 경로 생성
-    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 693): 특정 인스턴스의 모든 Command 파일 목록 조회
-    - `async list_command_files(self, bucket, prefix)` (line 757): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
-    - `async replay_instance_state(self, bucket, command_files, strict)` (line 798): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
-    - `is_instance_deleted(self, instance_state)` (line 960): 인스턴스가 삭제된 상태인지 확인
-    - `get_deletion_info(self, instance_state)` (line 974): 삭제된 인스턴스의 삭제 정보 반환
+    - `async save_json(self, bucket, key, data, metadata)` (line 178): JSON 데이터를 S3에 저장하고 체크섬 반환
+    - `async save_bytes(self, bucket, key, data, content_type, metadata)` (line 226): Raw bytes를 S3에 저장하고 체크섬 반환
+    - `async save_fileobj(self, bucket, key, fileobj, content_type, metadata, checksum)` (line 274): Stream a file-like object into S3 and return a checksum.
+    - `async load_json(self, bucket, key)` (line 331): S3에서 JSON 데이터 로드
+    - `async load_bytes(self, bucket, key)` (line 358): S3에서 Raw bytes 로드
+    - `async load_bytes_lines(self, bucket, key, max_lines, max_bytes)` (line 383): Load up to `max_lines` newline-delimited lines from the start of an object.
+    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 442): 저장된 파일의 체크섬 검증
+    - `async delete_object(self, bucket, key)` (line 475): S3 객체 삭제
+    - `async delete_prefix(self, bucket, prefix)` (line 498): Delete all objects under a prefix.
+    - `async list_objects(self, bucket, prefix, max_keys)` (line 568): 버킷의 객체 목록 조회
+    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 602): Paginated object listing (returns next continuation token if more).
+    - `async iter_objects(self, bucket, prefix, max_keys)` (line 629): Async iterator over all objects under prefix (pagination-aware).
+    - `async get_object_metadata(self, bucket, key)` (line 653): 객체 메타데이터 조회
+    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 681): 인스턴스 이벤트 저장 경로 생성
+    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 703): 특정 인스턴스의 모든 Command 파일 목록 조회
+    - `async list_command_files(self, bucket, prefix)` (line 767): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
+    - `async replay_instance_state(self, bucket, command_files, strict)` (line 808): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
+    - `is_instance_deleted(self, instance_state)` (line 970): 인스턴스가 삭제된 상태인지 확인
+    - `get_deletion_info(self, instance_state)` (line 984): 삭제된 인스턴스의 삭제 정보 반환
 
 ### `backend/shared/setup.py`
 
@@ -10843,6 +10857,26 @@
   - `test_agent_health_path_remains_exempt()` (line 69): no docstring
   - `test_agent_auth_configuration_requires_token()` (line 80): no docstring
 
+### `backend/tests/unit/agent/test_agent_router_failures.py`
+- **Functions**
+  - `async test_create_agent_run_returns_503_when_event_store_missing(monkeypatch)` (line 59): no docstring
+  - `async test_create_agent_run_records_started_event_after_registry_and_task_setup(monkeypatch)` (line 77): no docstring
+  - `async test_execute_agent_run_marks_completed_steps_before_failed_step(monkeypatch)` (line 116): no docstring
+- **Classes**
+  - `_FakeRegistry` (line 14): no docstring
+    - `__init__(self)` (line 15): no docstring
+    - `async create_run(self, **kwargs)` (line 21): no docstring
+    - `async create_step(self, **kwargs)` (line 24): no docstring
+    - `async update_step_status(self, **kwargs)` (line 27): no docstring
+    - `async update_run_status(self, **kwargs)` (line 30): no docstring
+  - `_FakeRuntime` (line 34): no docstring
+    - `__init__(self)` (line 35): no docstring
+    - `async record_event(self, event_type, **kwargs)` (line 38): no docstring
+  - `_DummyTask` (line 43): no docstring
+    - `__init__(self)` (line 44): no docstring
+    - `add_done_callback(self, callback)` (line 47): no docstring
+  - `_FakeRequest` (line 52): no docstring
+
 ### `backend/tests/unit/config/test_app_config_topics.py`
 - **Functions**
   - `test_get_all_topics_includes_command_dlqs()` (line 6): no docstring
@@ -10917,10 +10951,12 @@
 
 ### `backend/tests/unit/data_connector/test_adapter_source_type_strictness.py`
 - **Functions**
-  - `test_connector_kind_from_source_type_known_values()` (line 8): no docstring
-  - `test_connector_kind_from_source_type_unknown_raises_in_strict_mode()` (line 15): no docstring
-  - `test_import_config_key_for_source_type_known_values()` (line 20): no docstring
-  - `test_import_config_key_for_source_type_unknown_raises_in_strict_mode()` (line 26): no docstring
+  - `test_connector_kind_from_source_type_known_values()` (line 16): no docstring
+  - `test_connector_kind_from_source_type_unknown_raises_in_strict_mode()` (line 23): no docstring
+  - `test_import_config_key_for_source_type_known_values()` (line 28): no docstring
+  - `test_import_config_key_for_source_type_unknown_raises_in_strict_mode()` (line 34): no docstring
+  - `test_source_type_helpers_reject_unknown_connector_kind()` (line 39): no docstring
+  - `test_adapter_factory_rejects_unknown_connector_kind()` (line 50): no docstring
 
 ### `backend/tests/unit/data_connector/test_incremental_query_ordering.py`
 - **Functions**
@@ -11390,6 +11426,7 @@
   - `test_oms_admin_token_uses_settings_ssot(monkeypatch)` (line 100): no docstring
   - `test_resolve_db_name_for_bff_call_priority()` (line 112): no docstring
   - `async test_bff_json_includes_project_scope_header(monkeypatch)` (line 154): no docstring
+  - `async test_http_json_maps_transport_errors_to_structured_response(monkeypatch)` (line 193): no docstring
 
 ### `backend/tests/unit/mcp/test_pipeline_plan_add_output_contract.py`
 - **Functions**
@@ -12039,6 +12076,18 @@
   - `test_metrics_redirect_without_deprecated_query_has_no_deprecation_headers()` (line 15): no docstring
   - `test_metrics_redirect_with_deprecated_query_sets_deprecation_headers()` (line 25): no docstring
 
+### `backend/tests/unit/routers/test_monitoring_router_health.py`
+- **Functions**
+  - `_build_client()` (line 11): no docstring
+  - `test_monitoring_health_endpoints_do_not_fail_open_without_container()` (line 17): no docstring
+  - `test_detailed_health_serializes_type_based_service_keys(monkeypatch)` (line 64): no docstring
+- **Classes**
+  - `_Registration` (line 44): no docstring
+  - `_Container` (line 51): no docstring
+    - `__init__(self)` (line 52): no docstring
+  - `DummyService` (line 59): no docstring
+    - `async health_check(self)` (line 60): no docstring
+
 ### `backend/tests/unit/routers/test_schema_changes.py`
 - **Classes**
   - `TestSchemaChangesModels` (line 18): Test request/response models
@@ -12415,6 +12464,7 @@
 ### `backend/tests/unit/services/test_agent_runtime_delegated_auth.py`
 - **Functions**
   - `async test_agent_runtime_sends_service_token_and_delegated_user_token(monkeypatch)` (line 20): no docstring
+  - `async test_agent_runtime_forwards_idempotency_and_agent_session_headers(monkeypatch)` (line 110): no docstring
 - **Classes**
   - `DummyEventStore` (line 10): no docstring
     - `__init__(self)` (line 11): no docstring
@@ -12487,17 +12537,26 @@
 
 ### `backend/tests/unit/services/test_background_task_manager.py`
 - **Functions**
-  - `async _wait_until_complete(manager, task_id, timeout_seconds)` (line 33): no docstring
-  - `async test_retry_attempt_clears_terminal_fields_before_reexecution()` (line 50): no docstring
-  - `async test_task_stays_terminal_failed_after_retry_exhaustion()` (line 83): no docstring
-  - `async test_run_with_tracking_registers_current_task_for_dead_task_cleanup()` (line 106): no docstring
-  - `async test_create_task_does_not_inject_task_id_when_callable_does_not_accept_it()` (line 134): no docstring
+  - `async _wait_until_complete(manager, task_id, timeout_seconds)` (line 35): no docstring
+  - `async test_retry_attempt_clears_terminal_fields_before_reexecution()` (line 52): no docstring
+  - `async test_task_stays_terminal_failed_after_retry_exhaustion()` (line 85): no docstring
+  - `async test_run_with_tracking_registers_current_task_for_dead_task_cleanup()` (line 108): no docstring
+  - `async test_create_task_does_not_inject_task_id_when_callable_does_not_accept_it()` (line 136): no docstring
+  - `async test_provider_starts_new_background_task_manager(monkeypatch)` (line 183): no docstring
+  - `async test_provider_starts_existing_background_task_manager(monkeypatch)` (line 204): no docstring
 - **Classes**
-  - `_RedisStub` (line 12): no docstring
-    - `__init__(self)` (line 13): no docstring
-    - `async set_json(self, key, value, ttl)` (line 16): no docstring
-    - `async get_json(self, key)` (line 21): no docstring
-    - `async scan_keys(self, pattern)` (line 27): no docstring
+  - `_RedisStub` (line 14): no docstring
+    - `__init__(self)` (line 15): no docstring
+    - `async set_json(self, key, value, ttl)` (line 18): no docstring
+    - `async get_json(self, key)` (line 23): no docstring
+    - `async scan_keys(self, pattern)` (line 29): no docstring
+  - `_ContainerStub` (line 158): no docstring
+    - `__init__(self, redis_service, existing_manager)` (line 159): no docstring
+    - `has(self, service_type)` (line 164): no docstring
+    - `is_created(self, service_type)` (line 167): no docstring
+    - `ensure_singleton(self, service_type, factory)` (line 170): no docstring
+    - `async get(self, service_type)` (line 173): no docstring
+    - `ensure_instance(self, service_type, instance)` (line 176): no docstring
 
 ### `backend/tests/unit/services/test_changelog_store.py`
 - **Functions**
@@ -12629,12 +12688,15 @@
 - **Functions**
   - `async test_token_roundtrip()` (line 13): no docstring
   - `async test_consistency_token_service_creates_metadata()` (line 36): no docstring
-  - `async test_wait_for_consistency_uses_resolved_instances_index()` (line 83): no docstring
-  - `async test_wait_for_consistency_requires_index_context_without_db_name()` (line 104): no docstring
+  - `async test_wait_for_consistency_uses_resolved_instances_index()` (line 89): no docstring
+  - `async test_wait_for_consistency_requires_index_context_without_db_name()` (line 110): no docstring
+  - `async test_wait_for_consistency_surfaces_elasticsearch_failures()` (line 126): no docstring
 - **Classes**
   - `_ESClient` (line 73): no docstring
     - `__init__(self)` (line 74): no docstring
     - `async get(self, index, id)` (line 77): no docstring
+  - `_ESFailureClient` (line 82): no docstring
+    - `async get(self, index, id)` (line 83): no docstring
 
 ### `backend/tests/unit/services/test_database_error_policy.py`
 - **Functions**
@@ -12860,6 +12922,8 @@
   - `async test_event_replay_all_and_determinism()` (line 188): no docstring
   - `async test_event_replay_paginates_and_not_found_is_deterministic()` (line 226): no docstring
   - `async test_event_replay_supports_current_event_store_layout()` (line 268): no docstring
+  - `async test_event_replay_merges_legacy_and_current_layout_history()` (line 312): no docstring
+  - `async test_point_in_time_replay_uses_event_occurred_at_not_index_last_modified()` (line 358): no docstring
 - **Classes**
   - `_InMemoryS3Client` (line 13): no docstring
     - `__init__(self)` (line 14): no docstring
@@ -12897,7 +12961,8 @@
   - `async test_get_events_avoids_full_bucket_scan_when_aggregate_index_is_complete()` (line 110): no docstring
   - `async test_get_events_falls_back_when_aggregate_index_has_sequence_gap()` (line 143): no docstring
   - `async test_replay_events_fallback_scans_each_year_in_requested_range()` (line 187): no docstring
-  - `async test_snapshot_operations_initialize_session_lazily(monkeypatch)` (line 225): no docstring
+  - `async test_replay_events_falls_back_when_any_day_in_range_lacks_index()` (line 225): no docstring
+  - `async test_snapshot_operations_initialize_session_lazily(monkeypatch)` (line 265): no docstring
 - **Classes**
   - `_Body` (line 12): no docstring
     - `__init__(self, payload)` (line 13): no docstring
@@ -13059,7 +13124,9 @@
   - `async test_action_log_listing_uses_exact_total_count(monkeypatch)` (line 202): no docstring
   - `async test_overlay_pagination_happens_after_merge(monkeypatch)` (line 233): no docstring
   - `async test_access_policy_paginates_after_filtering(monkeypatch)` (line 281): no docstring
-  - `async test_overlay_detail_hidden_by_policy_does_not_fall_back_to_base(monkeypatch)` (line 322): no docstring
+  - `async test_access_policy_still_applies_offset_limit_when_no_rows_filtered(monkeypatch)` (line 322): no docstring
+  - `async test_overlay_and_access_policy_paginate_after_logical_merge(monkeypatch)` (line 365): no docstring
+  - `async test_overlay_detail_hidden_by_policy_does_not_fall_back_to_base(monkeypatch)` (line 421): no docstring
 - **Classes**
   - `_FakeDatasetRegistry` (line 18): no docstring
     - `__init__(self, policy)` (line 19): no docstring
@@ -13892,7 +13959,7 @@
   - `async test_scheduler_records_ignored_when_schedule_due_but_dependency_not_satisfied(monkeypatch)` (line 112): no docstring
   - `async test_scheduler_does_not_trigger_dependency_only_when_pipeline_is_newer_than_deps(monkeypatch)` (line 159): no docstring
   - `async test_scheduler_triggers_interval_schedule_when_due(monkeypatch)` (line 204): no docstring
-  - `async test_scheduler_records_tick_before_publish_to_avoid_duplicate_due_runs(monkeypatch)` (line 249): no docstring
+  - `async test_scheduler_does_not_record_tick_when_publish_fails(monkeypatch)` (line 249): no docstring
   - `async test_scheduler_skips_paused_pipeline_even_when_schedule_due(monkeypatch)` (line 288): no docstring
   - `async test_scheduler_triggers_cron_schedule_when_matches(monkeypatch)` (line 329): no docstring
   - `async test_scheduler_triggers_when_dependency_is_newer_than_pipeline_build(monkeypatch)` (line 374): no docstring
@@ -14050,24 +14117,25 @@
 
 ### `backend/tests/unit/services/test_processed_event_registry_claim_ordering.py`
 - **Functions**
-  - `_call_index(conn, needle)` (line 59): no docstring
-  - `async test_claim_serializes_aggregate_before_inserting_new_processing_row()` (line 67): no docstring
-  - `async test_claim_returns_in_progress_when_lower_sequence_is_still_processing()` (line 86): no docstring
+  - `_call_index(conn, needle)` (line 62): no docstring
+  - `async test_claim_serializes_aggregate_before_inserting_new_processing_row()` (line 70): no docstring
+  - `async test_claim_returns_in_progress_when_lower_sequence_is_still_processing()` (line 89): no docstring
+  - `async test_claim_ignores_expired_lower_sequence_processing_row()` (line 106): no docstring
 - **Classes**
   - `_FakeTransaction` (line 10): no docstring
     - `async __aenter__(self)` (line 11): no docstring
     - `async __aexit__(self, exc_type, exc, tb)` (line 14): no docstring
   - `_FakeConnection` (line 18): no docstring
-    - `__init__(self, lower_inflight)` (line 19): no docstring
-    - `async __aenter__(self)` (line 23): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 26): no docstring
-    - `transaction(self)` (line 29): no docstring
-    - `async execute(self, sql, *args)` (line 32): no docstring
-    - `async fetchval(self, sql, *args)` (line 36): no docstring
-    - `async fetchrow(self, sql, *args)` (line 44): no docstring
-  - `_FakePool` (line 51): no docstring
-    - `__init__(self, conn)` (line 52): no docstring
-    - `acquire(self)` (line 55): no docstring
+    - `__init__(self, lower_inflight, lower_inflight_expired)` (line 19): no docstring
+    - `async __aenter__(self)` (line 24): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 27): no docstring
+    - `transaction(self)` (line 30): no docstring
+    - `async execute(self, sql, *args)` (line 33): no docstring
+    - `async fetchval(self, sql, *args)` (line 37): no docstring
+    - `async fetchrow(self, sql, *args)` (line 47): no docstring
+  - `_FakePool` (line 54): no docstring
+    - `__init__(self, conn)` (line 55): no docstring
+    - `acquire(self)` (line 58): no docstring
 
 ### `backend/tests/unit/services/test_processed_event_registry_schema.py`
 - **Functions**
@@ -14240,7 +14308,9 @@
   - `async test_replay_instance_state_strict_raises_on_invalid_command_file()` (line 174): no docstring
   - `async test_load_bytes_closes_stream_body()` (line 194): no docstring
   - `async test_list_objects_paginated_raises_typed_error_on_transport_failure()` (line 213): no docstring
-  - `async test_delete_prefix_raises_when_delete_objects_reports_partial_failure()` (line 232): no docstring
+  - `async test_bucket_exists_raises_typed_error_on_access_denied()` (line 232): no docstring
+  - `async test_delete_prefix_raises_when_delete_objects_reports_partial_failure()` (line 251): no docstring
+  - `async test_delete_object_raises_typed_error_on_access_denied()` (line 274): no docstring
 - **Classes**
   - `_FakeS3Client` (line 10): no docstring
     - `__init__(self, pages)` (line 11): no docstring
@@ -14302,9 +14372,10 @@
 
 ### `backend/tests/unit/services/test_websocket_service_restart.py`
 - **Functions**
-  - `async test_restart_pubsub_listener_resets_running_before_restart(monkeypatch)` (line 17): no docstring
+  - `async test_restart_pubsub_listener_resets_running_before_restart(monkeypatch)` (line 18): no docstring
+  - `async test_stop_resets_notification_singleton_for_new_redis_client()` (line 43): no docstring
 - **Classes**
-  - `_RedisStub` (line 11): no docstring
+  - `_RedisStub` (line 12): no docstring
 
 ### `backend/tests/unit/services/test_worker_stores_lineage_policy.py`
 - **Functions**
@@ -14789,55 +14860,58 @@
 
 ### `backend/tests/unit/workers/test_connector_sync_worker.py`
 - **Functions**
-  - `async test_sync_worker_process_connector_update_snapshot()` (line 188): no docstring
-  - `async test_sync_worker_process_connector_update_file_import_uses_file_config_key()` (line 261): no docstring
-  - `async test_sync_worker_process_connector_update_streaming_uses_cdc_extract()` (line 320): no docstring
-  - `async test_sync_worker_handle_envelope_rejects_unknown()` (line 384): no docstring
-  - `async test_sync_worker_handle_envelope_accepts_sqlserver_table_import(monkeypatch)` (line 398): no docstring
-  - `async test_sync_worker_handle_envelope_accepts_mysql_file_import(monkeypatch)` (line 419): no docstring
-  - `async test_sync_worker_run_processes_message(monkeypatch)` (line 440): no docstring
-  - `async test_sync_worker_heartbeat_loop_stops(monkeypatch)` (line 469): no docstring
+  - `async test_sync_worker_process_connector_update_snapshot()` (line 194): no docstring
+  - `async test_sync_worker_process_connector_update_treats_post_ingest_sync_state_failure_as_non_retryable()` (line 267): no docstring
+  - `async test_sync_worker_process_connector_update_file_import_uses_file_config_key()` (line 321): no docstring
+  - `async test_sync_worker_process_connector_update_streaming_uses_cdc_extract()` (line 380): no docstring
+  - `async test_sync_worker_handle_envelope_rejects_unknown()` (line 444): no docstring
+  - `async test_sync_worker_handle_envelope_accepts_sqlserver_table_import(monkeypatch)` (line 458): no docstring
+  - `async test_sync_worker_handle_envelope_accepts_mysql_file_import(monkeypatch)` (line 479): no docstring
+  - `async test_sync_worker_run_processes_message(monkeypatch)` (line 500): no docstring
+  - `async test_sync_worker_heartbeat_loop_stops(monkeypatch)` (line 529): no docstring
 - **Classes**
-  - `_FakeTracing` (line 16): no docstring
-    - `span(self, *args, **kwargs)` (line 17): no docstring
-  - `_FakeAdapter` (line 21): no docstring
-    - `__init__(self)` (line 22): no docstring
-    - `async snapshot_extract(self, config, secrets, import_config)` (line 28): no docstring
-    - `async incremental_extract(self, config, secrets, import_config, sync_state)` (line 40): no docstring
-    - `async cdc_extract(self, config, secrets, import_config, sync_state)` (line 44): no docstring
-  - `_FakeAdapterFactory` (line 49): no docstring
-    - `__init__(self)` (line 50): no docstring
-    - `get_adapter(self, connector_kind)` (line 53): no docstring
-  - `_FakeRegistry` (line 58): no docstring
-    - `__init__(self)` (line 59): no docstring
-    - `async get_source(self, source_type, source_id)` (line 67): no docstring
-    - `async get_mapping(self, source_type, source_id)` (line 74): no docstring
-    - `async get_sync_state(self, source_type, source_id)` (line 78): no docstring
-    - `async get_connection_secrets(self, source_type, source_id)` (line 82): no docstring
-    - `async upsert_sync_state_json(self, source_type, source_id, sync_state_json, merge)` (line 86): no docstring
-    - `async record_sync_outcome(self, **kwargs)` (line 96): no docstring
-  - `_FakeIngestService` (line 100): no docstring
-    - `__init__(self)` (line 101): no docstring
-    - `async ingest_rows(self, **kwargs)` (line 104): no docstring
-  - `_FakeProcessed` (line 122): no docstring
-    - `__init__(self)` (line 123): no docstring
-    - `async claim(self, **kwargs)` (line 129): no docstring
-    - `async mark_done(self, **kwargs)` (line 133): no docstring
-    - `async mark_failed(self, **kwargs)` (line 136): no docstring
-    - `async heartbeat(self, **kwargs)` (line 139): no docstring
-  - `_FakeMessage` (line 144): no docstring
-    - `__init__(self, payload)` (line 145): no docstring
-    - `error(self)` (line 148): no docstring
-    - `value(self)` (line 151): no docstring
-    - `headers(self)` (line 154): no docstring
-    - `topic(self)` (line 157): no docstring
-    - `partition(self)` (line 160): no docstring
-    - `offset(self)` (line 163): no docstring
-  - `_FakeConsumer` (line 167): no docstring
-    - `__init__(self, worker)` (line 168): no docstring
-    - `poll(self, timeout)` (line 173): no docstring
-    - `commit(self, msg, asynchronous)` (line 178): no docstring
-    - `commit_sync(self, msg)` (line 182): no docstring
+  - `_FakeTracing` (line 17): no docstring
+    - `span(self, *args, **kwargs)` (line 18): no docstring
+  - `_FakeAdapter` (line 22): no docstring
+    - `__init__(self)` (line 23): no docstring
+    - `async snapshot_extract(self, config, secrets, import_config)` (line 29): no docstring
+    - `async incremental_extract(self, config, secrets, import_config, sync_state)` (line 41): no docstring
+    - `async cdc_extract(self, config, secrets, import_config, sync_state)` (line 45): no docstring
+  - `_FakeAdapterFactory` (line 50): no docstring
+    - `__init__(self)` (line 51): no docstring
+    - `get_adapter(self, connector_kind)` (line 54): no docstring
+  - `_FakeRegistry` (line 59): no docstring
+    - `__init__(self)` (line 60): no docstring
+    - `async get_source(self, source_type, source_id)` (line 68): no docstring
+    - `async get_mapping(self, source_type, source_id)` (line 75): no docstring
+    - `async get_sync_state(self, source_type, source_id)` (line 79): no docstring
+    - `async get_connection_secrets(self, source_type, source_id)` (line 83): no docstring
+    - `async upsert_sync_state_json(self, source_type, source_id, sync_state_json, merge)` (line 87): no docstring
+    - `async record_sync_outcome(self, **kwargs)` (line 97): no docstring
+  - `_FailingSyncStateRegistry` (line 101): no docstring
+    - `async upsert_sync_state_json(self, source_type, source_id, sync_state_json, merge)` (line 102): no docstring
+  - `_FakeIngestService` (line 106): no docstring
+    - `__init__(self)` (line 107): no docstring
+    - `async ingest_rows(self, **kwargs)` (line 110): no docstring
+  - `_FakeProcessed` (line 128): no docstring
+    - `__init__(self)` (line 129): no docstring
+    - `async claim(self, **kwargs)` (line 135): no docstring
+    - `async mark_done(self, **kwargs)` (line 139): no docstring
+    - `async mark_failed(self, **kwargs)` (line 142): no docstring
+    - `async heartbeat(self, **kwargs)` (line 145): no docstring
+  - `_FakeMessage` (line 150): no docstring
+    - `__init__(self, payload)` (line 151): no docstring
+    - `error(self)` (line 154): no docstring
+    - `value(self)` (line 157): no docstring
+    - `headers(self)` (line 160): no docstring
+    - `topic(self)` (line 163): no docstring
+    - `partition(self)` (line 166): no docstring
+    - `offset(self)` (line 169): no docstring
+  - `_FakeConsumer` (line 173): no docstring
+    - `__init__(self, worker)` (line 174): no docstring
+    - `poll(self, timeout)` (line 179): no docstring
+    - `commit(self, msg, asynchronous)` (line 184): no docstring
+    - `commit_sync(self, msg)` (line 188): no docstring
 
 ### `backend/tests/unit/workers/test_connector_trigger_service.py`
 - **Functions**
@@ -14847,6 +14921,7 @@
   - `async test_trigger_service_poll_source_uses_adapter_and_records_change(monkeypatch)` (line 231): no docstring
   - `async test_trigger_service_file_import_uses_file_import_config_key(monkeypatch)` (line 264): no docstring
   - `async test_trigger_service_publish_outbox(monkeypatch)` (line 308): no docstring
+  - `async test_trigger_service_failed_poll_respects_polling_interval_before_retry(monkeypatch)` (line 348): no docstring
 - **Classes**
   - `_FakeTracing` (line 15): no docstring
     - `span(self, *args, **kwargs)` (line 16): no docstring
@@ -14912,22 +14987,43 @@
 
 ### `backend/tests/unit/workers/test_message_relay_checkpoint.py`
 - **Functions**
-  - `async test_load_checkpoint_returns_empty_for_missing_object()` (line 43): no docstring
-  - `async test_load_checkpoint_raises_for_non_missing_client_error()` (line 64): no docstring
-  - `async test_process_events_propagates_checkpoint_load_failures()` (line 81): no docstring
-  - `test_s3_client_kwargs_derive_tls_from_endpoint_scheme()` (line 93): no docstring
+  - `async test_load_checkpoint_returns_empty_for_missing_object()` (line 98): no docstring
+  - `async test_load_checkpoint_raises_for_non_missing_client_error()` (line 119): no docstring
+  - `async test_process_events_propagates_checkpoint_load_failures()` (line 136): no docstring
+  - `test_s3_client_kwargs_derive_tls_from_endpoint_scheme()` (line 148): no docstring
+  - `async test_list_next_index_keys_orders_lookback_before_forward()` (line 160): no docstring
+  - `async test_process_events_does_not_advance_checkpoint_on_missing_index_entry()` (line 194): no docstring
+  - `async test_process_events_does_not_advance_checkpoint_on_missing_event_payload()` (line 250): no docstring
+  - `async test_process_events_advances_checkpoint_past_malformed_index_entry()` (line 320): no docstring
+  - `async test_process_events_advances_checkpoint_past_invalid_json_index_entry()` (line 375): no docstring
+  - `async test_process_events_flushes_pending_batch_before_skipping_malformed_index_entry()` (line 430): no docstring
 - **Classes**
-  - `_AsyncBody` (line 9): no docstring
-    - `__init__(self, payload)` (line 10): no docstring
-    - `async read(self)` (line 14): no docstring
-    - `close(self)` (line 17): no docstring
-  - `_ClientContext` (line 21): no docstring
-    - `__init__(self, client)` (line 22): no docstring
-    - `async __aenter__(self)` (line 25): no docstring
-    - `async __aexit__(self, exc_type, exc, tb)` (line 28): no docstring
-  - `_Session` (line 33): no docstring
-    - `__init__(self, client)` (line 34): no docstring
-    - `client(self, *args, **kwargs)` (line 37): no docstring
+  - `_AsyncBody` (line 11): no docstring
+    - `__init__(self, payload)` (line 12): no docstring
+    - `async read(self)` (line 16): no docstring
+    - `close(self)` (line 19): no docstring
+  - `_ClientContext` (line 23): no docstring
+    - `__init__(self, client)` (line 24): no docstring
+    - `async __aenter__(self)` (line 27): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 30): no docstring
+  - `_Session` (line 35): no docstring
+    - `__init__(self, client)` (line 36): no docstring
+    - `client(self, *args, **kwargs)` (line 39): no docstring
+  - `_Paginator` (line 44): no docstring
+    - `__init__(self, contents_by_prefix)` (line 45): no docstring
+    - `async paginate(self, **kwargs)` (line 48): no docstring
+  - `_ListClient` (line 53): no docstring
+    - `__init__(self, contents_by_prefix)` (line 54): no docstring
+    - `get_paginator(self, name)` (line 57): no docstring
+  - `_Producer` (line 62): no docstring
+    - `__init__(self)` (line 63): no docstring
+    - `produce(self, topic, value, key, headers, callback)` (line 67): no docstring
+    - `poll(self, timeout)` (line 73): no docstring
+    - `flush(self, timeout)` (line 77): no docstring
+  - `_Tracing` (line 86): no docstring
+    - `span(self, *args, **kwargs)` (line 87): no docstring
+  - `_Metrics` (line 92): no docstring
+    - `record_event(self, *args, **kwargs)` (line 93): no docstring
 
 ### `backend/tests/unit/workers/test_message_relay_process.py`
 - **Functions**
@@ -15172,6 +15268,7 @@
   - `test_validation_methods_delegate_to_validation_domain(monkeypatch)` (line 41): no docstring
   - `test_ingest_methods_delegate_to_ingest_domain(monkeypatch)` (line 76): no docstring
   - `async test_async_domain_methods_delegate(monkeypatch)` (line 107): no docstring
+  - `async test_run_deploy_mode_keeps_deployed_status_when_watermark_persist_fails(monkeypatch)` (line 154): no docstring
 
 ### `backend/tests/unit/workers/test_pipeline_worker_helpers.py`
 - **Functions**

@@ -159,14 +159,6 @@ async def _maybe_resume_idempotent_pipeline_create(
     ):
         raise _pipeline_create_conflict()
 
-    principal_type, principal_id = _resolve_principal(request)
-    await pipeline_registry.grant_permission(
-        pipeline_id=existing.pipeline_id,
-        principal_type=principal_type,
-        principal_id=principal_id,
-        role="admin",
-    )
-
     version = await pipeline_registry.get_latest_version(pipeline_id=existing.pipeline_id, branch=branch)
     if version is None:
         version = await pipeline_registry.add_version(
@@ -190,6 +182,14 @@ async def _maybe_resume_idempotent_pipeline_create(
             existing_dependencies = _normalize_dependencies_for_compare(existing_dependencies_payload)
         elif existing_dependencies != requested_dependencies:
             raise _pipeline_create_conflict()
+
+    principal_type, principal_id = _resolve_principal(request)
+    await pipeline_registry.grant_permission(
+        pipeline_id=existing.pipeline_id,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        role="admin",
+    )
 
     dependencies_for_api = _format_dependencies_for_api(existing_dependencies_payload)
     response_definition_json = dict(version.definition_json or {})
@@ -255,6 +255,7 @@ async def create_pipeline(
 ) -> dict[str, Any]:
     sanitized: dict[str, Any] = {}
     effective_pipeline_id: Optional[str] = None
+    created_record: Any = None
     try:
         idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline create")
         sanitized = sanitize_input(payload)
@@ -398,6 +399,7 @@ async def create_pipeline(
             schedule_cron=schedule_cron,
             pipeline_id=effective_pipeline_id,
         )
+        created_record = record
         principal_type, principal_id = _resolve_principal(request)
         await pipeline_registry.grant_permission(
             pipeline_id=record.pipeline_id,
@@ -503,6 +505,30 @@ async def create_pipeline(
             code=ErrorCode.RESOURCE_ALREADY_EXISTS,
         ) from exc
     except Exception as exc:
+        if effective_pipeline_id and created_record is not None:
+            recovered = await _maybe_resume_idempotent_pipeline_create(
+                pipeline_registry=pipeline_registry,
+                request=request,
+                pipeline_id=effective_pipeline_id,
+                db_name=db_name,
+                name=name,
+                description=description,
+                pipeline_type=pipeline_type,
+                location=location,
+                branch=branch,
+                proposal_status=proposal_status,
+                proposal_title=proposal_title,
+                proposal_description=proposal_description,
+                proposal_submitted_at=proposal_submitted_at,
+                proposal_reviewed_at=proposal_reviewed_at,
+                proposal_review_comment=proposal_review_comment,
+                schedule_interval_seconds=schedule_interval_seconds,
+                schedule_cron=schedule_cron,
+                definition_json=definition_json,
+                dependencies=dependencies,
+            )
+            if recovered is not None:
+                return recovered
         db_name = ""
         if isinstance(sanitized, dict):
             db_name = str(sanitized.get("db_name") or "")

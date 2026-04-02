@@ -222,6 +222,46 @@ async def test_replay_events_fallback_scans_each_year_in_requested_range() -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_replay_events_falls_back_when_any_day_in_range_lacks_index() -> None:
+    indexed_event_key = "events/2026/01/01/Order/ord-1/evt-1.json"
+    fallback_event_key = "events/2026/01/02/Order/ord-1/evt-2.json"
+    client = _S3Client(
+        pages_by_prefix={
+            "indexes/by-date/2026/01/01/": [{"Contents": [{"Key": "indexes/by-date/2026/01/01/1735689600000_evt-1.json"}]}],
+            "indexes/by-date/2026/01/02/": [{"Contents": []}],
+            "events/2026/": [{"Contents": [{"Key": indexed_event_key}, {"Key": fallback_event_key}]}],
+        },
+        objects_by_key={
+            "indexes/by-date/2026/01/01/1735689600000_evt-1.json": json.dumps({"s3_key": indexed_event_key}).encode("utf-8"),
+            indexed_event_key: _event_bytes_at(
+                event_id="evt-1",
+                sequence=1,
+                occurred_at="2026-01-01T00:00:00+00:00",
+            ),
+            fallback_event_key: _event_bytes_at(
+                event_id="evt-2",
+                sequence=2,
+                occurred_at="2026-01-02T00:00:00+00:00",
+            ),
+        },
+    )
+    store = EventStore()
+    store.bucket_name = "test-bucket"
+    store.session = _Session(client)
+
+    events = [
+        event
+        async for event in store.replay_events(
+            from_timestamp=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            to_timestamp=datetime(2026, 1, 2, 0, 0, 1, tzinfo=timezone.utc),
+        )
+    ]
+
+    assert [event.event_id for event in events] == ["evt-1", "evt-2"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_snapshot_operations_initialize_session_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshot_key = "snapshots/Order/ord-1/vlatest.json"
     client = _S3Client(

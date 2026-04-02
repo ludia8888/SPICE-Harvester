@@ -30,8 +30,23 @@ async def http_json(
     error_prefix: str = "HTTP",
     error_path: str = "",
 ) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        resp = await client.request(method, url, headers=headers, json=json_body, params=params)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.request(method, url, headers=headers, json=json_body, params=params)
+    except httpx.TimeoutException as exc:
+        path = error_path or url
+        return {
+            "error": f"{error_prefix} {method} {path} timed out",
+            "status_code": 504,
+            "response": {"detail": str(exc)},
+        }
+    except httpx.RequestError as exc:
+        path = error_path or url
+        return {
+            "error": f"{error_prefix} {method} {path} unavailable",
+            "status_code": 503,
+            "response": {"detail": str(exc)},
+        }
     try:
         payload = resp.json()
     except Exception:

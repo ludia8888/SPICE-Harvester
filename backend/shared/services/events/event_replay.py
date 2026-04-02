@@ -163,12 +163,43 @@ class EventReplayService:
             "db_name": data.get("db_name"),
         }
 
+    @staticmethod
+    def _coerce_timestamp(value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str) and value.strip():
+            candidate = value.strip().replace("Z", "+00:00")
+            try:
+                parsed = datetime.fromisoformat(candidate)
+            except ValueError:
+                return None
+            return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return None
+
+    @staticmethod
+    def _event_identity(event: Dict[str, Any]) -> str:
+        content = event.get("content") if isinstance(event.get("content"), dict) else {}
+        sequence = int(content.get("sequence_number") or 0)
+        command_id = str(content.get("command_id") or "").strip()
+        command_type = str(content.get("command_type") or "").strip()
+        if sequence and command_id:
+            return f"seq:{sequence}:cmd:{command_id}:{command_type}"
+        if command_id:
+            return f"cmd:{command_id}:{command_type}"
+        return str(event.get("key") or "")
+
     def _event_matches_db_name(self, payload: Dict[str, Any], *, db_name: str) -> bool:
         normalized = self._normalize_event_payload(payload)
         event_db_name = normalized.get("db_name")
         if not event_db_name:
             return True
         return str(event_db_name) == str(db_name)
+
+    async def _list_all_objects_async(self, *, prefix: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._list_all_objects, prefix=prefix)
+
+    async def _load_json_object_async(self, *, key: str) -> Dict[str, Any]:
+        return await asyncio.to_thread(self._load_json_object, key=key)
 
     def _load_current_layout_events(
         self,
@@ -186,11 +217,39 @@ class EventReplayService:
             raw_payload = self._load_json_object(key=entry["s3_key"])
             if not self._event_matches_db_name(raw_payload, db_name=db_name):
                 continue
+            normalized = self._normalize_event_payload(raw_payload)
             events.append(
                 {
                     "key": entry["s3_key"],
-                    "timestamp": entry.get("last_modified"),
-                    "content": self._normalize_event_payload(raw_payload),
+                    "timestamp": self._coerce_timestamp(normalized.get("timestamp")) or entry.get("last_modified"),
+                    "content": normalized,
+                }
+            )
+        return events
+
+    async def _load_current_layout_events_from_objects(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        aggregate_id: str,
+    ) -> List[Dict[str, Any]]:
+        objects = await self._list_all_objects_async(prefix="events/")
+        events: List[Dict[str, Any]] = []
+        aggregate_path = f"/{class_id}/{aggregate_id}/"
+        for obj in objects:
+            key = str(obj.get("Key") or "")
+            if aggregate_path not in key:
+                continue
+            raw_payload = await self._load_json_object_async(key=key)
+            if not self._event_matches_db_name(raw_payload, db_name=db_name):
+                continue
+            normalized = self._normalize_event_payload(raw_payload)
+            events.append(
+                {
+                    "key": key,
+                    "timestamp": self._coerce_timestamp(normalized.get("timestamp")) or obj.get("LastModified"),
+                    "content": normalized,
                 }
             )
         return events
@@ -206,14 +265,34 @@ class EventReplayService:
         objects = self._list_all_objects(prefix=prefix)
         events: List[Dict[str, Any]] = []
         for obj in objects:
+            content = self._load_json_object(key=obj["Key"])
             events.append(
                 {
                     "key": obj["Key"],
-                    "timestamp": obj["LastModified"],
-                    "content": self._load_json_object(key=obj["Key"]),
+                    "timestamp": self._coerce_timestamp(content.get("timestamp") or content.get("created_at")) or obj["LastModified"],
+                    "content": content,
                 }
             )
         return events
+
+    @classmethod
+    def _merge_event_collections(cls, *collections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for collection in collections:
+            for event in collection:
+                identity = cls._event_identity(event)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                merged.append(event)
+        merged.sort(
+            key=lambda x: (
+                x["content"].get("sequence_number", 0),
+                cls._coerce_timestamp(x.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc),
+            )
+        )
+        return merged
         
     async def replay_aggregate(
         self, 
@@ -238,18 +317,27 @@ class EventReplayService:
         """
         print(f"🔄 Replaying aggregate: {aggregate_id}")
 
-        current_layout_events = self._load_current_layout_events(
-            db_name=db_name,
-            class_id=class_id,
-            aggregate_id=aggregate_id,
-        )
-        legacy_events = self._load_legacy_events(
-            db_name=db_name,
-            class_id=class_id,
-            aggregate_id=aggregate_id,
+        current_layout_events, current_layout_scan_events, legacy_events = await asyncio.gather(
+            asyncio.to_thread(
+                self._load_current_layout_events,
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            ),
+            self._load_current_layout_events_from_objects(
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            ),
+            asyncio.to_thread(
+                self._load_legacy_events,
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            ),
         )
 
-        events = current_layout_events or legacy_events
+        events = self._merge_event_collections(current_layout_events, current_layout_scan_events, legacy_events)
 
         if not events:
             return {
@@ -260,11 +348,6 @@ class EventReplayService:
             }
         
         # Sort by sequence number if available, else by timestamp
-        events.sort(key=lambda x: (
-            x['content'].get('sequence_number', 0),
-            x['timestamp']
-        ))
-        
         # Apply filters
         filtered_events = []
         for event in events:
@@ -278,7 +361,10 @@ class EventReplayService:
             
             # Check timestamp filter
             if up_to_timestamp is not None:
-                if event['timestamp'].replace(tzinfo=timezone.utc) > up_to_timestamp:
+                event_ts = self._coerce_timestamp(event["content"].get("timestamp")) or self._coerce_timestamp(event.get("timestamp"))
+                if event_ts is None:
+                    continue
+                if event_ts > up_to_timestamp:
                     continue
             
             filtered_events.append(event)
@@ -364,13 +450,13 @@ class EventReplayService:
 
         aggregate_ids = {
             entry["aggregate_id"]
-            for entry in self._list_current_layout_index_entries(class_id=class_id)
+            for entry in await asyncio.to_thread(self._list_current_layout_index_entries, class_id=class_id)
             if entry.get("aggregate_id")
         }
 
         if not aggregate_ids:
             prefix = f"{db_name}/{class_id}/"
-            objects = self._list_all_objects(prefix=prefix)
+            objects = await self._list_all_objects_async(prefix=prefix)
             for obj in objects:
                 parts = obj["Key"].split('/')
                 if len(parts) >= 3:
@@ -463,17 +549,26 @@ class EventReplayService:
         """
         print(f"📜 Getting history for {aggregate_id}")
 
-        events = self._load_current_layout_events(
-            db_name=db_name,
-            class_id=class_id,
-            aggregate_id=aggregate_id,
-        )
-        if not events:
-            events = self._load_legacy_events(
+        current_layout_events, current_layout_scan_events, legacy_events = await asyncio.gather(
+            asyncio.to_thread(
+                self._load_current_layout_events,
                 db_name=db_name,
                 class_id=class_id,
                 aggregate_id=aggregate_id,
-            )
+            ),
+            self._load_current_layout_events_from_objects(
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            ),
+            asyncio.to_thread(
+                self._load_legacy_events,
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            ),
+        )
+        events = self._merge_event_collections(current_layout_events, current_layout_scan_events, legacy_events)
 
         if not events:
             return []

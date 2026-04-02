@@ -148,3 +148,98 @@ async def test_async_domain_methods_delegate(monkeypatch: pytest.MonkeyPatch) ->
 
     assert watermarked == "watermarked"
     assert output["artifact_key"] == "s3://bucket/path"
+
+
+@pytest.mark.asyncio
+async def test_run_deploy_mode_keeps_deployed_status_when_watermark_persist_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = PipelineWorker()
+
+    async def _create_bucket(_bucket: str) -> None:
+        return None
+
+    worker.storage = SimpleNamespace(create_bucket=_create_bucket)
+    worker.lakefs_client = object()
+
+    async def _prepare_deploy_output_work(**kwargs: Any):  # noqa: ANN003
+        return ([{"node_id": "out"}], True)
+
+    async def _stage_deploy_outputs(**kwargs: Any):  # noqa: ANN003
+        return ("run-branch", "commit-1", "merge-1", [{"node_id": "out"}])
+
+    async def _publish_deploy_outputs(**kwargs: Any):  # noqa: ANN003
+        return [{"node_id": "out", "artifact_key": "s3://bucket/out"}]
+
+    async def _persist_deploy_watermarks(**kwargs: Any):  # noqa: ANN003
+        raise RuntimeError("watermark store unavailable")
+
+    monkeypatch.setattr(worker, "_prepare_deploy_output_work", _prepare_deploy_output_work)
+    monkeypatch.setattr(worker, "_stage_deploy_outputs", _stage_deploy_outputs)
+    monkeypatch.setattr(worker, "_publish_deploy_outputs", _publish_deploy_outputs)
+    monkeypatch.setattr(worker, "_persist_deploy_watermarks", _persist_deploy_watermarks)
+
+    build_calls: list[dict[str, Any]] = []
+    run_calls: list[dict[str, Any]] = []
+    event_calls: list[dict[str, Any]] = []
+
+    async def _record_build(**kwargs: Any) -> None:
+        build_calls.append(kwargs)
+
+    async def _record_run(**kwargs: Any) -> None:
+        run_calls.append(kwargs)
+
+    async def _record_artifact(**kwargs: Any) -> None:  # noqa: ARG001
+        return None
+
+    async def _emit_job_event(**kwargs: Any) -> None:
+        event_calls.append(kwargs)
+
+    job = PipelineJob(
+        job_id="job-1",
+        pipeline_id="pipe-1",
+        db_name="demo",
+        output_dataset_name="out",
+        definition_json={"nodes": [], "edges": []},
+        node_id="node-1",
+        branch="main",
+    )
+
+    await worker._run_deploy_mode(
+        job=job,
+        lock=None,
+        tables={},
+        target_node_ids=[],
+        output_nodes={},
+        definition={"nodes": [], "edges": []},
+        declared_outputs=[],
+        pipeline_ref="pipe-ref",
+        run_ref="run-ref",
+        execution_semantics="batch",
+        diff_empty_inputs=False,
+        has_incremental_input=False,
+        incremental_inputs_have_additive_updates=None,
+        preview_limit=0,
+        temp_dirs=[],
+        persisted_dfs=[],
+        input_snapshots=[],
+        input_commit_payload=[],
+        inputs_payload={},
+        pipeline_spec_hash=None,
+        pipeline_spec_commit_id=None,
+        code_version=None,
+        spark_conf={},
+        resolved_pipeline_id="pipe-1",
+        previous_watermark=None,
+        previous_watermark_keys=[],
+        watermark_column=None,
+        record_build=_record_build,
+        record_run=_record_run,
+        record_artifact=_record_artifact,
+        emit_job_event=_emit_job_event,
+    )
+
+    assert build_calls[0]["status"] == "DEPLOYED"
+    assert run_calls[0]["status"] == "DEPLOYED"
+    assert run_calls[0]["output_json"]["watermarks"]["status"] == "degraded"
+    assert event_calls[0]["status"] == "DEPLOYED"

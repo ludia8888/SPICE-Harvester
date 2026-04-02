@@ -465,6 +465,7 @@ class WebSocketNotificationService:
         
     async def stop(self) -> None:
         """알림 서비스 중지 with proper cleanup"""
+        global _notification_service
         self.running = False
         
         if self.task_manager and self._pubsub_task_id:
@@ -479,6 +480,8 @@ class WebSocketNotificationService:
             except asyncio.CancelledError:
                 pass
             self._pubsub_task = None
+        if _notification_service is self:
+            _notification_service = None
                 
         logger.info("WebSocket notification service stopped")
         
@@ -635,7 +638,7 @@ def get_connection_manager() -> WebSocketConnectionManager:
 def get_notification_service(redis_service: RedisService) -> WebSocketNotificationService:
     """WebSocket 알림 서비스 싱글톤 인스턴스 반환"""
     global _notification_service
-    if _notification_service is None:
+    if _notification_service is None or _notification_service.redis is not redis_service:
         _notification_service = WebSocketNotificationService(
             redis_service, get_connection_manager()
         )

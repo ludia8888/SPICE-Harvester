@@ -284,10 +284,10 @@ class PipelineScheduler:
                 else nullcontext()
             )
             with ctx:
-                # Persist the schedule tick before enqueue so a retrying scheduler
-                # process does not publish the same due run repeatedly.
-                await self.registry.record_schedule_tick(pipeline_id=pipeline_id, scheduled_at=now)
+                # Persist the schedule tick only after publish succeeds so a transient
+                # queue failure cannot permanently skip a due run.
                 await self.queue.publish(job)
+                await self.registry.record_schedule_tick(pipeline_id=pipeline_id, scheduled_at=now)
                 if self.metrics and hasattr(self.metrics, "record_business_metric"):
                     try:
                         self.metrics.record_business_metric(

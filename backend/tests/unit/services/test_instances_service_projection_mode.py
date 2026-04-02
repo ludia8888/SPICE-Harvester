@@ -273,8 +273,8 @@ async def test_overlay_pagination_happens_after_merge(
 
     assert result["total"] == 3
     assert [row["instance_id"] for row in result["instances"]] == ["base-1"]
-    assert es.search_calls[0]["from_"] == 0
-    assert es.search_calls[0]["size"] == 2
+    assert len(es.search_calls) == 2
+    assert all(call["index"] in {base_index, overlay_index} for call in es.search_calls)
 
 
 @pytest.mark.asyncio
@@ -316,6 +316,105 @@ async def test_access_policy_paginates_after_filtering(monkeypatch: pytest.Monke
 
     assert result["total"] == 1
     assert [row["instance_id"] for row in result["instances"]] == ["visible-1"]
+
+
+@pytest.mark.asyncio
+async def test_access_policy_still_applies_offset_limit_when_no_rows_filtered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    es = _FakeElasticsearchService(
+        search_result={
+            "total": 3,
+            "hits": [
+                {"class_id": "Order", "instance_id": "row-1", "event_timestamp": "2026-01-01T00:00:03Z"},
+                {"class_id": "Order", "instance_id": "row-2", "event_timestamp": "2026-01-01T00:00:02Z"},
+                {"class_id": "Order", "instance_id": "row-3", "event_timestamp": "2026-01-01T00:00:01Z"},
+            ],
+        }
+    )
+
+    def _fake_apply_access_policy(instances, *, policy):  # noqa: ANN001
+        _ = policy
+        return instances, {}
+
+    monkeypatch.setattr(instances_service_module, "apply_access_policy", _fake_apply_access_policy)
+
+    result = await list_class_instances(
+        db_name="demo_db",
+        class_id="Order",
+        request_headers={},
+        base_branch="main",
+        overlay_branch=None,
+        branch=None,
+        limit=1,
+        offset=1,
+        search=None,
+        status_filter=None,
+        action_type_id=None,
+        submitted_by=None,
+        elasticsearch_service=es,  # type: ignore[arg-type]
+        dataset_registry=_FakeDatasetRegistry(policy=SimpleNamespace(policy={"kind": "stub"})),  # type: ignore[arg-type]
+        action_logs=None,
+    )
+
+    assert result["total"] == 3
+    assert [row["instance_id"] for row in result["instances"]] == ["row-2"]
+
+
+@pytest.mark.asyncio
+async def test_overlay_and_access_policy_paginate_after_logical_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_index = get_instances_index_name("demo_db", branch="main")
+    overlay_index = get_instances_index_name("demo_db", branch="writeback/main")
+    es = _PerIndexElasticsearchService(
+        {
+            base_index: {
+                "total": 3,
+                "hits": [
+                    {"class_id": "Order", "instance_id": "base-1", "event_timestamp": "2026-01-01T00:00:03Z"},
+                    {"class_id": "Order", "instance_id": "base-2", "event_timestamp": "2026-01-01T00:00:02Z"},
+                    {"class_id": "Order", "instance_id": "base-3", "event_timestamp": "2026-01-01T00:00:01Z"},
+                ],
+            },
+            overlay_index: {
+                "total": 2,
+                "hits": [
+                    {"class_id": "Order", "instance_id": "base-2", "event_timestamp": "2026-01-01T00:00:04Z"},
+                    {"class_id": "Order", "instance_id": "overlay-1", "event_timestamp": "2026-01-01T00:00:05Z"},
+                ],
+            },
+        }
+    )
+
+    def _fake_apply_access_policy(instances, *, policy):  # noqa: ANN001
+        _ = policy
+        return [row for row in instances if row.get("instance_id") != "overlay-1"], {}
+
+    monkeypatch.setattr(instances_service_module, "apply_access_policy", _fake_apply_access_policy)
+
+    result = await list_class_instances(
+        db_name="demo_db",
+        class_id="Order",
+        request_headers={},
+        base_branch="main",
+        overlay_branch="writeback/main",
+        branch=None,
+        limit=2,
+        offset=1,
+        search=None,
+        status_filter=None,
+        action_type_id=None,
+        submitted_by=None,
+        elasticsearch_service=es,  # type: ignore[arg-type]
+        dataset_registry=_FakeDatasetRegistry(policy=SimpleNamespace(policy={"kind": "stub"})),  # type: ignore[arg-type]
+        action_logs=None,
+    )
+
+    assert result["total"] == 3
+    assert [row["instance_id"] for row in result["instances"]] == ["base-1", "base-3"]
+    assert len(es.search_calls) == 2
+    assert all(call["index"] in {base_index, overlay_index} for call in es.search_calls)
 
 
 @pytest.mark.asyncio

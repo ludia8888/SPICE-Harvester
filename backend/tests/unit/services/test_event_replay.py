@@ -306,3 +306,92 @@ async def test_event_replay_supports_current_event_store_layout() -> None:
     assert replay["final_state"]["data"]["amount"] == 25
     assert [item["command_id"] for item in history] == ["cmd-1", "cmd-2"]
     assert replay_all["aggregates"][aggregate_id]["event_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_event_replay_merges_legacy_and_current_layout_history() -> None:
+    client = _s3_client()
+    bucket = "instance-events"
+    _ensure_bucket(client, bucket)
+
+    db_name = "demo_db"
+    class_id = "Customer"
+    aggregate_id = "cust-2"
+    legacy_prefix = f"{db_name}/{class_id}/{aggregate_id}/"
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
+
+    _put_event(
+        client,
+        bucket,
+        legacy_prefix + "1.json",
+        {
+            "command_type": "CREATE_INSTANCE",
+            "command_id": "cmd-legacy",
+            "sequence_number": 1,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "payload": {"name": "Alice"},
+        },
+    )
+    _put_current_layout_event(
+        client,
+        bucket,
+        class_id=class_id,
+        aggregate_id=aggregate_id,
+        event_id="evt-2",
+        sequence_number=2,
+        payload={
+            "db_name": db_name,
+            "command_id": "cmd-current",
+            "payload": {"email": "alice@example.com"},
+        },
+        command_type="UPDATE_INSTANCE",
+    )
+
+    replay = await service.replay_aggregate(db_name, class_id, aggregate_id)
+
+    assert replay["event_count"] == 2
+    assert replay["final_state"]["data"] == {"name": "Alice", "email": "alice@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_point_in_time_replay_uses_event_occurred_at_not_index_last_modified() -> None:
+    client = _s3_client()
+    bucket = "instance-events"
+    _ensure_bucket(client, bucket)
+
+    db_name = "demo_db"
+    class_id = "Customer"
+    aggregate_id = "cust-3"
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
+    event_id = "evt-1"
+    _put_current_layout_event(
+        client,
+        bucket,
+        class_id=class_id,
+        aggregate_id=aggregate_id,
+        event_id=event_id,
+        sequence_number=1,
+        payload={
+            "db_name": db_name,
+            "command_id": "cmd-1",
+            "payload": {"name": "Alice"},
+        },
+        command_type="CREATE_INSTANCE",
+    )
+    event_key = f"events/2026/01/01/{class_id}/{aggregate_id}/{event_id}.json"
+    payload = json.loads(client._buckets[bucket][event_key]["Body"].decode("utf-8"))
+    payload["occurred_at"] = "2026-01-01T00:00:00+00:00"
+    client._buckets[bucket][event_key]["Body"] = json.dumps(payload).encode("utf-8")
+    index_key = f"indexes/by-aggregate/{class_id}/{aggregate_id}/{1:020d}_{event_id}.json"
+    client._buckets[bucket][index_key]["LastModified"] = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+    replay = await service.point_in_time_replay(
+        db_name,
+        class_id,
+        aggregate_id,
+        datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert replay["status"] == "REPLAYED"
+    assert replay["event_count"] == 1
