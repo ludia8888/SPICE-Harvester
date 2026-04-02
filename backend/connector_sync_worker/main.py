@@ -58,6 +58,10 @@ from shared.utils.worker_runner import run_component_lifecycle
 logger = logging.getLogger(__name__)
 
 
+class _SyncStatePersistenceError(RuntimeError):
+    """Raised when sync-state persistence fails after ingest side effects already completed."""
+
+
 class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]):
     def __init__(self) -> None:
         settings = get_settings()
@@ -233,6 +237,8 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         return "connector_sync.process_event"
 
     def _is_retryable_error(self, exc: Exception, *, payload: EventEnvelope) -> bool:  # type: ignore[override]
+        if isinstance(exc, _SyncStatePersistenceError):
+            return False
         return True
 
     def _in_progress_sleep_seconds(self, *, claim, payload: EventEnvelope) -> float:  # type: ignore[override]
@@ -390,12 +396,17 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         )
 
         if extract.next_state:
-            await self.registry.upsert_sync_state_json(
-                source_type=source_type,
-                source_id=source_id,
-                sync_state_json=dict(extract.next_state),
-                merge=True,
-            )
+            try:
+                await self.registry.upsert_sync_state_json(
+                    source_type=source_type,
+                    source_id=source_id,
+                    sync_state_json=dict(extract.next_state),
+                    merge=True,
+                )
+            except Exception as exc:
+                raise _SyncStatePersistenceError(
+                    f"sync-state persistence failed after ingest completed for {source_type}:{source_id}"
+                ) from exc
 
         dataset = ingest.get("dataset") if isinstance(ingest, dict) else {}
         version = ingest.get("version") if isinstance(ingest, dict) else {}

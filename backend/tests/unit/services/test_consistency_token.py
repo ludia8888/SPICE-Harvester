@@ -79,6 +79,12 @@ class _ESClient:
         return {"_source": {"version": 2, "event_sequence": 10}}
 
 
+class _ESFailureClient:
+    async def get(self, *, index: str, id: str):  # noqa: A002
+        _ = index, id
+        raise RuntimeError("es unavailable")
+
+
 @pytest.mark.asyncio
 async def test_wait_for_consistency_uses_resolved_instances_index() -> None:
     service = ConsistencyTokenService()
@@ -114,3 +120,21 @@ async def test_wait_for_consistency_requires_index_context_without_db_name() -> 
 
     with pytest.raises(ValueError, match="missing db_name"):
         await service.wait_for_consistency(token, _ESClient(), max_wait_ms=10)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_consistency_surfaces_elasticsearch_failures() -> None:
+    service = ConsistencyTokenService()
+    token = ConsistencyToken(
+        command_id="command-1234567890",
+        timestamp="2024-01-01T00:00:00+00:00",
+        sequence_number=10,
+        aggregate_id="agg-1",
+        version=2,
+        db_name="demo_db",
+        branch="main",
+        projection_lag_ms=0,
+    )
+
+    with pytest.raises(RuntimeError, match="es unavailable"):
+        await service.wait_for_consistency(token, _ESFailureClient(), max_wait_ms=10)

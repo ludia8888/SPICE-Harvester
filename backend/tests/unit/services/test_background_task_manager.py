@@ -5,8 +5,10 @@ import json
 
 import pytest
 
+from shared.dependencies.providers import get_background_task_manager
 from shared.models.background_task import TaskStatus
 from shared.services.core.background_task_manager import BackgroundTaskManager
+from shared.services.storage.redis_service import RedisService
 
 
 class _RedisStub:
@@ -151,3 +153,66 @@ async def test_create_task_does_not_inject_task_id_when_callable_does_not_accept
     assert task is not None
     assert task.status == TaskStatus.COMPLETED
     assert observed == {"command_id": "cmd-1"}
+
+
+class _ContainerStub:
+    def __init__(self, redis_service: object, existing_manager: object | None = None) -> None:
+        self._instances = {RedisService: redis_service}
+        if existing_manager is not None:
+            self._instances[BackgroundTaskManager] = existing_manager
+
+    def has(self, service_type: object) -> bool:
+        return service_type in self._instances
+
+    def is_created(self, service_type: object) -> bool:
+        return service_type in self._instances
+
+    def ensure_singleton(self, service_type: object, factory: object) -> bool:  # noqa: ARG002
+        return service_type not in self._instances
+
+    async def get(self, service_type: object) -> object:
+        return self._instances[service_type]
+
+    def ensure_instance(self, service_type: object, instance: object) -> bool:
+        created = service_type not in self._instances
+        self._instances[service_type] = instance
+        return created
+
+
+@pytest.mark.asyncio
+async def test_provider_starts_new_background_task_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis_service = _RedisStub()
+    container = _ContainerStub(redis_service)
+    observed: dict[str, int] = {"starts": 0}
+
+    class _Manager:
+        async def start(self) -> None:
+            observed["starts"] += 1
+
+    monkeypatch.setattr(
+        "shared.dependencies.providers.create_background_task_manager",
+        lambda redis: _Manager(),
+    )
+
+    manager = await get_background_task_manager(container=container)  # type: ignore[arg-type]
+
+    assert isinstance(manager, _Manager)
+    assert observed == {"starts": 1}
+
+
+@pytest.mark.asyncio
+async def test_provider_starts_existing_background_task_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis_service = _RedisStub()
+    observed: dict[str, int] = {"starts": 0}
+
+    class _Manager:
+        async def start(self) -> None:
+            observed["starts"] += 1
+
+    manager = _Manager()
+    container = _ContainerStub(redis_service, existing_manager=manager)
+
+    resolved = await get_background_task_manager(container=container)  # type: ignore[arg-type]
+
+    assert resolved is manager
+    assert observed == {"starts": 1}

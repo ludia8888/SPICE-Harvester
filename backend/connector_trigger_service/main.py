@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 from confluent_kafka import Producer
@@ -71,6 +72,7 @@ class ConnectorTriggerService:
         self.producer_ops: Optional[KafkaProducerOps] = None
         self.sheets: Optional[GoogleSheetsService] = None
         self.adapter_factory: Optional[ConnectorAdapterFactory] = None
+        self._last_poll_attempts: dict[tuple[str, str], datetime] = {}
 
     async def initialize(self) -> None:
         settings = get_settings()
@@ -131,6 +133,7 @@ class ConnectorTriggerService:
             except Exception:
                 logger.warning("Failed to close ConnectorRegistry", exc_info=True)
             self.registry = None
+        self._last_poll_attempts.clear()
 
     def _get_producer_ops(self) -> KafkaProducerOps:
         ops = self.producer_ops
@@ -162,9 +165,13 @@ class ConnectorTriggerService:
             return False
         interval = self._resolve_polling_interval_seconds(source)
         state = await self.registry.get_sync_state(source_type=source.source_type, source_id=source.source_id)
-        if not state or not state.last_polled_at:
+        last_polled_at = state.last_polled_at if state else None
+        last_attempt_at = self._last_poll_attempts.get((source.source_type, source.source_id))
+        if last_attempt_at and (last_polled_at is None or last_attempt_at > last_polled_at):
+            last_polled_at = last_attempt_at
+        if not last_polled_at:
             return True
-        elapsed = (utcnow() - state.last_polled_at).total_seconds()
+        elapsed = (utcnow() - last_polled_at).total_seconds()
         return elapsed >= interval
 
     async def _poll_with_adapter(self, source: ConnectorSource) -> None:
@@ -204,6 +211,7 @@ class ConnectorTriggerService:
     async def _poll_source(self, source: ConnectorSource, sem: asyncio.Semaphore) -> None:
         async with sem:
             try:
+                self._last_poll_attempts[(source.source_type, source.source_id)] = utcnow()
                 with self.tracing.span(
                     "connector_trigger.poll",
                     attributes={
@@ -214,6 +222,27 @@ class ConnectorTriggerService:
                     await self._poll_with_adapter(source)
             except Exception as e:
                 logger.error("Polling error (source=%s:%s): %s", source.source_type, source.source_id, e)
+                self._last_poll_attempts[(source.source_type, source.source_id)] = utcnow()
+                if self.registry:
+                    try:
+                        state = await self.registry.get_sync_state(
+                            source_type=source.source_type,
+                            source_id=source.source_id,
+                        )
+                        await self.registry.record_poll_result(
+                            source_type=source.source_type,
+                            source_id=source.source_id,
+                            current_cursor=str(state.last_seen_cursor) if state and state.last_seen_cursor is not None else None,
+                            kafka_topic=self.topic,
+                        )
+                    except Exception as mark_exc:
+                        logger.warning(
+                            "Failed to record failed poll attempt for source=%s:%s: %s",
+                            source.source_type,
+                            source.source_id,
+                            mark_exc,
+                            exc_info=True,
+                        )
 
     async def _poll_loop(self) -> None:
         if not self.registry:

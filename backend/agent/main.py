@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         if require_event_store:
             raise
         logger.warning("Event store unavailable; agent service running in degraded mode: %s", exc)
-        app.state.event_store = event_store
+        app.state.event_store = None
 
     audit_store = None
     try:

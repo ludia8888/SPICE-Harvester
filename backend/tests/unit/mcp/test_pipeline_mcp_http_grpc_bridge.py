@@ -187,3 +187,35 @@ async def test_bff_json_includes_project_scope_header(monkeypatch):
     assert headers["X-Principal-Id"] == "user-1"
     assert headers["X-Principal-Type"] == "user"
     assert "Idempotency-Key" in headers
+
+
+@pytest.mark.asyncio
+async def test_http_json_maps_transport_errors_to_structured_response(monkeypatch):
+    from mcp_servers import pipeline_mcp_http as target
+
+    class FakeClient:
+        def __init__(self, **kwargs):  # noqa: ANN001
+            _ = kwargs
+
+        async def __aenter__(self):  # noqa: ANN001
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):  # noqa: ANN001
+            return False
+
+        async def request(self, method, url, headers=None, json=None, params=None):  # noqa: ANN001
+            _ = method, url, headers, json, params
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(target.httpx, "AsyncClient", FakeClient)
+
+    payload = await target.http_json(
+        "GET",
+        "http://bff.local/api/v1/health",
+        headers={},
+        error_prefix="BFF",
+        error_path="/api/v1/health",
+    )
+
+    assert payload["status_code"] == 503
+    assert "unavailable" in payload["error"].lower()

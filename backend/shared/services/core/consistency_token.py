@@ -19,6 +19,8 @@ import logging
 
 from shared.config.search_config import get_instances_index_name
 
+_ES_NOT_FOUND_TYPES = {"notfounderror"}
+
 @dataclass
 class ConsistencyToken:
     """
@@ -261,10 +263,12 @@ class ConsistencyTokenService:
                 return (doc_version >= token.version and 
                         doc_sequence >= token.sequence_number)
             
-        except Exception:
-            # Document not found yet
-            logging.getLogger(__name__).warning("Exception fallback at shared/services/core/consistency_token.py:245", exc_info=True)
-            pass
+        except Exception as exc:
+            exc_name = type(exc).__name__.lower()
+            status_code = getattr(exc, "status_code", None)
+            if exc_name in _ES_NOT_FOUND_TYPES or status_code == 404:
+                return False
+            raise
         
         return False
 

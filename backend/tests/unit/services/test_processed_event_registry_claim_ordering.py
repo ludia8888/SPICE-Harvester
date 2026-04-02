@@ -16,8 +16,9 @@ class _FakeTransaction:
 
 
 class _FakeConnection:
-    def __init__(self, *, lower_inflight: bool = False) -> None:
+    def __init__(self, *, lower_inflight: bool = False, lower_inflight_expired: bool = False) -> None:
         self.lower_inflight = lower_inflight
+        self.lower_inflight_expired = lower_inflight_expired
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
 
     async def __aenter__(self) -> "_FakeConnection":
@@ -36,7 +37,9 @@ class _FakeConnection:
     async def fetchval(self, sql: str, *args: Any):  # noqa: ANN401
         self.calls.append((sql, args))
         if "sequence_number < $3" in sql:
-            return 1 if self.lower_inflight else None
+            if self.lower_inflight and not self.lower_inflight_expired:
+                return 1
+            return None
         if "FROM spice_event_registry.aggregate_versions" in sql:
             return None
         raise AssertionError(f"Unexpected SQL: {sql}")
@@ -97,3 +100,21 @@ async def test_claim_returns_in_progress_when_lower_sequence_is_still_processing
 
     assert result.decision == ClaimDecision.IN_PROGRESS
     assert not any("INSERT INTO spice_event_registry.processed_events" in sql for sql, _ in conn.calls)
+
+
+@pytest.mark.asyncio
+async def test_claim_ignores_expired_lower_sequence_processing_row() -> None:
+    conn = _FakeConnection(lower_inflight=True, lower_inflight_expired=True)
+    registry = ProcessedEventRegistry(dsn="postgresql://example.invalid/db")
+    registry._pool = _FakePool(conn)
+
+    result = await registry.claim(
+        handler="worker",
+        event_id="evt-3",
+        aggregate_id="agg-1",
+        sequence_number=4,
+    )
+
+    assert result.decision == ClaimDecision.CLAIMED
+    lower_inflight_call = next(sql for sql, _ in conn.calls if "sequence_number < $3" in sql)
+    assert "COALESCE(heartbeat_at, started_at) >= $5" in lower_inflight_call

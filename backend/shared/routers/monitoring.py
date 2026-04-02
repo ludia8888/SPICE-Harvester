@@ -21,6 +21,7 @@ from starlette.responses import RedirectResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies import get_container, ServiceContainer
+from shared.dependencies.container import ServiceToken
 from shared.dependencies.providers import InitializedBackgroundTaskManagerDep, get_settings_dependency
 from shared.config.settings import get_settings as get_settings_ssot
 from shared.errors.error_envelope import build_error_envelope
@@ -94,6 +95,29 @@ def _runtime_status_from_request(request: Optional[Request]) -> Optional[Dict[st
     }
 
 
+async def _safe_get_container() -> Optional[ServiceContainer]:
+    try:
+        return await get_container()
+    except RuntimeError:
+        return None
+
+
+def _service_registration_key(key: object) -> str:
+    if isinstance(key, str):
+        return key
+    if isinstance(key, ServiceToken):
+        service_name = getattr(key.service_type, "__name__", None)
+        if service_name:
+            return f"{key.name}:{service_name}"
+        return key.name
+    if isinstance(key, type):
+        return key.__name__
+    name = getattr(key, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return repr(key)
+
+
 @router.get("/health", 
            summary="Basic Health Check",
            description="Readiness/liveness signal for traffic routing")
@@ -106,10 +130,11 @@ async def basic_health_check(request: Request):
     - no not_initialized noise
     - returns only whether this process should receive traffic
     """
-    container = await get_container()
+    container = await _safe_get_container()
     runtime_status = _runtime_status_from_request(request)
     runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
-    ready = bool(container.is_initialized) if runtime_ready is None else bool(container.is_initialized and runtime_ready)
+    container_ready = bool(container is not None and container.is_initialized)
+    ready = container_ready if runtime_ready is None else bool(container_ready and runtime_ready)
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     payload = {
         "status": "ok" if ready else "unready",
@@ -117,7 +142,7 @@ async def basic_health_check(request: Request):
         "ready": ready,
         "accepting_traffic": ready,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": "spice-harvester",
+        "service": _resolve_service_name(request),
     }
     if runtime_status is not None:
         payload["issues"] = runtime_status["issues"]
@@ -132,9 +157,9 @@ async def basic_health_check(request: Request):
            summary="Detailed Health Check", 
            description="Comprehensive health check with service details")
 async def detailed_health_check(
+    request: Request,
     include_metrics: bool = Query(False, description="Include performance metrics"),
     settings: ApplicationSettings = Depends(get_settings_dependency),
-    container: ServiceContainer = Depends(get_container),
 ):
     """
     Detailed health check with comprehensive service information
@@ -142,6 +167,30 @@ async def detailed_health_check(
     Provides detailed health status of all services, dependencies,
     and optional performance metrics.
     """
+    container = await _safe_get_container()
+    runtime_status = _runtime_status_from_request(request)
+
+    if container is None:
+        health_data: Dict[str, Any] = {
+            "status": "unready",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "environment": settings.environment.value,
+            "version": "1.0.0",
+            "summary": {
+                "registered_services": 0,
+                "checked_services": 0,
+                "unhealthy_services": 0,
+            },
+            "services": {},
+            "note": "Service container is not initialized.",
+        }
+        if runtime_status is not None:
+            health_data["issues"] = runtime_status["issues"]
+            health_data["background_tasks"] = runtime_status["background_tasks"]
+        if include_metrics:
+            health_data["metrics"] = {"container_initialized": False}
+        return JSONResponse(content=health_data, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
     # Validate real runtime wiring: only services that are actually initialized can be checked.
     # This avoids the old cargo-cult lifecycle manager dependency that was never wired.
     services: Dict[str, Any] = {}
@@ -151,6 +200,7 @@ async def detailed_health_check(
     # Container internals are used intentionally (monitoring-only) so we can access instantiated services.
     registrations = getattr(container, "_services", {})  # noqa: SLF001
     for name, registration in registrations.items():
+        registration_key = _service_registration_key(name)
         instantiated = getattr(registration, "instance", None) is not None
         meta = {
             "type": getattr(getattr(registration, "service_type", None), "__name__", None),
@@ -162,14 +212,14 @@ async def detailed_health_check(
 
         instance = getattr(registration, "instance", None)
         if instance is None:
-            services[name] = {**meta, "status": "not_initialized"}
+            services[registration_key] = {**meta, "status": "not_initialized"}
             continue
 
         result = await _check_service_instance(instance)
         checked += 1
         if result.get("status") != "healthy":
             unhealthy += 1
-        services[name] = {**meta, **result}
+        services[registration_key] = {**meta, **result}
 
     overall = "ok" if unhealthy == 0 else "degraded"
     status_code = status.HTTP_200_OK
@@ -187,6 +237,9 @@ async def detailed_health_check(
         "services": services,
         "note": "This endpoint checks only initialized services. Uninstantiated services are reported as not_initialized.",
     }
+    if runtime_status is not None:
+        health_data["issues"] = runtime_status["issues"]
+        health_data["background_tasks"] = runtime_status["background_tasks"]
 
     if include_metrics:
         health_data["metrics"] = {"container_initialized": bool(container.is_initialized)}
@@ -206,15 +259,12 @@ async def readiness_probe(request: Request):
     """
     runtime_status = _runtime_status_from_request(request)
     runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
-    try:
-        container = await get_container()
-        container_ready = bool(container.is_initialized)
-    except RuntimeError:
-        container_ready = True if runtime_status is not None else False
+    container = await _safe_get_container()
+    container_ready = bool(container is not None and container.is_initialized)
     ready = container_ready if runtime_ready is None else bool(container_ready and runtime_ready)
     payload = {
         "ready": ready,
-        "reason": "Container initialized" if ready else "Startup degraded",
+        "reason": "Container initialized" if ready else "Container not ready",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if runtime_status is not None:
@@ -229,7 +279,7 @@ async def readiness_probe(request: Request):
            summary="Kubernetes Liveness Probe", 
            description="Liveness probe for Kubernetes deployments")
 async def liveness_probe(
-    container: ServiceContainer = Depends(get_container)
+    request: Request,
 ):
     """
     Kubernetes liveness probe
@@ -238,6 +288,7 @@ async def liveness_probe(
     503 if the service should be restarted.
     """
     try:
+        container = await _safe_get_container()
         # Basic liveness check - if we can respond, we're alive
         alive = True
         reason = "Service responsive"
@@ -245,7 +296,8 @@ async def liveness_probe(
         response_data = {
             "alive": alive,
             "reason": reason,
-            "container_initialized": bool(container.is_initialized),
+            "container_initialized": bool(container is not None and container.is_initialized),
+            "service": _resolve_service_name(request),
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+import connector_sync_worker.main as connector_sync_module
 from connector_sync_worker.main import ConnectorSyncWorker
 from shared.models.event_envelope import EventEnvelope
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorSource, SyncState
@@ -95,6 +96,11 @@ class _FakeRegistry:
 
     async def record_sync_outcome(self, **kwargs):  # noqa: ANN003
         self.sync_outcomes.append(dict(kwargs))
+
+
+class _FailingSyncStateRegistry(_FakeRegistry):
+    async def upsert_sync_state_json(self, *, source_type: str, source_id: str, sync_state_json: dict, merge: bool):  # noqa: ARG002
+        raise RuntimeError(f"cannot persist sync state for {source_type}:{source_id}")
 
 
 class _FakeIngestService:
@@ -255,6 +261,60 @@ async def test_sync_worker_process_connector_update_snapshot() -> None:
     assert call["source_id"] == "sheet-1"
     assert registry.sync_state_updates
     assert registry.sync_state_updates[0]["sync_state_json"] == {"watermark": 2}
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_process_connector_update_treats_post_ingest_sync_state_failure_as_non_retryable() -> None:
+    worker = ConnectorSyncWorker()
+    registry = _FailingSyncStateRegistry()
+    ingest = _FakeIngestService()
+
+    registry.source = ConnectorSource(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        enabled=True,
+        config_json={
+            "sheet_url": "https://docs.google.com/spreadsheets/d/sheet-1/edit",
+            "import_mode": "SNAPSHOT",
+            "table_import_config": {"type": "jdbcImportConfig", "query": "SELECT * FROM external_sheet"},
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.mapping = ConnectorMapping(
+        mapping_id="map-1",
+        source_type="google_sheets",
+        source_id="sheet-1",
+        status="active",
+        enabled=True,
+        target_db_name="demo",
+        target_branch="main",
+        target_class_label="User",
+        field_mappings=[],
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    worker.registry = registry
+    worker.adapter_factory = _FakeAdapterFactory()
+    worker.ingest_service = ingest
+    worker.tracing = _FakeTracing()
+
+    envelope = EventEnvelope.from_connector_update(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        cursor="cursor-2",
+        data={"source_type": "google_sheets", "source_id": "sheet-1"},
+    )
+
+    with pytest.raises(connector_sync_module._SyncStatePersistenceError):
+        await worker._process_connector_update(envelope)
+
+    assert ingest.calls
+    assert worker._is_retryable_error(
+        connector_sync_module._SyncStatePersistenceError("sync-state persistence failed"),
+        payload=envelope,
+    ) is False
 
 
 @pytest.mark.asyncio

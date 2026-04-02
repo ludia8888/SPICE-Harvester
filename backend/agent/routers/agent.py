@@ -37,6 +37,17 @@ def _actor_label(principal_type: str, principal_id: str) -> str:
     return actor_label(principal_type, principal_id)
 
 
+def _require_event_store(request: Request) -> Any:
+    event_store = getattr(request.app.state, "event_store", None)
+    if event_store is None:
+        raise classified_http_exception(
+            503,
+            "Agent event store unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
+    return event_store
+
+
 def _request_meta(request: Request, body: AgentRunRequest) -> Dict[str, Any]:
     return {
         "request_id": body.request_id or request.headers.get("X-Request-Id"),
@@ -224,8 +235,14 @@ async def _execute_agent_run(
                 finished_at=datetime.now(timezone.utc),
             )
             steps = state.get("steps", []) or []
+            failed_step_index = int(state.get("step_index", 0) or 0)
             for idx in range(len(steps)):
-                status = "FAILED" if idx == 0 else "SKIPPED"
+                if idx < failed_step_index:
+                    status = "COMPLETED"
+                elif idx == failed_step_index:
+                    status = "FAILED"
+                else:
+                    status = "SKIPPED"
                 await agent_registry.update_step_status(
                     run_id=run_id,
                     step_id=_step_id(idx),
@@ -247,8 +264,9 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     principal_type, principal_id = _resolve_principal(request)
     actor = _actor_label(principal_type, principal_id)
     tenant_id = _resolve_tenant_id(request)
+    event_store = _require_event_store(request)
     runtime = AgentRuntime.from_env(
-        event_store=request.app.state.event_store,  # type: ignore[attr-defined]
+        event_store=event_store,
         audit_store=request.app.state.audit_store,  # type: ignore[attr-defined]
     )
     agent_registry = request.app.state.agent_registry  # type: ignore[attr-defined]
@@ -256,22 +274,6 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     run_id = str(uuid4())
     request_meta = _request_meta(request, body)
     masked_context = mask_pii(body.context or {}, max_string_chars=200)
-    await runtime.record_event(
-        event_type="AGENT_RUN_STARTED",
-        run_id=run_id,
-        actor=actor,
-        status="success",
-        data={
-            "goal": body.goal,
-            "steps_total": len(body.steps),
-            "dry_run": body.dry_run,
-            "context_digest": digest_for_audit(masked_context),
-            "context": masked_context,
-            "request_meta": request_meta,
-        },
-        request_id=request_meta.get("request_id"),
-    )
-
     await _record_run_start(
         agent_registry=agent_registry,
         run_id=run_id,
@@ -314,6 +316,26 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     task.add_done_callback(
         lambda _: request.app.state.agent_tasks.pop(run_id, None)  # type: ignore[attr-defined]
     )
+    try:
+        await runtime.record_event(
+            event_type="AGENT_RUN_STARTED",
+            run_id=run_id,
+            actor=actor,
+            status="success",
+            data={
+                "goal": body.goal,
+                "steps_total": len(body.steps),
+                "dry_run": body.dry_run,
+                "context_digest": digest_for_audit(masked_context),
+                "context": masked_context,
+                "request_meta": request_meta,
+            },
+            request_id=request_meta.get("request_id"),
+        )
+    except Exception:
+        task.cancel()
+        request.app.state.agent_tasks.pop(run_id, None)  # type: ignore[attr-defined]
+        raise
 
     response = ApiResponse.accepted(
         "Agent run accepted",
@@ -335,7 +357,7 @@ async def get_agent_run(
     include_events: bool = Query(False, description="Include event payloads"),
     limit: int = Query(200, ge=1, le=1000),
 ) -> Dict[str, Any]:
-    event_store = request.app.state.event_store  # type: ignore[attr-defined]
+    event_store = _require_event_store(request)
     events = await event_store.get_events("AgentRun", run_id)
     if not events:
         raise classified_http_exception(404, "run not found", code=ErrorCode.RESOURCE_NOT_FOUND)
@@ -431,7 +453,7 @@ async def list_agent_run_events(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ) -> Dict[str, Any]:
-    event_store = request.app.state.event_store  # type: ignore[attr-defined]
+    event_store = _require_event_store(request)
     events = await event_store.get_events("AgentRun", run_id)
     if not events:
         raise classified_http_exception(404, "run not found", code=ErrorCode.RESOURCE_NOT_FOUND)

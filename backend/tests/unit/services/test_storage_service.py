@@ -229,6 +229,25 @@ async def test_list_objects_paginated_raises_typed_error_on_transport_failure() 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_bucket_exists_raises_typed_error_on_access_denied() -> None:
+    service = StorageService.__new__(StorageService)
+
+    class _Client:
+        def head_bucket(self, **kwargs):
+            _ = kwargs
+            raise ClientError(
+                {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+                "HeadBucket",
+            )
+
+    service.client = _Client()
+
+    with pytest.raises(StorageUnavailableError):
+        await StorageService.bucket_exists(service, "bucket")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_delete_prefix_raises_when_delete_objects_reports_partial_failure() -> None:
     service = StorageService.__new__(StorageService)
 
@@ -248,3 +267,22 @@ async def test_delete_prefix_raises_when_delete_objects_reports_partial_failure(
 
     with pytest.raises(StorageUnavailableError):
         await StorageService.delete_prefix(service, bucket="bucket", prefix="demo")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_delete_object_raises_typed_error_on_access_denied() -> None:
+    service = StorageService.__new__(StorageService)
+
+    class _Client:
+        def delete_object(self, **kwargs):
+            _ = kwargs
+            raise ClientError(
+                {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+                "DeleteObject",
+            )
+
+    service.client = _Client()
+
+    with pytest.raises(StorageUnavailableError):
+        await StorageService.delete_object(service, "bucket", "demo.json")

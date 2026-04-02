@@ -50,22 +50,30 @@ _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND = {
 
 def connection_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
-    return _CONNECTION_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_connection")
+    if kind not in _CONNECTION_SOURCE_TYPE_BY_KIND:
+        raise ValueError(f"Unknown connector kind: {kind}")
+    return _CONNECTION_SOURCE_TYPE_BY_KIND[kind]
 
 
 def table_import_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
-    return _TABLE_IMPORT_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets")
+    if kind not in _TABLE_IMPORT_SOURCE_TYPE_BY_KIND:
+        raise ValueError(f"Unknown connector kind: {kind}")
+    return _TABLE_IMPORT_SOURCE_TYPE_BY_KIND[kind]
 
 
 def file_import_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
-    return _FILE_IMPORT_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_file_import")
+    if kind not in _FILE_IMPORT_SOURCE_TYPE_BY_KIND:
+        raise ValueError(f"Unknown connector kind: {kind}")
+    return _FILE_IMPORT_SOURCE_TYPE_BY_KIND[kind]
 
 
 def virtual_table_source_type_for_kind(connector_kind: str) -> str:
     kind = str(connector_kind or "").strip().lower()
-    return _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND.get(kind, "google_sheets_virtual_table")
+    if kind not in _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND:
+        raise ValueError(f"Unknown connector kind: {kind}")
+    return _VIRTUAL_TABLE_SOURCE_TYPE_BY_KIND[kind]
 
 
 def connector_kind_from_source_type(source_type: str, *, strict: bool = True) -> str:
@@ -226,6 +234,8 @@ class ConnectorAdapterFactory:
 
     def get_adapter(self, connector_kind: str) -> ConnectorAdapter:
         kind = str(connector_kind or "").strip().lower()
+        if not kind:
+            raise ValueError("connector_kind is required")
         if kind == "snowflake":
             return self._snowflake
         if kind == "postgresql":
@@ -236,4 +246,6 @@ class ConnectorAdapterFactory:
             return self._sqlserver
         if kind == "oracle":
             return self._oracle
-        return _GoogleSheetsAdapter(service=self._google_sheets_service)
+        if kind == "google_sheets":
+            return _GoogleSheetsAdapter(service=self._google_sheets_service)
+        raise ValueError(f"Unknown connector kind: {kind}")

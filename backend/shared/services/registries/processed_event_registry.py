@@ -241,12 +241,14 @@ class ProcessedEventRegistry:
                           AND sequence_number IS NOT NULL
                           AND sequence_number < $3
                           AND event_id <> $4
+                          AND COALESCE(heartbeat_at, started_at) >= $5
                         LIMIT 1
                         """,
                         handler,
                         aggregate_id,
                         sequence_number,
                         event_id,
+                        lease_cutoff,
                     )
                     if lower_inflight:
                         return ClaimResult(

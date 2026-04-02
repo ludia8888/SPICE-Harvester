@@ -5,6 +5,7 @@ import pytest
 from shared.services.core.websocket_service import (
     WebSocketConnectionManager,
     WebSocketNotificationService,
+    get_notification_service,
 )
 
 
@@ -35,3 +36,17 @@ async def test_restart_pubsub_listener_resets_running_before_restart(monkeypatch
     await service._restart_pubsub_listener()
 
     assert observed == {"running_before_start": False}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_resets_notification_singleton_for_new_redis_client() -> None:
+    redis1 = _RedisStub()
+    redis2 = _RedisStub()
+
+    service1 = get_notification_service(redis1)  # type: ignore[arg-type]
+    await service1.stop()
+    service2 = get_notification_service(redis2)  # type: ignore[arg-type]
+
+    assert service2 is not service1
+    assert service2.redis is redis2

@@ -980,7 +980,8 @@ class EventStore:
                 end = end_dt.astimezone(timezone.utc) if end_dt.tzinfo else end_dt.replace(tzinfo=timezone.utc)
 
                 paginator = s3.get_paginator("list_objects_v2")
-                any_index = False
+                all_days_indexed = True
+                indexed_events: List[EventEnvelope] = []
 
                 day = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
                 last_day = datetime(end.year, end.month, end.day, tzinfo=timezone.utc)
@@ -992,15 +993,17 @@ class EventStore:
                         for obj in page.get("Contents", []):
                             day_keys.append(obj["Key"])
 
-                    if day_keys:
-                        any_index = True
+                    if not day_keys:
+                        all_days_indexed = False
+                    else:
                         day_keys.sort()
 
                         for idx_key in day_keys:
                             filename = idx_key.rsplit("/", 1)[-1]
                             ts_str = filename.split("_", 1)[0]
                             if not ts_str.isdigit():
-                                continue
+                                all_days_indexed = False
+                                break
 
                             ts_ms = int(ts_str)
                             ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
@@ -1020,15 +1023,18 @@ class EventStore:
 
                             s3_key = idx_data.get("s3_key")
                             if not s3_key:
-                                continue
+                                all_days_indexed = False
+                                break
 
                             ev_obj = await s3.get_object(Bucket=self.bucket_name, Key=s3_key)
                             ev_data = await ev_obj["Body"].read()
-                            yield EventEnvelope.model_validate_json(ev_data)
+                            indexed_events.append(EventEnvelope.model_validate_json(ev_data))
 
                     day += timedelta(days=1)
 
-                if any_index:
+                if all_days_indexed and indexed_events:
+                    for event in indexed_events:
+                        yield event
                     return
 
                 # Slow fallback (no indexes): scan each year in range.

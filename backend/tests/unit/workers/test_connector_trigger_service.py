@@ -342,3 +342,33 @@ async def test_trigger_service_publish_outbox(monkeypatch: pytest.MonkeyPatch) -
 
     assert producer.produced, "Expected producer.produce to be called"
     assert registry.published == ["outbox-1"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_service_failed_poll_respects_polling_interval_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(trigger_module, "get_tracing_service", lambda *_: _FakeTracing())
+
+    service = ConnectorTriggerService()
+    registry = _FakeRegistry()
+    service.registry = registry
+    service.tracing = _FakeTracing()
+
+    source = ConnectorSource(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        enabled=True,
+        config_json={"polling_interval": 60},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    async def _fail_poll(_source):  # noqa: ANN001
+        raise RuntimeError("poll failed")
+
+    monkeypatch.setattr(service, "_poll_with_adapter", _fail_poll)
+
+    await service._poll_source(source, asyncio.Semaphore(1))
+
+    assert await service._is_due(source) is False

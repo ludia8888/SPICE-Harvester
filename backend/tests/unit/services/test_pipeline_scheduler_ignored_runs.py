@@ -246,7 +246,7 @@ async def test_scheduler_triggers_interval_schedule_when_due(monkeypatch: pytest
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_scheduler_records_tick_before_publish_to_avoid_duplicate_due_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_scheduler_does_not_record_tick_when_publish_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     last_run = datetime(2025, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
 
@@ -280,7 +280,7 @@ async def test_scheduler_records_tick_before_publish_to_avoid_duplicate_due_runs
     with pytest.raises(RuntimeError, match="kafka unavailable"):
         await scheduler._tick()
 
-    assert registry.schedule_ticks == [("90909090-9090-9090-9090-909090909090", now)]
+    assert registry.schedule_ticks == []
 
 
 @pytest.mark.unit

@@ -431,7 +431,9 @@ class EventPublisher:
 
         selected_lookback = lookback[:lookback_limit]
         selected_forward = forward[: self.batch_size]
-        return selected_forward + selected_lookback
+        selected = selected_lookback + selected_forward
+        selected.sort()
+        return selected
 
     async def process_events(self) -> int:
         """Tail S3 by-date index and publish to Kafka."""
@@ -527,6 +529,16 @@ class EventPublisher:
                 details = first_failure or f"kafka_flush_remaining={remaining}"
                 raise RuntimeError(f"Kafka batch delivery failed ({reason}): {details}")
 
+        async def flush_batch_and_advance_checkpoint(*, idx_key: str, ts_ms: Optional[int], reason: str) -> None:
+            nonlocal checkpoint_dirty
+            if batch:
+                await flush_batch(reason=reason)
+            if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
+                checkpoint_dirty = True
+                await self._save_checkpoint(checkpoint)
+                checkpoint_dirty = False
+                self._metrics_total["checkpoint_saves"] += 1
+
         async with self.session.client(
             "s3",
             **self._s3_client_kwargs(),
@@ -541,16 +553,36 @@ class EventPublisher:
                         idx_obj = await s3.get_object(Bucket=self.bucket_name, Key=idx_key)
                     except ClientError as e:
                         if e.response.get("Error", {}).get("Code") == "NoSuchKey":
-                            logger.warning("Missing index entry %s; skipping", idx_key)
-                            if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
-                                checkpoint_dirty = True
-                            continue
+                            logger.warning("Missing index entry %s; will retry from current checkpoint", idx_key)
+                            if batch:
+                                await flush_batch(reason="before_missing_index_entry")
+                            break
                         raise
 
-                    idx_data = json.loads((await idx_obj["Body"].read()).decode("utf-8"))
+                    try:
+                        idx_data = json.loads((await idx_obj["Body"].read()).decode("utf-8"))
+                    except (TypeError, ValueError) as exc:
+                        logger.warning(
+                            "Malformed index entry %s; skipping permanently: %s",
+                            idx_key,
+                            exc,
+                            exc_info=True,
+                        )
+                        await flush_batch_and_advance_checkpoint(
+                            idx_key=idx_key,
+                            ts_ms=ts_ms,
+                            reason="before_malformed_index_entry",
+                        )
+                        continue
                     s3_key = idx_data.get("s3_key")
                     if not s3_key:
-                        raise RuntimeError("index entry missing s3_key")
+                        logger.error("Malformed index entry %s missing s3_key; advancing checkpoint", idx_key)
+                        await flush_batch_and_advance_checkpoint(
+                            idx_key=idx_key,
+                            ts_ms=ts_ms,
+                            reason="before_missing_s3_key",
+                        )
+                        continue
 
                     event_id = idx_data.get("event_id")
                     if not event_id:
@@ -573,10 +605,14 @@ class EventPublisher:
                         ev_obj = await s3.get_object(Bucket=self.bucket_name, Key=s3_key)
                     except ClientError as e:
                         if e.response.get("Error", {}).get("Code") == "NoSuchKey":
-                            logger.warning("Missing event payload %s (index=%s); skipping", s3_key, idx_key)
-                            if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
-                                checkpoint_dirty = True
-                            continue
+                            logger.warning(
+                                "Missing event payload %s (index=%s); will retry from current checkpoint",
+                                s3_key,
+                                idx_key,
+                            )
+                            if batch:
+                                await flush_batch(reason="before_missing_event_payload")
+                            break
                         raise
 
                     ev_bytes = await ev_obj["Body"].read()

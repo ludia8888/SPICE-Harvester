@@ -2954,15 +2954,29 @@ class PipelineWorker(ProcessedEventKafkaWorker[PipelineJob, None]):
             deployed_commit_id=merge_commit_id,
         )
 
-        watermark_update = await self._persist_deploy_watermarks(
-            resolved_pipeline_id=resolved_pipeline_id,
-            branch=job.branch or "main",
-            execution_semantics=execution_semantics,
-            input_snapshots=input_snapshots,
-            watermark_column=watermark_column,
-            previous_watermark=previous_watermark,
-            previous_watermark_keys=previous_watermark_keys,
-        )
+        try:
+            watermark_update = await self._persist_deploy_watermarks(
+                resolved_pipeline_id=resolved_pipeline_id,
+                branch=job.branch or "main",
+                execution_semantics=execution_semantics,
+                input_snapshots=input_snapshots,
+                watermark_column=watermark_column,
+                previous_watermark=previous_watermark,
+                previous_watermark_keys=previous_watermark_keys,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Persisting deploy watermarks failed after deploy outputs were already published "
+                "(job_id=%s, pipeline_id=%s): %s",
+                job.job_id,
+                resolved_pipeline_id,
+                exc,
+                exc_info=True,
+            )
+            watermark_update = {
+                "status": "degraded",
+                "error": str(exc),
+            }
 
         await record_run(
             job_id=job.job_id,

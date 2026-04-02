@@ -164,8 +164,13 @@ class StorageService:
             try:
                 self.client.head_bucket(Bucket=bucket_name)
                 return True
-            except ClientError:
-                return False
+            except ClientError as exc:
+                code = str((exc.response.get("Error") or {}).get("Code") or "")
+                if code in {"404", "NoSuchBucket", "NotFound"}:
+                    return False
+                raise StorageUnavailableError(
+                    f"Failed to probe bucket {bucket_name}: {code or 'ClientError'}"
+                ) from exc
 
         return await asyncio.to_thread(_exists)
             
@@ -481,8 +486,13 @@ class StorageService:
         try:
             self.client.delete_object(Bucket=bucket, Key=key)
             return True
-        except ClientError:
-            return False
+        except ClientError as exc:
+            code = str((exc.response.get("Error") or {}).get("Code") or "")
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise StorageUnavailableError(
+                f"Failed to delete object s3://{bucket}/{key}: {code or 'ClientError'}"
+            ) from exc
 
     @trace_storage_operation("s3.delete_prefix")
     async def delete_prefix(

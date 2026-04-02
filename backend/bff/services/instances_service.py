@@ -428,7 +428,9 @@ async def list_class_instances(
     search_size = max(limit + offset, limit) if requires_merged_pagination else limit
     search_offset = 0 if requires_merged_pagination else offset
     sort = [{"event_timestamp": {"order": "desc"}}]
-    requires_full_materialization = access_policy is not None
+    # Overlay merge and access-policy filtering both need the full candidate set so
+    # totals and pagination reflect logical objects rather than the current ES page window.
+    requires_full_materialization = access_policy is not None or overlay_index_name is not None
 
     try:
         if requires_full_materialization:
@@ -521,10 +523,7 @@ async def list_class_instances(
             instances=instances,
             access_policy=access_policy,
         )
-        if access_filtered:
-            total = len(instances)
-            instances = instances[offset : offset + limit]
-        elif overlay_result and not overlay_error:
+        if requires_full_materialization:
             total = len(instances)
             instances = instances[offset : offset + limit]
         return {

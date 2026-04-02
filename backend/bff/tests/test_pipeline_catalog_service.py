@@ -51,6 +51,11 @@ class _PipelineRegistry:
         self.create_calls = 0
         self.add_version_calls = 0
         self.grant_permission_calls = 0
+        self.replace_dependencies_calls = 0
+        self.fail_after_create_on_grant = False
+        self._grant_failures_remaining = 0
+        self._add_version_failures_remaining = 0
+        self._replace_dependencies_failures_remaining = 0
 
     async def create_pipeline(self, **kwargs: Any) -> _PipelineRecord:
         self.create_calls += 1
@@ -88,10 +93,18 @@ class _PipelineRegistry:
 
     async def grant_permission(self, **kwargs: Any) -> None:
         _ = kwargs
+        if self._grant_failures_remaining > 0:
+            self._grant_failures_remaining -= 1
+            raise RuntimeError("grant failed")
+        if self.fail_after_create_on_grant:
+            raise RuntimeError("grant failed")
         self.grant_permission_calls += 1
 
     async def add_version(self, *, pipeline_id: str, branch: Optional[str] = None, definition_json: Optional[dict[str, Any]] = None) -> _PipelineVersion:
         _ = branch
+        if self._add_version_failures_remaining > 0:
+            self._add_version_failures_remaining -= 1
+            raise RuntimeError("add_version failed")
         self.add_version_calls += 1
         version = _PipelineVersion(
             version_id=f"version-{self.add_version_calls}",
@@ -106,6 +119,10 @@ class _PipelineRegistry:
         return self.versions.get(pipeline_id)
 
     async def replace_dependencies(self, *, pipeline_id: str, dependencies: list[dict[str, str]]) -> None:
+        if self._replace_dependencies_failures_remaining > 0:
+            self._replace_dependencies_failures_remaining -= 1
+            raise RuntimeError("replace_dependencies failed")
+        self.replace_dependencies_calls += 1
         self.dependencies[pipeline_id] = list(dependencies)
 
     async def list_dependencies(self, *, pipeline_id: str) -> list[dict[str, str]]:
@@ -214,3 +231,137 @@ async def test_create_pipeline_rejects_same_idempotency_key_with_different_paylo
         )
 
     assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_idempotent_resume_does_not_grant_admin_before_equivalence_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+    monkeypatch.setattr(pipeline_catalog_service, "_validate_dependency_targets", _noop_async)
+
+    registry = _PipelineRegistry()
+    request = _Request(headers={"Idempotency-Key": "idem-3", "X-Principal-Id": "user-1"})
+    dependency_a = "11111111-1111-1111-1111-111111111111"
+    dependency_b = "22222222-2222-2222-2222-222222222222"
+    payload = {
+        "db_name": "test_db",
+        "name": "Orders Pipeline",
+        "location": "warehouse/orders",
+        "dependencies": [{"pipeline_id": dependency_a, "behavior": "required"}],
+    }
+
+    await pipeline_catalog_service.create_pipeline(
+        payload=payload,
+        audit_store=_AuditStore(),
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline_catalog_service.create_pipeline(
+            payload={**payload, "dependencies": [{"pipeline_id": dependency_b, "behavior": "required"}]},
+            audit_store=_AuditStore(),
+            pipeline_registry=registry,
+            dataset_registry=object(),
+            event_store=_EventStore(),
+            request=request,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert registry.grant_permission_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_recovers_when_permission_grant_fails_after_row_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+
+    registry = _PipelineRegistry()
+    registry._grant_failures_remaining = 1
+    request = _Request(headers={"Idempotency-Key": "idem-4", "X-Principal-Id": "user-1"})
+    payload = {
+        "db_name": "test_db",
+        "name": "Orders Pipeline",
+        "location": "warehouse/orders",
+    }
+
+    response = await pipeline_catalog_service.create_pipeline(
+        payload=payload,
+        audit_store=_AuditStore(),
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    assert response["status"] == "success"
+    pipeline = response["data"]["pipeline"]
+    assert pipeline["pipeline_id"] in registry.records
+    assert registry.create_calls == 1
+    assert registry.add_version_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_recovers_when_add_version_fails_after_row_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+
+    registry = _PipelineRegistry()
+    registry._add_version_failures_remaining = 1
+    request = _Request(headers={"Idempotency-Key": "idem-5", "X-Principal-Id": "user-1"})
+    payload = {
+        "db_name": "test_db",
+        "name": "Orders Pipeline",
+        "location": "warehouse/orders",
+    }
+
+    response = await pipeline_catalog_service.create_pipeline(
+        payload=payload,
+        audit_store=_AuditStore(),
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    assert response["status"] == "success"
+    pipeline = response["data"]["pipeline"]
+    assert pipeline["pipeline_id"] in registry.records
+    assert registry.create_calls == 1
+    assert registry.add_version_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_recovers_when_dependencies_fail_after_row_create(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+    monkeypatch.setattr(pipeline_catalog_service, "_validate_dependency_targets", _noop_async)
+
+    registry = _PipelineRegistry()
+    registry._replace_dependencies_failures_remaining = 1
+    request = _Request(headers={"Idempotency-Key": "idem-6", "X-Principal-Id": "user-1"})
+    dependency_id = "33333333-3333-3333-3333-333333333333"
+    payload = {
+        "db_name": "test_db",
+        "name": "Orders Pipeline",
+        "location": "warehouse/orders",
+        "dependencies": [{"pipeline_id": dependency_id, "behavior": "required"}],
+    }
+
+    response = await pipeline_catalog_service.create_pipeline(
+        payload=payload,
+        audit_store=_AuditStore(),
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    assert response["status"] == "success"
+    pipeline = response["data"]["pipeline"]
+    assert pipeline["pipeline_id"] in registry.records
+    assert registry.create_calls == 1
+    assert registry.replace_dependencies_calls == 1
+    assert pipeline["dependencies"] == [{"pipelineId": dependency_id, "status": "DEPLOYED"}]
