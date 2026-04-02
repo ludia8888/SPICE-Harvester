@@ -212,6 +212,34 @@ async def lifespan(app: FastAPI):
     await worker.initialize()
     stop_event = asyncio.Event()
     task = asyncio.create_task(worker.run(stop_event))
+    app.state.runtime_status = {
+        "ready": True,
+        "degraded": False,
+        "issues": [],
+        "background_tasks": {"ingest_reconciler": {"status": "running"}},
+    }
+
+    def _mark_task_done(done_task: asyncio.Task[None]) -> None:
+        runtime_status = getattr(app.state, "runtime_status", None)
+        if not isinstance(runtime_status, dict):
+            return
+        task_status = runtime_status.setdefault("background_tasks", {}).setdefault("ingest_reconciler", {})
+        if done_task.cancelled():
+            task_status["status"] = "cancelled"
+            return
+        exc = done_task.exception()
+        if exc is None:
+            task_status["status"] = "stopped"
+            return
+        task_status["status"] = "failed"
+        task_status["error"] = str(exc)
+        runtime_status["ready"] = False
+        runtime_status["degraded"] = True
+        issues = runtime_status.setdefault("issues", [])
+        if "ingest_reconciler_task_failed" not in issues:
+            issues.append("ingest_reconciler_task_failed")
+
+    task.add_done_callback(_mark_task_done)
     app.state.reconciler_worker = worker
     app.state.reconciler_stop = stop_event
     app.state.reconciler_task = task

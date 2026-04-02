@@ -41,6 +41,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Extensions"])
 
 
+async def _count_list_resources_total(
+    *,
+    service: OntologyResourceService,
+    db_name: str,
+    branch: str,
+    resource_type: Optional[str],
+) -> int:
+    total = 0
+    offset = 0
+    page_size = 1000
+    while True:
+        page = await service.list_resources(
+            db_name,
+            branch=branch,
+            resource_type=resource_type,
+            limit=page_size,
+            offset=offset,
+        )
+        page_count = len(page)
+        total += page_count
+        if page_count < page_size:
+            return total
+        offset += page_count
+
+
 def _normalize_resource_payload(payload: OntologyResourceRequest) -> Dict[str, Any]:
     data = payload.model_dump(exclude_unset=True)
     spec = data.pop("spec", {}) or {}
@@ -243,10 +268,16 @@ async def list_resources(
             limit=limit,
             offset=offset,
         )
+        total = await _count_list_resources_total(
+            service=service,
+            db_name=db_name,
+            branch=branch,
+            resource_type=normalized_type,
+        )
 
         return ApiResponse.success(
             message="Ontology resources retrieved",
-            data={"resources": resources, "total": len(resources)},
+            data={"resources": resources, "total": total},
         ).to_dict()
     except RuntimeError as e:
         raise classified_http_exception(

@@ -40,6 +40,54 @@ from shared.observability.tracing import trace_db_operation
 logger = logging.getLogger(__name__)
 
 
+async def _grant_pipeline_admin_best_effort(
+    *,
+    pipeline_registry: Any,
+    request: Any,
+    pipeline_id: str,
+) -> None:
+    principal_type, principal_id = _resolve_principal(request)
+    try:
+        await pipeline_registry.grant_permission(
+            pipeline_id=pipeline_id,
+            principal_type=principal_type,
+            principal_id=principal_id,
+            role="admin",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Pipeline create completed but admin grant failed (pipeline_id=%s): %s",
+            pipeline_id,
+            exc,
+        )
+
+
+def _build_pipeline_create_response(
+    *,
+    record: Any,
+    version: Any,
+    definition_json: dict[str, Any],
+    dependencies_payload: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    dependencies_for_api = _format_dependencies_for_api(dependencies_payload)
+    response_definition_json = dict(version.definition_json or {}) if version is not None else dict(definition_json or {})
+    if dependencies_for_api:
+        response_definition_json["dependencies"] = dependencies_for_api
+    return ApiResponse.success(
+        message="Pipeline created",
+        data={
+            "pipeline": {
+                **record.__dict__,
+                "definition_json": response_definition_json,
+                "version_id": version.version_id if version is not None else None,
+                "commit_id": version.lakefs_commit_id if version is not None else None,
+                "version": version.lakefs_commit_id if version is not None else None,
+                "dependencies": dependencies_for_api,
+            },
+        },
+    ).to_dict()
+
+
 def _idempotent_pipeline_id(*, idempotency_key: str, db_name: str, branch: str) -> str:
     seed = f"bff:create_pipeline:{db_name}:{branch}:{idempotency_key}"
     return str(uuid5(NAMESPACE_URL, seed))
@@ -183,37 +231,23 @@ async def _maybe_resume_idempotent_pipeline_create(
         elif existing_dependencies != requested_dependencies:
             raise _pipeline_create_conflict()
 
-    principal_type, principal_id = _resolve_principal(request)
-    await pipeline_registry.grant_permission(
+    await _grant_pipeline_admin_best_effort(
+        pipeline_registry=pipeline_registry,
+        request=request,
         pipeline_id=existing.pipeline_id,
-        principal_type=principal_type,
-        principal_id=principal_id,
-        role="admin",
     )
-
-    dependencies_for_api = _format_dependencies_for_api(existing_dependencies_payload)
-    response_definition_json = dict(version.definition_json or {})
-    if dependencies_for_api:
-        response_definition_json["dependencies"] = dependencies_for_api
 
     logger.info(
         "Recovered idempotent pipeline create request (pipeline_id=%s branch=%s)",
         existing.pipeline_id,
         branch,
+        )
+    return _build_pipeline_create_response(
+        record=existing,
+        version=version,
+        definition_json=definition_json,
+        dependencies_payload=existing_dependencies_payload,
     )
-    return ApiResponse.success(
-        message="Pipeline created",
-        data={
-            "pipeline": {
-                **existing.__dict__,
-                "definition_json": response_definition_json,
-                "version_id": version.version_id,
-                "commit_id": version.lakefs_commit_id,
-                "version": version.lakefs_commit_id,
-                "dependencies": dependencies_for_api,
-            },
-        },
-    ).to_dict()
 
 
 @trace_db_operation("bff.pipeline_catalog.list_pipelines")
@@ -400,13 +434,6 @@ async def create_pipeline(
             pipeline_id=effective_pipeline_id,
         )
         created_record = record
-        principal_type, principal_id = _resolve_principal(request)
-        await pipeline_registry.grant_permission(
-            pipeline_id=record.pipeline_id,
-            principal_type=principal_type,
-            principal_id=principal_id,
-            role="admin",
-        )
         version = await pipeline_registry.add_version(
             pipeline_id=record.pipeline_id,
             branch=branch,
@@ -415,9 +442,11 @@ async def create_pipeline(
         if dependencies is not None:
             await pipeline_registry.replace_dependencies(pipeline_id=record.pipeline_id, dependencies=dependencies)
         dependencies_payload = await pipeline_registry.list_dependencies(pipeline_id=record.pipeline_id)
-        dependencies_for_api = _format_dependencies_for_api(dependencies_payload)
-        if dependencies_for_api:
-            definition_json = {**definition_json, "dependencies": dependencies_for_api}
+        await _grant_pipeline_admin_best_effort(
+            pipeline_registry=pipeline_registry,
+            request=request,
+            pipeline_id=record.pipeline_id,
+        )
 
         event = build_command_event(
             event_type="PIPELINE_CREATED",
@@ -429,7 +458,7 @@ async def create_pipeline(
                 "name": name,
                 "pipeline_type": pipeline_type,
                 "location": location,
-                "definition_json": definition_json,
+                "definition_json": dict(version.definition_json or {}),
                 "version_id": version.version_id,
                 "commit_id": version.lakefs_commit_id,
                 "version": version.lakefs_commit_id,
@@ -444,34 +473,30 @@ async def create_pipeline(
         except Exception as exc:
             logger.warning("Failed to append pipeline create event: %s", exc)
 
-        await _log_pipeline_audit(
-            audit_store,
-            request=request,
-            action="PIPELINE_CREATED",
-            status="success",
-            pipeline_id=record.pipeline_id,
-            metadata={
-                "db_name": db_name,
-                "name": name,
-                "pipeline_type": pipeline_type,
-                "branch": branch,
-                "commit_id": version.lakefs_commit_id if version else None,
-            },
-        )
-
-        return ApiResponse.success(
-            message="Pipeline created",
-            data={
-                "pipeline": {
-                    **record.__dict__,
-                    "definition_json": definition_json,
-                    "version_id": version.version_id,
-                    "commit_id": version.lakefs_commit_id,
-                    "version": version.lakefs_commit_id,
-                    "dependencies": dependencies_for_api,
+        try:
+            await _log_pipeline_audit(
+                audit_store,
+                request=request,
+                action="PIPELINE_CREATED",
+                status="success",
+                pipeline_id=record.pipeline_id,
+                metadata={
+                    "db_name": db_name,
+                    "name": name,
+                    "pipeline_type": pipeline_type,
+                    "branch": branch,
+                    "commit_id": version.lakefs_commit_id if version else None,
                 },
-            },
-        ).to_dict()
+            )
+        except Exception as exc:
+            logger.warning("Failed to record pipeline create audit log: %s", exc)
+
+        return _build_pipeline_create_response(
+            record=record,
+            version=version,
+            definition_json=definition_json,
+            dependencies_payload=dependencies_payload,
+        )
     except HTTPException:
         raise
     except PipelineAlreadyExistsError as exc:

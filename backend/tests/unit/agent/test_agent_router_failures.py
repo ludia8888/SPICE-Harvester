@@ -32,20 +32,27 @@ class _FakeRegistry:
 
 
 class _FakeRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, fail_on_started: bool = False) -> None:
         self.recorded_events: list[str] = []
+        self.fail_on_started = fail_on_started
 
     async def record_event(self, *, event_type: str, **kwargs: Any) -> None:
         _ = kwargs
         self.recorded_events.append(event_type)
+        if self.fail_on_started and event_type == "AGENT_RUN_STARTED":
+            raise RuntimeError("event write failed")
 
 
 class _DummyTask:
     def __init__(self) -> None:
         self.callbacks: list[Any] = []
+        self.cancelled = False
 
     def add_done_callback(self, callback):  # noqa: ANN001
         self.callbacks.append(callback)
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
 
 @dataclass
@@ -139,3 +146,37 @@ async def test_execute_agent_run_marks_completed_steps_before_failed_step(
     )
 
     assert [call["status"] for call in registry.update_step_calls] == ["COMPLETED", "FAILED", "SKIPPED"]
+
+
+@pytest.mark.asyncio
+async def test_create_agent_run_marks_failed_when_started_event_recording_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeRuntime(fail_on_started=True)
+    registry = _FakeRegistry()
+    dummy_task = _DummyTask()
+    request = _FakeRequest(
+        headers={"X-Principal-Id": "user-1"},
+        app=SimpleNamespace(
+            state=SimpleNamespace(event_store=object(), audit_store=None, agent_registry=registry, agent_tasks={})
+        ),
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+    body = AgentRunRequest(
+        goal="demo",
+        steps=[
+            AgentToolCall(service="bff", method="GET", path="/api/v1/health"),
+            AgentToolCall(service="bff", method="GET", path="/api/v1/config"),
+        ],
+    )
+
+    monkeypatch.setattr(agent_router.AgentRuntime, "from_env", classmethod(lambda cls, **kwargs: runtime))
+    monkeypatch.setattr(agent_router, "_execute_agent_run", lambda **kwargs: None)
+    monkeypatch.setattr(agent_router.asyncio, "create_task", lambda coro: dummy_task)  # noqa: ARG005
+
+    with pytest.raises(RuntimeError, match="event write failed"):
+        await agent_router.create_agent_run(request, body)
+
+    assert dummy_task.cancelled is True
+    assert registry.update_run_calls[-1]["status"] == "FAILED"
+    assert [call["status"] for call in registry.update_step_calls] == ["FAILED", "SKIPPED"]

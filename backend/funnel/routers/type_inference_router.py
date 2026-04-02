@@ -10,7 +10,7 @@ default to xsd:string. Type coercion at objectify/write time via coerce_value().
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
@@ -23,11 +23,59 @@ from shared.models.structure_analysis import (
 )
 from shared.utils.app_logger import get_logger
 from funnel.services.structure_patch import apply_structure_patch
-from funnel.services.structure_patch_store import delete_patch, get_patch, upsert_patch
+from funnel.services.structure_patch_store import (
+    StructurePatchStoreUnavailableError,
+    delete_patch,
+    get_patch,
+    upsert_patch,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/funnel", tags=["funnel"])
+
+
+def _patch_store_unavailable() -> Exception:
+    return classified_http_exception(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Structure patch store unavailable",
+        code=ErrorCode.UPSTREAM_UNAVAILABLE,
+    )
+
+
+async def _apply_saved_patch_if_enabled(
+    *,
+    analysis: SheetStructureAnalysisResponse,
+    grid: list[list[Any]],
+    merged_cells: Any,
+    cell_style_hints: Any,
+    include_complex_types: bool,
+    options: Optional[Dict[str, Any]],
+) -> SheetStructureAnalysisResponse:
+    if not bool((options or {}).get("apply_patches", True)):
+        return analysis
+
+    sig = (analysis.metadata or {}).get("sheet_signature")
+    if not isinstance(sig, str) or not sig:
+        return analysis
+
+    try:
+        patch = await get_patch(sig)
+    except StructurePatchStoreUnavailableError as exc:
+        raise _patch_store_unavailable() from exc
+
+    if patch is None:
+        return analysis
+
+    return apply_structure_patch(
+        analysis,
+        patch=patch,
+        grid=grid,
+        merged_cells=merged_cells,
+        cell_style_hints=cell_style_hints,
+        include_complex_types=include_complex_types,
+        options=options,
+    )
 
 
 @router.post("/structure/analyze", response_model=SheetStructureAnalysisResponse)
@@ -55,21 +103,17 @@ async def analyze_sheet_structure(
             max_tables=request.max_tables,
             options=request.options,
         )
-        if bool((request.options or {}).get("apply_patches", True)):
-            sig = (analysis.metadata or {}).get("sheet_signature")
-            if isinstance(sig, str) and sig:
-                patch = get_patch(sig)
-                if patch:
-                    analysis = apply_structure_patch(
-                        analysis,
-                        patch=patch,
-                        grid=request.grid,
-                        merged_cells=request.merged_cells,
-                        cell_style_hints=request.cell_style_hints,
-                        include_complex_types=request.include_complex_types,
-                        options=request.options,
-                    )
+        analysis = await _apply_saved_patch_if_enabled(
+            analysis=analysis,
+            grid=request.grid,
+            merged_cells=request.merged_cells,
+            cell_style_hints=request.cell_style_hints,
+            include_complex_types=request.include_complex_types,
+            options=request.options,
+        )
         return analysis
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Sheet structure analysis failed: {str(e)}")
         raise classified_http_exception(
@@ -165,20 +209,14 @@ async def analyze_excel_structure(
             code=ErrorCode.INTERNAL_ERROR,
         )
 
-    if bool(opts.get("apply_patches", True)):
-        sig = (analysis.metadata or {}).get("sheet_signature")
-        if isinstance(sig, str) and sig:
-            patch = get_patch(sig)
-            if patch:
-                analysis = apply_structure_patch(
-                    analysis,
-                    patch=patch,
-                    grid=sheet_grid.grid,
-                    merged_cells=sheet_grid.merged_cells,
-                    cell_style_hints=sheet_grid.cell_style_hints,
-                    include_complex_types=include_complex_types,
-                    options=opts,
-                )
+    analysis = await _apply_saved_patch_if_enabled(
+        analysis=analysis,
+        grid=sheet_grid.grid,
+        merged_cells=sheet_grid.merged_cells,
+        cell_style_hints=sheet_grid.cell_style_hints,
+        include_complex_types=include_complex_types,
+        options=opts,
+    )
 
     return SheetStructureAnalysisResponse(
         tables=analysis.tables,
@@ -266,20 +304,14 @@ async def analyze_google_sheets_structure(
             code=ErrorCode.INTERNAL_ERROR,
         )
 
-    if bool((request.options or {}).get("apply_patches", True)):
-        sig = (analysis.metadata or {}).get("sheet_signature")
-        if isinstance(sig, str) and sig:
-            patch = get_patch(sig)
-            if patch:
-                analysis = apply_structure_patch(
-                    analysis,
-                    patch=patch,
-                    grid=sheet_grid.grid,
-                    merged_cells=sheet_grid.merged_cells,
-                    cell_style_hints=getattr(sheet_grid, "cell_style_hints", None),
-                    include_complex_types=request.include_complex_types,
-                    options=request.options,
-                )
+    analysis = await _apply_saved_patch_if_enabled(
+        analysis=analysis,
+        grid=sheet_grid.grid,
+        merged_cells=sheet_grid.merged_cells,
+        cell_style_hints=getattr(sheet_grid, "cell_style_hints", None),
+        include_complex_types=request.include_complex_types,
+        options=request.options,
+    )
 
     return SheetStructureAnalysisResponse(
         tables=analysis.tables,
@@ -302,12 +334,18 @@ async def upsert_structure_patch(patch: SheetStructurePatch) -> SheetStructurePa
             detail="Patch ops must not be empty",
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
-    return upsert_patch(patch)
+    try:
+        return await upsert_patch(patch)
+    except StructurePatchStoreUnavailableError as exc:
+        raise _patch_store_unavailable() from exc
 
 
 @router.get("/structure/patch/{sheet_signature}", response_model=SheetStructurePatch)
 async def get_structure_patch(sheet_signature: str) -> SheetStructurePatch:
-    patch = get_patch(sheet_signature)
+    try:
+        patch = await get_patch(sheet_signature)
+    except StructurePatchStoreUnavailableError as exc:
+        raise _patch_store_unavailable() from exc
     if patch is None:
         raise classified_http_exception(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -319,7 +357,10 @@ async def get_structure_patch(sheet_signature: str) -> SheetStructurePatch:
 
 @router.delete("/structure/patch/{sheet_signature}")
 async def delete_structure_patch(sheet_signature: str) -> Dict[str, Any]:
-    deleted = delete_patch(sheet_signature)
+    try:
+        deleted = await delete_patch(sheet_signature)
+    except StructurePatchStoreUnavailableError as exc:
+        raise _patch_store_unavailable() from exc
     return {"deleted": bool(deleted), "sheet_signature": sheet_signature}
 
 

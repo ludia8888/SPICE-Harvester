@@ -22,6 +22,8 @@ from typing import Optional
 
 from shared.services.registries.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 
+pytestmark = pytest.mark.requires_infra
+
 
 @contextmanager
 def _set_env(**updates):

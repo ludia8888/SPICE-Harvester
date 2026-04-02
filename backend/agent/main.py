@@ -23,11 +23,35 @@ from shared.utils.app_logger import get_logger
 logger = get_logger(__name__)
 
 
+def _ensure_runtime_status(app: FastAPI) -> dict[str, object]:
+    state = getattr(app.state, "runtime_status", None)
+    if isinstance(state, dict):
+        return state
+    state = {
+        "ready": True,
+        "degraded": False,
+        "issues": [],
+        "background_tasks": {},
+    }
+    app.state.runtime_status = state
+    return state
+
+
+def _mark_runtime_issue(app: FastAPI, *, message: str, ready: bool) -> None:
+    status = _ensure_runtime_status(app)
+    status["degraded"] = True
+    status["ready"] = bool(status.get("ready", True) and ready)
+    issues = status.setdefault("issues", [])
+    if isinstance(issues, list) and message not in issues:
+        issues.append(message)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize dependencies."""
     ensure_startup_security("agent")
     ensure_agent_auth_configured()
+    _ensure_runtime_status(app)
     require_event_store = get_settings().agent.require_event_store
     try:
         await event_store.connect()
@@ -38,6 +62,7 @@ async def lifespan(app: FastAPI):
             raise
         logger.warning("Event store unavailable; agent service running in degraded mode: %s", exc)
         app.state.event_store = None
+        _mark_runtime_issue(app, message="event_store_unavailable", ready=False)
 
     audit_store = None
     try:
@@ -46,6 +71,7 @@ async def lifespan(app: FastAPI):
         logger.info("AuditLogStore connected for agent service")
     except Exception as exc:
         logger.warning("AuditLogStore unavailable for agent service: %s", exc)
+        _mark_runtime_issue(app, message="audit_store_unavailable", ready=True)
     app.state.audit_store = audit_store
 
     agent_registry = None
@@ -55,6 +81,7 @@ async def lifespan(app: FastAPI):
         logger.info("AgentRegistry connected for agent service")
     except Exception as exc:
         logger.warning("AgentRegistry unavailable for agent service: %s", exc)
+        _mark_runtime_issue(app, message="agent_registry_unavailable", ready=False)
     app.state.agent_registry = agent_registry
 
     session_registry = None
@@ -64,6 +91,7 @@ async def lifespan(app: FastAPI):
         logger.info("AgentSessionRegistry connected for agent service")
     except Exception as exc:
         logger.warning("AgentSessionRegistry unavailable for agent service: %s", exc)
+        _mark_runtime_issue(app, message="agent_session_registry_unavailable", ready=False)
     app.state.agent_session_registry = session_registry
 
     app.state.agent_tasks = {}
@@ -75,6 +103,7 @@ async def lifespan(app: FastAPI):
         logger.info("Rate limiter initialized for agent service")
     except Exception as exc:
         logger.warning("Rate limiter unavailable for agent service: %s", exc)
+        _mark_runtime_issue(app, message="rate_limiter_unavailable", ready=True)
 
     yield
 

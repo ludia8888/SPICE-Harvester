@@ -167,6 +167,47 @@ async def test_create_side_effects_append_event_before_es_and_use_event_sequence
 
 
 @pytest.mark.asyncio
+async def test_resolve_instance_payload_returns_none_for_deleted_event_history() -> None:
+    worker = StrictInstanceWorker()
+    worker.event_store = SimpleNamespace(
+        get_events=AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    event_type="INSTANCE_CREATED",
+                    data={
+                        "db_name": "demo",
+                        "branch": "main",
+                        "class_id": "Account",
+                        "instance_id": "acc-1",
+                        "name": "Alice",
+                    },
+                ),
+                SimpleNamespace(
+                    event_type="INSTANCE_DELETED",
+                    data={
+                        "db_name": "demo",
+                        "branch": "main",
+                        "class_id": "Account",
+                        "instance_id": "acc-1",
+                    },
+                ),
+            ]
+        )
+    )
+    worker.s3_client = SimpleNamespace(list_objects_v2=object(), get_object=object())
+    worker._s3_call = AsyncMock(side_effect=AssertionError("S3 fallback should not run after delete tombstone"))  # type: ignore[assignment]
+
+    resolved = await worker._resolve_instance_payload(
+        db_name="demo",
+        branch="main",
+        class_id="Account",
+        instance_id="acc-1",
+    )
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
 async def test_shutdown_uses_disconnect_for_elasticsearch_service(monkeypatch) -> None:
     worker = StrictInstanceWorker()
     worker._close_consumer_runtime = AsyncMock()  # type: ignore[assignment]

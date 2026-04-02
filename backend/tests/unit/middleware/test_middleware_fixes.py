@@ -237,6 +237,38 @@ def test_rate_limit_admin_bypass_requires_valid_token():
 
 
 @pytest.mark.unit
+def test_rate_limit_ignores_spoofed_x_forwarded_for_for_ip_buckets():
+    with _set_env(REDIS_URL="redis://127.0.0.1:6399", RATE_LIMIT_FAIL_OPEN="false"):
+        app = FastAPI()
+        install_rate_limit_headers_middleware(app)
+
+        @app.post("/limited")
+        @rate_limit(requests=2, window=60)
+        async def limited(request: Request):  # noqa: ARG001
+            return {"ok": True}
+
+        client = TestClient(app)
+        assert client.post("/limited", headers={"X-Forwarded-For": "203.0.113.10"}).status_code == 200
+        assert client.post("/limited", headers={"X-Forwarded-For": "203.0.113.11"}).status_code == 200
+        assert client.post("/limited", headers={"X-Forwarded-For": "203.0.113.12"}).status_code == 429
+
+
+@pytest.mark.unit
+def test_rate_limit_fails_closed_when_request_parameter_is_missing():
+    with _set_env(REDIS_URL="redis://127.0.0.1:6399", RATE_LIMIT_FAIL_OPEN="false"):
+        app = FastAPI()
+
+        @app.get("/limited")
+        @rate_limit(requests=2, window=60)
+        async def limited():
+            return {"ok": True}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/limited")
+        assert response.status_code == 500
+
+
+@pytest.mark.unit
 def test_bff_auth_allows_user_jwt_when_enabled():
     token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
     with _set_env(BFF_REQUIRE_AUTH="true", USER_JWT_ENABLED="true", USER_JWT_HS256_SECRET="secret"):

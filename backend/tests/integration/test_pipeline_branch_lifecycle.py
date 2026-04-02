@@ -7,6 +7,8 @@ import pytest
 from shared.config.service_config import ServiceConfig
 from shared.services.registries.pipeline_registry import PipelineRegistry
 
+pytestmark = [pytest.mark.integration, pytest.mark.requires_infra]
+
 
 @pytest.mark.asyncio
 async def test_pipeline_branch_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:

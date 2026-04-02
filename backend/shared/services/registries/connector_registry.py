@@ -397,6 +397,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         source_type: Optional[str] = None,
         enabled: Optional[bool] = None,
         limit: int = 500,
+        offset: int = 0,
     ) -> List[ConnectorSource]:
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
@@ -412,7 +413,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         sql = (
             f"SELECT source_type, source_id, enabled, config_json, created_at, updated_at "
             f"FROM {self._schema}.connector_sources {where} "
-            f"ORDER BY updated_at DESC LIMIT {max(1, int(limit))}"
+            f"ORDER BY updated_at DESC LIMIT {max(1, int(limit))} OFFSET {max(0, int(offset))}"
         )
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(sql, *args)

@@ -595,39 +595,40 @@ async def submit_action_batch_async(
 
     noop_event_store = _NoopEventStore()
     submit_results: Dict[str, ActionSubmitResponse] = {}
+    dependency_registry: Optional[ActionLogRegistry] = None
 
-    for request_id, item in normalized_items:
-        item_base_branch = str(item.base_branch or request.base_branch or "main").strip() or "main"
-        item_overlay_branch = str(item.overlay_branch or request.overlay_branch or "").strip() or None
-        item_metadata = dict(item.metadata or {})
-        item_metadata["__batch"] = {"batch_id": batch_id, "request_id": request_id}
-        item_metadata["__batch_payload"] = sanitize_input(item.input)
-        deps = dependencies_by_request_id.get(request_id) or []
-        if deps:
-            item_metadata["__dependency"] = {
-                "depends_on": [str(dep.on) for dep in deps],
-                "trigger_on": [str(dep.trigger_on) for dep in deps],
-            }
-
-        submit_req = ActionSubmitRequest(
-            input=item.input,
-            correlation_id=item.correlation_id,
-            metadata=item_metadata,
-            base_branch=item_base_branch,
-            overlay_branch=item_overlay_branch,
-        )
-        submit_resp = await submit_action_async(
-            db_name=db_name,
-            action_type_id=action_type_id,
-            request=submit_req,
-            base_branch=None,
-            event_store=noop_event_store,
-        )
-        submit_results[request_id] = submit_resp
-
-    dependency_registry = ActionLogRegistry()
-    await dependency_registry.connect()
     try:
+        for request_id, item in normalized_items:
+            item_base_branch = str(item.base_branch or request.base_branch or "main").strip() or "main"
+            item_overlay_branch = str(item.overlay_branch or request.overlay_branch or "").strip() or None
+            item_metadata = dict(item.metadata or {})
+            item_metadata["__batch"] = {"batch_id": batch_id, "request_id": request_id}
+            item_metadata["__batch_payload"] = sanitize_input(item.input)
+            deps = dependencies_by_request_id.get(request_id) or []
+            if deps:
+                item_metadata["__dependency"] = {
+                    "depends_on": [str(dep.on) for dep in deps],
+                    "trigger_on": [str(dep.trigger_on) for dep in deps],
+                }
+
+            submit_req = ActionSubmitRequest(
+                input=item.input,
+                correlation_id=item.correlation_id,
+                metadata=item_metadata,
+                base_branch=item_base_branch,
+                overlay_branch=item_overlay_branch,
+            )
+            submit_resp = await submit_action_async(
+                db_name=db_name,
+                action_type_id=action_type_id,
+                request=submit_req,
+                base_branch=None,
+                event_store=noop_event_store,
+            )
+            submit_results[request_id] = submit_resp
+
+        dependency_registry = ActionLogRegistry()
+        await dependency_registry.connect()
         for child_request_id, deps in dependencies_by_request_id.items():
             if not deps:
                 continue
@@ -640,63 +641,105 @@ async def submit_action_batch_async(
                     parent_action_log_id=parent_log_id,
                     trigger_on=str(dep.trigger_on),
                 )
-    finally:
-        await dependency_registry.close()
 
-    # Emit root commands only after dependencies are fully registered.
-    for request_id, item in normalized_items:
-        if dependencies_by_request_id.get(request_id):
-            continue
-        submit_resp = submit_results[request_id]
-        correlation_id = (item.correlation_id or get_correlation_id() or "").strip() or None
-        payload = sanitize_input(item.input)
-        metadata_payload = {
-            **(item.metadata or {}),
-            "__batch": {"batch_id": batch_id, "request_id": request_id},
-            "correlation_id": correlation_id,
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
-            "ontology": {"ref": f"branch:{submit_resp.base_branch}", "commit": submit_resp.ontology_commit_id},
-        }
-        command = ActionCommand(
-            command_id=UUID(submit_resp.action_log_id),
-            db_name=db_name,
-            action_log_id=UUID(submit_resp.action_log_id),
-            action_type_id=action_type_id,
-            ontology_commit_id=submit_resp.ontology_commit_id,
-            base_branch=submit_resp.base_branch,
-            overlay_branch=submit_resp.overlay_branch,
-            correlation_id=correlation_id,
-            payload=payload,
-            metadata=metadata_payload,
-        )
-        envelope = EventEnvelope.from_command(
-            command,
-            actor=str((item.metadata or {}).get("user_id") or ""),
-            kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
-            metadata={"service": "oms", "mode": "action_writeback_batch"},
-        )
-        await event_store.append_event(envelope)
-
-    response_items: List[ActionSubmitBatchItemResponse] = []
-    for idx, (request_id, _item) in enumerate(normalized_items):
-        submit_resp = submit_results[request_id]
-        deps = [str(dep.on) for dep in dependencies_by_request_id.get(request_id, [])]
-        response_items.append(
-            ActionSubmitBatchItemResponse(
-                index=idx,
-                request_id=request_id,
-                action_log_id=submit_resp.action_log_id,
-                status="WAITING_DEPENDENCY" if deps else submit_resp.status,
-                depends_on=deps,
+        # Emit root commands only after dependencies are fully registered.
+        for request_id, item in normalized_items:
+            if dependencies_by_request_id.get(request_id):
+                continue
+            submit_resp = submit_results[request_id]
+            correlation_id = (item.correlation_id or get_correlation_id() or "").strip() or None
+            payload = sanitize_input(item.input)
+            metadata_payload = {
+                **(item.metadata or {}),
+                "__batch": {"batch_id": batch_id, "request_id": request_id},
+                "correlation_id": correlation_id,
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": {"ref": f"branch:{submit_resp.base_branch}", "commit": submit_resp.ontology_commit_id},
+            }
+            command = ActionCommand(
+                command_id=UUID(submit_resp.action_log_id),
+                db_name=db_name,
+                action_log_id=UUID(submit_resp.action_log_id),
+                action_type_id=action_type_id,
+                ontology_commit_id=submit_resp.ontology_commit_id,
+                base_branch=submit_resp.base_branch,
+                overlay_branch=submit_resp.overlay_branch,
+                correlation_id=correlation_id,
+                payload=payload,
+                metadata=metadata_payload,
             )
-        )
+            envelope = EventEnvelope.from_command(
+                command,
+                actor=str((item.metadata or {}).get("user_id") or ""),
+                kafka_topic=AppConfig.ACTION_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "action_writeback_batch"},
+            )
+            await event_store.append_event(envelope)
 
-    return ActionSubmitBatchResponse(
-        batch_id=batch_id,
-        db_name=db_name,
-        action_type_id=action_type_id,
-        items=response_items,
-    )
+        response_items: List[ActionSubmitBatchItemResponse] = []
+        for idx, (request_id, _item) in enumerate(normalized_items):
+            submit_resp = submit_results[request_id]
+            deps = [str(dep.on) for dep in dependencies_by_request_id.get(request_id, [])]
+            response_items.append(
+                ActionSubmitBatchItemResponse(
+                    index=idx,
+                    request_id=request_id,
+                    action_log_id=submit_resp.action_log_id,
+                    status="WAITING_DEPENDENCY" if deps else submit_resp.status,
+                    depends_on=deps,
+                )
+            )
+
+        return ActionSubmitBatchResponse(
+            batch_id=batch_id,
+            db_name=db_name,
+            action_type_id=action_type_id,
+            items=response_items,
+        )
+    except Exception as exc:
+        if submit_results:
+            registry_for_cleanup = dependency_registry
+            cleanup_registry_created = False
+            if registry_for_cleanup is None:
+                try:
+                    registry_for_cleanup = ActionLogRegistry()
+                    await registry_for_cleanup.connect()
+                    cleanup_registry_created = True
+                except Exception:
+                    logger.warning(
+                        "Failed to connect ActionLogRegistry for batch cleanup",
+                        exc_info=True,
+                    )
+                    registry_for_cleanup = None
+            if registry_for_cleanup is not None:
+                cleanup_payload = {
+                    "error": "batch_submission_failed",
+                    "message": str(exc),
+                    "batch_id": batch_id,
+                }
+                for submit_resp in submit_results.values():
+                    try:
+                        await registry_for_cleanup.mark_failed(
+                            action_log_id=submit_resp.action_log_id,
+                            result=cleanup_payload,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to mark batch action log failed during cleanup",
+                            exc_info=True,
+                        )
+                if cleanup_registry_created:
+                    try:
+                        await registry_for_cleanup.close()
+                    except Exception:
+                        logger.warning(
+                            "Failed to close ActionLogRegistry after batch cleanup",
+                            exc_info=True,
+                        )
+        raise
+    finally:
+        if dependency_registry is not None:
+            await dependency_registry.close()
 
 
 @trace_endpoint("oms.action.simulate")

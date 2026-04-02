@@ -14,6 +14,26 @@ from shared.config.settings import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _parse_token_expiry(value: Any, *, user_id: str) -> Optional[datetime]:
+    raw_value = "" if value is None else str(value).strip()
+    if not raw_value:
+        logger.warning("Google Sheets token for user %s is missing expires_at; treating token as expired", user_id)
+        return None
+    try:
+        expires_at = datetime.fromisoformat(raw_value)
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Google Sheets token for user %s has malformed expires_at=%r; treating token as expired: %s",
+            user_id,
+            value,
+            exc,
+        )
+        return None
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at
+
+
 class GoogleOAuth2Client:
     """
     Google OAuth2 인증 클라이언트 (향후 확장용)
@@ -199,10 +219,8 @@ class GoogleOAuth2Client:
             return None
 
         # Check if token is expired
-        expires_at = datetime.fromisoformat(token_data["expires_at"])
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= datetime.now(timezone.utc):
+        expires_at = _parse_token_expiry(token_data.get("expires_at"), user_id=user_id)
+        if expires_at is None or expires_at <= datetime.now(timezone.utc):
             # Token expired, try to refresh
             refresh_token = token_data.get("refresh_token")
             if not refresh_token:

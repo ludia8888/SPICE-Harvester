@@ -6,6 +6,7 @@ Based on Context7 recommendations for API security
 
 import hmac
 import hashlib
+import ipaddress
 import time
 from typing import Optional, Dict, Any, Tuple, Mapping
 from functools import wraps
@@ -30,6 +31,34 @@ def _is_valid_admin_bypass_token(headers: Mapping[str, str]) -> bool:
         if expected and hmac.compare_digest(presented, expected):
             return True
     return False
+
+
+def _is_trusted_proxy_host(host: Optional[str]) -> bool:
+    raw = str(host or "").strip()
+    if not raw:
+        return False
+    try:
+        ip = ipaddress.ip_address(raw)
+    except ValueError:
+        return False
+    return bool(ip.is_loopback or ip.is_private or ip.is_link_local)
+
+
+def _extract_request(*, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Optional[Request]:
+    for arg in args:
+        if isinstance(arg, Request):
+            return arg
+
+    for value in kwargs.values():
+        if isinstance(value, Request):
+            return value
+
+    candidate = kwargs.get("request") or kwargs.get("http_request")
+    if isinstance(candidate, Request):
+        return candidate
+    if candidate is not None and hasattr(candidate, "scope") and hasattr(candidate, "headers"):
+        return candidate
+    return None
 
 
 class TokenBucket:
@@ -331,12 +360,14 @@ class RateLimiter:
             return self.get_client_id(request, "ip")
             
         else:  # Default to IP
-            # Get real IP considering proxies
-            forwarded = request.headers.get("X-Forwarded-For")
-            if forwarded:
-                ip = forwarded.split(",")[0].strip()
-            else:
-                ip = request.client.host if request.client else "unknown"
+            peer_ip = request.client.host if request.client else ""
+            ip = peer_ip or "unknown"
+            if _is_trusted_proxy_host(peer_ip):
+                forwarded = request.headers.get("X-Forwarded-For")
+                if forwarded:
+                    forwarded_ip = forwarded.split(",")[0].strip()
+                    if forwarded_ip:
+                        ip = forwarded_ip
             return f"ip:{ip}"
     
     async def check_rate_limit(
@@ -417,27 +448,7 @@ def rate_limit(
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # 🔥 FIX! Find the Request object in function arguments
-            request = None
-            
-            # Look for Request object in positional args
-            for arg in args:
-                if isinstance(arg, Request):
-                    request = arg
-                    break
-
-            # Look for Request object in keyword args
-            if request is None:
-                for value in kwargs.values():
-                    if isinstance(value, Request):
-                        request = value
-                        break
-
-            # Fallback: request param names (sometimes provided without typing).
-            if request is None:
-                candidate = kwargs.get("request") or kwargs.get("http_request")
-                if candidate is not None and hasattr(candidate, "scope"):
-                    request = candidate
+            request = _extract_request(args=args, kwargs=kwargs)
 
             bypass_rate_limit = False
             if request is not None:
@@ -452,9 +463,12 @@ def rate_limit(
                         logging.getLogger(__name__).warning("Exception fallback at shared/middleware/rate_limiter.py:450", exc_info=True)
                         bypass_rate_limit = False
             
-            # If no Request found, skip rate limiting (for non-HTTP contexts)
             if request is None:
-                return await func(*args, **kwargs)
+                raise classified_http_exception(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "Rate-limited HTTP endpoints must receive a Request parameter",
+                    code=ErrorCode.INTERNAL_ERROR,
+                )
             if getattr(request.state, "is_internal_agent", False):
                 return await func(*args, **kwargs)
             # Get or create rate limiter

@@ -147,6 +147,34 @@ async def _record_run_start(
         )
 
 
+async def _mark_run_start_failed(
+    *,
+    agent_registry: Optional[AgentRegistry],
+    run_id: str,
+    tenant_id: str,
+    body: AgentRunRequest,
+    error: str,
+) -> None:
+    if not agent_registry:
+        return
+    finished_at = datetime.now(timezone.utc)
+    await agent_registry.update_run_status(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status="FAILED",
+        finished_at=finished_at,
+    )
+    for idx, _step in enumerate(body.steps):
+        await agent_registry.update_step_status(
+            run_id=run_id,
+            step_id=_step_id(idx),
+            tenant_id=tenant_id,
+            status="FAILED" if idx == 0 else "SKIPPED",
+            error=error if idx == 0 else None,
+            finished_at=finished_at,
+        )
+
+
 async def _execute_agent_run(
     *,
     runtime: AgentRuntime,
@@ -332,9 +360,22 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
             },
             request_id=request_meta.get("request_id"),
         )
-    except Exception:
+    except Exception as exc:
         task.cancel()
         request.app.state.agent_tasks.pop(run_id, None)  # type: ignore[attr-defined]
+        try:
+            await _mark_run_start_failed(
+                agent_registry=agent_registry,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                body=body,
+                error=str(exc) or exc.__class__.__name__,
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Failed to mark agent run start failure in registry",
+                exc_info=True,
+            )
         raise
 
     response = ApiResponse.accepted(

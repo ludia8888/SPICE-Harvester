@@ -6,6 +6,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import httpx
 from fastapi import APIRouter, Body, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from bff.routers.data_connector_deps import (
     get_connector_adapter_factory,
@@ -99,6 +100,7 @@ from shared.foundry.auth import require_scopes
 from shared.foundry.rids import build_rid
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.observability.tracing import trace_endpoint
+from shared.models.background_task import BackgroundTask
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorRegistry, ConnectorSource
@@ -110,6 +112,9 @@ from shared.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/connectivity", tags=["Foundry Connectivity v2"])
+
+_CONNECTIVITY_FETCH_LIMIT_START = 5000
+_CONNECTIVITY_FETCH_LIMIT_MAX = 2_000_000
 
 
 def _feature_flags_settings() -> Any:
@@ -362,13 +367,60 @@ async def _list_connection_owned_sources(
 ) -> list[ConnectorSource]:
     owned_sources: list[ConnectorSource] = []
     for source_type in source_types:
-        sources = await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000)
+        sources = await _list_all_enabled_sources_for_type(
+            connector_registry=connector_registry,
+            source_type=source_type,
+        )
         for src in sources:
             if str((src.config_json or {}).get("connection_id") or "").strip() != connection_id:
                 continue
             owned_sources.append(src)
     owned_sources.sort(key=lambda src: str(src.source_id))
     return owned_sources
+
+
+async def _list_all_enabled_sources_for_type(
+    *,
+    connector_registry: ConnectorRegistry,
+    source_type: str,
+) -> list[ConnectorSource]:
+    limit = _CONNECTIVITY_FETCH_LIMIT_START
+    while True:
+        sources = await connector_registry.list_sources(
+            source_type=source_type,
+            enabled=True,
+            limit=limit,
+        )
+        if len(sources) < limit or limit >= _CONNECTIVITY_FETCH_LIMIT_MAX:
+            return sources
+        limit = min(limit * 2, _CONNECTIVITY_FETCH_LIMIT_MAX)
+
+
+async def _list_all_connectivity_export_tasks(task_manager: Any) -> list[BackgroundTask]:
+    redis_service = getattr(task_manager, "redis", None)
+    if redis_service is None or not hasattr(redis_service, "scan_keys") or not hasattr(redis_service, "get_json"):
+        return await task_manager.get_all_tasks(
+            task_type="connectivity_export_run",
+            limit=_CONNECTIVITY_FETCH_LIMIT_MAX,
+        )
+
+    task_keys = await redis_service.scan_keys("background_task:*")
+    tasks: list[BackgroundTask] = []
+    for key in task_keys:
+        task_data = await redis_service.get_json(key)
+        if not isinstance(task_data, dict):
+            continue
+        try:
+            task = BackgroundTask(**task_data)
+        except ValidationError as exc:
+            logger.warning("Skipping malformed background task payload for key %s: %s", key, exc)
+            continue
+        if task.task_type != "connectivity_export_run":
+            continue
+        tasks.append(task)
+
+    tasks.sort(key=lambda item: item.created_at, reverse=True)
+    return tasks
 
 
 async def _load_table_import_source(
@@ -2772,7 +2824,12 @@ async def list_connections_v2(
 
     all_connections: list[ConnectorSource] = []
     for source_type in _connection_source_types():
-        all_connections.extend(await connector_registry.list_sources(source_type=source_type, enabled=True, limit=5000))
+        all_connections.extend(
+            await _list_all_enabled_sources_for_type(
+                connector_registry=connector_registry,
+                source_type=source_type,
+            )
+        )
     all_connections.sort(key=lambda src: str(src.source_id))
 
     page_items = all_connections[offset : offset + pageSize]
@@ -3250,7 +3307,7 @@ async def list_connection_export_runs_v2(
     if isinstance(offset, JSONResponse):
         return offset
 
-    tasks = await task_manager.get_all_tasks(task_type="connectivity_export_run", limit=5000)
+    tasks = await _list_all_connectivity_export_tasks(task_manager)
     scoped_tasks = []
     for task in tasks:
         metadata = getattr(task, "metadata", {}) if isinstance(getattr(task, "metadata", {}), dict) else {}

@@ -88,6 +88,7 @@ async def get_recompute_projection_result(
 @rate_limit(**RateLimitPresets.STRICT)
 @trace_endpoint("bff.admin.reindex_instances_endpoint")
 async def reindex_instances_endpoint(
+    http_request: Request,
     db_name: str = Query(..., description="Database name"),
     branch: str = Query(default="main", description="Branch"),
     delete_index_first: bool = Query(default=False, description="Delete ES index before rebuild"),

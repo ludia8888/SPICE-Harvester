@@ -53,6 +53,7 @@ from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.ontology_key_spec_registry import OntologyKeySpecRegistry
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
+from shared.errors.runtime_exception_policy import RuntimeZone, record_lineage_or_raise
 from shared.security.input_sanitizer import validate_branch_name
 from shared.security.database_access import (
     delete_database_access_entries,
@@ -213,6 +214,67 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         if isinstance(expected, list):
             return current == expected
         return current == expected
+
+    async def _record_ontology_lineage(
+        self,
+        *,
+        command_id: str,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        ontology_version: str,
+        edge_type: str,
+    ) -> None:
+        lineage_store = getattr(self.observability, "lineage_store", self.observability)
+
+        if isinstance(self.observability, WorkerObservability) and self.observability.lineage_store is not None:
+            async def _record() -> None:
+                await self.observability.lineage_store.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                    edge_type=edge_type,
+                    occurred_at=datetime.now(timezone.utc),
+                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
+                        "artifact": "ontology_class",
+                        "ontology": ontology_version,
+                    },
+                )
+        else:
+            async def _record() -> None:
+                await self.observability.record_link(
+                    from_node_id=LineageStore.node_event(str(command_id)),
+                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                    edge_type=edge_type,
+                    occurred_at=datetime.now(timezone.utc),
+                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "class_id": class_id,
+                        "artifact": "ontology_class",
+                        "ontology": ontology_version,
+                    },
+                )
+
+        await record_lineage_or_raise(
+            lineage_store=lineage_store,
+            required=self.lineage_required,
+            record_call=_record,
+            logger=logger,
+            operation="ontology_worker.record_ontology_lineage",
+            zone=RuntimeZone.OBSERVABILITY,
+            context={
+                "db_name": db_name,
+                "branch": branch,
+                "class_id": class_id,
+                "ontology": ontology_version,
+                "edge_type": edge_type,
+            },
+        )
 
     async def initialize(self):
         """워커 초기화"""
@@ -429,6 +491,43 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                             )
                     raise
 
+            ontology_version = None
+            try:
+                ontology_version = await resolve_ontology_version(
+                    None, db_name=db_name, branch=branch, logger=logger
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve ontology version after create (db=%s branch=%s class_id=%s): %s",
+                    db_name,
+                    branch,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
+
+            event = OntologyEvent(
+                event_type=EventType.ONTOLOGY_CLASS_CREATED,
+                db_name=db_name,
+                branch=branch,
+                class_id=class_id,
+                command_id=command_id,
+                metadata={"ontology": ontology_version} if ontology_version else {},
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "class_id": class_id,
+                    "label": payload.get('label'),
+                    "description": payload.get('description'),
+                    "properties": payload.get('properties', []),
+                    "relationships": payload.get('relationships', []),
+                    "parent_class": payload.get('parent_class'),
+                    "abstract": payload.get('abstract', False),
+                },
+                occurred_by=command_data.get('created_by', 'system')
+            )
+            await self.publish_event(event)
+
             if db_name and class_id and self.key_spec_registry:
                 try:
                     pk_fields, title_fields = self._extract_key_spec_from_payload(payload)
@@ -440,37 +539,23 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                         title_key=title_fields,
                     )
                 except Exception as exc:
-                    # Hard fail: without key_spec we cannot provide a reliable primaryKey/titleKey contract.
-                    # This is retry-safe because ontology writes are idempotent and the next retry will
-                    # re-attempt the key_spec upsert.
                     logger.error(
-                        "Failed to upsert ontology key_spec (db=%s branch=%s class_id=%s): %s",
+                        "Failed to upsert ontology key_spec after successful create (db=%s branch=%s class_id=%s): %s",
                         db_name,
                         branch,
                         class_id,
                         exc,
                         exc_info=True,
                     )
-                    raise RuntimeError("ontology_key_spec_upsert_failed") from exc
-            ontology_version = await resolve_ontology_version(
-                None, db_name=db_name, branch=branch, logger=logger
-            )
             if command_id and class_id:
-                await self.observability.record_link(
-                    from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                await self._record_ontology_lineage(
+                    command_id=str(command_id),
+                    db_name=str(db_name),
+                    branch=str(branch),
+                    class_id=str(class_id),
+                    ontology_version=str(ontology_version),
                     edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
-                    occurred_at=datetime.now(timezone.utc),
-                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "branch": branch,
-                        "class_id": class_id,
-                        "artifact": "ontology_class",
-                        "ontology": ontology_version,
-                    },
                 )
-
             if command_id and class_id and self.audit_store:
                 try:
                     await self.audit_store.log(
@@ -500,43 +585,24 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                         exc,
                         exc_info=True,
                     )
-            
-            
-            # 성공 이벤트 생성
-            event = OntologyEvent(
-                event_type=EventType.ONTOLOGY_CLASS_CREATED,
-                db_name=db_name,
-                branch=branch,
-                class_id=class_id,
-                command_id=command_id,
-                metadata={"ontology": ontology_version},
-                data={
-                    "db_name": db_name,
-                    "branch": branch,
-                    "class_id": class_id,
-                    "label": payload.get('label'),
-                    "description": payload.get('description'),
-                    "properties": payload.get('properties', []),
-                    "relationships": payload.get('relationships', []),
-                    "parent_class": payload.get('parent_class'),
-                    "abstract": payload.get('abstract', False),
-                },
-                occurred_by=command_data.get('created_by', 'system')
-            )
-            
-            # 이벤트 발행
-            await self.publish_event(event)
-            
-            # Redis에 완료 상태 업데이트
+
             if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "class_id": class_id,
-                        "message": f"Successfully created ontology class: {class_id}"
-                        }
-                )
-            
+                try:
+                    await self.command_status_service.complete_command(
+                        command_id=command_id,
+                        result={
+                            "class_id": class_id,
+                            "message": f"Successfully created ontology class: {class_id}"
+                            }
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to mark ontology create command completed (command_id=%s): %s",
+                        command_id,
+                        exc,
+                        exc_info=True,
+                    )
+
             logger.info(f"Successfully created ontology class: {class_id}")
             
         except Exception as e:
@@ -638,9 +704,38 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                             )
                     raise
 
-            ontology_version = await resolve_ontology_version(
-                None, db_name=db_name, branch=branch, logger=logger
+            ontology_version = None
+            try:
+                ontology_version = await resolve_ontology_version(
+                    None, db_name=db_name, branch=branch, logger=logger
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve ontology version after update (db=%s branch=%s class_id=%s): %s",
+                    db_name,
+                    branch,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
+
+            event = OntologyEvent(
+                event_type=EventType.ONTOLOGY_CLASS_UPDATED,
+                db_name=db_name,
+                branch=branch,
+                class_id=class_id,
+                command_id=command_id,
+                metadata={"ontology": ontology_version} if ontology_version else {},
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "class_id": class_id,
+                    "updates": updates,
+                    "merged_data": merged_data,
+                },
+                occurred_by=command_data.get('created_by', 'system')
             )
+            await self.publish_event(event)
 
             if db_name and class_id and self.key_spec_registry:
                 try:
@@ -654,30 +749,22 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     )
                 except Exception as exc:
                     logger.error(
-                        "Failed to upsert ontology key_spec after update (db=%s branch=%s class_id=%s): %s",
+                        "Failed to upsert ontology key_spec after successful update (db=%s branch=%s class_id=%s): %s",
                         db_name,
                         branch,
                         class_id,
                         exc,
                         exc_info=True,
                     )
-                    raise RuntimeError("ontology_key_spec_upsert_failed") from exc
             if command_id and class_id:
-                await self.observability.record_link(
-                    from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                await self._record_ontology_lineage(
+                    command_id=str(command_id),
+                    db_name=str(db_name),
+                    branch=str(branch),
+                    class_id=str(class_id),
+                    ontology_version=str(ontology_version),
                     edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
-                    occurred_at=datetime.now(timezone.utc),
-                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "branch": branch,
-                        "class_id": class_id,
-                        "artifact": "ontology_class",
-                        "ontology": ontology_version,
-                    },
                 )
-
             if command_id and class_id and self.audit_store:
                 try:
                     await self.audit_store.log(
@@ -707,39 +794,25 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                         exc,
                         exc_info=True,
                     )
-            
-            # 성공 이벤트 생성
-            event = OntologyEvent(
-                event_type=EventType.ONTOLOGY_CLASS_UPDATED,
-                db_name=db_name,
-                branch=branch,
-                class_id=class_id,
-                command_id=command_id,
-                metadata={"ontology": ontology_version},
-                data={
-                    "db_name": db_name,
-                    "branch": branch,
-                    "class_id": class_id,
-                    "updates": updates,
-                    "merged_data": merged_data,
-                },
-                occurred_by=command_data.get('created_by', 'system')
-            )
-            
-            # 이벤트 발행
-            await self.publish_event(event)
-            
-            # Redis에 완료 상태 업데이트
+
             if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "class_id": class_id,
-                        "message": f"Successfully updated ontology class: {class_id}",
-                        "updates": updates,
-                        }
-                )
-            
+                try:
+                    await self.command_status_service.complete_command(
+                        command_id=command_id,
+                        result={
+                            "class_id": class_id,
+                            "message": f"Successfully updated ontology class: {class_id}",
+                            "updates": updates,
+                            }
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to mark ontology update command completed (command_id=%s): %s",
+                        command_id,
+                        exc,
+                        exc_info=True,
+                    )
+
             logger.info(f"Successfully updated ontology class: {class_id}")
             
         except Exception as e:
@@ -830,9 +903,36 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 logger.info(f"Ontology '{class_id}' already deleted; treating delete as idempotent success")
                 already_missing = True
 
-            ontology_version = await resolve_ontology_version(
-                None, db_name=db_name, branch=branch, logger=logger
+            ontology_version = None
+            try:
+                ontology_version = await resolve_ontology_version(
+                    None, db_name=db_name, branch=branch, logger=logger
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve ontology version after delete (db=%s branch=%s class_id=%s): %s",
+                    db_name,
+                    branch,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
+
+            event = OntologyEvent(
+                event_type=EventType.ONTOLOGY_CLASS_DELETED,
+                db_name=db_name,
+                branch=branch,
+                class_id=class_id,
+                command_id=command_id,
+                metadata={"ontology": ontology_version} if ontology_version else {},
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "class_id": class_id
+                },
+                occurred_by=command_data.get('created_by', 'system')
             )
+            await self.publish_event(event)
 
             if db_name and class_id and self.key_spec_registry:
                 try:
@@ -843,31 +943,23 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     )
                 except Exception as exc:
                     logger.error(
-                        "Failed to delete ontology key_spec (db=%s branch=%s class_id=%s): %s",
+                        "Failed to delete ontology key_spec after successful delete (db=%s branch=%s class_id=%s): %s",
                         db_name,
                         branch,
                         class_id,
                         exc,
                         exc_info=True,
                     )
-                    raise RuntimeError("ontology_key_spec_delete_failed") from exc
 
             if command_id and class_id:
-                await self.observability.record_link(
-                    from_node_id=LineageStore.node_event(str(command_id)),
-                    to_node_id=LineageStore.node_artifact("graph", db_name, branch, f"ontology:{class_id}"),
+                await self._record_ontology_lineage(
+                    command_id=str(command_id),
+                    db_name=str(db_name),
+                    branch=str(branch),
+                    class_id=str(class_id),
+                    ontology_version=str(ontology_version),
                     edge_type=EDGE_EVENT_DELETED_GRAPH_DOCUMENT,
-                    occurred_at=datetime.now(timezone.utc),
-                    to_label=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                    edge_metadata={
-                        "db_name": db_name,
-                        "branch": branch,
-                        "class_id": class_id,
-                        "artifact": "ontology_class",
-                        "ontology": ontology_version,
-                    },
                 )
-
             if command_id and class_id and self.audit_store:
                 try:
                     await self.audit_store.log(
@@ -898,36 +990,24 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                         exc,
                         exc_info=True,
                     )
-            
-            # 성공 이벤트 생성
-            event = OntologyEvent(
-                event_type=EventType.ONTOLOGY_CLASS_DELETED,
-                db_name=db_name,
-                branch=branch,
-                class_id=class_id,
-                command_id=command_id,
-                metadata={"ontology": ontology_version},
-                data={
-                    "db_name": db_name,
-                    "branch": branch,
-                    "class_id": class_id
-                },
-                occurred_by=command_data.get('created_by', 'system')
-            )
-            
-            # 이벤트 발행
-            await self.publish_event(event)
-            
-            # Redis에 완료 상태 업데이트
+
             if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "class_id": class_id,
-                        "message": f"Successfully deleted ontology class: {class_id}"
-                    }
-                )
-            
+                try:
+                    await self.command_status_service.complete_command(
+                        command_id=command_id,
+                        result={
+                            "class_id": class_id,
+                            "message": f"Successfully deleted ontology class: {class_id}"
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to mark ontology delete command completed (command_id=%s): %s",
+                        command_id,
+                        exc,
+                        exc_info=True,
+                    )
+
             logger.info(f"Successfully deleted ontology class: {class_id}")
             
         except Exception as e:

@@ -46,7 +46,7 @@ from oms.grpc.server import OMSGrpcServer
 
 # OMS specific imports  
 from oms.services.event_store import event_store
-from shared.services.storage.redis_service import RedisService
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
@@ -169,28 +169,22 @@ class OMSServiceContainer:
     
     async def _initialize_redis_and_command_status(self) -> None:
         """Initialize Redis service and Command Status service"""
-        # Temporarily skip Redis to allow system to work
-        logger.warning("Redis initialization temporarily disabled to avoid recursion issue")
-        self._oms_services['redis_service'] = None
-        self._oms_services['command_status_service'] = None
-        return
-        
-        # Original code commented out until Redis recursion is fixed
-        # try:
-        #     redis_service = RedisService(
-        #         host=self.settings.database.redis_host,
-        #         port=self.settings.database.redis_port,
-        #         password=self.settings.database.redis_password
-        #     )
-        #     await redis_service.connect()
-        #     command_status_service = CommandStatusService(redis_service)
-        #     self._oms_services['redis_service'] = redis_service
-        #     self._oms_services['command_status_service'] = command_status_service
-        #     logger.info("Redis 연결 성공")
-        # except Exception as e:
-        #     logger.error(f"Redis 연결 실패: {e}")
-        #     self._oms_services['redis_service'] = None
-        #     self._oms_services['command_status_service'] = None
+        try:
+            redis_service = create_redis_service(self.settings)
+            await redis_service.connect()
+            command_status_service = CommandStatusService(redis_service)
+            self._oms_services['redis_service'] = redis_service
+            self._oms_services['command_status_service'] = command_status_service
+            try:
+                self.container.register_instance(RedisService, redis_service, replace=True)
+                self.container.register_instance(CommandStatusService, command_status_service, replace=True)
+            except Exception:
+                logger.warning("Failed to register OMS Redis/command status services in container", exc_info=True)
+            logger.info("Redis and Command Status service initialized for OMS")
+        except Exception as e:
+            logger.warning("Redis/Command Status unavailable for OMS startup: %s", e)
+            self._oms_services['redis_service'] = None
+            self._oms_services['command_status_service'] = None
     
     async def _initialize_elasticsearch(self) -> None:
         """Initialize Elasticsearch service"""

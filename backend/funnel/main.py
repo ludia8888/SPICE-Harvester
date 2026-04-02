@@ -14,6 +14,9 @@ from typing import Any, Dict
 from fastapi import FastAPI
 
 from funnel.routers.type_inference_router import router as structure_router
+from funnel.services.structure_patch_store import close_patch_store, initialize_patch_store
+from shared.config.settings import get_settings
+from shared.services.storage.redis_service import create_redis_service
 from shared.utils.app_logger import get_logger
 
 # Rate limiting middleware
@@ -36,11 +39,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize rate limiter: {e}")
 
+    try:
+        redis_service = create_redis_service(get_settings())
+        await redis_service.connect()
+        await initialize_patch_store(redis_service)
+        app.state.structure_patch_store_ready = True
+        logger.info("Structure patch store initialized")
+    except Exception as e:
+        app.state.structure_patch_store_ready = False
+        app.state.structure_patch_store_error = str(e)
+        logger.error(f"Failed to initialize structure patch store: {e}")
+
     yield
 
     # Cleanup
     if hasattr(app.state, 'rate_limiter'):
         await app.state.rate_limiter.close()
+    try:
+        await close_patch_store()
+    except Exception as e:
+        logger.error(f"Failed to close structure patch store: {e}")
 
     logger.info("Funnel Service stopped")
 

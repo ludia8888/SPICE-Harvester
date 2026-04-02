@@ -26,10 +26,14 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import sys
+import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,6 +63,9 @@ from mcp_servers.pipeline_mcp_errors import tool_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+
+_STREAMABLE_SESSION_IDLE_TTL_SECONDS = 60 * 15
+_STREAMABLE_SESSION_MAX = 512
 
 # ---------------------------------------------------------------------------
 # Common helpers
@@ -127,6 +134,100 @@ def _extract_dataset_ids(payload: Dict[str, Any]) -> List[str]:
         if candidate:
             dataset_ids.append(candidate)
     return dataset_ids
+
+
+@dataclass
+class _StreamableSessionState:
+    session_id: str
+    transport: Any
+    task: asyncio.Task[Any]
+    last_seen: float
+
+
+class _StreamableSessionRegistry:
+    def __init__(self, *, idle_ttl_seconds: int = _STREAMABLE_SESSION_IDLE_TTL_SECONDS, max_sessions: int = _STREAMABLE_SESSION_MAX):
+        self._idle_ttl_seconds = idle_ttl_seconds
+        self._max_sessions = max_sessions
+        self._sessions: Dict[str, _StreamableSessionState] = {}
+        self._lock = asyncio.Lock()
+
+    async def get_or_create(self, requested_session_id: Optional[str], *, transport_factory: Any, server_runner_factory: Any) -> _StreamableSessionState:
+        stale_states: list[_StreamableSessionState] = []
+        async with self._lock:
+            stale_states.extend(self._evict_idle_locked())
+
+            session_id = str(requested_session_id or "").strip()
+            state = self._sessions.get(session_id) if session_id else None
+            if state is not None:
+                state.last_seen = time.monotonic()
+            else:
+                transport = transport_factory(session_id or str(uuid.uuid4()))
+                session_id = str(getattr(transport, "_session_id", None) or session_id or uuid.uuid4())
+                task = asyncio.create_task(server_runner_factory(transport))
+                state = _StreamableSessionState(
+                    session_id=session_id,
+                    transport=transport,
+                    task=task,
+                    last_seen=time.monotonic(),
+                )
+                self._sessions[session_id] = state
+                task.add_done_callback(lambda _: self._sessions.pop(session_id, None))
+                stale_states.extend(self._evict_over_capacity_locked())
+
+        for stale_state in stale_states:
+            await self._close_state(stale_state)
+        return state
+
+    async def close(self, session_id: Optional[str]) -> None:
+        if not session_id:
+            return
+        async with self._lock:
+            state = self._sessions.pop(str(session_id), None)
+        if state is not None:
+            await self._close_state(state)
+
+    async def shutdown(self) -> None:
+        async with self._lock:
+            states = list(self._sessions.values())
+            self._sessions.clear()
+        for state in states:
+            await self._close_state(state)
+
+    def _evict_idle_locked(self) -> list[_StreamableSessionState]:
+        now = time.monotonic()
+        stale_states: list[_StreamableSessionState] = []
+        for session_id, state in list(self._sessions.items()):
+            if now - state.last_seen < self._idle_ttl_seconds:
+                continue
+            removed = self._sessions.pop(session_id, None)
+            if removed is not None:
+                stale_states.append(removed)
+        return stale_states
+
+    def _evict_over_capacity_locked(self) -> list[_StreamableSessionState]:
+        evicted: list[_StreamableSessionState] = []
+        while len(self._sessions) > self._max_sessions:
+            oldest = min(self._sessions.values(), key=lambda state: state.last_seen)
+            self._sessions.pop(oldest.session_id, None)
+            evicted.append(oldest)
+        return evicted
+
+    async def _close_state(self, state: _StreamableSessionState) -> None:
+        state.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await state.task
+        transport = state.transport
+        for close_name in ("aclose", "close"):
+            closer = getattr(transport, close_name, None)
+            if closer is None:
+                continue
+            try:
+                result = closer()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.debug("Failed to close streamable MCP transport for session %s", state.session_id, exc_info=True)
+            break
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Tool definitions (organised by SDK domain)
@@ -868,35 +969,38 @@ def main_sse(host: str = "0.0.0.0", port: int = 9090) -> None:
 def main_streamable_http(host: str = "0.0.0.0", port: int = 9090) -> None:
     """Run as Streamable HTTP transport (MCP 2025-03 spec)."""
     import uvicorn
+    from contextlib import asynccontextmanager
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.responses import JSONResponse
     from mcp.server.streamable_http import StreamableHTTPServerTransport
 
     mcp = BffSdkMCPServer()
+    session_registry = _StreamableSessionRegistry()
 
-    # Session store for stateful connections
-    _sessions: Dict[str, StreamableHTTPServerTransport] = {}
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        await session_registry.shutdown()
 
     async def handle_mcp(request):
-        session_id = request.headers.get("mcp-session-id")
-        if session_id and session_id in _sessions:
-            transport = _sessions[session_id]
-        else:
-            transport = StreamableHTTPServerTransport(
-                mcp_session_id=session_id or str(uuid.uuid4()),
-            )
-            _sessions[transport._session_id] = transport
-            # Run MCP server in background for this session
-            import asyncio
-            asyncio.create_task(
-                mcp.server.run(
-                    transport._read_stream,
-                    transport._write_stream,
-                    mcp.server.create_initialization_options(),
-                )
-            )
-        await transport.handle_request(request.scope, request.receive, request._send)
+        requested_session_id = request.headers.get("mcp-session-id")
+        state = await session_registry.get_or_create(
+            requested_session_id,
+            transport_factory=lambda session_id: StreamableHTTPServerTransport(
+                mcp_session_id=session_id,
+            ),
+            server_runner_factory=lambda transport: mcp.server.run(
+                transport._read_stream,
+                transport._write_stream,
+                mcp.server.create_initialization_options(),
+            ),
+        )
+        try:
+            await state.transport.handle_request(request.scope, request.receive, request._send)
+        finally:
+            if request.method.upper() == "DELETE":
+                await session_registry.close(state.session_id)
 
     async def handle_health(request):
         return JSONResponse({
@@ -911,6 +1015,7 @@ def main_streamable_http(host: str = "0.0.0.0", port: int = 9090) -> None:
             Route("/health", handle_health),
             Route("/mcp", handle_mcp, methods=["GET", "POST", "DELETE"]),
         ],
+        lifespan=lifespan,
     )
 
     logger.info("Starting BFF SDK MCP Server (Streamable HTTP) on %s:%d", host, port)

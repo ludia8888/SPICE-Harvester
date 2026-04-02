@@ -12,6 +12,7 @@ Key features:
 5. ✅ Environment drift detection
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -30,24 +31,44 @@ router = APIRouter(tags=["Config Monitoring"])
 
 # Global configuration monitor instance
 _config_monitor: Optional[ConfigurationMonitor] = None
+_config_monitor_settings_key: Optional[str] = None
+
+
+def _settings_cache_key(settings: ApplicationSettings) -> str:
+    try:
+        payload = settings.model_dump(mode="json")
+    except AttributeError:
+        payload = repr(settings)
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _log_critical_changes(change: ConfigChange) -> None:
+    if change.severity not in [ConfigSeverity.CRITICAL, ConfigSeverity.ERROR]:
+        return
+    logger = logging.getLogger(__name__)
+    sanitized_change = change.to_dict()
+    logger.warning(
+        "Critical config change: %s = %r",
+        change.key_path,
+        sanitized_change.get("new_value"),
+    )
+
+
+def _build_config_monitor(settings: ApplicationSettings) -> ConfigurationMonitor:
+    monitor = ConfigurationMonitor(settings)
+    monitor.add_change_callback(_log_critical_changes)
+    return monitor
 
 
 async def get_config_monitor(settings: ApplicationSettings = Depends(get_settings_dependency)) -> ConfigurationMonitor:
     """Get or create configuration monitor"""
-    global _config_monitor
-    
-    if _config_monitor is None:
-        _config_monitor = ConfigurationMonitor(settings)
-        
-        # Add some useful change callbacks
-        def log_critical_changes(change: ConfigChange):
-            if change.severity in [ConfigSeverity.CRITICAL, ConfigSeverity.ERROR]:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Critical config change: {change.key_path} = {change.new_value}")
-        
-        _config_monitor.add_change_callback(log_critical_changes)
-    
+    global _config_monitor, _config_monitor_settings_key
+
+    current_key = _settings_cache_key(settings)
+    if _config_monitor is None or _config_monitor_settings_key != current_key:
+        _config_monitor = _build_config_monitor(settings)
+        _config_monitor_settings_key = current_key
+
     return _config_monitor
 
 
@@ -566,9 +587,9 @@ async def get_monitoring_status(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Exception fallback at shared/routers/config_monitoring.py:562", exc_info=True)
-        return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "system_status": "error",
-            "error": str(e)
-        }
+        logging.getLogger(__name__).warning("Configuration monitoring status failed", exc_info=True)
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Configuration monitoring status failed: {str(e)}",
+            code=ErrorCode.CONFIGURATION_ERROR,
+        ) from e

@@ -6,6 +6,7 @@ across BFF, OMS, and Funnel services.
 """
 
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -277,6 +278,21 @@ def _add_logging_middleware(app: FastAPI) -> None:
 
 def _add_health_check(app: FastAPI, service_info: ServiceInfo) -> None:
     """Add standardized health check endpoints"""
+
+    def _resolve_runtime_status() -> Optional[Dict[str, Any]]:
+        state = getattr(app, "state", None)
+        if state is None:
+            return None
+
+        explicit = getattr(state, "runtime_status", None)
+        if isinstance(explicit, dict):
+            return explicit
+
+        service_key = re.sub(r"[^a-z0-9]+", "_", service_info.name.lower()).strip("_")
+        keyed = getattr(state, f"{service_key}_runtime_status", None)
+        if isinstance(keyed, dict):
+            return keyed
+        return None
     
     @app.get("/", tags=["Health"])
     async def root():
@@ -290,13 +306,40 @@ def _add_health_check(app: FastAPI, service_info: ServiceInfo) -> None:
         }
     
     @app.get("/health", tags=["Health"])
-    async def health_check():
+    async def health_check(request: Request):
         """표준 헬스 체크 엔드포인트"""
-        return ApiResponse.health_check(
+        _ = request
+        response = ApiResponse.health_check(
             service_name=service_info.name,
             version=service_info.version,
             description=service_info.description
         ).to_dict()
+        runtime_status = _resolve_runtime_status()
+        if not runtime_status:
+            return response
+
+        ready = bool(runtime_status.get("ready", True))
+        degraded = bool(runtime_status.get("degraded", False))
+        issues = list(runtime_status.get("issues") or [])
+        background_tasks = dict(runtime_status.get("background_tasks") or {})
+
+        if isinstance(response.get("data"), dict):
+            response["data"]["status"] = "healthy" if ready and not degraded else "degraded"
+            response["data"]["ready"] = ready
+            if issues:
+                response["data"]["issues"] = issues
+            if background_tasks:
+                response["data"]["background_tasks"] = background_tasks
+
+        if ready and not degraded:
+            return response
+
+        response["status"] = "warning" if ready else "error"
+        response["message"] = "Service is degraded" if ready else "Service is not ready"
+        return JSONResponse(
+            status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=response,
+        )
 
 
 def _add_debug_endpoints(app: FastAPI) -> None:

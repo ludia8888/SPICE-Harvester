@@ -2067,6 +2067,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     ) -> Optional[Dict[str, Any]]:
         aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
         payload: Optional[Dict[str, Any]] = None
+        tombstoned = False
         if self.event_store:
             try:
                 events = await self.event_store.get_events(
@@ -2074,7 +2075,13 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     aggregate_id=aggregate_id,
                 )
                 for ev in events:
+                    if ev.event_type == "INSTANCE_DELETED":
+                        tombstoned = True
+                        payload = None
+                        continue
                     if ev.event_type in {"INSTANCE_CREATED", "INSTANCE_UPDATED"} and isinstance(ev.data, dict):
+                        if tombstoned:
+                            continue
                         payload = {
                             k: v
                             for k, v in ev.data.items()
@@ -2082,6 +2089,9 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                         }
             except Exception as exc:
                 logger.debug("Failed to resolve instance payload from event store: %s", exc, exc_info=True)
+
+        if tombstoned:
+            return None
 
         if payload is not None:
             return payload

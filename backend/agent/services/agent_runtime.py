@@ -1352,22 +1352,31 @@ class AgentRuntime:
         )
         await self.event_store.append_event(envelope)
         if self.audit_store:
-            await self.audit_store.log(
-                partition_key=f"agent_run:{run_id}",
-                actor=actor,
-                action=event_type,
-                status="success" if status == "success" else "failure",
-                resource_type=resource_type,
-                resource_id=resource_id or run_id,
-                event_id=str(envelope.event_id),
-                metadata={
-                    "step_index": step_index,
-                    "request_id": request_id,
-                    "event_type": event_type,
-                },
-                error=error,
-                occurred_at=envelope.occurred_at,
-            )
+            try:
+                await self.audit_store.log(
+                    partition_key=f"agent_run:{run_id}",
+                    actor=actor,
+                    action=event_type,
+                    status="success" if status == "success" else "failure",
+                    resource_type=resource_type,
+                    resource_id=resource_id or run_id,
+                    event_id=str(envelope.event_id),
+                    metadata={
+                        "step_index": step_index,
+                        "request_id": request_id,
+                        "event_type": event_type,
+                    },
+                    error=error,
+                    occurred_at=envelope.occurred_at,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Agent audit log failed after event append (run_id=%s event_type=%s): %s",
+                    run_id,
+                    event_type,
+                    exc,
+                    exc_info=True,
+                )
         return str(envelope.event_id)
 
     async def execute_tool_call(

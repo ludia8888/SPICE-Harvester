@@ -41,27 +41,27 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **688**, functions **6515**, classes **910**, internal cross-imports **1638**
+- Population: files **688**, functions **6547**, classes **913**, internal cross-imports **1644**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1638 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1644 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
 | 3 | I/O와 Core 직접 연결 | 4/96 (4.17%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 3/22 (13.64%) | <= 15.00% | **PASS** | `high_coupling_modules / modules` |
 | 5 | 파일 응집도 저하 | 52/688 (7.56%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 64/688 (9.30%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 328/6515 (5.03%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/910 (1.65%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 740/6515 (11.36%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 420/6515 (6.45%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 6 | 파일 단일 책임 위반 | 65/688 (9.45%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 328/6547 (5.01%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/913 (1.64%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 740/6547 (11.30%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 420/6547 (6.42%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
 - Layer leaks: none detected
 - Dependency cycles: none detected
 - I/O-core direct links (sample): `shared/services/core/agent_internal_client.py`, `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
-- Longest functions: `mcp_servers/pipeline_mcp_server.py:202` (1321 lines), `mcp_servers/pipeline_mcp_server.py:204` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:685` (996 lines)
+- Longest functions: `mcp_servers/pipeline_mcp_server.py:203` (1321 lines), `mcp_servers/pipeline_mcp_server.py:205` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:685` (996 lines)
 - Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:685` (CC=292), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1105` (CC=247)
 
 ## External Interfaces (Published Ports)
