@@ -58,6 +58,8 @@ class _Connection:
                 "created_at": self._now,
                 "updated_at": self._now,
             }
+        if "FROM spice_objectify.objectify_watermarks" in sql:
+            return None
         raise AssertionError(f"Unexpected fetchrow SQL: {sql}")
 
     async def execute(self, sql: str, *args: object):
@@ -103,3 +105,18 @@ async def test_create_mapping_spec_serializes_version_allocation_with_advisory_l
     assert len(conn.execute_calls) == 2
     assert "INSERT INTO spice_objectify.ontology_mapping_specs" in conn.execute_calls[0][0]
     assert "UPDATE spice_objectify.ontology_mapping_specs" in conn.execute_calls[1][0]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_watermark_uses_schema_qualified_table_name() -> None:
+    conn = _Connection()
+    registry = ObjectifyRegistry(dsn="postgresql://example.invalid/db")
+    registry._pool = _Pool(conn)
+
+    await registry.get_watermark(mapping_spec_id="00000000-0000-0000-0000-000000000001")
+
+    assert any(
+        "FROM spice_objectify.objectify_watermarks" in sql
+        for sql, _args in conn.fetchrow_calls
+    )

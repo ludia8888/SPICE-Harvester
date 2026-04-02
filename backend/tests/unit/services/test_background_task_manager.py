@@ -100,3 +100,31 @@ async def test_task_stays_terminal_failed_after_retry_exhaustion() -> None:
     assert final_task.result is not None
     assert final_task.result.success is False
     assert "permanent failure" in str(final_task.result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_run_with_tracking_registers_current_task_for_dead_task_cleanup() -> None:
+    manager = BackgroundTaskManager(redis_service=_RedisStub(), websocket_service=None)  # type: ignore[arg-type]
+    manager.dead_task_threshold = 0
+
+    release = asyncio.Event()
+    registered: dict[str, bool] = {}
+
+    async def _task(task_id: str) -> None:
+        registered["present"] = task_id in manager._running_tasks
+        await release.wait()
+
+    task_id = "tracked-task"
+    runner = asyncio.create_task(manager.run_with_tracking(task_id=task_id, func=_task, kwargs={"task_id": task_id}))
+    try:
+        for _ in range(50):
+            if registered:
+                break
+            await asyncio.sleep(0.01)
+        assert registered == {"present": True}
+        task = await manager.get_task_status(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.PROCESSING
+    finally:
+        release.set()
+        await runner

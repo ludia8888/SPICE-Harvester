@@ -26,10 +26,11 @@ from bff.routers.pipeline_shared import (
     _require_pipeline_idempotency_key,
     _resolve_principal,
 )
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.input_validation_service import enforce_db_scope_or_403
 from shared.config.app_config import AppConfig
 from shared.models.requests import ApiResponse
-from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
+from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.registries.pipeline_registry import PipelineAlreadyExistsError
@@ -90,14 +91,11 @@ async def create_pipeline(
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         if request is not None:
             enforce_db_scope_or_403(request, db_name=db_name)
-            try:
-                await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DATA_ENGINEER_ROLES)
-            except ValueError as exc:
-                raise classified_http_exception(
-                    status.HTTP_403_FORBIDDEN,
-                    str(exc),
-                    code=ErrorCode.PERMISSION_DENIED,
-                ) from exc
+            await enforce_database_role_or_http_error(
+                headers=request.headers,
+                db_name=db_name,
+                required_roles=DATA_ENGINEER_ROLES,
+            )
         name = str(sanitized.get("name") or "").strip()
         if not name:
             raise classified_http_exception(status.HTTP_400_BAD_REQUEST, "name is required", code=ErrorCode.REQUEST_VALIDATION_FAILED)

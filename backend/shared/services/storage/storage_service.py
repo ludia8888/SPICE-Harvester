@@ -23,11 +23,20 @@ except ImportError:
     HAS_BOTO3 = False
 
 from shared.models.commands import CommandType
+from shared.errors.infra_errors import StorageUnavailableError
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.s3_client_config import build_s3_client_config
 
 if TYPE_CHECKING:
     from shared.config.settings import ApplicationSettings
+
+logger = logging.getLogger(__name__)
+
+
+def _client_error_code(exc: Exception) -> str:
+    if isinstance(exc, ClientError):
+        return str(exc.response.get("Error", {}).get("Code") or "")
+    return ""
 
 
 class StorageService:
@@ -90,6 +99,33 @@ class StorageService:
             client_kwargs["verify"] = ssl_verify
 
         self.client = boto3.client("s3", **client_kwargs)
+
+    def _raise_storage_unavailable(
+        self,
+        *,
+        exc: Exception,
+        operation: str,
+        bucket: str,
+        path: Optional[str] = None,
+        message: Optional[str] = None,
+    ) -> None:
+        detail = message or f"Storage operation failed during {operation}"
+        raise StorageUnavailableError(
+            detail,
+            operation=operation,
+            bucket=bucket,
+            path=path,
+            cause=exc,
+        ) from exc
+
+    @staticmethod
+    def _read_body_and_close(body: Any) -> bytes:
+        try:
+            return body.read()
+        finally:
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
         
     @trace_storage_operation("s3.create_bucket")
     async def create_bucket(self, bucket_name: str) -> bool:
@@ -300,13 +336,18 @@ class StorageService:
         """
         try:
             response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
-            json_bytes = await asyncio.to_thread(response['Body'].read)
+            json_bytes = await asyncio.to_thread(self._read_body_and_close, response["Body"])
             json_data = json_bytes.decode('utf-8')
             return json.loads(json_data)
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            if _client_error_code(e) == 'NoSuchKey':
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
-            raise
+            self._raise_storage_unavailable(
+                exc=e,
+                operation="load_json",
+                bucket=bucket,
+                path=key,
+            )
 
     @trace_storage_operation("s3.load_bytes")
     async def load_bytes(self, bucket: str, key: str) -> bytes:
@@ -322,11 +363,16 @@ class StorageService:
         """
         try:
             response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
-            return await asyncio.to_thread(response['Body'].read)
+            return await asyncio.to_thread(self._read_body_and_close, response["Body"])
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            if _client_error_code(e) == 'NoSuchKey':
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
-            raise
+            self._raise_storage_unavailable(
+                exc=e,
+                operation="load_bytes",
+                bucket=bucket,
+                path=key,
+            )
 
     @trace_storage_operation("s3.load_bytes_lines")
     async def load_bytes_lines(
@@ -406,12 +452,19 @@ class StorageService:
             검증 성공 여부
         """
         try:
-            response = self.client.get_object(Bucket=bucket, Key=key)
-            content = response['Body'].read()
+            response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
+            content = await asyncio.to_thread(self._read_body_and_close, response["Body"])
             actual_checksum = hashlib.sha256(content).hexdigest()
             return actual_checksum == expected_checksum
-        except ClientError:
-            return False
+        except ClientError as e:
+            if _client_error_code(e) == "NoSuchKey":
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}")
+            self._raise_storage_unavailable(
+                exc=e,
+                operation="verify_checksum",
+                bucket=bucket,
+                path=key,
+            )
             
     @trace_storage_operation("s3.delete_object")
     async def delete_object(self, bucket: str, key: str) -> bool:
@@ -456,16 +509,43 @@ class StorageService:
             if continuation_token:
                 kwargs["ContinuationToken"] = continuation_token
 
-            response = await asyncio.to_thread(self.client.list_objects_v2, **kwargs)
+            try:
+                response = await asyncio.to_thread(self.client.list_objects_v2, **kwargs)
+            except ClientError as exc:
+                self._raise_storage_unavailable(
+                    exc=exc,
+                    operation="delete_prefix:list",
+                    bucket=bucket,
+                    path=prefix,
+                )
             contents = response.get("Contents", []) or []
             keys = [str(obj.get("Key") or "") for obj in contents if str(obj.get("Key") or "").startswith(prefix)]
 
             if keys:
-                await asyncio.to_thread(
-                    self.client.delete_objects,
-                    Bucket=bucket,
-                    Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
-                )
+                try:
+                    delete_response = await asyncio.to_thread(
+                        self.client.delete_objects,
+                        Bucket=bucket,
+                        Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
+                    )
+                except ClientError as exc:
+                    self._raise_storage_unavailable(
+                        exc=exc,
+                        operation="delete_prefix:delete",
+                        bucket=bucket,
+                        path=prefix,
+                    )
+                errors = delete_response.get("Errors", []) if isinstance(delete_response, dict) else []
+                if errors:
+                    first_error = errors[0] if isinstance(errors[0], dict) else {}
+                    reason = str(first_error.get("Message") or first_error.get("Code") or "delete failed")
+                    self._raise_storage_unavailable(
+                        exc=RuntimeError(reason),
+                        operation="delete_prefix:delete",
+                        bucket=bucket,
+                        path=str(first_error.get("Key") or prefix),
+                        message=f"Failed to delete one or more objects under {bucket}/{prefix}",
+                    )
                 deleted += len(keys)
 
             if not response.get("IsTruncated"):
@@ -500,8 +580,13 @@ class StorageService:
                 MaxKeys=max_keys,
             )
             return response.get('Contents', [])
-        except ClientError:
-            return []
+        except ClientError as exc:
+            self._raise_storage_unavailable(
+                exc=exc,
+                operation="list_objects",
+                bucket=bucket,
+                path=prefix,
+            )
 
     @trace_storage_operation("s3.list_objects_paginated")
     async def list_objects_paginated(
@@ -522,8 +607,13 @@ class StorageService:
             contents = response.get("Contents", []) or []
             token = response.get("NextContinuationToken") if response.get("IsTruncated") else None
             return contents, token
-        except ClientError:
-            return [], None
+        except ClientError as exc:
+            self._raise_storage_unavailable(
+                exc=exc,
+                operation="list_objects_paginated",
+                bucket=bucket,
+                path=prefix,
+            )
 
     @trace_storage_operation("s3.iter_objects")
     async def iter_objects(
@@ -708,7 +798,9 @@ class StorageService:
     async def replay_instance_state(
         self,
         bucket: str,
-        command_files: list
+        command_files: list,
+        *,
+        strict: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
@@ -852,10 +944,10 @@ class StorageService:
                             }
                         }
                 
-            except Exception as e:
-                # 개별 Command 처리 실패 시 로그만 남기고 계속 진행
-                import logging
-                logging.error(f"Failed to process command file {file_key}: {e}")
+            except Exception as exc:
+                if strict:
+                    raise RuntimeError(f"Failed to process command file {file_key}") from exc
+                logger.error("Failed to process command file %s: %s", file_key, exc, exc_info=True)
                 continue
         
         # 최종 상태에 Command 이력 포함

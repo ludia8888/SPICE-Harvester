@@ -2,7 +2,46 @@ from __future__ import annotations
 
 import pytest
 
+from oms.exceptions import DatabaseError
 from oms.services.ontology_resources import OntologyResourceService
+
+
+class _AcquireCtx:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _Pool:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def acquire(self):
+        return _AcquireCtx(self._conn)
+
+
+class _Conn:
+    def __init__(self, *, existing_relations: set[str] | None = None) -> None:
+        self._existing_relations = set(existing_relations or set())
+        self.executed: list[str] = []
+
+    async def fetchval(self, sql: str, *args):
+        if sql == "SELECT to_regclass($1) IS NOT NULL":
+            return args[0] in self._existing_relations
+        return None
+
+    async def execute(self, sql: str, *_args):
+        self.executed.append(sql)
+        if "CREATE TABLE IF NOT EXISTS ontology_resources" in sql:
+            self._existing_relations.add("ontology_resources")
+        if "CREATE TABLE IF NOT EXISTS ontology_resource_versions" in sql:
+            self._existing_relations.add("ontology_resource_versions")
+        return None
 
 
 @pytest.mark.unit
@@ -142,3 +181,36 @@ async def test_materialize_commit_snapshot_delegates_to_promote(monkeypatch: pyt
         "source_branch": "main",
         "target_branch": "commit-xyz",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ensure_postgres_schema_raises_when_bootstrap_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = OntologyResourceService(postgres_url="postgresql://localhost/test")
+    conn = _Conn()
+
+    async def _fake_pool():
+        return _Pool(conn)
+
+    monkeypatch.setattr(service, "_ensure_pool", _fake_pool)
+    monkeypatch.setenv("ALLOW_RUNTIME_DDL_BOOTSTRAP", "false")
+
+    with pytest.raises(DatabaseError, match="missing required schema objects"):
+        await service._ensure_postgres_schema()  # noqa: SLF001
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ensure_postgres_schema_bootstraps_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = OntologyResourceService(postgres_url="postgresql://localhost/test")
+    conn = _Conn()
+
+    async def _fake_pool():
+        return _Pool(conn)
+
+    monkeypatch.setattr(service, "_ensure_pool", _fake_pool)
+    monkeypatch.setenv("ALLOW_RUNTIME_DDL_BOOTSTRAP", "true")
+
+    await service._ensure_postgres_schema()  # noqa: SLF001
+
+    assert any("CREATE TABLE IF NOT EXISTS ontology_resources" in sql for sql in conn.executed)

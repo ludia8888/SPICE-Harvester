@@ -18,8 +18,42 @@ from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from shared.config.settings import get_settings
+from shared.observability.otel_imports import (
+    AioHttpClientInstrumentor,
+    AsyncPGInstrumentor,
+    AsyncioInstrumentor,
+    BatchSpanProcessor,
+    BotocoreInstrumentor,
+    CompositePropagator,
+    ConsoleSpanExporter,
+    FastAPIInstrumentor,
+    HAS_OPENTELEMETRY,
+    HTTPXClientInstrumentor,
+    JaegerExporter,
+    KafkaInstrumentor,
+    OTLPSpanExporter,
+    ParentBased,
+    RedisInstrumentor,
+    RequestsInstrumentor,
+    Resource,
+    SERVICE_NAME,
+    SERVICE_VERSION,
+    Status,
+    StatusCode,
+    TraceContextTextMapPropagator,
+    TraceIdRatioBased,
+    TracerProvider,
+    W3CBaggagePropagator,
+    baggage,
+    context,
+    extract,
+    get_tracer_provider,
+    inject,
+    otel_trace,
+    set_global_textmap,
+    set_tracer_provider,
+)
 from shared.utils.app_logger import get_logger
-import logging
 
 logger = get_logger(__name__)
 
@@ -54,127 +88,6 @@ def _sanitize_span_attributes(attributes: Optional[Dict[str, Any]]) -> Dict[str,
         sanitized[key] = str(value)
 
     return sanitized
-
-
-# -----------------------------
-# Optional imports (best-effort)
-# -----------------------------
-
-try:
-    from opentelemetry import baggage, context, trace as otel_trace
-    from opentelemetry.propagate import extract, inject, set_global_textmap
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
-    from opentelemetry.trace import Status, StatusCode, get_tracer_provider, set_tracer_provider
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-
-    HAS_OPENTELEMETRY = True
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:73", exc_info=True)
-    baggage = None
-    context = None
-    otel_trace = None
-    extract = None
-    inject = None
-    set_global_textmap = None
-    Resource = None
-    SERVICE_NAME = None
-    SERVICE_VERSION = None
-    TracerProvider = None
-    BatchSpanProcessor = None
-    ConsoleSpanExporter = None
-    ParentBased = None
-    TraceIdRatioBased = None
-    Status = None
-    StatusCode = None
-    get_tracer_provider = None
-    set_tracer_provider = None
-    TraceContextTextMapPropagator = None
-    HAS_OPENTELEMETRY = False
-
-
-try:  # optional: baggage propagation for richer cross-service context
-    from opentelemetry.baggage.propagation import W3CBaggagePropagator
-    from opentelemetry.propagators.composite import CompositePropagator
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:99", exc_info=True)
-    W3CBaggagePropagator = None
-    CompositePropagator = None
-
-
-try:  # optional
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:106", exc_info=True)
-    OTLPSpanExporter = None
-
-try:  # optional
-    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:111", exc_info=True)
-    JaegerExporter = None
-
-try:  # optional
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:116", exc_info=True)
-    FastAPIInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:121", exc_info=True)
-    HTTPXClientInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:126", exc_info=True)
-    AsyncPGInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.redis import RedisInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:131", exc_info=True)
-    RedisInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:136", exc_info=True)
-    AsyncioInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:141", exc_info=True)
-    AioHttpClientInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:146", exc_info=True)
-    BotocoreInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:151", exc_info=True)
-    RequestsInstrumentor = None
-
-try:  # optional
-    from opentelemetry.instrumentation.kafka import KafkaInstrumentor
-except ModuleNotFoundError:
-    logging.getLogger(__name__).info(
-        "Kafka OpenTelemetry instrumentation module is not installed; continuing without Kafka instrumentation."
-    )
-    KafkaInstrumentor = None
-except Exception:  # pragma: no cover - depends on environment
-    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:156", exc_info=True)
-    KafkaInstrumentor = None
-
 
 class _SettingsValue:
     def __init__(self, getter):  # noqa: ANN001
@@ -331,7 +244,7 @@ class TracingService:
                         [TraceContextTextMapPropagator(), W3CBaggagePropagator()]
                     )
                 except Exception:
-                    logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:297", exc_info=True)
+                    logger.warning("Failed to compose baggage-aware propagator", exc_info=True)
                     propagator = TraceContextTextMapPropagator()
 
             set_global_textmap(propagator)
@@ -556,7 +469,7 @@ class TracingService:
         try:
             inject(headers)
         except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:491", exc_info=True)
+            logger.warning("Failed to inject trace context", exc_info=True)
             return headers
         return headers
 
@@ -566,7 +479,7 @@ class TracingService:
         try:
             return extract(headers)
         except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at shared/observability/tracing.py:500", exc_info=True)
+            logger.warning("Failed to extract trace context", exc_info=True)
             return None
 
 

@@ -6,16 +6,42 @@ existing OMS/BFF ontology resources.
 
 import asyncio
 import logging
-import time
 from typing import Any, Dict
-from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from bff.dependencies import OMSClientDep
+from bff.dependencies import OMSClientDep, get_redis_service
+from bff.services.database_role_guard import enforce_database_role_or_permission_error
+from bff.routers.foundry_ontology_v2_actions import (
+    _normalize_apply_action_response_payload,
+    _resolve_apply_action_mode,
+)
+from bff.routers.foundry_ontology_v2_common import (
+    _decode_page_token,
+    _default_expected_head_commit,
+    _encode_page_token,
+    _extract_api_response_data,
+)
+from bff.routers.foundry_ontology_v2_errors import (
+    ApiFeaturePreviewUsageOnlyError,
+    ObjectSetNotFoundError,
+    OntologyNotFoundError,
+    PermissionDeniedError,
+    _ONTOLOGY_HANDLED_EXCEPTIONS,
+    _error_parameters,
+    _foundry_error,
+    _internal_error_response,
+    _not_found_error,
+    _passthrough_upstream_error_payload,
+    _permission_denied,
+    _preflight_error_response,
+    _service_http_error_response,
+    _upstream_status_error_response,
+    _upstream_transport_error_response,
+)
 from bff.routers.object_types_deps import get_dataset_registry, get_objectify_registry
 from bff.routers.link_types_read import (
     _extract_resources as _extract_link_resources,
@@ -32,10 +58,11 @@ from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectT
 from bff.services.oms_client import OMSClient
 from bff.services import object_type_contract_service
 from shared.config.settings import get_settings
+from shared.errors.infra_errors import RegistryUnavailableError
 from shared.foundry.compute_routing import choose_search_around_backend
+from shared.foundry.temporary_object_set_store import FoundryTemporaryObjectSetStore
 from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispatcher
 from shared.foundry.auth import require_scopes
-from shared.foundry.errors import foundry_error
 from shared.foundry.rids import build_rid
 from shared.observability.tracing import trace_endpoint
 from shared.utils.language import first_localized_text
@@ -49,8 +76,8 @@ from shared.security.input_sanitizer import (
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.storage.redis_service import RedisService
 from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
-from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 from shared.utils.ontology_fields import list_ontology_properties
 from shared.utils.object_type_backing import list_backing_sources
 
@@ -63,10 +90,6 @@ _DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
     "name": "table",
     "color": "#4C6A9A",
 }
-_FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
-_TEMP_OBJECT_SET_TTL_SECONDS = 60 * 60
-_TEMP_OBJECT_SET_STORE: dict[str, tuple[float, dict[str, Any]]] = {}
-_TEMP_OBJECT_SET_LOCK = asyncio.Lock()
 _SEARCH_ROUTING_AUDIT_STORE: AuditLogStore | None = None
 _SEARCH_ROUTING_AUDIT_DISABLED = False
 _FORWARDED_ACTOR_HEADER_KEYS = (
@@ -105,42 +128,6 @@ def _query_type_branch_candidates() -> tuple[str, ...]:
         if normalized and normalized not in branches:
             branches.append(normalized)
     return tuple(branches)
-
-
-class OntologyNotFoundError(Exception):
-    pass
-
-
-class PermissionDeniedError(Exception):
-    pass
-
-
-class ApiFeaturePreviewUsageOnlyError(ValueError):
-    pass
-
-
-class ObjectSetNotFoundError(ValueError):
-    pass
-
-
-_ONTOLOGY_HANDLED_EXCEPTIONS = (
-    OntologyNotFoundError,
-    PermissionDeniedError,
-    ApiFeaturePreviewUsageOnlyError,
-    ObjectSetNotFoundError,
-    SecurityViolationError,
-    ActionPermissionProfileError,
-    httpx.HTTPError,
-    HTTPException,
-    RuntimeError,
-    LookupError,
-    ValueError,
-    TypeError,
-    KeyError,
-    AttributeError,
-    OSError,
-    AssertionError,
-)
 
 
 class ApplyActionRequestOptionsV2(BaseModel):
@@ -239,220 +226,6 @@ def _build_backing_sources_from_v2_payload(
     )
 
 
-def _extract_api_response_data(payload: Any) -> Dict[str, Any]:
-    if isinstance(payload, dict):
-        data = payload.get("data")
-        if isinstance(data, dict):
-            return data
-        return payload
-    data = getattr(payload, "data", None)
-    if isinstance(data, dict):
-        return data
-    return {}
-
-
-def _service_http_error_response(
-    exc: HTTPException,
-    *,
-    ontology: str,
-    object_type: str | None = None,
-) -> JSONResponse:
-    status_code = int(getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR))
-    detail = getattr(exc, "detail", None)
-    message = str(exc)
-    if isinstance(detail, dict):
-        message = str(detail.get("message") or detail.get("detail") or detail.get("error") or message)
-    elif detail:
-        message = str(detail)
-
-    if status_code == status.HTTP_404_NOT_FOUND:
-        if object_type:
-            return _not_found_error("ObjectTypeNotFound", ontology=ontology, object_type=object_type)
-        return _not_found_error("OntologyNotFound", ontology=ontology)
-    if status_code == status.HTTP_403_FORBIDDEN:
-        return _permission_denied(ontology=ontology, message=message)
-
-    error_code = "INVALID_ARGUMENT" if 400 <= status_code < 500 else "INTERNAL"
-    error_name = "InvalidArgument" if 400 <= status_code < 500 else "Internal"
-    parameters = _error_parameters(
-        ontology=ontology,
-        object_type=object_type,
-        parameters={"message": message},
-    )
-    return _foundry_error(status_code, error_code=error_code, error_name=error_name, parameters=parameters)
-
-
-def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "main"
-    if normalized.lower().startswith("branch:"):
-        return normalized
-    return f"branch:{normalized}"
-
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return foundry_error(
-        int(status_code),
-        error_code=error_code,
-        error_name=error_name,
-        parameters=parameters or {},
-    )
-
-
-def _passthrough_upstream_error_payload(exc: httpx.HTTPStatusError) -> JSONResponse | None:
-    response = exc.response
-    if response is None:
-        return None
-    try:
-        payload = response.json()
-    except ValueError:
-        logger.warning("Failed to decode upstream error payload as JSON", exc_info=True)
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return JSONResponse(status_code=response.status_code, content=payload)
-
-
-def _named_not_found(error_name: str, *, parameters: Dict[str, Any]) -> JSONResponse:
-    return _foundry_error(
-        status.HTTP_404_NOT_FOUND,
-        error_code="NOT_FOUND",
-        error_name=error_name,
-        parameters=parameters,
-    )
-
-
-def _error_parameters(
-    *,
-    ontology: str,
-    object_type: str | None = None,
-    link_type: str | None = None,
-    primary_key: str | None = None,
-    linked_primary_key: str | None = None,
-    parameters: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"ontology": ontology}
-    if object_type is not None:
-        payload["objectType"] = object_type
-    if link_type is not None:
-        payload["linkType"] = link_type
-    if primary_key is not None:
-        payload["primaryKey"] = primary_key
-    if linked_primary_key is not None:
-        payload["linkedObjectPrimaryKey"] = linked_primary_key
-    if parameters:
-        payload.update({str(key): value for key, value in parameters.items() if value is not None})
-    return payload
-
-
-def _not_found_error(
-    error_name: str,
-    *,
-    ontology: str,
-    object_type: str | None = None,
-    link_type: str | None = None,
-    primary_key: str | None = None,
-    linked_primary_key: str | None = None,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return _named_not_found(
-        error_name,
-        parameters=_error_parameters(
-            ontology=ontology,
-            object_type=object_type,
-            link_type=link_type,
-            primary_key=primary_key,
-            linked_primary_key=linked_primary_key,
-            parameters=parameters,
-        ),
-    )
-
-
-def _permission_denied(
-    *,
-    ontology: str,
-    message: str = "Permission denied",
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    payload = {"ontology": ontology, "message": message}
-    if parameters:
-        payload.update(parameters)
-    return _foundry_error(
-        status.HTTP_403_FORBIDDEN,
-        error_code="PERMISSION_DENIED",
-        error_name="PermissionDenied",
-        parameters=payload,
-    )
-
-
-def _preflight_error_response(
-    exc: Exception,
-    *,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    scoped = {str(key): value for key, value in (parameters or {}).items() if value is not None}
-    if isinstance(exc, OntologyNotFoundError):
-        return _not_found_error("OntologyNotFound", ontology=ontology, parameters=scoped or None)
-    if isinstance(exc, ObjectSetNotFoundError):
-        return _not_found_error("ObjectSetNotFound", ontology=ontology, parameters=scoped or None)
-    if isinstance(exc, PermissionDeniedError):
-        return _permission_denied(ontology=ontology, message=str(exc), parameters=scoped or None)
-    if isinstance(exc, ApiFeaturePreviewUsageOnlyError):
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="ApiFeaturePreviewUsageOnly",
-            parameters={"ontology": ontology, **scoped, "message": str(exc)},
-        )
-    if isinstance(exc, (ValueError, SecurityViolationError)):
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"ontology": ontology, **scoped, "message": str(exc)},
-        )
-    if isinstance(exc, httpx.HTTPStatusError):
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": ontology, **scoped},
-        )
-    if isinstance(exc, httpx.HTTPError):
-        return _foundry_error(
-            status.HTTP_502_BAD_GATEWAY,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": ontology, **scoped},
-        )
-    logger.error("Foundry v2 preflight failed (%s): %s", ontology, exc)
-    return _foundry_error(
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        error_code="INTERNAL",
-        error_name="Internal",
-        parameters={"ontology": ontology, **scoped},
-    )
-
-
-def _decode_page_token(page_token: str | None, *, scope: str | None = None) -> int:
-    return decode_offset_page_token(
-        page_token,
-        ttl_seconds=_FOUNDRY_PAGE_TOKEN_TTL_SECONDS,
-        expected_scope=scope,
-    )
-
-
-def _encode_page_token(offset: int, *, scope: str | None = None) -> str:
-    return encode_offset_page_token(offset, scope=scope)
-
-
 def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
     raw = str(order_by or "").strip()
     if not raw:
@@ -486,40 +259,35 @@ def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
     return {"orderType": "fields", "fields": fields}
 
 
-def _temporary_object_set_rid() -> str:
-    return f"ri.object-set.main.versioned-object-set.{uuid4()}"
+def _temporary_object_set_store(redis_service: RedisService) -> FoundryTemporaryObjectSetStore:
+    settings = get_settings()
+    return FoundryTemporaryObjectSetStore(
+        redis_service=redis_service,
+        ttl_seconds=int(settings.cache.foundry_temp_object_set_ttl_seconds),
+    )
 
 
-def _prune_expired_temporary_object_sets(now_epoch: float) -> None:
-    expired = [rid for rid, (expires_at, _) in _TEMP_OBJECT_SET_STORE.items() if expires_at <= now_epoch]
-    for rid in expired:
-        _TEMP_OBJECT_SET_STORE.pop(rid, None)
+async def _store_temporary_object_set(
+    object_set: dict[str, Any],
+    *,
+    redis_service: RedisService,
+) -> str:
+    store = _temporary_object_set_store(redis_service)
+    return await store.create(object_set)
 
 
-async def _store_temporary_object_set(object_set: dict[str, Any]) -> str:
-    rid = _temporary_object_set_rid()
-    now_epoch = time.time()
-    async with _TEMP_OBJECT_SET_LOCK:
-        _prune_expired_temporary_object_sets(now_epoch)
-        _TEMP_OBJECT_SET_STORE[rid] = (now_epoch + _TEMP_OBJECT_SET_TTL_SECONDS, dict(object_set))
-    return rid
-
-
-async def _load_temporary_object_set(rid: str) -> dict[str, Any]:
-    normalized_rid = str(rid or "").strip()
-    if not normalized_rid:
-        raise ObjectSetNotFoundError("objectSetRid is required")
-    now_epoch = time.time()
-    async with _TEMP_OBJECT_SET_LOCK:
-        _prune_expired_temporary_object_sets(now_epoch)
-        record = _TEMP_OBJECT_SET_STORE.get(normalized_rid)
-        if record is None:
-            raise ObjectSetNotFoundError(f"ObjectSet not found: {normalized_rid}")
-        expires_at, object_set = record
-        if expires_at <= now_epoch:
-            _TEMP_OBJECT_SET_STORE.pop(normalized_rid, None)
-            raise ObjectSetNotFoundError(f"ObjectSet not found: {normalized_rid}")
-        return dict(object_set)
+async def _load_temporary_object_set(
+    rid: str,
+    *,
+    redis_service: RedisService,
+) -> dict[str, Any]:
+    store = _temporary_object_set_store(redis_service)
+    try:
+        return await store.get(rid)
+    except LookupError as exc:
+        raise ObjectSetNotFoundError(str(exc)) from exc
+    except RegistryUnavailableError:
+        raise
 
 
 def _collect_object_set_object_types(object_set: Any) -> list[str]:
@@ -560,7 +328,19 @@ async def _resolve_object_set_definition(object_set: Any) -> dict[str, Any]:
     if isinstance(object_set, dict):
         return dict(object_set)
     if isinstance(object_set, str):
-        return await _load_temporary_object_set(object_set)
+        raise ValueError("Temporary objectSet RID resolution requires redis_service")
+    raise ValueError("objectSet is required")
+
+
+async def _resolve_object_set_definition_with_store(
+    object_set: Any,
+    *,
+    redis_service: RedisService,
+) -> dict[str, Any]:
+    if isinstance(object_set, dict):
+        return dict(object_set)
+    if isinstance(object_set, str):
+        return await _load_temporary_object_set(object_set, redis_service=redis_service)
     raise ValueError("objectSet is required")
 
 
@@ -655,9 +435,13 @@ async def _resolve_search_around_target_primary_keys(
     db_name: str,
     branch: str,
     object_set: dict[str, Any],
+    redis_service: RedisService,
 ) -> tuple[dict[str, list[str]], str]:
     link_type = _extract_search_around_link_type(object_set)
-    source_object_set = await _resolve_object_set_definition(object_set.get("objectSet"))
+    source_object_set = await _resolve_object_set_definition_with_store(
+        object_set.get("objectSet"),
+        redis_service=redis_service,
+    )
     source_object_types = _collect_object_set_object_types(source_object_set)
     if not source_object_types:
         raise ValueError("searchAround.objectSet.objectType is required")
@@ -903,12 +687,14 @@ async def _load_rows_for_search_around_object_set(
     payload: dict[str, Any],
     endpoint_scope: str,
     actor: str | None = None,
+    redis_service: RedisService,
 ) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
     target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
         oms_client=oms_client,
         db_name=db_name,
         branch=branch,
         object_set=object_set,
+        redis_service=redis_service,
     )
 
     target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
@@ -1953,21 +1739,38 @@ async def _resolve_object_primary_key_field(
 
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
-    except ValueError as exc:
-        if str(exc).strip().lower() == "permission denied":
-            raise PermissionDeniedError("Permission denied") from exc
-        raise
+    request_method = str(request.scope.get("method") or "GET").upper()
+    allow_if_registry_unavailable = request_method in {"GET", "HEAD", "OPTIONS"}
+    await enforce_database_role_or_permission_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        denied_error_factory=PermissionDeniedError,
+        allow_if_registry_unavailable=allow_if_registry_unavailable,
+        enforce_fn=enforce_database_role,
+    )
+
+
+async def _require_domain_write_role(request: Request, *, db_name: str) -> None:
+    await enforce_database_role_or_permission_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        denied_error_factory=PermissionDeniedError,
+        allow_if_registry_unavailable=False,
+        enforce_fn=enforce_database_role,
+    )
 
 
 async def _require_read_role(request: Request, *, db_name: str) -> None:
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=READ_ROLES)
-    except ValueError as exc:
-        if str(exc).strip().lower() == "permission denied":
-            raise PermissionDeniedError("Permission denied") from exc
-        raise
+    await enforce_database_role_or_permission_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=READ_ROLES,
+        denied_error_factory=PermissionDeniedError,
+        allow_if_registry_unavailable=True,
+        enforce_fn=enforce_database_role,
+    )
 
 
 def _extract_actor_forward_headers(request: Request) -> Dict[str, str]:
@@ -2538,159 +2341,6 @@ def _apply_query_execute_options(
             payload[key] = value
 
     return payload
-
-
-def _scoped_error_parameters(
-    *,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"ontology": ontology}
-    if parameters:
-        payload.update({str(key): value for key, value in parameters.items() if value is not None})
-    return payload
-
-
-def _normalize_non_foundry_upstream_error(
-    exc: httpx.HTTPStatusError,
-    *,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-    action_surface: bool = False,
-) -> JSONResponse | None:
-    response = exc.response
-    if response is None:
-        return None
-
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if "errorCode" in payload and "errorName" in payload:
-        return None
-
-    status_code = int(response.status_code)
-    error_code = str(payload.get("code") or "").strip().upper()
-    message = str(payload.get("message") or "").strip()
-    merged_parameters = _scoped_error_parameters(ontology=ontology, parameters=parameters)
-    if message:
-        merged_parameters["message"] = message
-
-    if status_code in {status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY} or error_code == "REQUEST_VALIDATION_FAILED":
-        if action_surface:
-            return _foundry_error(
-                status.HTTP_400_BAD_REQUEST,
-                error_code="ACTION_VALIDATION_FAILED",
-                error_name="ActionValidationFailed",
-                parameters=merged_parameters,
-            )
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters=merged_parameters,
-        )
-    if status_code == status.HTTP_403_FORBIDDEN:
-        if action_surface:
-            return _foundry_error(
-                status.HTTP_403_FORBIDDEN,
-                error_code="PERMISSION_DENIED",
-                error_name="EditObjectPermissionDenied",
-                parameters=merged_parameters,
-            )
-        return _foundry_error(
-            status.HTTP_403_FORBIDDEN,
-            error_code="PERMISSION_DENIED",
-            error_name="PermissionDenied",
-            parameters=merged_parameters,
-        )
-    if status_code == status.HTTP_404_NOT_FOUND:
-        if action_surface:
-            return _foundry_error(
-                status.HTTP_404_NOT_FOUND,
-                error_code="NOT_FOUND",
-                error_name="ActionTypeNotFound",
-                parameters=merged_parameters,
-            )
-        return _foundry_error(
-            status.HTTP_404_NOT_FOUND,
-            error_code="NOT_FOUND",
-            error_name="NotFound",
-            parameters=merged_parameters,
-        )
-    if status_code == status.HTTP_409_CONFLICT:
-        return _foundry_error(
-            status.HTTP_409_CONFLICT,
-            error_code="CONFLICT",
-            error_name="Conflict",
-            parameters=merged_parameters,
-        )
-    return None
-
-
-def _upstream_status_error_response(
-    exc: httpx.HTTPStatusError,
-    *,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-    not_found_response: JSONResponse | None = None,
-    passthrough_payload: bool = False,
-    normalize_non_foundry_payload: bool = False,
-    action_surface: bool = False,
-) -> JSONResponse:
-    status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-    if normalize_non_foundry_payload:
-        normalized = _normalize_non_foundry_upstream_error(
-            exc,
-            ontology=ontology,
-            parameters=parameters,
-            action_surface=action_surface,
-        )
-        if normalized is not None:
-            return normalized
-    if passthrough_payload:
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-    if status_code == status.HTTP_404_NOT_FOUND and not_found_response is not None:
-        return not_found_response
-    return _foundry_error(
-        status_code,
-        error_code="UPSTREAM_ERROR",
-        error_name="UpstreamError",
-        parameters=_scoped_error_parameters(ontology=ontology, parameters=parameters),
-    )
-
-
-def _upstream_transport_error_response(
-    *,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return _foundry_error(
-        status.HTTP_502_BAD_GATEWAY,
-        error_code="UPSTREAM_ERROR",
-        error_name="UpstreamError",
-        parameters=_scoped_error_parameters(ontology=ontology, parameters=parameters),
-    )
-
-
-def _internal_error_response(
-    *,
-    log_message: str,
-    exc: Exception,
-    ontology: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    logger.error("%s: %s", log_message, exc)
-    return _foundry_error(
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        error_code="INTERNAL",
-        error_name="Internal",
-        parameters=_scoped_error_parameters(ontology=ontology, parameters=parameters),
-    )
 
 
 async def _find_resource_by_rid(
@@ -3645,131 +3295,6 @@ async def get_action_type_by_rid_v2(
             ontology=db_name,
             parameters={"actionTypeRid": action_type_rid},
         )
-
-
-def _resolve_apply_action_mode(*, explicit_mode: str | None) -> str:
-    mode = str(explicit_mode or "").strip().upper()
-    if not mode:
-        return "VALIDATE_AND_EXECUTE"
-    if mode not in {"VALIDATE_ONLY", "VALIDATE_AND_EXECUTE"}:
-        raise ValueError("options.mode must be VALIDATE_ONLY or VALIDATE_AND_EXECUTE")
-    return mode
-
-
-def _default_action_parameter_results(parameters: Dict[str, Any] | None) -> Dict[str, Any]:
-    results: Dict[str, Any] = {}
-    if not isinstance(parameters, dict):
-        return results
-    for raw_name in parameters.keys():
-        name = str(raw_name or "").strip()
-        if not name:
-            continue
-        results[name] = {
-            "required": True,
-            "evaluatedConstraints": [],
-            "result": "VALID",
-        }
-    return results
-
-
-def _extract_action_audit_log_id(payload: Dict[str, Any], data_payload: Dict[str, Any]) -> str | None:
-    candidates = (
-        payload.get("auditLogId"),
-        payload.get("action_log_id"),
-        data_payload.get("auditLogId"),
-        data_payload.get("action_log_id"),
-        payload.get("command_id"),
-        data_payload.get("command_id"),
-    )
-    for raw_value in candidates:
-        text = str(raw_value or "").strip()
-        if text:
-            return text
-    return None
-
-
-def _normalize_action_writeback_status(
-    raw_status: Any,
-    *,
-    audit_log_id: str | None,
-    side_effect_delivery: Any,
-) -> str:
-    normalized = str(raw_status or "").strip().lower()
-    if normalized in {"confirmed", "missing", "not_configured"}:
-        return normalized
-    if audit_log_id or side_effect_delivery is not None:
-        return "confirmed"
-    return "not_configured"
-
-
-def _normalize_apply_action_response_payload(
-    *,
-    response: Any,
-    request_parameters: Dict[str, Any] | None,
-) -> Dict[str, Any]:
-    fallback_parameters = _default_action_parameter_results(request_parameters)
-    if not isinstance(response, dict):
-        return {
-            "validation": {"result": "VALID"},
-            "parameters": fallback_parameters,
-            "auditLogId": None,
-            "action_log_id": None,
-            "sideEffectDelivery": None,
-            "writebackStatus": "not_configured",
-        }
-
-    normalized: Dict[str, Any] = dict(response)
-    validation = normalized.get("validation")
-    if not isinstance(validation, dict):
-        validation = {}
-    normalized_validation = dict(validation)
-
-    validation_result = str(normalized_validation.get("result") or "").strip().upper()
-    if validation_result not in {"VALID", "INVALID"}:
-        validation_result = "VALID"
-    normalized_validation["result"] = validation_result
-
-    submission_criteria = normalized_validation.get("submissionCriteria")
-    if not isinstance(submission_criteria, list):
-        submission_criteria = []
-    normalized_validation["submissionCriteria"] = submission_criteria
-
-    nested_parameters = normalized_validation.pop("parameters", None)
-    top_parameters = normalized.get("parameters")
-    if not isinstance(top_parameters, dict):
-        top_parameters = nested_parameters if isinstance(nested_parameters, dict) else None
-    if not isinstance(top_parameters, dict):
-        top_parameters = fallback_parameters
-    elif not top_parameters and fallback_parameters:
-        top_parameters = fallback_parameters
-
-    normalized_validation["parameters"] = top_parameters
-    normalized["validation"] = normalized_validation
-    normalized["parameters"] = top_parameters
-    data_payload = normalized.get("data") if isinstance(normalized.get("data"), dict) else {}
-
-    audit_log_id = _extract_action_audit_log_id(normalized, data_payload)
-    side_effect_delivery = normalized.get("sideEffectDelivery")
-    if side_effect_delivery is None:
-        side_effect_delivery = data_payload.get("sideEffectDelivery")
-    writeback_status = _normalize_action_writeback_status(
-        normalized.get("writebackStatus") or data_payload.get("writebackStatus"),
-        audit_log_id=audit_log_id,
-        side_effect_delivery=side_effect_delivery,
-    )
-
-    normalized["auditLogId"] = audit_log_id
-    normalized["action_log_id"] = audit_log_id
-    normalized["sideEffectDelivery"] = side_effect_delivery
-    normalized["writebackStatus"] = writeback_status
-
-    if isinstance(data_payload, dict):
-        data_payload.setdefault("auditLogId", audit_log_id)
-        data_payload.setdefault("action_log_id", audit_log_id)
-        data_payload.setdefault("sideEffectDelivery", side_effect_delivery)
-        data_payload.setdefault("writebackStatus", writeback_status)
-        normalized["data"] = data_payload
-    return normalized
 
 
 @router.post("/{ontologyRid}/actions/{actionApiName}/apply", dependencies=[_ONTOLOGY_WRITE])
@@ -5836,6 +5361,7 @@ async def load_object_set_objects_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_type: str | None = None
@@ -5846,7 +5372,10 @@ async def load_object_set_objects_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = transaction_id, sdk_package_rid, sdk_version
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_type = _resolve_object_set_object_type(object_set)
@@ -5877,6 +5406,7 @@ async def load_object_set_objects_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjects",
                 actor=actor,
+                redis_service=redis_service,
             )
         else:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -5938,6 +5468,7 @@ async def load_object_set_links_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
@@ -5950,7 +5481,10 @@ async def load_object_set_links_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         requested_links = _normalize_link_type_values(payload)
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
@@ -6149,6 +5683,7 @@ async def load_object_set_multiple_object_types_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_types: list[str] = []
@@ -6167,7 +5702,10 @@ async def load_object_set_multiple_object_types_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_types = _collect_object_set_object_types(object_set)
@@ -6210,6 +5748,7 @@ async def load_object_set_multiple_object_types_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsMultipleObjectTypes",
                 actor=actor,
+                redis_service=redis_service,
             )
             object_types = resolved_object_types
         elif len(object_types) == 1:
@@ -6283,6 +5822,7 @@ async def load_object_set_objects_or_interfaces_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_types: list[str] = []
@@ -6301,7 +5841,10 @@ async def load_object_set_objects_or_interfaces_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_types = _collect_object_set_object_types(object_set)
@@ -6344,6 +5887,7 @@ async def load_object_set_objects_or_interfaces_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsOrInterfaces",
                 actor=actor,
+                redis_service=redis_service,
             )
         elif len(object_types) == 1:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -6411,6 +5955,7 @@ async def aggregate_object_set_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     """Delegate objectSet aggregate to OMS ES-native aggregate engine."""
     ontology = ontologyRid
@@ -6418,7 +5963,10 @@ async def aggregate_object_set_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = transaction_id, sdk_package_rid, sdk_version
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
@@ -6491,14 +6039,18 @@ async def create_temporary_object_set_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version
         await _require_read_role(request, db_name=db_name)
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
-        object_set_rid = await _store_temporary_object_set(object_set)
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
+        object_set_rid = await _store_temporary_object_set(object_set, redis_service=redis_service)
         return {"objectSetRid": object_set_rid}
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
@@ -6515,12 +6067,13 @@ async def get_object_set_v2(
     objectSetRid: str,
     request: Request,
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_read_role(request, db_name=db_name)
-        return await _load_temporary_object_set(objectSetRid)
+        return await _load_temporary_object_set(objectSetRid, redis_service=redis_service)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,

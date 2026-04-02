@@ -105,6 +105,17 @@ class AgentToolIdempotencyRecord:
 
 
 class AgentRegistry(PostgresSchemaRegistry):
+    _REQUIRED_TABLES = (
+        "agent_runs",
+        "agent_steps",
+        "agent_approvals",
+        "agent_approval_requests",
+        "agent_tool_idempotency",
+    )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
+
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
             f"""

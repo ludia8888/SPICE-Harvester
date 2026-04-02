@@ -42,6 +42,11 @@ class LineageStore(PostgresSchemaRegistry):
     _DISALLOWED_ES_ARTIFACT_ALIAS_PREFIX = "artifact:elasticsearch:"
     _DISALLOWED_ES_EDGE_TYPE_ALIAS = "event_wrote_es_document"
     _DISALLOWED_S3_EDGE_TYPE_ALIAS = "event_wrote_s3_object"
+    _REQUIRED_TABLES = (
+        "lineage_nodes",
+        "lineage_edges",
+        "lineage_backfill_queue",
+    )
 
     @staticmethod
     def _is_ignorable_schema_backfill_error(exc: asyncpg.PostgresError) -> bool:
@@ -61,6 +66,7 @@ class LineageStore(PostgresSchemaRegistry):
         schema: str = "spice_lineage",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ):
         perf = get_settings().performance
         pool_min_value = int(pool_min) if pool_min is not None else int(perf.lineage_pg_pool_min)
@@ -71,7 +77,11 @@ class LineageStore(PostgresSchemaRegistry):
             pool_min=pool_min_value,
             pool_max=pool_max_value,
             command_timeout=int(perf.lineage_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
         await conn.execute(

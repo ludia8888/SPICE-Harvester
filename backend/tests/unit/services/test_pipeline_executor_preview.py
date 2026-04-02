@@ -6,6 +6,7 @@ from typing import Any, Optional
 import pytest
 
 from shared.services.pipeline.pipeline_executor import PipelineExecutor
+from shared.services.pipeline.pipeline_expression_utils import normalize_preview_comparison_expression
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,11 @@ async def test_executor_compute_equals_is_treated_as_comparison_when_lhs_exists(
     preview = await executor.preview(definition=definition, db_name=db_name, node_id="t1", limit=10)
     values = [row.get("computed") for row in preview.get("rows") or []]
     assert values == [True, False]
+
+
+def test_preview_expression_normalizer_keeps_equals_inside_string_literals() -> None:
+    assert normalize_preview_comparison_expression("status = 'a=b'") == "status == 'a=b'"
+    assert normalize_preview_comparison_expression('status = "a=b"') == 'status == "a=b"'
 
 
 @pytest.mark.unit

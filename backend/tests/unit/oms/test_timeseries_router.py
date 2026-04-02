@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from oms.routers import timeseries as timeseries_module
 from oms.routers.timeseries import timeseries_router
 from shared.dependencies.providers import get_elasticsearch_service, get_storage_service
+from shared.security.database_access import DatabaseAccessRegistryUnavailableError
 
 app = FastAPI()
 app.include_router(timeseries_router)
@@ -259,3 +260,26 @@ async def test_timeseries_returns_permission_denied_when_actor_header_present_an
     body = resp.json()
     assert body["errorCode"] == "PERMISSION_DENIED"
     assert body["errorName"] == "PermissionDenied"
+
+
+@pytest.mark.asyncio
+async def test_timeseries_allows_registry_degrade_when_actor_role_check_is_unverifiable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _unavailable(**kwargs):  # noqa: ANN001, ANN003
+        _ = kwargs
+        raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
+
+    monkeypatch.setattr(timeseries_module, "enforce_database_role", _unavailable)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Sensor/sensor-001/timeseries/temperature/firstPoint",
+            headers={"X-User-ID": "alice"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["time"] == "2024-01-01T00:00:00Z"
+    assert body["value"] == 10.0

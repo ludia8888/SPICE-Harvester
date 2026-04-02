@@ -140,6 +140,7 @@ class ActionLogRegistry(PostgresSchemaRegistry):
     """
 
     _DEPENDENCY_TRIGGER_VALUES = {"SUCCEEDED", "FAILED", "COMPLETED"}
+    _REQUIRED_TABLES = ("ontology_action_logs", "ontology_action_dependencies")
 
     def __init__(
         self,
@@ -148,6 +149,7 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         schema: str = "spice_action_logs",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ) -> None:
         perf = get_settings().performance
         pool_min_value = int(pool_min) if pool_min is not None else int(perf.action_log_pg_pool_min)
@@ -158,6 +160,7 @@ class ActionLogRegistry(PostgresSchemaRegistry):
             pool_min=pool_min_value,
             pool_max=pool_max_value,
             command_timeout=int(perf.action_log_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
 
     @staticmethod
@@ -176,6 +179,9 @@ class ActionLogRegistry(PostgresSchemaRegistry):
             return json.dumps(value, ensure_ascii=False)
         except TypeError:
             return json.dumps(str(value), ensure_ascii=False)
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         statuses = ",".join(f"'{s.value}'" for s in ActionLogStatus)
@@ -481,6 +487,46 @@ class ActionLogRegistry(PostgresSchemaRegistry):
             )
 
         return [rec for rec in (_row_to_record(row) for row in rows) if rec is not None]
+
+    async def count_logs(
+        self,
+        *,
+        db_name: str,
+        statuses: Optional[List[str]] = None,
+        action_type_id: Optional[str] = None,
+        submitted_by: Optional[str] = None,
+    ) -> int:
+        if not self._pool:
+            await self.connect()
+        db_name = str(db_name or "").strip()
+        if not db_name:
+            raise ValueError("db_name is required")
+
+        status_values = None
+        if statuses:
+            status_values = [str(s or "").strip() for s in statuses if str(s or "").strip()]
+            if not status_values:
+                status_values = None
+
+        action_type_id = str(action_type_id or "").strip() or None
+        submitted_by = str(submitted_by or "").strip() or None
+
+        async with self._pool.acquire() as conn:
+            value = await conn.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM {self._schema}.ontology_action_logs
+                WHERE db_name = $1
+                  AND ($2::text[] IS NULL OR status = ANY($2::text[]))
+                  AND ($3::text IS NULL OR action_type_id = $3)
+                  AND ($4::text IS NULL OR submitted_by = $4)
+                """,
+                db_name,
+                status_values,
+                action_type_id,
+                submitted_by,
+            )
+        return int(value or 0)
 
     async def list_outbox_candidates(
         self,

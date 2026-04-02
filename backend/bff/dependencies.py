@@ -45,6 +45,22 @@ from bff.services.oms_client import OMSClient
 import logging
 
 SERVICE_NAME = "BFF"
+logger = logging.getLogger(__name__)
+
+
+def _service_unavailable(message: str, exc: Exception) -> Exception:
+    return classified_http_exception(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        f"{message}: {exc}",
+        code=ErrorCode.UPSTREAM_UNAVAILABLE,
+    )
+
+
+async def _health_status_for_service(service: object) -> str:
+    if hasattr(service, "health_check"):
+        is_healthy = await service.health_check()
+        return "healthy" if is_healthy else "unhealthy"
+    return "available"
 
 
 class BFFDependencyProvider:
@@ -73,12 +89,8 @@ class BFFDependencyProvider:
         
         try:
             return await container.get(OMSClient)
-        except Exception as e:
-            raise classified_http_exception(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                f"OMS client not available: {str(e)}",
-                code=ErrorCode.UPSTREAM_UNAVAILABLE,
-            )
+        except Exception as exc:
+            raise _service_unavailable("OMS client not available", exc) from exc
     
     @staticmethod
     async def get_action_log_registry(
@@ -97,12 +109,8 @@ class BFFDependencyProvider:
 
         try:
             return await container.get(ActionLogRegistry)
-        except Exception as e:
-            raise classified_http_exception(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                f"ActionLogRegistry not available: {str(e)}",
-                code=ErrorCode.UPSTREAM_UNAVAILABLE,
-            ) from e
+        except Exception as exc:
+            raise _service_unavailable("ActionLogRegistry not available", exc) from exc
 
 
 # Type-safe dependency annotations for cleaner injection
@@ -408,17 +416,12 @@ async def check_bff_dependencies_health(
             try:
                 if container.has(service_type):
                     service = await container.get(service_type)
-                    # Perform basic health check if available
-                    if hasattr(service, 'health_check'):
-                        is_healthy = await service.health_check()
-                        health_status[service_name] = "healthy" if is_healthy else "unhealthy"
-                    else:
-                        health_status[service_name] = "available"
+                    health_status[service_name] = await _health_status_for_service(service)
                 else:
                     health_status[service_name] = "not_registered"
-            except Exception as e:
-                logging.getLogger(__name__).warning("Exception fallback at bff/dependencies.py:607", exc_info=True)
-                health_status[service_name] = f"error: {str(e)}"
+            except Exception as exc:
+                logger.warning("BFF dependency health check failed for %s", service_name, exc_info=True)
+                health_status[service_name] = f"error: {str(exc)}"
         
         return {
             "status": "ok",
@@ -427,7 +430,7 @@ async def check_bff_dependencies_health(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Exception fallback at bff/dependencies.py:616", exc_info=True)
+        logger.warning("BFF dependency health check crashed", exc_info=True)
         return build_error_envelope(
             service_name=SERVICE_NAME,
             message="BFF dependency health check failed",

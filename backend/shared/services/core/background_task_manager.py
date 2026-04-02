@@ -217,7 +217,14 @@ class BackgroundTaskManager:
         )
         """
         kwargs = kwargs or {}
-        await self._execute_task(task_id, func, args, kwargs)
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._running_tasks[task_id] = current_task
+        try:
+            await self._execute_task(task_id, func, args, kwargs)
+        finally:
+            if self._running_tasks.get(task_id) is current_task:
+                self._running_tasks.pop(task_id, None)
         
     async def _execute_task(
         self,

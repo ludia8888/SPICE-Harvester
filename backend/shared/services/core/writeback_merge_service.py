@@ -87,6 +87,7 @@ class WritebackMergeService:
         base_state = await self._base_storage.replay_instance_state(
             bucket=AppConfig.INSTANCE_BUCKET,
             command_files=command_files,
+            strict=True,
         )
         if not isinstance(base_state, dict) or not base_state:
             raise RuntimeError("base_instance_state_unavailable")

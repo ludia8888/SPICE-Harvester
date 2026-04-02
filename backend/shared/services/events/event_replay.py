@@ -40,6 +40,40 @@ class EventReplayService:
             region_name="us-east-1",
         )
         self.bucket_name = bucket_name
+
+    def _list_all_objects(self, *, prefix: str) -> List[Dict[str, Any]]:
+        objects: List[Dict[str, Any]] = []
+        continuation_token: Optional[str] = None
+
+        while True:
+            params: Dict[str, Any] = {
+                "Bucket": self.bucket_name,
+                "Prefix": prefix,
+                "MaxKeys": 1000,
+            }
+            if continuation_token:
+                params["ContinuationToken"] = continuation_token
+            response = self.s3_client.list_objects_v2(**params)
+            contents = response.get("Contents", []) or []
+            objects.extend(obj for obj in contents if isinstance(obj, dict))
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
+
+        return objects
+
+    def _load_json_object(self, *, key: str) -> Dict[str, Any]:
+        obj_data = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+        body = obj_data.get("Body")
+        if body is None:
+            return {}
+        try:
+            raw = body.read()
+        finally:
+            close = getattr(body, "close", None)
+            if callable(close):
+                close()
+        return json.loads(raw.decode("utf-8"))
         
     async def replay_aggregate(
         self, 
@@ -66,13 +100,9 @@ class EventReplayService:
         
         # List all events for this aggregate
         prefix = f"{db_name}/{class_id}/{aggregate_id}/"
-        response = self.s3_client.list_objects_v2(
-            Bucket=self.bucket_name,
-            Prefix=prefix,
-            MaxKeys=1000
-        )
-        
-        if 'Contents' not in response:
+        objects = self._list_all_objects(prefix=prefix)
+
+        if not objects:
             return {
                 "aggregate_id": aggregate_id,
                 "status": "NOT_FOUND",
@@ -82,15 +112,11 @@ class EventReplayService:
         
         # Load all events
         events = []
-        for obj in response['Contents']:
-            obj_data = self.s3_client.get_object(
-                Bucket=self.bucket_name,
-                Key=obj['Key']
-            )
-            content = json.loads(obj_data['Body'].read())
+        for obj in objects:
+            content = self._load_json_object(key=obj["Key"])
             events.append({
-                "key": obj['Key'],
-                "timestamp": obj['LastModified'],
+                "key": obj["Key"],
+                "timestamp": obj["LastModified"],
                 "content": content
             })
         
@@ -199,13 +225,9 @@ class EventReplayService:
         
         # List all objects for this class
         prefix = f"{db_name}/{class_id}/"
-        response = self.s3_client.list_objects_v2(
-            Bucket=self.bucket_name,
-            Prefix=prefix,
-            MaxKeys=1000
-        )
-        
-        if 'Contents' not in response:
+        objects = self._list_all_objects(prefix=prefix)
+
+        if not objects:
             return {
                 "status": "NO_AGGREGATES",
                 "aggregate_count": 0,
@@ -214,8 +236,8 @@ class EventReplayService:
         
         # Group by aggregate ID
         aggregates = defaultdict(list)
-        for obj in response['Contents']:
-            parts = obj['Key'].split('/')
+        for obj in objects:
+            parts = obj["Key"].split('/')
             if len(parts) >= 3:
                 aggregate_id = parts[2]
                 aggregates[aggregate_id].append(obj)
@@ -270,10 +292,12 @@ class EventReplayService:
         
         # Replay 3 times
         replays = []
-        for i in range(3):
+        statuses = []
+        for _i in range(3):
             result = await self.replay_aggregate(db_name, class_id, aggregate_id)
-            replays.append(result['state_hash'])
-        
+            statuses.append(str(result.get("status") or "UNKNOWN"))
+            replays.append(str(result.get("state_hash") or f"status:{statuses[-1]}"))
+
         # Check all hashes are identical
         all_identical = len(set(replays)) == 1
         
@@ -298,28 +322,20 @@ class EventReplayService:
         print(f"📜 Getting history for {aggregate_id}")
         
         prefix = f"{db_name}/{class_id}/{aggregate_id}/"
-        response = self.s3_client.list_objects_v2(
-            Bucket=self.bucket_name,
-            Prefix=prefix,
-            MaxKeys=1000
-        )
-        
-        if 'Contents' not in response:
+        objects = self._list_all_objects(prefix=prefix)
+
+        if not objects:
             return []
         
         # Load all events with metadata
         events = []
-        for obj in response['Contents']:
-            obj_data = self.s3_client.get_object(
-                Bucket=self.bucket_name,
-                Key=obj['Key']
-            )
-            content = json.loads(obj_data['Body'].read())
+        for obj in objects:
+            content = self._load_json_object(key=obj["Key"])
             
             events.append({
-                "timestamp": obj['LastModified'].isoformat(),
-                "key": obj['Key'],
-                "size": obj['Size'],
+                "timestamp": obj["LastModified"].isoformat(),
+                "key": obj["Key"],
+                "size": obj["Size"],
                 "command_type": content.get('command_type'),
                 "command_id": content.get('command_id'),
                 "sequence_number": content.get('sequence_number', 0),

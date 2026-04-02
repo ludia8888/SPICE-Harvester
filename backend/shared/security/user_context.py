@@ -13,6 +13,10 @@ class UserTokenError(RuntimeError):
     """Raised when a user/delegated JWT cannot be verified."""
 
 
+class UserTokenUnavailableError(UserTokenError):
+    """Raised when token verification cannot complete because auth infrastructure is unavailable."""
+
+
 @dataclass(frozen=True)
 class UserPrincipal:
     """
@@ -148,9 +152,12 @@ async def _fetch_jwks(url: str) -> Dict[str, Any]:
     if cached and cached[0] > now:
         return cached[1]
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url)
-    resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise UserTokenUnavailableError("JWKS endpoint unavailable") from exc
     jwks = resp.json()
     if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
         raise UserTokenError("JWKS response invalid")

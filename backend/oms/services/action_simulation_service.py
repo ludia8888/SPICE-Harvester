@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from oms.services.action_target_state_service import ActionTargetStateLoadError, load_action_target_states
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
-from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, get_database_access_role
+from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, inspect_database_access
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import LakeFSStorageService
 from shared.services.storage.storage_service import StorageService
@@ -467,7 +468,22 @@ async def enforce_action_permission(
         return None
 
     actor_type = str(submitted_by_type or "user").strip().lower() or "user"
-    role = await get_database_access_role(db_name=db_name, principal_type=actor_type, principal_id=actor)
+    inspection = await inspect_database_access(
+        db_name=db_name,
+        principal_type=actor_type,
+        principal_id=actor,
+    )
+    if inspection.is_unavailable:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "database_access_registry_unavailable",
+                    "message": "Unable to verify actor database access role",
+                }
+            ),
+            status_code=503,
+        )
+    role = inspection.role
     if permission_profile.permission_model == PERMISSION_MODEL_ONTOLOGY_ROLES:
         if role not in DOMAIN_MODEL_ROLES:
             raise ActionSimulationRejected(
@@ -513,6 +529,14 @@ async def enforce_action_permission(
                     ),
                     status_code=503,
                 ) from exc
+            finally:
+                try:
+                    await dataset_registry.close()
+                except Exception:
+                    logger.warning(
+                        "Failed to close DatasetRegistry after inherited project policy lookup",
+                        exc_info=True,
+                    )
             inherited_policy = access_policy.policy if access_policy is not None else None
             if (not isinstance(inherited_policy, dict) or not inherited_policy) and bool(
                 project_policy_contract["require_project_policy"]
@@ -955,59 +979,87 @@ async def preflight_action_writeback(
     class_interface_refs: Dict[str, List[str]] = {}
     class_field_types: Dict[str, Dict[str, str]] = {}
 
-    async def _ensure_class_runtime_contract(class_id: str) -> None:
-        if class_id in class_interface_refs:
-            return
-        contract = await load_action_target_runtime_contract(
+    target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    assumption_reports: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    try:
+        loaded_target_states = await load_action_target_states(
             db_name=db_name,
-            class_id=class_id,
-            branch=ontology_commit_id,
+            base_branch=base_branch,
+            contract_branch=ontology_commit_id,
+            compiled_targets=compiled_shape,
             resources=resource_service,
+            storage=base_storage,
+            required_interfaces=required_interface_set,
+            allow_missing_base_state=False,
+            load_runtime_contract_fn=load_action_target_runtime_contract,
         )
-        if contract is None:
+    except ActionTargetStateLoadError as exc:
+        if exc.kind == "invalid_target":
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": "action_implementation_invalid", "message": "each compiled target requires class_id and instance_id"}),
+                status_code=500,
+            ) from exc
+        if exc.kind == "target_class_not_found":
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
                         "error": "action_target_class_not_found",
                         "message": "Target class not found at ontology commit",
-                        "class_id": class_id,
+                        "class_id": exc.details.get("class_id"),
                         "ontology_commit_id": ontology_commit_id,
                     }
                 ),
                 status_code=404,
-            )
-        class_interface_refs[class_id] = contract.interfaces
-        class_field_types[class_id] = contract.field_types
-
-    target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    assumption_reports: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    for item in compiled_shape:
-        class_id = safe_str(item.class_id)
-        instance_id = safe_str(item.instance_id)
-        if not class_id or not instance_id:
-            raise ActionSimulationRejected(
-                _attach_enterprise({"error": "action_implementation_invalid", "message": "each compiled target requires class_id and instance_id"}),
-                status_code=500,
-            )
-        await _ensure_class_runtime_contract(class_id)
-
-        prefix = f"{db_name}/{base_branch}/{class_id}/{instance_id}/"
-        command_files = await base_storage.list_command_files(bucket=AppConfig.INSTANCE_BUCKET, prefix=prefix)
-        base_state = await base_storage.replay_instance_state(bucket=AppConfig.INSTANCE_BUCKET, command_files=command_files)
-        if not isinstance(base_state, dict) or not base_state:
+            ) from exc
+        if exc.kind == "base_state_not_found":
             raise ActionSimulationRejected(
                 _attach_enterprise(
                     {
                         "error": "base_instance_not_found",
                         "message": "Base instance state not found",
-                        "class_id": class_id,
-                        "instance_id": instance_id,
+                        "class_id": exc.details.get("class_id"),
+                        "instance_id": exc.details.get("instance_id"),
                         "base_branch": base_branch,
                     }
                 ),
                 status_code=404,
-            )
+            ) from exc
+        if exc.kind == "required_interfaces_missing":
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "action_interface_not_implemented",
+                        "message": "Action target class does not satisfy required interfaces",
+                        "class_id": exc.details.get("class_id"),
+                        "required_interfaces": exc.details.get("required_interfaces"),
+                        "implemented_interfaces": exc.details.get("implemented_interfaces"),
+                        "missing_interfaces": exc.details.get("missing_interfaces"),
+                    }
+                ),
+                status_code=403,
+            ) from exc
+        if exc.kind == "storage_unavailable":
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "base_instance_state_unavailable",
+                        "message": "Unable to load base instance state",
+                        "class_id": exc.details.get("class_id"),
+                        "instance_id": exc.details.get("instance_id"),
+                        "base_branch": base_branch,
+                    }
+                ),
+                status_code=503,
+            ) from exc
+        raise
+
+    for loaded_target in loaded_target_states:
+        class_id = loaded_target.class_id
+        instance_id = loaded_target.instance_id
+        class_interface_refs[class_id] = list(loaded_target.interfaces)
+        class_field_types[class_id] = dict(loaded_target.field_types)
+        base_state = dict(loaded_target.base_state)
         access_docs[(class_id, instance_id)] = base_state
 
         assumed_state = base_state
@@ -1117,25 +1169,6 @@ async def preflight_action_writeback(
                 assumptions=assumptions_payload,
             )
         )
-
-    if required_interface_set:
-        for tgt in loaded:
-            implemented = set(class_interface_refs.get(tgt.class_id, []))
-            missing = sorted(required_interface_set - implemented)
-            if missing:
-                raise ActionSimulationRejected(
-                    _attach_enterprise(
-                        {
-                            "error": "action_interface_not_implemented",
-                            "message": "Action target class does not satisfy required interfaces",
-                            "class_id": tgt.class_id,
-                            "required_interfaces": sorted(required_interface_set),
-                            "implemented_interfaces": sorted(implemented),
-                            "missing_interfaces": missing,
-                        }
-                    ),
-                    status_code=403,
-                )
 
     try:
         resolved_permission_profile = permission_profile or resolve_action_permission_profile(action_spec)
@@ -1521,8 +1554,7 @@ async def simulate_effects_for_patchset(
                 writeback_branch=writeback_branch,
             )
             baseline = merged.document
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at oms/services/action_simulation_service.py:1222", exc_info=True)
+        except FileNotFoundError:
             baseline = {
                 "instance_id": instance_id,
                 "class_id": class_id,
@@ -1532,6 +1564,19 @@ async def simulate_effects_for_patchset(
                 "lifecycle_id": lifecycle_id,
                 "data": {},
             }
+        except Exception as exc:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "base_instance_state_unavailable",
+                        "message": "Unable to load authoritative base instance state",
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "base_branch": base_branch,
+                    }
+                ),
+                status_code=503,
+            ) from exc
 
         effective = dict(baseline or {})
         data_payload = effective.get("data") if isinstance(effective.get("data"), dict) else {}

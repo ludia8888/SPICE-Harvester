@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from shared.services.pipeline.pipeline_definition_utils import resolve_execution_semantics
+from shared.services.pipeline.pipeline_expression_utils import normalize_preview_comparison_expression
 from shared.services.pipeline.pipeline_transform_spec import normalize_operation
 import logging
 
@@ -136,7 +137,7 @@ def _is_preview_safe_compute_expression(expression: str) -> bool:
     if not expr:
         return True
     # Mirror the preview executor behavior: interpret Spark-style '=' comparisons as Python '=='.
-    expr = re.sub(r"(?<![<>=!])=(?![=])", "==", expr)
+    expr = normalize_preview_comparison_expression(expr)
     lower = expr.lower()
     if lower.startswith("to_timestamp(") and expr.endswith(")"):
         inner = expr[len("to_timestamp(") : -1].strip()

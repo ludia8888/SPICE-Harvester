@@ -16,6 +16,7 @@ import httpx
 from google.protobuf.json_format import ParseDict
 
 from shared.config.settings import get_settings
+from shared.errors.infra_errors import UpstreamUnavailableError
 from shared.generated.grpc.spice.oms.v1 import oms_gateway_pb2
 from shared.services.grpc.oms_gateway_client import OMSGatewayGrpcClient
 
@@ -78,14 +79,23 @@ class OMSClient(ManagedAsyncClient):
         client = getattr(self, "client", None)
         if not isinstance(client, httpx.AsyncClient):
             return None
-        return await client.request(
-            method,
-            path,
-            headers=self._merged_headers(headers),
-            params=params,
-            json=json_body,
-            content=binary_body,
-        )
+        try:
+            return await client.request(
+                method,
+                path,
+                headers=self._merged_headers(headers),
+                params=params,
+                json=json_body,
+                content=binary_body,
+            )
+        except httpx.HTTPError as exc:
+            raise UpstreamUnavailableError(
+                f"OMS request failed during {method.upper()} {path}",
+                service="oms",
+                operation=method.upper(),
+                path=path,
+                cause=exc,
+            ) from exc
 
     async def _call_unary(
         self,
@@ -105,7 +115,16 @@ class OMSClient(ManagedAsyncClient):
             query=query,
             **fields,
         )
-        response = await self.client.call_unary(rpc_name, request)
+        try:
+            response = await self.client.call_unary(rpc_name, request)
+        except (grpc.RpcError, httpx.HTTPError, OSError) as exc:
+            raise UpstreamUnavailableError(
+                f"OMS request failed during {rpc_name}",
+                service="oms",
+                operation=rpc_name,
+                path=path_for_error,
+                cause=exc,
+            ) from exc
         http_response = OMSGatewayGrpcClient.to_httpx_response("POST", path_for_error, response)
         return http_response
 

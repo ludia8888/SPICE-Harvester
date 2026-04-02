@@ -32,12 +32,22 @@ class _InMemoryS3Client:
         body = self._buckets[Bucket][Key]["Body"]
         return {"Body": io.BytesIO(body)}
 
-    def list_objects_v2(self, *, Bucket: str, Prefix: str, MaxKeys: int = 1000):  # noqa: N803, ANN001
+    def list_objects_v2(
+        self,
+        *,
+        Bucket: str,
+        Prefix: str,
+        MaxKeys: int = 1000,
+        ContinuationToken: str | None = None,
+    ):  # noqa: N803, ANN001
         objects = self._buckets.get(Bucket, {})
         keys = [k for k in objects.keys() if k.startswith(Prefix)]
-        keys = sorted(keys)[: int(MaxKeys)]
-        if not keys:
+        keys = sorted(keys)
+        start = int(ContinuationToken or 0)
+        page = keys[start : start + int(MaxKeys)]
+        if not page:
             return {}
+        next_index = start + len(page)
         return {
             "Contents": [
                 {
@@ -45,8 +55,10 @@ class _InMemoryS3Client:
                     "LastModified": objects[key]["LastModified"],
                     "Size": len(objects[key]["Body"]),
                 }
-                for key in keys
-            ]
+                for key in page
+            ],
+            "IsTruncated": next_index < len(keys),
+            "NextContinuationToken": str(next_index) if next_index < len(keys) else None,
         }
 
     def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
@@ -158,3 +170,45 @@ async def test_event_replay_all_and_determinism() -> None:
         assert deterministic["deterministic"] is True
     finally:
         _cleanup_prefix(client, bucket, prefix)
+
+
+@pytest.mark.asyncio
+async def test_event_replay_paginates_and_not_found_is_deterministic() -> None:
+    client = _s3_client()
+    bucket = "instance-events"
+    _ensure_bucket(client, bucket)
+
+    db_name = f"db-{uuid.uuid4().hex[:6]}"
+    class_id = "Account"
+    aggregate_id = "acct-1"
+    prefix = f"{db_name}/{class_id}/{aggregate_id}/"
+    service = EventReplayService(bucket_name=bucket, s3_client=client)
+
+    try:
+        for idx in range(1005):
+            _put_event(
+                client,
+                bucket,
+                prefix + f"{idx:04d}.json",
+                {
+                    "command_type": "UPDATE_INSTANCE" if idx else "CREATE_INSTANCE",
+                    "command_id": f"cmd-{idx}",
+                    "sequence_number": idx + 1,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payload": {"value": idx},
+                },
+            )
+
+        replay = await service.replay_aggregate(db_name, class_id, aggregate_id)
+        assert replay["event_count"] == 1005
+        assert replay["total_events"] == 1005
+
+        history = await service.get_aggregate_history(db_name, class_id, aggregate_id)
+        assert len(history) == 1005
+
+        missing = await service.verify_replay_determinism(db_name, class_id, "missing")
+        assert missing["deterministic"] is True
+        assert missing["hashes"] == ["status:NOT_FOUND", "status:NOT_FOUND", "status:NOT_FOUND"]
+    finally:
+        _cleanup_prefix(client, bucket, f"{db_name}/{class_id}/")

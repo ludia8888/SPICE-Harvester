@@ -287,6 +287,20 @@ class AgentSessionLLMUsageAggregateRecord:
 
 
 class AgentSessionRegistry(PostgresSchemaRegistry):
+    _REQUIRED_TABLES = (
+        "agent_sessions",
+        "agent_session_messages",
+        "agent_session_jobs",
+        "agent_session_context_items",
+        "agent_session_events",
+        "agent_session_tool_calls",
+        "agent_session_llm_calls",
+        "agent_session_ci_results",
+    )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
+
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
             f"""

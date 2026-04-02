@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
+from enum import Enum
+import logging
 from typing import Any, DefaultDict, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.errors.infra_errors import RegistryUnavailableError
+from shared.services.registries.runtime_ddl import (
+    allow_runtime_ddl_bootstrap,
+    find_missing_schema_objects,
+    format_missing_schema_objects,
+)
+
+logger = logging.getLogger(__name__)
 
 DATABASE_ACCESS_ROLES = (
     "Owner",
@@ -35,6 +46,40 @@ _ROLE_ALIASES = {
     "governance": "Security",
 }
 
+_DATABASE_ACCESS_UNAVAILABLE_ERRORS = (
+    OSError,
+    asyncpg.PostgresConnectionError,
+    asyncpg.TooManyConnectionsError,
+)
+
+
+class DatabaseAccessState(str, Enum):
+    CONFIGURED = "configured"
+    UNCONFIGURED = "unconfigured"
+    UNAVAILABLE = "unavailable"
+
+
+class DatabaseAccessRegistryUnavailableError(RegistryUnavailableError):
+    """Raised when the database-access registry cannot be reached."""
+
+
+@dataclass(frozen=True)
+class DatabaseAccessInspection:
+    state: DatabaseAccessState
+    role: Optional[str] = None
+
+    @property
+    def is_configured(self) -> bool:
+        return self.state == DatabaseAccessState.CONFIGURED
+
+    @property
+    def is_unconfigured(self) -> bool:
+        return self.state == DatabaseAccessState.UNCONFIGURED
+
+    @property
+    def is_unavailable(self) -> bool:
+        return self.state == DatabaseAccessState.UNAVAILABLE
+
 
 def resolve_database_actor(headers: Mapping[str, str]) -> Tuple[str, str]:
     principal_type = (headers.get("X-User-Type") or "user").strip().lower() or "user"
@@ -57,12 +102,16 @@ def normalize_database_role(value: Optional[str]) -> Optional[str]:
     return normalized or raw
 
 
+def _database_access_schema_missing_message() -> str:
+    return "database_access schema is missing. Apply migrations or enable ALLOW_RUNTIME_DDL_BOOTSTRAP=true."
+
+
 async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str, List[Dict[str, Any]]]:
     names = [str(name).strip() for name in db_names or [] if str(name or "").strip()]
     if not names:
         return {}
 
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="fetch_entries")
     try:
         try:
             rows = await conn.fetch(
@@ -74,8 +123,9 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
                 names,
             )
         except asyncpg.UndefinedTableError:
-            # Treat missing table as "unconfigured" (migrations not applied yet).
-            return {}
+            if allow_runtime_ddl_bootstrap():
+                return {}
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -96,7 +146,7 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
 
 
 async def list_database_names() -> List[str]:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="list_database_names")
     try:
         try:
             rows = await conn.fetch(
@@ -107,7 +157,9 @@ async def list_database_names() -> List[str]:
                 """
             )
         except asyncpg.UndefinedTableError:
-            return []
+            if allow_runtime_ddl_bootstrap():
+                return []
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -131,7 +183,7 @@ async def upsert_database_access_entry(
         return
     normalized_role = normalize_database_role(role) or role
 
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="upsert_entry")
     try:
         try:
             await conn.execute(
@@ -198,6 +250,25 @@ def resolve_database_actor_with_name(headers: Mapping[str, str]) -> Tuple[str, s
 
 
 async def ensure_database_access_table(conn: asyncpg.Connection) -> None:
+    missing_objects = await find_missing_schema_objects(conn, required_relations=("database_access",))
+    if not missing_objects:
+        return
+    bootstrap_allowed = allow_runtime_ddl_bootstrap()
+    if not bootstrap_allowed:
+        raise DatabaseAccessRegistryUnavailableError(
+            format_missing_schema_objects(
+                "database_access",
+                missing=missing_objects,
+                bootstrap_allowed=False,
+            )
+        )
+    logger.warning(
+        format_missing_schema_objects(
+            "database_access",
+            missing=missing_objects,
+            bootstrap_allowed=True,
+        )
+    )
     # Prefer migrations in production (`backend/database/migrations/008_database_access.sql`).
     # This helper remains for local/dev/test bootstrapping.
     await conn.execute(
@@ -234,53 +305,106 @@ async def ensure_database_access_table(conn: asyncpg.Connection) -> None:
     )
 
 
+async def _connect_database_access_registry(*, operation: str) -> asyncpg.Connection | None:
+    try:
+        return await asyncpg.connect(get_settings().database.postgres_url)
+    except _DATABASE_ACCESS_UNAVAILABLE_ERRORS as exc:
+        logger.warning("Database access registry unavailable during %s: %s", operation, exc)
+        return None
+
+
+async def _require_database_access_registry(*, operation: str) -> asyncpg.Connection:
+    conn = await _connect_database_access_registry(operation=operation)
+    if conn is None:
+        raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
+    return conn
+
+
+async def inspect_database_access(
+    *,
+    db_name: str,
+    principal_type: Optional[str] = None,
+    principal_id: Optional[str] = None,
+) -> DatabaseAccessInspection:
+    if (principal_type is None) != (principal_id is None):
+        raise ValueError("principal_type and principal_id must be provided together")
+
+    conn = await _connect_database_access_registry(operation="inspection")
+    if conn is None:
+        return DatabaseAccessInspection(state=DatabaseAccessState.UNAVAILABLE)
+
+    try:
+        try:
+            if principal_type is not None and principal_id is not None:
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        EXISTS(
+                            SELECT 1
+                            FROM database_access
+                            WHERE db_name = $1
+                        ) AS configured,
+                        (
+                            SELECT role
+                            FROM database_access
+                            WHERE db_name = $1 AND principal_type = $2 AND principal_id = $3
+                            LIMIT 1
+                        ) AS role
+                    """,
+                    db_name,
+                    principal_type,
+                    principal_id,
+                )
+                configured = bool(row["configured"]) if row else False
+                role = normalize_database_role(row["role"]) if row and row["role"] else None
+                return DatabaseAccessInspection(
+                    state=DatabaseAccessState.CONFIGURED if configured else DatabaseAccessState.UNCONFIGURED,
+                    role=role,
+                )
+
+            row = await conn.fetchrow(
+                """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM database_access
+                    WHERE db_name = $1
+                ) AS configured
+                """,
+                db_name,
+            )
+            configured = bool(row["configured"]) if row else False
+            return DatabaseAccessInspection(
+                state=DatabaseAccessState.CONFIGURED if configured else DatabaseAccessState.UNCONFIGURED
+            )
+        except asyncpg.UndefinedTableError:
+            if allow_runtime_ddl_bootstrap():
+                return DatabaseAccessInspection(state=DatabaseAccessState.UNCONFIGURED)
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
+    finally:
+        await conn.close()
+
+
 async def get_database_access_role(
     *,
     db_name: str,
     principal_type: str,
     principal_id: str,
 ) -> Optional[str]:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
-    try:
-        try:
-            row = await conn.fetchrow(
-                """
-                SELECT role
-                FROM database_access
-                WHERE db_name = $1 AND principal_type = $2 AND principal_id = $3
-                """,
-                db_name,
-                principal_type,
-                principal_id,
-            )
-        except asyncpg.UndefinedTableError:
-            # Treat missing table as "unconfigured" (migrations not applied yet).
-            return None
-    finally:
-        await conn.close()
-
-    if not row:
-        return None
-    return normalize_database_role(row["role"])
+    inspection = await inspect_database_access(
+        db_name=db_name,
+        principal_type=principal_type,
+        principal_id=principal_id,
+    )
+    return inspection.role
 
 
 async def has_database_access_config(*, db_name: str) -> bool:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
-    try:
-        try:
-            row = await conn.fetchrow(
-                "SELECT 1 FROM database_access WHERE db_name = $1 LIMIT 1",
-                db_name,
-            )
-        except asyncpg.UndefinedTableError:
-            return False
-    finally:
-        await conn.close()
-    return bool(row)
+    inspection = await inspect_database_access(db_name=db_name)
+    return inspection.is_configured
 
 
 async def delete_database_access_entries(*, db_name: str) -> None:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="delete_entries")
     try:
         try:
             await conn.execute(
@@ -288,7 +412,9 @@ async def delete_database_access_entries(*, db_name: str) -> None:
                 db_name,
             )
         except asyncpg.UndefinedTableError:
-            return
+            if allow_runtime_ddl_bootstrap():
+                return
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -299,6 +425,7 @@ async def enforce_database_role(
     db_name: str,
     required_roles: Iterable[str],
     allow_if_unconfigured: bool = True,
+    allow_if_registry_unavailable: bool = False,
     require_env_key: str = "BFF_REQUIRE_DB_ACCESS",
 ) -> None:
     required_set = {normalize_database_role(role) for role in required_roles if role}
@@ -313,17 +440,21 @@ async def enforce_database_role(
     if not principal_id:
         raise ValueError("Permission denied")
 
-    role = await get_database_access_role(
+    inspection = await inspect_database_access(
         db_name=db_name,
         principal_type=principal_type,
         principal_id=principal_id,
     )
+    role = inspection.role
     if role is None:
         if enforce_flag is False:
             return
-        if allow_if_unconfigured and enforce_flag is not True:
-            if not await has_database_access_config(db_name=db_name):
+        if inspection.is_unconfigured and allow_if_unconfigured and enforce_flag is not True:
+            return
+        if inspection.is_unavailable:
+            if allow_if_registry_unavailable and enforce_flag is not True:
                 return
+            raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
         raise ValueError("Permission denied")
 
     if role not in required_set:

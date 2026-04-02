@@ -20,7 +20,13 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.foundry.errors import foundry_error
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
-from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
+from shared.security.user_context import (
+    UserPrincipal,
+    UserTokenError,
+    UserTokenUnavailableError,
+    extract_bearer_token,
+    verify_user_token,
+)
 from shared.services.registries.agent_tool_registry import AgentToolPolicyRecord
 from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.token_count import approx_token_count_json
@@ -1220,6 +1226,18 @@ async def _bff_auth_handle_agent_token(request: Request, call_next: _CallNext, c
                     jwt_algorithms=ctx.auth.user_jwt_algorithms,
                 )
                 _attach_verified_principal(request, principal)
+            except UserTokenUnavailableError as exc:
+                if ctx.dev_master:
+                    _attach_dev_master_principal(request)
+                else:
+                    return _error_response(
+                        request=request,
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        message="Delegated user token verification unavailable",
+                        detail=str(exc),
+                        code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                        category=ErrorCategory.UPSTREAM,
+                    )
             except UserTokenError as exc:
                 if ctx.dev_master:
                     _attach_dev_master_principal(request)
@@ -1336,6 +1354,18 @@ async def _bff_auth_handle_expected_token(request: Request, call_next: _CallNext
                 jwt_algorithms=ctx.auth.user_jwt_algorithms,
             )
             _attach_verified_principal(request, principal)
+        except UserTokenUnavailableError as exc:
+            if ctx.dev_master:
+                _attach_dev_master_principal(request)
+                return await call_next(request)
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="User JWT verification unavailable",
+                detail=str(exc),
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+            )
         except UserTokenError as exc:
             if ctx.dev_master:
                 _attach_dev_master_principal(request)
@@ -1398,6 +1428,22 @@ async def _bff_auth_handle_user_jwt(request: Request, call_next: _CallNext, ctx:
         )
         _attach_verified_principal(request, principal)
         return await call_next(request)
+    except UserTokenUnavailableError as exc:
+        if request.url.path.startswith("/api/v2"):
+            return foundry_error(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                error_code="UPSTREAM_UNAVAILABLE",
+                error_name="UpstreamUnavailable",
+                parameters={"message": str(exc)},
+            )
+        return _error_response(
+            request=request,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            message="Authentication verification unavailable",
+            detail=str(exc),
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+            category=ErrorCategory.UPSTREAM,
+        )
     except UserTokenError:
         if request.url.path.startswith("/api/v2"):
             response = foundry_error(
@@ -1534,6 +1580,9 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
                     jwt_hs256_secret=auth.user_jwt_hs256_secret,
                     jwt_algorithms=auth.user_jwt_algorithms,
                 )
+            except UserTokenUnavailableError:
+                await websocket.close(code=1013, reason="Delegated user token verification unavailable")
+                return False
             except UserTokenError:
                 await websocket.close(code=4403, reason="Delegated user token invalid")
                 return False
@@ -1559,6 +1608,9 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
                 jwt_algorithms=auth.user_jwt_algorithms,
             )
             return True
+        except UserTokenUnavailableError:
+            await websocket.close(code=1013, reason="User token verification unavailable")
+            return False
         except UserTokenError:
             pass
 

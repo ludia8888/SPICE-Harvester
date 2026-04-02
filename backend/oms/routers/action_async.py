@@ -24,7 +24,6 @@ from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispat
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.request_context import get_correlation_id
-from shared.security.database_access import has_database_access_config
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -220,14 +219,7 @@ class ApplyActionBatchRequestV2(BaseModel):
 
 
 async def _ensure_ontology_database_exists(ontology: str) -> str:
-    db_name = validate_db_name(ontology)
-    if await has_database_access_config(db_name=db_name):
-        return db_name
-    raise classified_http_exception(
-        status.HTTP_404_NOT_FOUND,
-        f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다",
-        code=ErrorCode.RESOURCE_NOT_FOUND,
-    )
+    return await ensure_database_exists(db_name=validate_db_name(ontology))
 
 
 def _resolve_v2_apply_mode(*, explicit_mode: Optional[str]) -> str:

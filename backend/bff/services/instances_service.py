@@ -7,19 +7,21 @@ Elasticsearch/OMS/writeback overlay read paths.
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.utils.action_log_serialization import ACTION_LOG_CLASS_ID, serialize_action_log_record
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
-from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
+from shared.security.database_access import DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import (
     sanitize_es_query,
     validate_branch_name,
@@ -49,6 +51,15 @@ class OverlayContext:
 
 def _is_action_log_class_id(class_id: str) -> bool:
     return str(class_id or "").strip().lower() == ACTION_LOG_CLASS_ID.lower()
+
+
+async def _require_action_log_role(*, request_headers: Dict[str, str], db_name: str) -> None:
+    await enforce_database_role_or_http_error(
+        headers=request_headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        allow_if_registry_unavailable=True,
+    )
 
 
 def _action_log_as_instance(record: ActionLogRecord) -> Dict[str, Any]:
@@ -86,19 +97,36 @@ async def _apply_access_policy_to_instances(
     db_name: str,
     class_id: str,
     instances: List[Dict[str, Any]],
+    access_policy: Any = None,
 ) -> tuple[List[Dict[str, Any]], bool]:
     if not instances:
         return instances, False
-    policy = await dataset_registry.get_access_policy(
+    policy = access_policy
+    if policy is None:
+        policy = await dataset_registry.get_access_policy(
+            db_name=db_name,
+            scope="data_access",
+            subject_type="object_type",
+            subject_id=class_id,
+        )
+    if not policy:
+        return instances, False
+    filtered, _ = apply_access_policy(instances, policy=policy.policy)
+    return filtered, True
+
+
+async def _load_access_policy(
+    *,
+    dataset_registry: DatasetRegistry,
+    db_name: str,
+    class_id: str,
+) -> Any:
+    return await dataset_registry.get_access_policy(
         db_name=db_name,
         scope="data_access",
         subject_type="object_type",
         subject_id=class_id,
     )
-    if not policy:
-        return instances, False
-    filtered, _ = apply_access_policy(instances, policy=policy.policy)
-    return filtered, True
 
 
 def _normalize_es_search_result(result: Any) -> tuple[int, List[Dict[str, Any]]]:
@@ -141,6 +169,37 @@ def _normalize_es_search_result(result: Any) -> tuple[int, List[Dict[str, Any]]]
         return total_value, sources
 
     return 0, []
+
+
+async def _search_all_instances(
+    *,
+    elasticsearch_service: ElasticsearchService,
+    index: str,
+    query: Dict[str, Any],
+    sort: List[Dict[str, Any]],
+    batch_size: int = 250,
+) -> tuple[int, List[Dict[str, Any]]]:
+    all_hits: List[Dict[str, Any]] = []
+    current_offset = 0
+    total = 0
+
+    while True:
+        result = await elasticsearch_service.search(
+            index=index,
+            query=query,
+            size=batch_size,
+            from_=current_offset,
+            sort=sort,
+        )
+        total, hits = _normalize_es_search_result(result)
+        if not hits:
+            break
+        all_hits.extend(hits)
+        current_offset += len(hits)
+        if len(hits) < batch_size or current_offset >= total:
+            break
+
+    return total, all_hits
 
 
 def _resolve_overlay_context(
@@ -236,6 +295,32 @@ def _merge_overlay_instances(
     return merged
 
 
+def _coerce_sort_timestamp(doc: Dict[str, Any]) -> str:
+    if not isinstance(doc, dict):
+        return ""
+    for key in ("event_timestamp", "updated_at", "created_at"):
+        value = doc.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    payload = doc.get("data")
+    if isinstance(payload, dict):
+        metadata = payload.get("_metadata")
+        if isinstance(metadata, dict):
+            for key in ("updated_at", "created_at"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+    return ""
+
+
+def _sort_instances_desc(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        instances,
+        key=lambda doc: (_coerce_sort_timestamp(doc), str(doc.get("instance_id") or "")),
+        reverse=True,
+    )
+
+
 @trace_external_call("bff.instances.list_class_instances")
 async def list_class_instances(
     *,
@@ -260,14 +345,7 @@ async def list_class_instances(
     resolved_base_branch = validate_branch_name(branch or base_branch or "main")
 
     if _is_action_log_class_id(class_id):
-        try:
-            await enforce_database_role(
-                headers=request_headers,
-                db_name=db_name,
-                required_roles=DOMAIN_MODEL_ROLES,
-            )
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+        await _require_action_log_role(request_headers=request_headers, db_name=db_name)
 
         if search:
             raise classified_http_exception(
@@ -291,10 +369,16 @@ async def list_class_instances(
             limit=limit,
             offset=offset,
         )
+        total = await action_logs.count_logs(
+            db_name=db_name,
+            statuses=status_filter,
+            action_type_id=action_type_id,
+            submitted_by=submitted_by,
+        )
 
         return {
             "class_id": class_id,
-            "total": len(records),
+            "total": total,
             "limit": limit,
             "offset": offset,
             "search": search,
@@ -335,15 +419,34 @@ async def list_class_instances(
     overlay_result = None
     overlay_error: Optional[str] = None
     overlay_status = "DISABLED" if not overlay.resolved_overlay_branch else "ACTIVE"
+    access_policy = await _load_access_policy(
+        dataset_registry=dataset_registry,
+        db_name=db_name,
+        class_id=class_id,
+    )
+    requires_merged_pagination = bool(overlay_index_name)
+    search_size = max(limit + offset, limit) if requires_merged_pagination else limit
+    search_offset = 0 if requires_merged_pagination else offset
+    sort = [{"event_timestamp": {"order": "desc"}}]
+    requires_full_materialization = access_policy is not None
 
     try:
-        es_result = await elasticsearch_service.search(
-            index=base_index_name,
-            query=query,
-            size=limit,
-            from_=offset,
-            sort=[{"event_timestamp": {"order": "desc"}}],
-        )
+        if requires_full_materialization:
+            _base_total, base_hits = await _search_all_instances(
+                elasticsearch_service=elasticsearch_service,
+                index=base_index_name,
+                query=query,
+                sort=sort,
+            )
+            es_result = {"total": _base_total, "hits": base_hits}
+        else:
+            es_result = await elasticsearch_service.search(
+                index=base_index_name,
+                query=query,
+                size=search_size,
+                from_=search_offset,
+                sort=sort,
+            )
     except (ESConnectionError, ConnectionRefusedError, TimeoutError) as exc:
         logger.warning("Elasticsearch connection failed while listing instances: %s", exc)
         es_error = "connection"
@@ -359,13 +462,22 @@ async def list_class_instances(
 
     if overlay_index_name and not es_error:
         try:
-            overlay_result = await elasticsearch_service.search(
-                index=overlay_index_name,
-                query=query,
-                size=limit,
-                from_=offset,
-                sort=[{"event_timestamp": {"order": "desc"}}],
-            )
+            if requires_full_materialization:
+                _overlay_total, overlay_hits = await _search_all_instances(
+                    elasticsearch_service=elasticsearch_service,
+                    index=overlay_index_name,
+                    query=query,
+                    sort=sort,
+                )
+                overlay_result = {"total": _overlay_total, "hits": overlay_hits}
+            else:
+                overlay_result = await elasticsearch_service.search(
+                    index=overlay_index_name,
+                    query=query,
+                    size=search_size,
+                    from_=search_offset,
+                    sort=sort,
+                )
         except NotFoundError:
             # Treat a missing overlay index as an empty overlay (no edits yet).
             overlay_result = None
@@ -399,15 +511,22 @@ async def list_class_instances(
         if overlay_result and not overlay_error:
             _overlay_total, overlay_hits = _normalize_es_search_result(overlay_result)
             instances = _merge_overlay_instances(base_instances=instances, overlay_instances=overlay_hits)
+            instances = _sort_instances_desc(instances)
+            total = len(instances)
 
         instances, access_filtered = await _apply_access_policy_to_instances(
             dataset_registry=dataset_registry,
             db_name=db_name,
             class_id=class_id,
             instances=instances,
+            access_policy=access_policy,
         )
         if access_filtered:
             total = len(instances)
+            instances = instances[offset : offset + limit]
+        elif overlay_result and not overlay_error:
+            total = len(instances)
+            instances = instances[offset : offset + limit]
         return {
             "class_id": class_id,
             "total": total,
@@ -661,14 +780,7 @@ async def get_instance_detail(
     resolved_base_branch = validate_branch_name(branch or base_branch or "main")
 
     if _is_action_log_class_id(class_id):
-        try:
-            await enforce_database_role(
-                headers=request_headers,
-                db_name=db_name,
-                required_roles=DOMAIN_MODEL_ROLES,
-            )
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+        await _require_action_log_role(request_headers=request_headers, db_name=db_name)
 
         try:
             action_log_uuid = UUID(str(instance_id))
@@ -782,6 +894,18 @@ async def get_instance_detail(
                             "writeback_edits_present": None,
                             "data": filtered_overlay[0],
                         }
+                    raise classified_http_exception(
+                        status.HTTP_404_NOT_FOUND,
+                        f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                        code=ErrorCode.RESOURCE_NOT_FOUND,
+                        extra={
+                            "base_branch": resolved_base_branch,
+                            "overlay_branch": overlay.resolved_overlay_branch,
+                            "overlay_status": overlay_status,
+                            "writeback_enabled": overlay.writeback_enabled,
+                            "writeback_edits_present": None,
+                        },
+                    )
 
             filtered, _ = await _apply_access_policy_to_instances(
                 dataset_registry=dataset_registry,

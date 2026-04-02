@@ -14,6 +14,18 @@ def _disable_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DOCKER_CONTAINER", "1")
 
 
+def _settings_ssot_allowed_files(repo_backend: Path) -> set[Path]:
+    return {
+        repo_backend / "shared" / "config" / "settings.py",
+        repo_backend / "shared" / "config" / "settings_support.py",
+        repo_backend / "shared" / "config" / "settings_agent.py",
+        repo_backend / "shared" / "config" / "settings_infra.py",
+        repo_backend / "shared" / "config" / "settings_observability.py",
+        repo_backend / "shared" / "config" / "settings_security.py",
+        repo_backend / "shared" / "config" / "settings_workers.py",
+    }
+
+
 def _iter_runtime_python_files(repo_backend: Path) -> list[Path]:
     roots: list[Path] = [
         repo_backend / "shared",
@@ -60,9 +72,7 @@ def test_app_config_reflects_current_settings(monkeypatch: pytest.MonkeyPatch) -
 
 def test_no_os_getenv_calls_outside_settings_module() -> None:
     repo_backend = Path(__file__).resolve().parents[3]
-    allowed = {
-        repo_backend / "shared" / "config" / "settings.py",
-    }
+    allowed = _settings_ssot_allowed_files(repo_backend)
 
     offenders: list[str] = []
     for path in _iter_runtime_python_files(repo_backend):
@@ -83,9 +93,7 @@ def test_no_os_getenv_calls_outside_settings_module() -> None:
 
 def test_no_application_settings_instantiation_outside_settings_module() -> None:
     repo_backend = Path(__file__).resolve().parents[3]
-    allowed = {
-        repo_backend / "shared" / "config" / "settings.py",
-    }
+    allowed = _settings_ssot_allowed_files(repo_backend)
 
     offenders: list[str] = []
     for path in _iter_runtime_python_files(repo_backend):
@@ -106,9 +114,7 @@ def test_no_application_settings_instantiation_outside_settings_module() -> None
 
 def test_no_import_global_settings_symbol_outside_settings_module() -> None:
     repo_backend = Path(__file__).resolve().parents[3]
-    allowed = {
-        repo_backend / "shared" / "config" / "settings.py",
-    }
+    allowed = _settings_ssot_allowed_files(repo_backend)
 
     offenders: list[str] = []
     for path in _iter_runtime_python_files(repo_backend):

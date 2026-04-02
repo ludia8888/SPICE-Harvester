@@ -10,6 +10,15 @@ from httpx import ASGITransport, AsyncClient
 import oms.routers.action_async as action_async
 import oms.services.action_simulation_service as simulation_service
 from oms.dependencies import OMSDependencyProvider
+from shared.security.database_access import DatabaseAccessInspection, DatabaseAccessState
+
+
+def _inspection(
+    *,
+    role: str | None = None,
+    state: DatabaseAccessState = DatabaseAccessState.CONFIGURED,
+) -> DatabaseAccessInspection:
+    return DatabaseAccessInspection(state=state, role=role)
 
 
 def _build_action_spec() -> Dict[str, Any]:
@@ -91,6 +100,22 @@ def action_async_app() -> FastAPI:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_ensure_ontology_database_exists_raises_503_when_registry_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _unavailable(db_name: str) -> str:  # noqa: ARG001
+        raise HTTPException(status_code=503, detail={"message": "Database access registry unavailable"})
+
+    monkeypatch.setattr(action_async, "ensure_database_exists", _unavailable)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await action_async._ensure_ontology_database_exists("demo")
+
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_submit_batch_returns_403_for_datasource_derived_without_data_engineer_role(
     action_async_app: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
@@ -102,10 +127,10 @@ async def test_submit_batch_returns_403_for_datasource_derived_without_data_engi
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
     monkeypatch.setattr(action_async, "compile_action_change_shape", lambda _impl, input_payload: [])
 
-    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
-        return "DomainModeler"
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(role="DomainModeler")
 
-    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
 
     transport = ASGITransport(app=action_async_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -129,10 +154,10 @@ async def test_simulate_returns_503_when_datasource_derived_data_access_is_unver
 ) -> None:
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
 
-    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
-        return "DataEngineer"
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(role="DataEngineer")
 
-    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
 
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
@@ -197,10 +222,10 @@ async def test_submit_batch_returns_403_when_target_class_misses_required_interf
         ],
     )
 
-    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
-        return "DataEngineer"
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(role="DataEngineer")
 
-    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
 
     transport = ASGITransport(app=action_async_app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -241,8 +266,8 @@ async def test_submit_batch_returns_503_when_target_edit_access_is_unverifiable(
         ],
     )
 
-    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
-        return "DataEngineer"
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(role="DataEngineer")
 
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
@@ -251,7 +276,7 @@ async def test_submit_batch_returns_503_when_target_edit_access_is_unverifiable(
         async def close(self) -> None:
             return None
 
-    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
     monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
     async def _fake_access_report(**kwargs: Any) -> Any:  # noqa: ANN401, ARG001
         return SimpleNamespace(
@@ -285,8 +310,8 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
 ) -> None:
     _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
 
-    async def _fake_role(*, db_name: str, principal_type: str, principal_id: str) -> str:  # noqa: ARG001
-        return "DataEngineer"
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(role="DataEngineer")
 
     class _FakeDatasetRegistry:
         async def connect(self) -> None:
@@ -304,7 +329,7 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
             status_code=503,
         )
 
-    monkeypatch.setattr(simulation_service, "get_database_access_role", _fake_role)
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
     monkeypatch.setattr(action_async, "DatasetRegistry", _FakeDatasetRegistry)
     monkeypatch.setattr(action_async, "create_storage_service", lambda _settings: object())
     monkeypatch.setattr(action_async, "create_lakefs_storage_service", lambda _settings: object())
@@ -325,3 +350,32 @@ async def test_simulate_use_branch_head_no_longer_requires_terminus(
 
     assert exc_info.value.status_code == 503
     assert "branch:main" in str(exc_info.value.detail)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_simulate_returns_503_when_database_access_registry_is_unavailable(
+    action_async_app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_deployment_and_resource_mocks(monkeypatch, action_spec=_build_action_spec())
+
+    async def _fake_inspection(*, db_name: str, principal_type: str, principal_id: str) -> DatabaseAccessInspection:  # noqa: ARG001
+        return _inspection(state=DatabaseAccessState.UNAVAILABLE)
+
+    monkeypatch.setattr(simulation_service, "inspect_database_access", _fake_inspection)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await action_async.simulate_action_async(
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            request=action_async.ActionSimulateRequest(
+                input={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                metadata={"user_id": "alice", "user_type": "user"},
+                base_branch="main",
+                include_effects=False,
+            ),
+        )
+
+    assert exc_info.value.status_code == 503
+    assert "database_access_registry_unavailable" in str(exc_info.value.detail)

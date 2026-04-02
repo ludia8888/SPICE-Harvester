@@ -17,6 +17,12 @@ from typing import Optional
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.runtime_ddl import (
+    RuntimeDDLDisabledError,
+    allow_runtime_ddl_bootstrap,
+    find_missing_schema_objects,
+    format_missing_schema_objects,
+)
 
 
 class OptimisticConcurrencyError(RuntimeError):
@@ -68,6 +74,7 @@ class AggregateSequenceAllocator:
             or str(seq_settings.event_store_sequence_handler_prefix or "write_side").strip()
             or "write_side"
         )
+        self._allow_runtime_ddl_bootstrap = bool(allow_runtime_ddl_bootstrap())
         self._pool: Optional[asyncpg.Pool] = None
 
     async def connect(self) -> None:
@@ -93,6 +100,21 @@ class AggregateSequenceAllocator:
             raise RuntimeError("AggregateSequenceAllocator not connected")
 
         async with self._pool.acquire() as conn:
+            missing = await find_missing_schema_objects(
+                conn,
+                schema=self._schema,
+                required_relations=("aggregate_versions",),
+            )
+            if not missing:
+                return
+            if not self._allow_runtime_ddl_bootstrap:
+                raise RuntimeDDLDisabledError(
+                    format_missing_schema_objects(
+                        self.__class__.__name__,
+                        missing=missing,
+                        bootstrap_allowed=False,
+                    )
+                )
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
             await conn.execute(
                 f"""

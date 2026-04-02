@@ -27,6 +27,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_db_name,
 )
+from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
 from shared.utils.instance_properties import flatten_instance_properties
 from shared.utils.number_utils import to_int_or_none
@@ -1625,6 +1626,44 @@ def _collapse_duplicate_sources(sources: List[Dict[str, Any]]) -> List[Dict[str,
     return collapsed
 
 
+async def _search_all_sources(
+    *,
+    es: ElasticsearchService,
+    index_name: str,
+    query: Dict[str, Any],
+    sort: Any,
+    page_size: int,
+) -> List[Dict[str, Any]]:
+    sources: List[Dict[str, Any]] = []
+    current_offset = 0
+    batch_size = max(int(page_size or 0), 100)
+
+    while True:
+        result = await es.search(
+            index=index_name,
+            query=query,
+            size=batch_size,
+            from_=current_offset,
+            sort=sort,
+        )
+        hits = result.get("hits", [])
+        if not isinstance(hits, list):
+            hits = []
+        page_hits = [hit for hit in hits if isinstance(hit, dict)]
+        if not page_hits:
+            break
+        sources.extend(page_hits)
+        try:
+            total = int(result.get("total") or 0)
+        except (TypeError, ValueError):
+            total = len(sources)
+        current_offset += len(page_hits)
+        if len(page_hits) < batch_size or current_offset >= total:
+            break
+
+    return sources
+
+
 def _rid_component(value: Any, *, fallback: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1764,7 +1803,13 @@ async def _search_objects_v2_impl(
         selected_fields = _resolve_select_fields(request)
         index_name = get_instances_index_name(db_name, branch=branch)
 
-        async def _run_search(search_query: Dict[str, Any], *, prefer_properties_sort: bool = False) -> Dict[str, Any]:
+        async def _run_search_page(
+            search_query: Dict[str, Any],
+            *,
+            prefer_properties_sort: bool = False,
+            page_offset: int = offset,
+            page_size: int = request.pageSize,
+        ) -> Dict[str, Any]:
             active_sort = (
                 _build_properties_sort_clause(request.orderBy)
                 if prefer_properties_sort and request.orderBy is not None
@@ -1774,8 +1819,8 @@ async def _search_objects_v2_impl(
                 return await es.search(
                     index=index_name,
                     query=search_query,
-                    size=request.pageSize,
-                    from_=offset,
+                    size=page_size,
+                    from_=page_offset,
                     sort=active_sort,
                 )
             except Exception:
@@ -1786,9 +1831,34 @@ async def _search_objects_v2_impl(
                 return await es.search(
                     index=index_name,
                     query=search_query,
-                    size=request.pageSize,
-                    from_=offset,
+                    size=page_size,
+                    from_=page_offset,
                     sort=_build_properties_sort_clause(request.orderBy),
+                )
+
+        async def _run_search_all(search_query: Dict[str, Any], *, prefer_properties_sort: bool = False) -> List[Dict[str, Any]]:
+            active_sort = (
+                _build_properties_sort_clause(request.orderBy)
+                if prefer_properties_sort and request.orderBy is not None
+                else sort_clause
+            )
+            try:
+                return await _search_all_sources(
+                    es=es,
+                    index_name=index_name,
+                    query=search_query,
+                    sort=active_sort,
+                    page_size=request.pageSize,
+                )
+            except Exception:
+                if request.orderBy is None or prefer_properties_sort:
+                    raise
+                return await _search_all_sources(
+                    es=es,
+                    index_name=index_name,
+                    query=search_query,
+                    sort=_build_properties_sort_clause(request.orderBy),
+                    page_size=request.pageSize,
                 )
 
         query = {
@@ -1799,11 +1869,8 @@ async def _search_objects_v2_impl(
                 ]
             }
         }
-        result = await _run_search(query)
-        if (
-            properties_fallback_query != object_query
-            and int(result.get("total") or 0) <= 0
-        ):
+        raw_sources = await _run_search_all(query)
+        if not raw_sources and properties_fallback_query != object_query:
             fallback_query = {
                 "bool": {
                     "must": [
@@ -1812,15 +1879,12 @@ async def _search_objects_v2_impl(
                     ]
                 }
             }
-            result = await _run_search(fallback_query, prefer_properties_sort=True)
+            raw_sources = await _run_search_all(fallback_query, prefer_properties_sort=True)
 
-        hits = result.get("hits", [])
-        if not isinstance(hits, list):
-            hits = []
-
-        raw_sources = [hit for hit in hits if isinstance(hit, dict)]
         collapsed_sources = _collapse_duplicate_sources(raw_sources)
-        flattened = [_flatten_source(hit) for hit in collapsed_sources]
+        total = len(collapsed_sources)
+        page_sources = collapsed_sources[offset : offset + request.pageSize]
+        flattened = [_flatten_source(hit) for hit in page_sources]
 
         if selected_fields is not None:
             projected: List[Dict[str, Any]] = []
@@ -1846,12 +1910,11 @@ async def _search_objects_v2_impl(
             )
         flattened = normalized_rows
 
-        total = int(result.get("total") or 0)
         if missing_object_type_response is not None and total <= 0:
             return missing_object_type_response
 
         next_page_token: Optional[str] = None
-        next_offset = offset + len(flattened)
+        next_offset = offset + len(page_sources)
         if next_offset < total:
             next_page_token = _encode_page_token(next_offset, scope=page_scope)
 
@@ -1944,7 +2007,14 @@ async def count_objects_v2_oms(
             }
         }
         index_name = get_instances_index_name(db_name, branch=branch)
-        total = await es.count(index=index_name, query=query)
+        raw_sources = await _search_all_sources(
+            es=es,
+            index_name=index_name,
+            query=query,
+            sort=[{"_doc": {"order": "asc"}}],
+            page_size=1000,
+        )
+        total = len(_collapse_duplicate_sources(raw_sources))
         return CountObjectsResponseV2(count=int(total))
     except SecurityViolationError as exc:
         return _foundry_error(

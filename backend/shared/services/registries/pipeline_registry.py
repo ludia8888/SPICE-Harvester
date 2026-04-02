@@ -380,6 +380,21 @@ def _row_to_pipeline_artifact(row: asyncpg.Record) -> PipelineArtifactRecord:
 
 
 class PipelineRegistry(PostgresSchemaRegistry):
+    _REQUIRED_TABLES = (
+        "lakefs_credentials",
+        "pipelines",
+        "pipeline_branches",
+        "pipeline_versions",
+        "pipeline_runs",
+        "pipeline_artifacts",
+        "promotion_manifests",
+        "pipeline_watermarks",
+        "pipeline_dependencies",
+        "pipeline_permissions",
+        "pipeline_udfs",
+        "pipeline_udf_versions",
+    )
+
     def __init__(
         self,
         *,
@@ -387,6 +402,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
         schema: str = "spice_pipelines",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ):
         perf = get_settings().performance
         pool_min_value = int(pool_min) if pool_min is not None else int(perf.pipeline_registry_pg_pool_min)
@@ -397,7 +413,11 @@ class PipelineRegistry(PostgresSchemaRegistry):
             pool_min=pool_min_value,
             pool_max=pool_max_value,
             command_timeout=int(perf.pipeline_registry_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     async def _get_lakefs_credentials(
         self,
@@ -668,6 +688,7 @@ class PipelineRegistry(PostgresSchemaRegistry):
                     schedule_interval_seconds INTEGER,
                     schedule_cron TEXT,
                     last_scheduled_at TIMESTAMPTZ,
+                    version INTEGER NOT NULL DEFAULT 1,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (db_name, name, branch)
@@ -707,7 +728,8 @@ class PipelineRegistry(PostgresSchemaRegistry):
                     ADD COLUMN IF NOT EXISTS deployed_commit_id TEXT,
                     ADD COLUMN IF NOT EXISTS schedule_interval_seconds INTEGER,
                     ADD COLUMN IF NOT EXISTS schedule_cron TEXT,
-                    ADD COLUMN IF NOT EXISTS last_scheduled_at TIMESTAMPTZ
+                    ADD COLUMN IF NOT EXISTS last_scheduled_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1
                 """
             )
             await conn.execute(
@@ -1067,6 +1089,9 @@ class PipelineRegistry(PostgresSchemaRegistry):
 
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_pipelines_db_name ON {self._schema}.pipelines(db_name)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_pipelines_version ON {self._schema}.pipelines(pipeline_id, version)"
             )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_pipelines_schedule ON {self._schema}.pipelines(schedule_interval_seconds)"

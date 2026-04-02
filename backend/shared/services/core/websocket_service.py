@@ -500,6 +500,8 @@ class WebSocketNotificationService:
         await asyncio.sleep(5)  # Wait before restarting
         if self.running:
             logger.info("Restarting WebSocket pubsub listener...")
+            self.running = False
+            self._pubsub_task = None
             await self.start()
         
     async def _listen_redis_updates(self) -> None:

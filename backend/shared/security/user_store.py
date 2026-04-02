@@ -84,6 +84,10 @@ class UserStore:
         raw = self._auth_users_json
         if not raw:
             raw = str(get_settings().auth.auth_users or "").strip()
+        settings = get_settings()
+        allow_dev_defaults = bool(
+            settings.is_development or settings.is_test or settings.is_pytest
+        )
         if raw:
             try:
                 parsed = json.loads(raw)
@@ -92,11 +96,18 @@ class UserStore:
                     logger.info("UserStore: loaded %d user(s) from AUTH_USERS", len(self._users))
                     return
             except json.JSONDecodeError:
-                logger.warning("UserStore: AUTH_USERS is not valid JSON – falling back to defaults")
+                logger.warning("UserStore: AUTH_USERS is not valid JSON")
 
-        # fallback: dev defaults
-        self._users = dict(_DEFAULT_DEV_USERS)
-        logger.info("UserStore: using default dev users (%d)", len(self._users))
+        if allow_dev_defaults:
+            self._users = dict(_DEFAULT_DEV_USERS)
+            logger.info("UserStore: using default dev users (%d)", len(self._users))
+            return
+
+        self._users = {}
+        logger.error(
+            "UserStore: AUTH_USERS missing or invalid outside development/test; "
+            "local login credentials are disabled"
+        )
 
     # ------------------------------------------------------------------
     def authenticate(self, username: str, password: str) -> Optional[UserInfo]:

@@ -22,8 +22,9 @@ from bff.services.oms_client import OMSClient
 from shared.config.settings import get_settings
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 from shared.security.database_access import (
+    DatabaseAccessRegistryUnavailableError,
     fetch_database_access_entries,
-    get_database_access_role,
+    inspect_database_access,
     resolve_database_actor_with_name,
     upsert_database_owner,
 )
@@ -89,6 +90,29 @@ def _database_not_found_policy(*, db_name: str) -> MessageErrorPolicy:
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
     )
+
+
+async def _sync_database_owner_best_effort(
+    *,
+    db_name: str,
+    actor_type: str,
+    actor_id: str,
+    actor_name: str,
+) -> None:
+    try:
+        await upsert_database_owner(
+            db_name=db_name,
+            principal_type=actor_type,
+            principal_id=actor_id,
+            principal_name=actor_name,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Database access owner sync failed for %s after authoritative create acceptance: %s",
+            db_name,
+            exc,
+            exc_info=True,
+        )
 
 
 def _enrich_db_entry(
@@ -189,6 +213,12 @@ async def list_databases(
             message=f"데이터베이스 목록 조회 완료 ({len(enriched)}개)",
             data={"databases": enriched, "count": len(enriched)},
         ).to_dict()
+    except DatabaseAccessRegistryUnavailableError as exc:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Database access registry unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        ) from exc
     except Exception as exc:
         logger.error("Failed to list databases: %s", exc)
         raise classified_http_exception(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc), code=ErrorCode.INTERNAL_ERROR) from exc
@@ -219,19 +249,19 @@ async def create_database(
 
         # Event Sourcing mode: pass through async contract (202 + command_id)
         if isinstance(result, dict) and result.get("status") == "accepted":
-            await upsert_database_owner(
+            await _sync_database_owner_best_effort(
                 db_name=validated_name,
-                principal_type=actor_type,
-                principal_id=actor_id,
-                principal_name=actor_name,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_name=actor_name,
             )
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
-        await upsert_database_owner(
+        await _sync_database_owner_best_effort(
             db_name=validated_name,
-            principal_type=actor_type,
-            principal_id=actor_id,
-            principal_name=actor_name,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            actor_name=actor_name,
         )
 
         return JSONResponse(
@@ -300,11 +330,18 @@ async def delete_database(
 
         actor_type, actor_id, _actor_name = resolve_database_actor_with_name(http_request.headers)
         if not _is_dev_mode():
-            role = await get_database_access_role(
+            inspection = await inspect_database_access(
                 db_name=validated_db_name,
                 principal_type=actor_type,
                 principal_id=actor_id,
             )
+            if inspection.is_unavailable:
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Database access registry unavailable",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                )
+            role = inspection.role
             if not role or role.lower() != "owner":
                 raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Only owners can delete projects.", code=ErrorCode.PERMISSION_DENIED)
 

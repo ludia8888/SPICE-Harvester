@@ -25,6 +25,7 @@ Usage:
 
 from .container import (
     ServiceContainer,
+    ServiceToken,
     initialize_container,
     get_container,
     shutdown_container,
@@ -51,6 +52,7 @@ from .providers import (
 __all__ = [
     # Container
     'ServiceContainer',
+    'ServiceToken',
     'initialize_container',
     'get_container',
     'shutdown_container',

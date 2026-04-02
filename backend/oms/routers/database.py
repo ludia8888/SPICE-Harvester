@@ -9,13 +9,13 @@ import logging
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 
-from oms.dependencies import EventStoreDep, CommandStatusServiceDep
+from oms.dependencies import CommandStatusServiceDep, EventStoreDep, database_exists_in_registry
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
 from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.security.database_access import (
-    has_database_access_config,
+    DatabaseAccessRegistryUnavailableError,
     list_database_names,
     upsert_database_owner,
 )
@@ -26,6 +26,23 @@ from shared.observability.tracing import trace_endpoint
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database", tags=["Database Management"])
+
+
+async def _sync_database_owner_best_effort(*, db_name: str) -> None:
+    try:
+        await upsert_database_owner(
+            db_name=db_name,
+            principal_type="user",
+            principal_id="system",
+            principal_name="system",
+        )
+    except Exception as exc:
+        logger.warning(
+            "Database access owner sync failed for %s after authoritative command acceptance: %s",
+            db_name,
+            exc,
+            exc_info=True,
+        )
 
 
 # Internal: BFF proxies via OMSClient. Public contract: /api/v1/databases/* (plural).
@@ -44,6 +61,12 @@ async def list_databases():
             message=f"데이터베이스 목록 조회 완료 ({len(databases)}개)",
             data={"databases": databases}
         ).to_dict()
+    except DatabaseAccessRegistryUnavailableError as exc:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Database access registry unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        ) from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -112,12 +135,7 @@ async def create_database(
         )
 
         # Foundry-style runtime stores project namespace/access in Postgres.
-        await upsert_database_owner(
-            db_name=db_name,
-            principal_type="user",
-            principal_id="system",
-            principal_name="system",
-        )
+        await _sync_database_owner_best_effort(db_name=db_name)
 
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
@@ -265,7 +283,7 @@ async def database_exists(db_name: str):
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
 
-        exists = await has_database_access_config(db_name=db_name)
+        exists = await database_exists_in_registry(db_name=db_name)
         
         return ApiResponse.success(
             message=f"데이터베이스 '{db_name}' 존재 여부: {exists}",
