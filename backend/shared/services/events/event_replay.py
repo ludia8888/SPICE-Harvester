@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional
 import boto3
 from botocore.client import Config
 import hashlib
-from collections import defaultdict
 
 class EventReplayService:
     """
@@ -40,6 +39,12 @@ class EventReplayService:
             region_name="us-east-1",
         )
         self.bucket_name = bucket_name
+        self._supported_command_types = {
+            "CREATE_INSTANCE",
+            "BULK_CREATE_INSTANCES",
+            "UPDATE_INSTANCE",
+            "DELETE_INSTANCE",
+        }
 
     def _list_all_objects(self, *, prefix: str) -> List[Dict[str, Any]]:
         objects: List[Dict[str, Any]] = []
@@ -74,6 +79,141 @@ class EventReplayService:
             if callable(close):
                 close()
         return json.loads(raw.decode("utf-8"))
+
+    @staticmethod
+    def _extract_aggregate_id_from_index_key(key: str) -> Optional[str]:
+        parts = str(key or "").split("/")
+        if len(parts) < 5 or parts[0] != "indexes" or parts[1] != "by-aggregate":
+            return None
+        return parts[3] or None
+
+    def _list_current_layout_index_entries(
+        self,
+        *,
+        class_id: str,
+        aggregate_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        prefix = f"indexes/by-aggregate/{class_id}/"
+        if aggregate_id:
+            prefix = f"{prefix}{aggregate_id}/"
+
+        entries: List[Dict[str, Any]] = []
+        for obj in self._list_all_objects(prefix=prefix):
+            index_key = str(obj.get("Key") or "")
+            entry = self._load_json_object(key=index_key)
+            s3_key = str(entry.get("s3_key") or "").strip()
+            if not s3_key:
+                continue
+            entries.append(
+                {
+                    "index_key": index_key,
+                    "aggregate_id": aggregate_id or self._extract_aggregate_id_from_index_key(index_key),
+                    "s3_key": s3_key,
+                    "last_modified": obj.get("LastModified"),
+                    "sequence_number": entry.get("sequence_number", 0),
+                    "event_type": entry.get("event_type"),
+                }
+            )
+        return entries
+
+    @staticmethod
+    def _is_event_envelope(payload: Dict[str, Any]) -> bool:
+        return all(
+            key in payload
+            for key in ("event_id", "event_type", "aggregate_type", "aggregate_id", "occurred_at")
+        )
+
+    def _normalize_event_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Replay payload must be a JSON object")
+
+        if not self._is_event_envelope(payload):
+            return payload
+
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        event_type = str(payload.get("event_type") or "").strip()
+        command_type = (
+            metadata.get("command_type")
+            or payload.get("command_type")
+            or event_type
+        )
+        if isinstance(command_type, str) and command_type.endswith("_REQUESTED"):
+            command_type = command_type[: -len("_REQUESTED")]
+        command_type = str(command_type or "").strip().upper()
+
+        if command_type not in self._supported_command_types:
+            raise ValueError(
+                "Unsupported current EventStore event layout for replay: "
+                f"missing supported command_type in {payload.get('event_id')}"
+            )
+
+        payload_data = data.get("payload")
+        if not isinstance(payload_data, dict):
+            payload_data = {}
+
+        return {
+            "command_type": command_type,
+            "command_id": metadata.get("command_id") or payload.get("event_id"),
+            "sequence_number": payload.get("sequence_number", 0),
+            "created_at": data.get("created_at") or payload.get("occurred_at"),
+            "timestamp": payload.get("occurred_at"),
+            "created_by": payload.get("actor"),
+            "payload": payload_data,
+            "db_name": data.get("db_name"),
+        }
+
+    def _event_matches_db_name(self, payload: Dict[str, Any], *, db_name: str) -> bool:
+        normalized = self._normalize_event_payload(payload)
+        event_db_name = normalized.get("db_name")
+        if not event_db_name:
+            return True
+        return str(event_db_name) == str(db_name)
+
+    def _load_current_layout_events(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        aggregate_id: str,
+    ) -> List[Dict[str, Any]]:
+        entries = self._list_current_layout_index_entries(class_id=class_id, aggregate_id=aggregate_id)
+        if not entries:
+            return []
+
+        events: List[Dict[str, Any]] = []
+        for entry in entries:
+            raw_payload = self._load_json_object(key=entry["s3_key"])
+            if not self._event_matches_db_name(raw_payload, db_name=db_name):
+                continue
+            events.append(
+                {
+                    "key": entry["s3_key"],
+                    "timestamp": entry.get("last_modified"),
+                    "content": self._normalize_event_payload(raw_payload),
+                }
+            )
+        return events
+
+    def _load_legacy_events(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        aggregate_id: str,
+    ) -> List[Dict[str, Any]]:
+        prefix = f"{db_name}/{class_id}/{aggregate_id}/"
+        objects = self._list_all_objects(prefix=prefix)
+        events: List[Dict[str, Any]] = []
+        for obj in objects:
+            events.append(
+                {
+                    "key": obj["Key"],
+                    "timestamp": obj["LastModified"],
+                    "content": self._load_json_object(key=obj["Key"]),
+                }
+            )
+        return events
         
     async def replay_aggregate(
         self, 
@@ -97,28 +237,27 @@ class EventReplayService:
             Final state after replay
         """
         print(f"🔄 Replaying aggregate: {aggregate_id}")
-        
-        # List all events for this aggregate
-        prefix = f"{db_name}/{class_id}/{aggregate_id}/"
-        objects = self._list_all_objects(prefix=prefix)
 
-        if not objects:
+        current_layout_events = self._load_current_layout_events(
+            db_name=db_name,
+            class_id=class_id,
+            aggregate_id=aggregate_id,
+        )
+        legacy_events = self._load_legacy_events(
+            db_name=db_name,
+            class_id=class_id,
+            aggregate_id=aggregate_id,
+        )
+
+        events = current_layout_events or legacy_events
+
+        if not events:
             return {
                 "aggregate_id": aggregate_id,
                 "status": "NOT_FOUND",
                 "event_count": 0,
                 "final_state": None
             }
-        
-        # Load all events
-        events = []
-        for obj in objects:
-            content = self._load_json_object(key=obj["Key"])
-            events.append({
-                "key": obj["Key"],
-                "timestamp": obj["LastModified"],
-                "content": content
-            })
         
         # Sort by sequence number if available, else by timestamp
         events.sort(key=lambda x: (
@@ -222,36 +361,39 @@ class EventReplayService:
             Dictionary of all aggregate states
         """
         print(f"🔄 Replaying all {class_id} aggregates in {db_name}")
-        
-        # List all objects for this class
-        prefix = f"{db_name}/{class_id}/"
-        objects = self._list_all_objects(prefix=prefix)
 
-        if not objects:
+        aggregate_ids = {
+            entry["aggregate_id"]
+            for entry in self._list_current_layout_index_entries(class_id=class_id)
+            if entry.get("aggregate_id")
+        }
+
+        if not aggregate_ids:
+            prefix = f"{db_name}/{class_id}/"
+            objects = self._list_all_objects(prefix=prefix)
+            for obj in objects:
+                parts = obj["Key"].split('/')
+                if len(parts) >= 3:
+                    aggregate_ids.add(parts[2])
+
+        if not aggregate_ids:
             return {
                 "status": "NO_AGGREGATES",
                 "aggregate_count": 0,
                 "aggregates": {}
             }
         
-        # Group by aggregate ID
-        aggregates = defaultdict(list)
-        for obj in objects:
-            parts = obj["Key"].split('/')
-            if len(parts) >= 3:
-                aggregate_id = parts[2]
-                aggregates[aggregate_id].append(obj)
-        
         # Replay each aggregate
         results = {}
-        for aggregate_id in list(aggregates.keys())[:limit]:
+        for aggregate_id in sorted(aggregate_ids)[:limit]:
             result = await self.replay_aggregate(db_name, class_id, aggregate_id)
-            results[aggregate_id] = result
+            if result.get("status") == "REPLAYED":
+                results[aggregate_id] = result
         
         return {
             "status": "REPLAYED",
             "aggregate_count": len(results),
-            "total_aggregates": len(aggregates),
+            "total_aggregates": len(aggregate_ids),
             "aggregates": results,
             "replay_timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -320,32 +462,38 @@ class EventReplayService:
         Returns all events in chronological order
         """
         print(f"📜 Getting history for {aggregate_id}")
-        
-        prefix = f"{db_name}/{class_id}/{aggregate_id}/"
-        objects = self._list_all_objects(prefix=prefix)
 
-        if not objects:
+        events = self._load_current_layout_events(
+            db_name=db_name,
+            class_id=class_id,
+            aggregate_id=aggregate_id,
+        )
+        if not events:
+            events = self._load_legacy_events(
+                db_name=db_name,
+                class_id=class_id,
+                aggregate_id=aggregate_id,
+            )
+
+        if not events:
             return []
-        
-        # Load all events with metadata
-        events = []
-        for obj in objects:
-            content = self._load_json_object(key=obj["Key"])
-            
-            events.append({
-                "timestamp": obj["LastModified"].isoformat(),
-                "key": obj["Key"],
-                "size": obj["Size"],
+
+        history = []
+        for event in events:
+            content = event["content"]
+            history.append({
+                "timestamp": event["timestamp"].isoformat() if hasattr(event["timestamp"], "isoformat") else str(event["timestamp"]),
+                "key": event["key"],
+                "size": None,
                 "command_type": content.get('command_type'),
                 "command_id": content.get('command_id'),
                 "sequence_number": content.get('sequence_number', 0),
                 "created_by": content.get('created_by', 'unknown')
             })
-        
-        # Sort chronologically
-        events.sort(key=lambda x: (x['sequence_number'], x['timestamp']))
-        
-        return events
+
+        history.sort(key=lambda x: (x['sequence_number'], x['timestamp']))
+
+        return history
 
 
 async def demo_replay():

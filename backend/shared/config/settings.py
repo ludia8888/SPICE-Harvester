@@ -1879,7 +1879,8 @@ class ApplicationSettings(BaseSettings):
         env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
+        populate_by_name=True,
     )
     
     # Environment and basic settings

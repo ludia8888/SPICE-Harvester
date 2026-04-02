@@ -329,16 +329,39 @@ class StorageHealthCheck(HealthCheckInterface):
         start_time = time.time()
         
         try:
+            is_healthy: bool
+            details: Dict[str, Any] = {}
             # Test storage connectivity
             if hasattr(self.storage_service, 'health_check'):
-                is_healthy = await self.storage_service.health_check()
+                probe_result = await self.storage_service.health_check()
+                if isinstance(probe_result, HealthCheckResult):
+                    details.update(probe_result.details or {})
+                    response_time = (time.time() - start_time) * 1000
+                    return HealthCheckResult(
+                        status=probe_result.status,
+                        service_name=self.service_name,
+                        service_type=self.service_type,
+                        message=probe_result.message or "Storage service health probe returned a result",
+                        response_time_ms=response_time,
+                        details=details,
+                        error=probe_result.error,
+                    )
+                is_healthy = bool(probe_result)
             elif hasattr(self.storage_service, 'list_buckets'):
                 # Test by listing buckets
-                await self.storage_service.list_buckets()
+                buckets = await self.storage_service.list_buckets()
+                details["bucket_count"] = len(buckets) if isinstance(buckets, list) else None
                 is_healthy = True
             else:
-                # Assume healthy for mock services
-                is_healthy = True
+                response_time = (time.time() - start_time) * 1000
+                return HealthCheckResult(
+                    status=HealthStatus.UNHEALTHY,
+                    service_name=self.service_name,
+                    service_type=self.service_type,
+                    message="Storage service does not expose a supported health probe",
+                    response_time_ms=response_time,
+                    error="missing_health_probe",
+                )
             
             response_time = (time.time() - start_time) * 1000
             
@@ -350,6 +373,7 @@ class StorageHealthCheck(HealthCheckInterface):
                     message="Storage service healthy",
                     response_time_ms=response_time,
                     details={
+                        **details,
                         "response_time_category": "fast" if response_time < 500 else "slow"
                     }
                 )

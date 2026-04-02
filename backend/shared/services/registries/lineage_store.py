@@ -673,14 +673,26 @@ class LineageStore(PostgresSchemaRegistry):
         edge_id = edge_id or uuid4()
 
         async with self._pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 f"""
-                INSERT INTO {self._schema}.lineage_edges (
-                    edge_id, from_node_id, to_node_id, edge_type, projection_name,
-                    occurred_at, recorded_at, db_name, branch, run_id, code_sha, schema_version, metadata
+                WITH inserted AS (
+                    INSERT INTO {self._schema}.lineage_edges (
+                        edge_id, from_node_id, to_node_id, edge_type, projection_name,
+                        occurred_at, recorded_at, db_name, branch, run_id, code_sha, schema_version, metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+                    ON CONFLICT (from_node_id, to_node_id, edge_type, projection_name) DO NOTHING
+                    RETURNING edge_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
-                ON CONFLICT (from_node_id, to_node_id, edge_type, projection_name) DO NOTHING
+                SELECT edge_id FROM inserted
+                UNION ALL
+                SELECT edge_id
+                FROM {self._schema}.lineage_edges
+                WHERE from_node_id = $2
+                  AND to_node_id = $3
+                  AND edge_type = $4
+                  AND projection_name = $5
+                LIMIT 1
                 """,
                 edge_id,
                 from_node_id,
@@ -696,7 +708,9 @@ class LineageStore(PostgresSchemaRegistry):
                 schema_version,
                 json.dumps(metadata, ensure_ascii=False),
             )
-        return edge_id
+        if not row:
+            raise RuntimeError("Failed to insert lineage edge")
+        return row["edge_id"]
 
     # -------------------------
     # Backfill queue (eventual recovery)

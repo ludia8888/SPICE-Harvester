@@ -5,7 +5,7 @@ Extracted from `bff.routers.pipeline_catalog` to keep routers thin.
 
 import logging
 from typing import Any, Optional
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import HTTPException, status
 
@@ -38,6 +38,182 @@ from shared.utils.event_utils import build_command_event
 from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)
+
+
+def _idempotent_pipeline_id(*, idempotency_key: str, db_name: str, branch: str) -> str:
+    seed = f"bff:create_pipeline:{db_name}:{branch}:{idempotency_key}"
+    return str(uuid5(NAMESPACE_URL, seed))
+
+
+def _normalize_pipeline_create_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _normalize_dependencies_for_compare(raw: Optional[list[dict[str, Any]]]) -> list[tuple[str, str]]:
+    normalized: set[tuple[str, str]] = set()
+    for dep in raw or []:
+        if not isinstance(dep, dict):
+            continue
+        pipeline_id = str(dep.get("pipeline_id") or dep.get("pipelineId") or "").strip()
+        if not pipeline_id:
+            continue
+        status_value = str(dep.get("status") or "DEPLOYED").strip().upper() or "DEPLOYED"
+        normalized.add((pipeline_id, status_value))
+    return sorted(normalized)
+
+
+def _pipeline_create_conflict() -> HTTPException:
+    return classified_http_exception(
+        status.HTTP_409_CONFLICT,
+        "Idempotency-Key already used for a different pipeline create request",
+        code=ErrorCode.CONFLICT,
+    )
+
+
+def _existing_pipeline_matches_request(
+    existing: Any,
+    *,
+    db_name: str,
+    name: str,
+    description: Optional[str],
+    pipeline_type: str,
+    location: str,
+    branch: str,
+    proposal_status: Optional[str],
+    proposal_title: Optional[str],
+    proposal_description: Optional[str],
+    proposal_submitted_at: Any,
+    proposal_reviewed_at: Any,
+    proposal_review_comment: Optional[str],
+    schedule_interval_seconds: Optional[int],
+    schedule_cron: Optional[str],
+) -> bool:
+    comparisons = (
+        (getattr(existing, "db_name", None), db_name),
+        (getattr(existing, "name", None), name),
+        (getattr(existing, "description", None), description),
+        (getattr(existing, "pipeline_type", None), pipeline_type),
+        (getattr(existing, "location", None), location),
+        (getattr(existing, "branch", None), branch),
+        (getattr(existing, "proposal_status", None), proposal_status),
+        (getattr(existing, "proposal_title", None), proposal_title),
+        (getattr(existing, "proposal_description", None), proposal_description),
+        (getattr(existing, "proposal_submitted_at", None), proposal_submitted_at),
+        (getattr(existing, "proposal_reviewed_at", None), proposal_reviewed_at),
+        (getattr(existing, "proposal_review_comment", None), proposal_review_comment),
+        (getattr(existing, "schedule_interval_seconds", None), schedule_interval_seconds),
+        (getattr(existing, "schedule_cron", None), schedule_cron),
+    )
+    return all(
+        _normalize_pipeline_create_value(current) == _normalize_pipeline_create_value(expected)
+        for current, expected in comparisons
+    )
+
+
+async def _maybe_resume_idempotent_pipeline_create(
+    *,
+    pipeline_registry: Any,
+    request: Any,
+    pipeline_id: str,
+    db_name: str,
+    name: str,
+    description: Optional[str],
+    pipeline_type: str,
+    location: str,
+    branch: str,
+    proposal_status: Optional[str],
+    proposal_title: Optional[str],
+    proposal_description: Optional[str],
+    proposal_submitted_at: Any,
+    proposal_reviewed_at: Any,
+    proposal_review_comment: Optional[str],
+    schedule_interval_seconds: Optional[int],
+    schedule_cron: Optional[str],
+    definition_json: dict[str, Any],
+    dependencies: Optional[list[dict[str, str]]],
+) -> Optional[dict[str, Any]]:
+    existing = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
+    if not existing:
+        return None
+
+    if not _existing_pipeline_matches_request(
+        existing,
+        db_name=db_name,
+        name=name,
+        description=description,
+        pipeline_type=pipeline_type,
+        location=location,
+        branch=branch,
+        proposal_status=proposal_status,
+        proposal_title=proposal_title,
+        proposal_description=proposal_description,
+        proposal_submitted_at=proposal_submitted_at,
+        proposal_reviewed_at=proposal_reviewed_at,
+        proposal_review_comment=proposal_review_comment,
+        schedule_interval_seconds=schedule_interval_seconds,
+        schedule_cron=schedule_cron,
+    ):
+        raise _pipeline_create_conflict()
+
+    principal_type, principal_id = _resolve_principal(request)
+    await pipeline_registry.grant_permission(
+        pipeline_id=existing.pipeline_id,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        role="admin",
+    )
+
+    version = await pipeline_registry.get_latest_version(pipeline_id=existing.pipeline_id, branch=branch)
+    if version is None:
+        version = await pipeline_registry.add_version(
+            pipeline_id=existing.pipeline_id,
+            branch=branch,
+            definition_json=definition_json,
+        )
+    elif dict(version.definition_json or {}) != dict(definition_json or {}):
+        raise _pipeline_create_conflict()
+
+    existing_dependencies_payload = await pipeline_registry.list_dependencies(pipeline_id=existing.pipeline_id)
+    existing_dependencies = _normalize_dependencies_for_compare(existing_dependencies_payload)
+    requested_dependencies = _normalize_dependencies_for_compare(dependencies)
+    if dependencies is None:
+        if existing_dependencies:
+            raise _pipeline_create_conflict()
+    else:
+        if not existing_dependencies and requested_dependencies:
+            await pipeline_registry.replace_dependencies(pipeline_id=existing.pipeline_id, dependencies=dependencies)
+            existing_dependencies_payload = await pipeline_registry.list_dependencies(pipeline_id=existing.pipeline_id)
+            existing_dependencies = _normalize_dependencies_for_compare(existing_dependencies_payload)
+        elif existing_dependencies != requested_dependencies:
+            raise _pipeline_create_conflict()
+
+    dependencies_for_api = _format_dependencies_for_api(existing_dependencies_payload)
+    response_definition_json = dict(version.definition_json or {})
+    if dependencies_for_api:
+        response_definition_json["dependencies"] = dependencies_for_api
+
+    logger.info(
+        "Recovered idempotent pipeline create request (pipeline_id=%s branch=%s)",
+        existing.pipeline_id,
+        branch,
+    )
+    return ApiResponse.success(
+        message="Pipeline created",
+        data={
+            "pipeline": {
+                **existing.__dict__,
+                "definition_json": response_definition_json,
+                "version_id": version.version_id,
+                "commit_id": version.lakefs_commit_id,
+                "version": version.lakefs_commit_id,
+                "dependencies": dependencies_for_api,
+            },
+        },
+    ).to_dict()
 
 
 @trace_db_operation("bff.pipeline_catalog.list_pipelines")
@@ -78,8 +254,9 @@ async def create_pipeline(
     request: Any,
 ) -> dict[str, Any]:
     sanitized: dict[str, Any] = {}
+    effective_pipeline_id: Optional[str] = None
     try:
-        _require_pipeline_idempotency_key(request, operation="pipeline create")
+        idempotency_key = _require_pipeline_idempotency_key(request, operation="pipeline create")
         sanitized = sanitize_input(payload)
         pipeline_id: Optional[str] = None
         raw_pipeline_id = sanitized.get("pipeline_id") or sanitized.get("pipelineId")
@@ -151,6 +328,11 @@ async def create_pipeline(
         proposal_submitted_at = None if not proposal_submitted_at else proposal_submitted_at
         proposal_reviewed_at = None if not proposal_reviewed_at else proposal_reviewed_at
         proposal_review_comment = str(proposal_review_comment).strip() if proposal_review_comment else None
+        effective_pipeline_id = pipeline_id or _idempotent_pipeline_id(
+            idempotency_key=idempotency_key,
+            db_name=db_name,
+            branch=branch,
+        )
 
         if isinstance(definition_json, dict) and definition_json:
             definition_json = await _augment_definition_with_casts(
@@ -175,6 +357,30 @@ async def create_pipeline(
                     extra={"errors": validation_errors},
                 )
 
+        recovered = await _maybe_resume_idempotent_pipeline_create(
+            pipeline_registry=pipeline_registry,
+            request=request,
+            pipeline_id=effective_pipeline_id,
+            db_name=db_name,
+            name=name,
+            description=description,
+            pipeline_type=pipeline_type,
+            location=location,
+            branch=branch,
+            proposal_status=proposal_status,
+            proposal_title=proposal_title,
+            proposal_description=proposal_description,
+            proposal_submitted_at=proposal_submitted_at,
+            proposal_reviewed_at=proposal_reviewed_at,
+            proposal_review_comment=proposal_review_comment,
+            schedule_interval_seconds=schedule_interval_seconds,
+            schedule_cron=schedule_cron,
+            definition_json=definition_json,
+            dependencies=dependencies,
+        )
+        if recovered is not None:
+            return recovered
+
         record = await pipeline_registry.create_pipeline(
             db_name=db_name,
             name=name,
@@ -190,7 +396,7 @@ async def create_pipeline(
             proposal_review_comment=proposal_review_comment,
             schedule_interval_seconds=schedule_interval_seconds,
             schedule_cron=schedule_cron,
-            pipeline_id=pipeline_id,
+            pipeline_id=effective_pipeline_id,
         )
         principal_type, principal_id = _resolve_principal(request)
         await pipeline_registry.grant_permission(
@@ -267,6 +473,30 @@ async def create_pipeline(
     except HTTPException:
         raise
     except PipelineAlreadyExistsError as exc:
+        if effective_pipeline_id:
+            recovered = await _maybe_resume_idempotent_pipeline_create(
+                pipeline_registry=pipeline_registry,
+                request=request,
+                pipeline_id=effective_pipeline_id,
+                db_name=db_name,
+                name=name,
+                description=description,
+                pipeline_type=pipeline_type,
+                location=location,
+                branch=branch,
+                proposal_status=proposal_status,
+                proposal_title=proposal_title,
+                proposal_description=proposal_description,
+                proposal_submitted_at=proposal_submitted_at,
+                proposal_reviewed_at=proposal_reviewed_at,
+                proposal_review_comment=proposal_review_comment,
+                schedule_interval_seconds=schedule_interval_seconds,
+                schedule_cron=schedule_cron,
+                definition_json=definition_json,
+                dependencies=dependencies,
+            )
+            if recovered is not None:
+                return recovered
         raise classified_http_exception(
             status.HTTP_409_CONFLICT,
             str(exc),

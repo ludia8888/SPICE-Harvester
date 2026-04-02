@@ -5,6 +5,7 @@ import pytest
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     input_sanitizer,
+    sanitize_es_query,
     sanitize_input,
     validate_branch_name,
 )
@@ -25,6 +26,17 @@ def test_validate_branch_name_rejects_legacy_master() -> None:
         validate_branch_name("master")
 
 
+def test_validate_branch_name_rejects_path_traversal_segments() -> None:
+    with pytest.raises(SecurityViolationError):
+        validate_branch_name("../main")
+
+    with pytest.raises(SecurityViolationError):
+        validate_branch_name("feature/../../prod")
+
+    with pytest.raises(SecurityViolationError):
+        validate_branch_name("feature//branch")
+
+
 def test_sanitize_input_accepts_main_branch_value() -> None:
     payload = {
         "spec": {
@@ -40,3 +52,16 @@ def test_sanitize_input_accepts_main_branch_value() -> None:
 
 def test_sql_detector_still_matches_information_schema_keyword() -> None:
     assert input_sanitizer.detect_sql_injection("select * from INFORMATION_SCHEMA.tables")
+
+
+def test_sanitize_es_query_escapes_reserved_chars_once() -> None:
+    assert sanitize_es_query("name:alice") == r"name\:alice"
+    assert sanitize_es_query("hello/world") == r"hello\/world"
+    assert sanitize_es_query("C++") == r"C\+\+"
+    assert sanitize_es_query(r"foo\bar") == r"foo\\bar"
+
+
+def test_sanitize_es_query_drops_only_wildcard_queries() -> None:
+    assert sanitize_es_query("*") == ""
+    assert sanitize_es_query("??") == ""
+    assert sanitize_es_query("*prefix") == "prefix"

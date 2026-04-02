@@ -25,6 +25,12 @@ class _Queue:
         self.published.append(job)
 
 
+class _FailingQueue(_Queue):
+    async def publish(self, job: Any) -> None:
+        self.published.append(job)
+        raise RuntimeError("kafka unavailable")
+
+
 class _Registry:
     def __init__(self, *, pipelines: list[dict[str, Any]], records: dict[str, _PipelineRecord]) -> None:
         self._pipelines = pipelines
@@ -236,6 +242,45 @@ async def test_scheduler_triggers_interval_schedule_when_due(monkeypatch: pytest
     assert job.schedule_cron is None
     assert registry.schedule_ticks == [(pipeline_id, now)]
     assert registry.runs == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_scheduler_records_tick_before_publish_to_avoid_duplicate_due_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    last_run = datetime(2025, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+
+    import shared.services.pipeline.pipeline_scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "_utcnow", lambda: now)
+
+    registry = _Registry(
+        pipelines=[
+            {
+                "pipeline_id": "90909090-9090-9090-9090-909090909090",
+                "db_name": "db",
+                "pipeline_type": "batch",
+                "schedule_interval_seconds": 60,
+                "schedule_cron": None,
+                "last_scheduled_at": last_run,
+                "last_build_status": "DEPLOYED",
+                "last_build_at": last_run,
+                "name": "p",
+                "branch": "main",
+                "output_dataset_name": "pipeline_output",
+                "definition_json": {},
+            }
+        ],
+        records={},
+    )
+    queue = _FailingQueue()
+
+    scheduler = PipelineScheduler(registry, queue, poll_seconds=1)
+
+    with pytest.raises(RuntimeError, match="kafka unavailable"):
+        await scheduler._tick()
+
+    assert registry.schedule_ticks == [("90909090-9090-9090-9090-909090909090", now)]
 
 
 @pytest.mark.unit

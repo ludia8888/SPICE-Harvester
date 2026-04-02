@@ -193,6 +193,13 @@ class ProcessedEventRegistry:
             """
         )
 
+    async def _lock_aggregate(self, conn: asyncpg.Connection, *, handler: str, aggregate_id: str) -> None:
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+            handler,
+            aggregate_id,
+        )
+
     async def claim(
         self,
         *,
@@ -222,6 +229,31 @@ class ProcessedEventRegistry:
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                if aggregate_id and sequence_number is not None:
+                    await self._lock_aggregate(conn, handler=handler, aggregate_id=aggregate_id)
+                    lower_inflight = await conn.fetchval(
+                        f"""
+                        SELECT 1
+                        FROM {self._schema}.processed_events
+                        WHERE handler = $1
+                          AND aggregate_id = $2
+                          AND status = 'processing'
+                          AND sequence_number IS NOT NULL
+                          AND sequence_number < $3
+                          AND event_id <> $4
+                        LIMIT 1
+                        """,
+                        handler,
+                        aggregate_id,
+                        sequence_number,
+                        event_id,
+                    )
+                    if lower_inflight:
+                        return ClaimResult(
+                            decision=ClaimDecision.IN_PROGRESS,
+                            existing_status="processing",
+                        )
+
                 inserted = await conn.fetchrow(
                     f"""
                     INSERT INTO {self._schema}.processed_events (

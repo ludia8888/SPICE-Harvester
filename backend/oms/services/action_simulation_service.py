@@ -58,6 +58,8 @@ from shared.utils.writeback_patch_apply import apply_changes_to_payload
 from shared.utils.time_utils import utcnow
 import logging
 
+logger = logging.getLogger(__name__)
+
 
 class ActionSimulationRejected(Exception):
     def __init__(self, payload: Dict[str, Any], *, status_code: int = 400) -> None:
@@ -531,7 +533,9 @@ async def enforce_action_permission(
                 ) from exc
             finally:
                 try:
-                    await dataset_registry.close()
+                    close = getattr(dataset_registry, "close", None)
+                    if callable(close):
+                        await close()
                 except Exception:
                     logger.warning(
                         "Failed to close DatasetRegistry after inherited project policy lookup",

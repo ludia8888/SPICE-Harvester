@@ -21,6 +21,12 @@ from contextvars import ContextVar
 from typing import Any, Dict, Iterator, Mapping, Optional
 from urllib.parse import unquote
 
+from shared.security.principal_utils import (
+    DEFAULT_PRINCIPAL_ID_HEADERS,
+    DEFAULT_PRINCIPAL_TYPE_HEADERS,
+    actor_label,
+    resolve_principal_from_headers,
+)
 from shared.utils.blank_utils import strip_to_none
 import logging
 
@@ -110,6 +116,12 @@ def context_from_headers(headers: Mapping[str, Any]) -> Dict[str, Optional[str]]
     correlation_id = _h("X-Correlation-Id") or _h("X-Correlation-ID")
     db_name = _h("X-DB-Name") or _h("X-Project")
     principal = _h("X-Principal")  # optional internal header
+    if not principal and any(_h(key) for key in (*DEFAULT_PRINCIPAL_ID_HEADERS, *DEFAULT_PRINCIPAL_TYPE_HEADERS)):
+        principal_type, principal_id = resolve_principal_from_headers(
+            headers,
+            allowed_principal_types={"user", "service"},
+        )
+        principal = actor_label(principal_type, principal_id)
     return {
         "request_id": request_id,
         "correlation_id": correlation_id,

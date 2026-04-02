@@ -19,6 +19,7 @@ import time
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from collections import OrderedDict
+from urllib.parse import urlparse
 
 import aioboto3
 from botocore.exceptions import ClientError
@@ -141,11 +142,12 @@ class EventPublisher:
 
     def _s3_client_kwargs(self) -> Dict[str, Any]:
         client_config = build_s3_client_config(self.endpoint_url)
+        use_ssl = (urlparse(str(self.endpoint_url or "")).scheme or "").lower() == "https"
         return {
             "endpoint_url": self.endpoint_url,
             "aws_access_key_id": self.access_key,
             "aws_secret_access_key": self.secret_key,
-            "use_ssl": False,
+            "use_ssl": use_ssl,
             "config": client_config,
         }
         

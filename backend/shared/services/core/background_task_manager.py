@@ -18,6 +18,7 @@ runs without proper monitoring and error handling.
 """
 
 import asyncio
+import inspect
 import logging
 import traceback
 from datetime import datetime, timezone, timedelta
@@ -79,6 +80,44 @@ class BackgroundTaskManager:
         self.retry_delay = 5  # seconds
         self.cleanup_interval = 300  # 5 minutes
         self.dead_task_threshold = 600  # 10 minutes
+
+    @staticmethod
+    def _prepare_task_kwargs(
+        func: Callable,
+        *,
+        args: Tuple,
+        kwargs: Dict[str, Any],
+        task_id: str,
+    ) -> Dict[str, Any]:
+        prepared = dict(kwargs)
+        if "task_id" in prepared:
+            return prepared
+
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):
+            prepared["task_id"] = task_id
+            return prepared
+
+        try:
+            bound = signature.bind_partial(*args, **prepared)
+        except TypeError:
+            bound = None
+
+        if bound is not None and "task_id" in bound.arguments:
+            return prepared
+
+        task_param = signature.parameters.get("task_id")
+        if task_param and task_param.kind is not inspect.Parameter.POSITIONAL_ONLY:
+            prepared["task_id"] = task_id
+            return prepared
+
+        for parameter in signature.parameters.values():
+            if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+                prepared["task_id"] = task_id
+                return prepared
+
+        return prepared
         
     async def start(self) -> None:
         """Start the background task manager."""
@@ -158,8 +197,12 @@ class BackgroundTaskManager:
                 logging.getLogger(__name__).warning("Exception fallback at shared/services/core/background_task_manager.py:157", exc_info=True)
                 task_id = str(uuid4())
 
-        # Convenience: inject the effective task_id into the task function unless caller already set it.
-        kwargs.setdefault("task_id", task_id)
+        kwargs = self._prepare_task_kwargs(
+            func,
+            args=args,
+            kwargs=kwargs,
+            task_id=task_id,
+        )
         
         # Create task record
         task_record = BackgroundTask(
@@ -216,7 +259,12 @@ class BackgroundTaskManager:
             args=(arg1, arg2)
         )
         """
-        kwargs = kwargs or {}
+        kwargs = self._prepare_task_kwargs(
+            func,
+            args=args,
+            kwargs=kwargs or {},
+            task_id=task_id,
+        )
         current_task = asyncio.current_task()
         if current_task is not None:
             self._running_tasks[task_id] = current_task

@@ -35,6 +35,19 @@ def _append_query_param(url: str, key: str, value: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
 
 
+async def _upsert_google_connection_secrets(
+    *,
+    connector_registry: ConnectorRegistry,
+    source: Any,
+    secrets: Dict[str, Any],
+) -> Dict[str, Any]:
+    return await connector_registry.upsert_connection_secrets(
+        source_type=source.source_type,
+        source_id=source.source_id,
+        secrets_json=secrets,
+    )
+
+
 async def _resolve_google_connection(
     *,
     connector_registry: ConnectorRegistry,
@@ -61,13 +74,31 @@ async def _resolve_google_connection(
     expires_at = secrets.get("expires_at") or config.get("expires_at")
     refresh_token = secrets.get("refresh_token") or config.get("refresh_token")
 
-    if token and expires_at:
+    malformed_expires_at = False
+    if token and expires_at is not None:
         try:
             expires_at_float = float(expires_at)
         except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at bff/routers/data_connector_ops.py:63", exc_info=True)
+            logger.warning(
+                "Malformed Google Sheets token expires_at; discarding cached access token (connection_id=%s)",
+                connection_id,
+                exc_info=True,
+            )
+            malformed_expires_at = True
             expires_at_float = None
-        if expires_at_float and oauth_client.is_token_expired(expires_at_float):
+        if malformed_expires_at:
+            token = None
+            expires_at = None
+            if secrets.get("access_token") is not None or secrets.get("expires_at") is not None:
+                cleared_secrets = dict(secrets)
+                cleared_secrets["access_token"] = None
+                cleared_secrets["expires_at"] = None
+                secrets = await _upsert_google_connection_secrets(
+                    connector_registry=connector_registry,
+                    source=source,
+                    secrets=cleared_secrets,
+                )
+        elif expires_at_float and oauth_client.is_token_expired(expires_at_float):
             token = None
 
     if not token and refresh_token:
@@ -80,12 +111,12 @@ async def _resolve_google_connection(
                 "refresh_token": refreshed.get("refresh_token", refresh_token),
             }
         )
-        await connector_registry.upsert_connection_secrets(
-            source_type=source.source_type,
-            source_id=source.source_id,
-            secrets_json=refreshed_secrets,
+        secrets = await _upsert_google_connection_secrets(
+            connector_registry=connector_registry,
+            source=source,
+            secrets=refreshed_secrets,
         )
-        token = refreshed_secrets.get("access_token")
+        token = secrets.get("access_token")
 
     return source, str(token) if token else None
 

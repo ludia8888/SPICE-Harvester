@@ -143,16 +143,29 @@ class ConnectorTriggerService:
         self.producer_ops = ops
         return ops
 
+    def _resolve_polling_interval_seconds(self, source: ConnectorSource) -> int:
+        cfg = source.config_json or {}
+        raw_interval = cfg.get("polling_interval")
+        try:
+            return max(1, int(raw_interval or 300))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid polling_interval for source %s:%s; using default 300s (value=%r)",
+                source.source_type,
+                source.source_id,
+                raw_interval,
+            )
+            return 300
+
     async def _is_due(self, source: ConnectorSource) -> bool:
         if not self.registry:
             return False
-        cfg = source.config_json or {}
-        interval = int(cfg.get("polling_interval") or 300)
+        interval = self._resolve_polling_interval_seconds(source)
         state = await self.registry.get_sync_state(source_type=source.source_type, source_id=source.source_id)
         if not state or not state.last_polled_at:
             return True
         elapsed = (utcnow() - state.last_polled_at).total_seconds()
-        return elapsed >= max(1, interval)
+        return elapsed >= interval
 
     async def _poll_with_adapter(self, source: ConnectorSource) -> None:
         if not self.registry or not self.adapter_factory:

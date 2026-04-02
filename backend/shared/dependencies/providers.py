@@ -52,20 +52,18 @@ async def get_settings_dependency() -> ApplicationSettings:
 async def get_label_mapper(
     container: ServiceContainer = Depends(get_container),
 ) -> LabelMapper:
-    if not container.has(LabelMapper):
-        def create_label_mapper(settings: ApplicationSettings) -> LabelMapper:  # noqa: ARG001
-            return LabelMapper()
-        container.register_singleton(LabelMapper, create_label_mapper)
+    def create_label_mapper(settings: ApplicationSettings) -> LabelMapper:  # noqa: ARG001
+        return LabelMapper()
+    container.ensure_singleton(LabelMapper, create_label_mapper)
     return await container.get(LabelMapper)
 
 
 async def get_jsonld_converter(
     container: ServiceContainer = Depends(get_container),
 ) -> JSONToJSONLDConverter:
-    if not container.has(JSONToJSONLDConverter):
-        def create_jsonld_converter(settings: ApplicationSettings) -> JSONToJSONLDConverter:  # noqa: ARG001
-            return JSONToJSONLDConverter()
-        container.register_singleton(JSONToJSONLDConverter, create_jsonld_converter)
+    def create_jsonld_converter(settings: ApplicationSettings) -> JSONToJSONLDConverter:  # noqa: ARG001
+        return JSONToJSONLDConverter()
+    container.ensure_singleton(JSONToJSONLDConverter, create_jsonld_converter)
     return await container.get(JSONToJSONLDConverter)
 
 
@@ -86,8 +84,7 @@ async def get_storage_service(
         Missing dependencies will fail at build/install time, not runtime.
     """
     # Register factory if not already registered
-    if not container.has(StorageService):
-        container.register_singleton(StorageService, create_storage_service)
+    container.ensure_singleton(StorageService, create_storage_service)
     
     return await container.get(StorageService)
 
@@ -101,8 +98,7 @@ async def get_lakefs_storage_service(
     This is separate from the default StorageService (MinIO) because lakeFS repositories
     are not managed via S3 CreateBucket and require different endpoint/credentials.
     """
-    if not container.has(LakeFSStorageService):
-        container.register_singleton(LakeFSStorageService, create_lakefs_storage_service)
+    container.ensure_singleton(LakeFSStorageService, create_lakefs_storage_service)
     return await container.get(LakeFSStorageService)
 
 
@@ -119,8 +115,7 @@ async def get_redis_service(
         RedisService: Redis service instance
     """
     # Register factory if not already registered
-    if not container.has(RedisService):
-        container.register_singleton(RedisService, create_redis_service)
+    container.ensure_singleton(RedisService, create_redis_service)
     
     return await container.get(RedisService)
 
@@ -138,8 +133,7 @@ async def get_elasticsearch_service(
         ElasticsearchService: Elasticsearch service instance
     """
     # Register factory if not already registered
-    if not container.has(ElasticsearchService):
-        container.register_singleton(ElasticsearchService, create_elasticsearch_service)
+    container.ensure_singleton(ElasticsearchService, create_elasticsearch_service)
     
     return await container.get(ElasticsearchService)
 
@@ -147,8 +141,7 @@ async def get_lineage_store(
     container: ServiceContainer = Depends(get_container),
 ) -> LineageStore:
     """FastAPI dependency to get LineageStore instance."""
-    if not container.has(LineageStore):
-        container.register_singleton(LineageStore, create_lineage_store)
+    container.ensure_singleton(LineageStore, create_lineage_store)
     return await container.get(LineageStore)
 
 
@@ -156,16 +149,14 @@ async def get_audit_log_store(
     container: ServiceContainer = Depends(get_container),
 ) -> AuditLogStore:
     """FastAPI dependency to get AuditLogStore instance."""
-    if not container.has(AuditLogStore):
-        container.register_singleton(AuditLogStore, create_audit_log_store)
+    container.ensure_singleton(AuditLogStore, create_audit_log_store)
     return await container.get(AuditLogStore)
 
 async def get_llm_gateway(
     container: ServiceContainer = Depends(get_container),
 ) -> LLMGateway:
     """FastAPI dependency to get LLMGateway instance."""
-    if not container.has(LLMGateway):
-        container.register_singleton(LLMGateway, create_llm_gateway)
+    container.ensure_singleton(LLMGateway, create_llm_gateway)
     return await container.get(LLMGateway)
 
 async def get_background_task_manager(
@@ -176,13 +167,12 @@ async def get_background_task_manager(
         if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
             return await container.get(BackgroundTaskManager)
 
-        if not container.has(RedisService):
-            container.register_singleton(RedisService, create_redis_service)
+        container.ensure_singleton(RedisService, create_redis_service)
         redis_service = await container.get(RedisService)
 
         task_manager = create_background_task_manager(redis_service)
-        container.register_instance(BackgroundTaskManager, task_manager)
-        return task_manager
+        container.ensure_instance(BackgroundTaskManager, task_manager)
+        return await container.get(BackgroundTaskManager)
     except Exception as e:
         raise classified_http_exception(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -230,12 +220,12 @@ def register_core_services(container: ServiceContainer) -> None:
         container: Service container to register with
     """
     # Register service factories
-    container.register_singleton(StorageService, create_storage_service)
-    container.register_singleton(RedisService, create_redis_service)
-    container.register_singleton(ElasticsearchService, create_elasticsearch_service)
-    container.register_singleton(LineageStore, create_lineage_store)
-    container.register_singleton(AuditLogStore, create_audit_log_store)
-    container.register_singleton(LLMGateway, create_llm_gateway)
+    container.ensure_singleton(StorageService, create_storage_service)
+    container.ensure_singleton(RedisService, create_redis_service)
+    container.ensure_singleton(ElasticsearchService, create_elasticsearch_service)
+    container.ensure_singleton(LineageStore, create_lineage_store)
+    container.ensure_singleton(AuditLogStore, create_audit_log_store)
+    container.ensure_singleton(LLMGateway, create_llm_gateway)
     
     # Log registration
     import logging

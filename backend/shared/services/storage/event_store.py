@@ -130,6 +130,10 @@ class EventStore:
             "verify": verify_ssl if use_ssl else None,
             "config": client_config,
         }
+
+    def _ensure_session(self) -> None:
+        if not self.session:
+            self.session = aioboto3.Session()
         
     @trace_storage_operation("event_store.connect", system="s3")
     async def connect(self):
@@ -815,8 +819,7 @@ class EventStore:
 
         This is useful for backfill jobs and operational tooling.
         """
-        if not self.session:
-            self.session = aioboto3.Session()
+        self._ensure_session()
 
         async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._get_existing_key_by_event_id(s3, str(event_id))
@@ -824,8 +827,7 @@ class EventStore:
     @trace_storage_operation("event_store.read_event_by_key", system="s3")
     async def read_event_by_key(self, *, key: str) -> EventEnvelope:
         """Read an event envelope from S3/MinIO by object key."""
-        if not self.session:
-            self.session = aioboto3.Session()
+        self._ensure_session()
 
         async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._read_event_object(s3, key)
@@ -842,11 +844,10 @@ class EventStore:
         Retrieve all events for an aggregate from S3/MinIO.
         This reads from the Single Source of Truth.
         """
-        events = []
+        events: List[EventEnvelope] = []
         
         try:
-            if not self.session:
-                self.session = aioboto3.Session()
+            self._ensure_session()
 
             async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Fast path: use aggregate index entries (one object per event).
@@ -859,12 +860,15 @@ class EventStore:
                         index_keys.append(obj["Key"])
 
                 indexed_events: List[EventEnvelope] = []
+                needs_fallback_scan = not index_keys
                 if index_keys:
                     index_keys.sort()
+                    observed_sequences: List[int] = []
                     for idx_key in index_keys:
                         filename = idx_key.rsplit("/", 1)[-1]
                         seq_str = filename.split("_", 1)[0]
                         seq = int(seq_str) if seq_str.isdigit() else 0
+                        observed_sequences.append(seq)
 
                         if from_version is not None and seq < from_version:
                             continue
@@ -881,21 +885,37 @@ class EventStore:
                         ev_data = await ev_obj["Body"].read()
                         indexed_events.append(EventEnvelope.model_validate_json(ev_data))
 
-                # Slow fallback: scan events/ and filter by path substring.
-                prefix = "events/"
-                async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                    for obj in page.get("Contents", []):
-                        key = obj["Key"]
-                        if f"/{aggregate_type}/{aggregate_id}/" not in key:
-                            continue
-                        response = await s3.get_object(Bucket=self.bucket_name, Key=key)
-                        event_data = await response["Body"].read()
-                        event = EventEnvelope.model_validate_json(event_data)
-                        if from_version is not None and (event.sequence_number or 0) < from_version:
-                            continue
-                        if to_version is not None and (event.sequence_number or 0) > to_version:
-                            continue
-                        events.append(event)
+                    relevant_sequences = [
+                        seq
+                        for seq in observed_sequences
+                        if (from_version is None or seq >= from_version)
+                        and (to_version is None or seq <= to_version)
+                    ]
+                    if relevant_sequences:
+                        ordered_sequences = sorted(set(relevant_sequences))
+                        expected_start = from_version if from_version is not None else ordered_sequences[0]
+                        expected_end = to_version if to_version is not None else ordered_sequences[-1]
+                        expected = list(range(expected_start, expected_end + 1))
+                        needs_fallback_scan = ordered_sequences != expected
+                    else:
+                        needs_fallback_scan = from_version is not None or to_version is not None
+
+                if needs_fallback_scan:
+                    # Slow fallback: scan events/ and filter by path substring.
+                    prefix = "events/"
+                    async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                        for obj in page.get("Contents", []):
+                            key = obj["Key"]
+                            if f"/{aggregate_type}/{aggregate_id}/" not in key:
+                                continue
+                            response = await s3.get_object(Bucket=self.bucket_name, Key=key)
+                            event_data = await response["Body"].read()
+                            event = EventEnvelope.model_validate_json(event_data)
+                            if from_version is not None and (event.sequence_number or 0) < from_version:
+                                continue
+                            if to_version is not None and (event.sequence_number or 0) > to_version:
+                                continue
+                            events.append(event)
 
                 if indexed_events:
                     events.extend(indexed_events)
@@ -951,8 +971,7 @@ class EventStore:
         This is used for system recovery, debugging, or building new projections.
         """
         try:
-            if not self.session:
-                self.session = aioboto3.Session()
+            self._ensure_session()
 
             async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Fast path: replay using by-date index entries.
@@ -1012,21 +1031,22 @@ class EventStore:
                 if any_index:
                     return
 
-                # Slow fallback (no indexes): scan by year prefix like compatibility code.
-                prefix = f"events/{start.year:04d}/"
-                async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                    for obj in page.get("Contents", []):
-                        key = obj["Key"]
-                        response = await s3.get_object(Bucket=self.bucket_name, Key=key)
-                        event_data = await response["Body"].read()
-                        event = EventEnvelope.model_validate_json(event_data)
-                        if event.occurred_at < start:
-                            continue
-                        if event.occurred_at > end:
-                            continue
-                        if event_types and event.event_type not in event_types:
-                            continue
-                        yield event
+                # Slow fallback (no indexes): scan each year in range.
+                for year in range(start.year, end.year + 1):
+                    prefix = f"events/{year:04d}/"
+                    async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                        for obj in page.get("Contents", []):
+                            key = obj["Key"]
+                            response = await s3.get_object(Bucket=self.bucket_name, Key=key)
+                            event_data = await response["Body"].read()
+                            event = EventEnvelope.model_validate_json(event_data)
+                            if event.occurred_at < start:
+                                continue
+                            if event.occurred_at > end:
+                                continue
+                            if event_types and event.event_type not in event_types:
+                                continue
+                            yield event
                         
         except Exception as e:
             logger.error(f"Failed to replay events from S3/MinIO: {e}")
@@ -1043,8 +1063,7 @@ class EventStore:
         """
         Get the current version of an aggregate (max sequence_number).
         """
-        if not self.session:
-            self.session = aioboto3.Session()
+        self._ensure_session()
 
         index_prefix = f"indexes/by-aggregate/{aggregate_type}/{aggregate_id}/"
         max_seq = 0
@@ -1191,6 +1210,7 @@ class EventStore:
         )
         
         try:
+            self._ensure_session()
             async with self.session.client(**self._s3_client_kwargs()) as s3:
                 response = await s3.get_object(
                     Bucket=self.bucket_name,
@@ -1227,6 +1247,7 @@ class EventStore:
         }
         
         try:
+            self._ensure_session()
             async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Save versioned snapshot
                 await s3.put_object(

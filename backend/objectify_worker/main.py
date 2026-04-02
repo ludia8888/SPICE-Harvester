@@ -249,6 +249,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         "REQUIRED_FIELD_MISSING",
         "VALUE_CONSTRAINT_FAILED",
     }
+
+    @staticmethod
+    def _source_lineage_branch(job: ObjectifyJob) -> str:
+        return str(job.dataset_branch or job.ontology_branch or "main")
+
+    @staticmethod
+    def _target_lineage_branch(job: ObjectifyJob) -> str:
+        return str(job.ontology_branch or job.dataset_branch or "main")
+
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.objectify
@@ -3925,14 +3934,15 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
 
         async def _record_header_links() -> str:
             job_node = LineageStore.node_aggregate("ObjectifyJob", job.job_id)
-            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
+            source_branch = self._source_lineage_branch(job)
+            target_branch = self._target_lineage_branch(job)
             column_lineage_pairs = self._build_column_lineage_pairs(getattr(mapping_spec, "mappings", None))
             if input_type == "artifact":
                 source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
                 edge_type = "pipeline_artifact_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
-                    "branch": lineage_branch,
+                    "branch": source_branch,
                     "dataset_id": job.dataset_id,
                     "artifact_id": job.artifact_id,
                     "artifact_output_name": artifact_output_name or job.artifact_output_name,
@@ -3948,7 +3958,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type = "dataset_version_objectify_job"
                 edge_metadata = {
                     "db_name": job.db_name,
-                    "branch": lineage_branch,
+                    "branch": source_branch,
                     "dataset_id": job.dataset_id,
                     "dataset_version_id": job.dataset_version_id,
                     "mapping_spec_id": job.mapping_spec_id,
@@ -3966,7 +3976,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type=edge_type,
                 occurred_at=datetime.now(timezone.utc),
                 db_name=job.db_name,
-                branch=lineage_branch,
+                branch=source_branch,
                 edge_metadata=edge_metadata,
             )
 
@@ -3978,10 +3988,10 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
                 edge_type="objectify_job_mapping_spec",
                 occurred_at=datetime.now(timezone.utc),
                 db_name=job.db_name,
-                branch=lineage_branch,
+                branch=target_branch,
                 edge_metadata={
                     "db_name": job.db_name,
-                    "branch": lineage_branch,
+                    "branch": target_branch,
                     "mapping_spec_id": mapping_spec.mapping_spec_id,
                     "mapping_spec_version": mapping_spec.version,
                     "dataset_id": job.dataset_id,
@@ -3993,7 +4003,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
             )
 
             if ontology_version:
-                branch = job.ontology_branch or job.dataset_branch or "main"
+                branch = target_branch
                 ont_id = f"{job.db_name}:{branch}:{ontology_version.get('commit') or 'head'}"
                 ont_node = LineageStore.node_aggregate("OntologyVersion", ont_id)
                 await self.lineage_store.record_link(  # type: ignore[union-attr]
@@ -4059,7 +4069,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         if input_type == "artifact":
             source_node = LineageStore.node_aggregate("PipelineArtifact", str(job.artifact_id))
             edge_type = "pipeline_artifact_objectified"
-            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
+            lineage_branch = self._target_lineage_branch(job)
             edge_metadata = {
                 "db_name": job.db_name,
                 "branch": lineage_branch,
@@ -4075,7 +4085,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         else:
             source_node = LineageStore.node_aggregate("DatasetVersion", str(job.dataset_version_id))
             edge_type = EDGE_DATASET_VERSION_OBJECTIFIED
-            lineage_branch = job.dataset_branch or job.ontology_branch or "main"
+            lineage_branch = self._target_lineage_branch(job)
             edge_metadata = {
                 "db_name": job.db_name,
                 "branch": lineage_branch,
@@ -4090,7 +4100,7 @@ class ObjectifyWorker(ProcessedEventKafkaWorker[ObjectifyJob, None]):
         for instance_id in instance_ids:
             if limit_remaining <= 0:
                 break
-            aggregate_id = f"{job.db_name}:{job.dataset_branch}:{job.target_class_id}:{instance_id}"
+            aggregate_id = f"{job.db_name}:{lineage_branch}:{job.target_class_id}:{instance_id}"
             instance_node = LineageStore.node_aggregate("Instance", aggregate_id)
 
             async def _record_instance_links() -> bool:

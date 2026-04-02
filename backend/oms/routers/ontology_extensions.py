@@ -483,9 +483,13 @@ async def update_resource(
         raise classified_http_exception(
             status.HTTP_400_BAD_REQUEST, str(e), code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
-    except (DatabaseError, OntologyNotFoundError) as e:
+    except OntologyNotFoundError as e:
         raise classified_http_exception(
             status.HTTP_404_NOT_FOUND, str(e), code=ErrorCode.ONTOLOGY_NOT_FOUND,
+        )
+    except DatabaseError as e:
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT, str(e), code=ErrorCode.DB_CONSTRAINT_VIOLATION,
         )
     except Exception as e:
         logger.error("Failed to update resource: %s", e)

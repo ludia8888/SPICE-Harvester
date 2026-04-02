@@ -4,9 +4,11 @@ import pytest
 
 from shared.config.settings import (
     AgentRuntimeSettings,
+    ApplicationSettings,
     AuthSettings,
     ClientSettings,
     DatabaseSettings,
+    Environment,
     FeatureFlagsSettings,
     ObjectifySettings,
     PipelineSettings,
@@ -199,3 +201,13 @@ def test_service_settings_no_external_funnel_address_surface(monkeypatch: pytest
     assert not hasattr(services, "funnel_port")
     assert not hasattr(services, "funnel_base_url_override")
     assert not hasattr(services, "funnel_base_url")
+
+
+def test_application_settings_populates_environment_by_field_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SPICE_ENV", raising=False)
+
+    settings = ApplicationSettings(environment="test")
+
+    assert settings.environment == Environment.TEST

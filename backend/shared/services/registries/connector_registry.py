@@ -604,7 +604,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
                 await conn.execute(
                     f"""
                     INSERT INTO {self._schema}.connector_sources (source_type, source_id, enabled, config_json, created_at, updated_at)
-                    VALUES ($1, $2, TRUE, '{{}}'::jsonb, NOW(), NOW())
+                    VALUES ($1, $2, FALSE, '{{}}'::jsonb, NOW(), NOW())
                     ON CONFLICT (source_type, source_id) DO NOTHING
                     """,
                     st,

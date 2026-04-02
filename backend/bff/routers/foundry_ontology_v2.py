@@ -6,6 +6,7 @@ existing OMS/BFF ontology resources.
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict
 
 import httpx
@@ -91,7 +92,8 @@ _DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
     "color": "#4C6A9A",
 }
 _SEARCH_ROUTING_AUDIT_STORE: AuditLogStore | None = None
-_SEARCH_ROUTING_AUDIT_DISABLED = False
+_SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = 0.0
+_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = 60.0
 _FORWARDED_ACTOR_HEADER_KEYS = (
     "X-User-ID",
     "X-User-Type",
@@ -646,8 +648,9 @@ async def _audit_search_around_compute_routing(
         decision_metadata,
     )
 
-    global _SEARCH_ROUTING_AUDIT_STORE, _SEARCH_ROUTING_AUDIT_DISABLED
-    if _SEARCH_ROUTING_AUDIT_DISABLED:
+    global _SEARCH_ROUTING_AUDIT_STORE, _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
+    now = time.monotonic()
+    if _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL > now:
         return
 
     try:
@@ -669,10 +672,12 @@ async def _audit_search_around_compute_routing(
             },
         )
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        _SEARCH_ROUTING_AUDIT_DISABLED = True
+        _SEARCH_ROUTING_AUDIT_STORE = None
+        _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = time.monotonic() + _SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
         logger.warning(
-            "Search Around compute routing audit disabled after persistence error (ontology=%s): %s",
+            "Search Around compute routing audit temporarily disabled after persistence error (ontology=%s, retry_in=%ss): %s",
             db_name,
+            int(_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS),
             exc,
             exc_info=True,
         )
