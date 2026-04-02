@@ -35,7 +35,7 @@ class StorageUnavailableError(RuntimeError):
         self.cause = cause
 
 
-class UpstreamUnavailableError(httpx.HTTPError):
+class UpstreamUnavailableError(httpx.RequestError):
     def __init__(
         self,
         message: str,
@@ -45,7 +45,7 @@ class UpstreamUnavailableError(httpx.HTTPError):
         path: str | None = None,
         cause: Exception | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, request=None)
         self.service = service
         self.operation = operation
         self.path = path

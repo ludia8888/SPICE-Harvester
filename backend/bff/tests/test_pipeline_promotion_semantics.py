@@ -6,6 +6,7 @@ from typing import Any, Optional
 import pytest
 from fastapi import HTTPException, status
 
+import bff.services.pipeline_execution_service as pipeline_execution_service
 from bff.services.pipeline_execution_service import build_pipeline, deploy_pipeline, preview_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
@@ -14,6 +15,24 @@ PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
 @pytest.fixture(autouse=True)
 def _set_postgres_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ONTOLOGY_RESOURCE_STORAGE_BACKEND", "postgres")
+
+
+@pytest.fixture(autouse=True)
+def _disable_pipeline_auth_guards(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _noop_enforce_database_role_or_http_error(**kwargs: Any) -> None:  # noqa: ANN401
+        _ = kwargs
+        return None
+
+    monkeypatch.setattr(
+        pipeline_execution_service,
+        "enforce_database_role_or_http_error",
+        _noop_enforce_database_role_or_http_error,
+    )
+    monkeypatch.setattr(
+        pipeline_execution_service,
+        "enforce_db_scope_or_403",
+        lambda request, *, db_name: None,  # noqa: ARG005
+    )
 
 
 @dataclass

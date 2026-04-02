@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 
 from shared.foundry.errors import foundry_error
+from shared.security.database_access import DatabaseAccessRegistryUnavailableError
 from shared.security.input_sanitizer import SecurityViolationError
 from shared.utils.action_permission_profile import ActionPermissionProfileError
 
@@ -195,6 +196,13 @@ def _preflight_error_response(
         return _not_found_error("ObjectSetNotFound", ontology=ontology, parameters=scoped or None)
     if isinstance(exc, PermissionDeniedError):
         return _permission_denied(ontology=ontology, message=str(exc), parameters=scoped or None)
+    if isinstance(exc, DatabaseAccessRegistryUnavailableError):
+        return _foundry_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            error_code="UPSTREAM_UNAVAILABLE",
+            error_name="UpstreamUnavailable",
+            parameters={"ontology": ontology, **scoped, "message": "Database access registry unavailable"},
+        )
     if isinstance(exc, ApiFeaturePreviewUsageOnlyError):
         return _foundry_error(
             status.HTTP_400_BAD_REQUEST,

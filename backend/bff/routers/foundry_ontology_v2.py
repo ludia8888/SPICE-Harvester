@@ -1738,6 +1738,17 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
     )
 
 
+async def _require_domain_write_role(request: Request, *, db_name: str) -> None:
+    await enforce_database_role_or_permission_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        denied_error_factory=PermissionDeniedError,
+        allow_if_registry_unavailable=False,
+        enforce_fn=enforce_database_role,
+    )
+
+
 async def _require_read_role(request: Request, *, db_name: str) -> None:
     await enforce_database_role_or_permission_error(
         headers=request.headers,
@@ -3294,7 +3305,7 @@ async def apply_action_v2(
         action_type = str(action or "").strip()
         if not action_type:
             raise ValueError("action is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_domain_write_role(request, db_name=db_name)
         principal_type, principal_id = resolve_database_actor(request.headers)
         metadata = {"user_id": principal_id, "user_type": principal_type}
         mode = _resolve_apply_action_mode(
@@ -3377,7 +3388,7 @@ async def apply_action_batch_v2(
         action_type = str(action or "").strip()
         if not action_type:
             raise ValueError("action is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_domain_write_role(request, db_name=db_name)
         principal_type, principal_id = resolve_database_actor(request.headers)
         metadata = {"user_id": principal_id, "user_type": principal_type}
         requests = list(body.requests or [])
@@ -4256,7 +4267,7 @@ async def create_object_type_v2(
         object_type = str(body.apiName or "").strip()
         if not object_type:
             raise ValueError("apiName is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_domain_write_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4348,7 +4359,7 @@ async def update_object_type_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_role(request, db_name=db_name)
+        await _require_domain_write_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,

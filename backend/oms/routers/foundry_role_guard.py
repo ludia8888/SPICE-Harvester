@@ -24,17 +24,24 @@ async def require_domain_role_if_actor(
     request: Request,
     *,
     db_name: str,
+    allow_if_registry_unavailable: bool = True,
     require_env_key: str = "OMS_REQUIRE_DB_ACCESS",
     enforce_fn: DomainRoleEnforceFn = enforce_database_role,
 ) -> None:
     if not has_actor_headers(request):
         return
-    await enforce_fn(
-        headers=request.headers,
-        db_name=db_name,
-        required_roles=DOMAIN_MODEL_ROLES,
-        require_env_key=require_env_key,
-    )
+    try:
+        await enforce_fn(
+            headers=request.headers,
+            db_name=db_name,
+            required_roles=DOMAIN_MODEL_ROLES,
+            allow_if_registry_unavailable=allow_if_registry_unavailable,
+            require_env_key=require_env_key,
+        )
+    except DatabaseAccessRegistryUnavailableError:
+        if allow_if_registry_unavailable:
+            return
+        raise
 
 
 async def require_domain_role_if_actor_or_response(
@@ -42,6 +49,7 @@ async def require_domain_role_if_actor_or_response(
     *,
     db_name: str,
     foundry_error: Callable[..., JSONResponse],
+    allow_if_registry_unavailable: bool = True,
     require_env_key: str = "OMS_REQUIRE_DB_ACCESS",
     enforce_fn: DomainRoleEnforceFn = enforce_database_role,
 ) -> Optional[JSONResponse]:
@@ -49,11 +57,15 @@ async def require_domain_role_if_actor_or_response(
         await require_domain_role_if_actor(
             request,
             db_name=db_name,
+            allow_if_registry_unavailable=allow_if_registry_unavailable,
             require_env_key=require_env_key,
             enforce_fn=enforce_fn,
         )
     except Exception as exc:
-        return foundry_role_guard_error_response(foundry_error=foundry_error, exc=exc)
+        response = foundry_role_guard_error_response(foundry_error=foundry_error, exc=exc)
+        if response is not None:
+            return response
+        raise
     return None
 
 

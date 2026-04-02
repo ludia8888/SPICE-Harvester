@@ -263,7 +263,7 @@ async def test_timeseries_returns_permission_denied_when_actor_header_present_an
 
 
 @pytest.mark.asyncio
-async def test_timeseries_returns_503_when_actor_role_check_is_unverifiable(
+async def test_timeseries_allows_registry_degrade_when_actor_role_check_is_unverifiable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     async def _unavailable(**kwargs):  # noqa: ANN001, ANN003
@@ -279,7 +279,7 @@ async def test_timeseries_returns_503_when_actor_role_check_is_unverifiable(
             headers={"X-User-ID": "alice"},
         )
 
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["errorCode"] == "UPSTREAM_UNAVAILABLE"
-    assert body["errorName"] == "UpstreamUnavailable"
+    assert body["time"] == "2024-01-01T00:00:00Z"
+    assert body["value"] == 10.0

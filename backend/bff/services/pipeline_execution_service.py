@@ -1539,7 +1539,7 @@ async def preview_pipeline(
                 headers=request.headers,
                 db_name=prepared.run_context.db_name,
                 required_roles=DATA_ENGINEER_ROLES,
-                allow_if_registry_unavailable=True,
+                allow_if_registry_unavailable=False,
             )
         node_id = prepared.run_context.node_id
         response = await _dispatch_preview_execution(
@@ -1625,7 +1625,7 @@ async def build_pipeline(
                 headers=request.headers,
                 db_name=prepared.run_context.db_name,
                 required_roles=DATA_ENGINEER_ROLES,
-                allow_if_registry_unavailable=True,
+                allow_if_registry_unavailable=False,
             )
         response = await _dispatch_build_execution(
             pipeline_id=pipeline_id,
@@ -3358,7 +3358,7 @@ async def deploy_pipeline(
             headers=request.headers,
             db_name=prepared.db_name,
             required_roles=DATA_ENGINEER_ROLES,
-            allow_if_registry_unavailable=True,
+            allow_if_registry_unavailable=False,
         )
         result = await _dispatch_deploy_execution(
             prepared=prepared,

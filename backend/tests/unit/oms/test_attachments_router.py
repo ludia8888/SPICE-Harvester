@@ -327,7 +327,7 @@ async def test_attachments_return_permission_denied_when_actor_header_present_an
 
 
 @pytest.mark.asyncio
-async def test_attachments_return_503_when_actor_role_check_is_unverifiable(
+async def test_attachments_allow_registry_degrade_when_actor_role_check_is_unverifiable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     async def _unavailable(**kwargs):  # noqa: ANN001, ANN003
@@ -343,7 +343,7 @@ async def test_attachments_return_503_when_actor_role_check_is_unverifiable(
             headers={"X-User-ID": "alice"},
         )
 
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["errorCode"] == "UPSTREAM_UNAVAILABLE"
-    assert body["errorName"] == "UpstreamUnavailable"
+    assert body["type"] == "single"
+    assert body["rid"] == "ri.attachments.main.attachment.aaaa-bbbb-cccc"
