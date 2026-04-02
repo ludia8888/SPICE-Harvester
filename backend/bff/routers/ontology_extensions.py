@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request, status
 
 from bff.dependencies import OMSClientDep
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.schemas.ontology_extensions_requests import OntologyDeploymentRecordRequest, OntologyResourceRequest
 from bff.services import ontology_extensions_service
 from bff.services.oms_client import OMSClient
@@ -19,10 +20,12 @@ router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Exten
 
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
-    except ValueError as exc:
-        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+    await enforce_database_role_or_http_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        enforce_fn=enforce_database_role,
+    )
 
 
 def _default_expected_head_commit(branch: str) -> str:

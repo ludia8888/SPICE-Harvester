@@ -29,6 +29,8 @@ from shared.services.storage.s3_client_config import build_s3_client_config
 if TYPE_CHECKING:
     from shared.config.settings import ApplicationSettings
 
+logger = logging.getLogger(__name__)
+
 
 class StorageService:
     """
@@ -708,7 +710,9 @@ class StorageService:
     async def replay_instance_state(
         self,
         bucket: str,
-        command_files: list
+        command_files: list,
+        *,
+        strict: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
@@ -852,10 +856,10 @@ class StorageService:
                             }
                         }
                 
-            except Exception as e:
-                # 개별 Command 처리 실패 시 로그만 남기고 계속 진행
-                import logging
-                logging.error(f"Failed to process command file {file_key}: {e}")
+            except Exception as exc:
+                if strict:
+                    raise RuntimeError(f"Failed to process command file {file_key}") from exc
+                logger.error("Failed to process command file %s: %s", file_key, exc, exc_info=True)
                 continue
         
         # 최종 상태에 Command 이력 포함

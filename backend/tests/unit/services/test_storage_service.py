@@ -122,3 +122,54 @@ def test_storage_service_supports_tls_ca_bundle_path(monkeypatch):
 
     assert captured["service_name"] == "s3"
     assert captured["kwargs"]["verify"] == "/tmp/ca-bundle.pem"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_replay_instance_state_best_effort_skips_invalid_command_files():
+    service = StorageService.__new__(StorageService)
+
+    async def _load_json(bucket: str, key: str):
+        _ = bucket
+        if key.endswith("bad.json"):
+            raise ValueError("bad command")
+        return {
+            "command_type": "CREATE_INSTANCE",
+            "command_id": "cmd-1",
+            "instance_id": "ticket-1",
+            "class_id": "Ticket",
+            "db_name": "demo",
+            "created_at": "2026-01-01T00:00:00Z",
+            "payload": {"status": "OPEN"},
+        }
+
+    service.load_json = _load_json
+
+    state = await StorageService.replay_instance_state(
+        service,
+        bucket="bucket",
+        command_files=["bad.json", "good.json"],
+    )
+
+    assert state is not None
+    assert state["status"] == "OPEN"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_replay_instance_state_strict_raises_on_invalid_command_file():
+    service = StorageService.__new__(StorageService)
+
+    async def _load_json(bucket: str, key: str):
+        _ = bucket, key
+        raise ValueError("bad command")
+
+    service.load_json = _load_json
+
+    with pytest.raises(RuntimeError, match="Failed to process command file bad.json"):
+        await StorageService.replay_instance_state(
+            service,
+            bucket="bucket",
+            command_files=["bad.json"],
+            strict=True,
+        )

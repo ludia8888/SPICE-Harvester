@@ -16,6 +16,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.dependencies import OMSClientDep
 from bff.routers.object_types_deps import get_dataset_registry, get_objectify_registry
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services import object_type_contract_service
 from bff.services.oms_client import OMSClient
 from shared.models.requests import ApiResponse
@@ -36,10 +37,12 @@ router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Objec
 
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
-    except ValueError as exc:
-        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+    await enforce_database_role_or_http_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        enforce_fn=enforce_database_role,
+    )
 
 
 def _unwrap_data(payload: Any) -> Dict[str, Any]:

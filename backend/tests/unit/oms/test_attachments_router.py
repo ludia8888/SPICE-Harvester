@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from oms.routers import attachments as attachments_module
 from oms.routers.attachments import attachments_upload_router, attachments_property_router
 from shared.dependencies.providers import get_elasticsearch_service, get_storage_service
+from shared.security.database_access import DatabaseAccessRegistryUnavailableError
 
 app = FastAPI()
 app.include_router(attachments_upload_router)
@@ -323,3 +324,26 @@ async def test_attachments_return_permission_denied_when_actor_header_present_an
     body = resp.json()
     assert body["errorCode"] == "PERMISSION_DENIED"
     assert body["errorName"] == "PermissionDenied"
+
+
+@pytest.mark.asyncio
+async def test_attachments_return_503_when_actor_role_check_is_unverifiable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _unavailable(**kwargs):  # noqa: ANN001, ANN003
+        _ = kwargs
+        raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
+
+    monkeypatch.setattr(attachments_module, "enforce_database_role", _unavailable)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/v2/ontologies/test_db/objects/Employee/emp-001/attachments/resume",
+            headers={"X-User-ID": "alice"},
+        )
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["errorCode"] == "UPSTREAM_UNAVAILABLE"
+    assert body["errorName"] == "UpstreamUnavailable"

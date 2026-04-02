@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-03-07T11:31:09+09:00
+> Generated: 2026-03-07T16:26:04+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -27,9 +27,13 @@
 
 ### `backend/action_worker/__init__.py`
 
+### `backend/action_worker/governance.py`
+- **Functions**
+  - `async check_writeback_dataset_acl_alignment(dataset_registry, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 15): no docstring
+
 ### `backend/action_worker/main.py`
 - **Functions**
-  - `async main()` (line 2608): no docstring
+  - `async main()` (line 2410): no docstring
 - **Classes**
   - `_ActionCommandPayload` (line 116): no docstring
   - `_ActionCommandParseError` (line 123): no docstring
@@ -53,45 +57,45 @@
     - `async _send_to_dlq(self, msg, error, attempt_count, payload, raw_payload, stage, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 478): no docstring
     - `async run(self)` (line 509): no docstring
     - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 513): no docstring
-    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 545): no docstring
-    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 772): no docstring
-    - `_audit_result(self, audit_policy, payload)` (line 905): no docstring
-    - `async _prepare_pending_input(self, action_log_id, command, log_rec, spec, audit_policy)` (line 933): no docstring
-    - `_is_public_identifier(value)` (line 1010): no docstring
-    - `async _execute_action_pending(self, db_name, action_log_id, command, log_rec, spec, resources, action_type_id, action_type_rid, ontology_commit_id, submitted_by, submitted_by_type, actor_role, permission_profile, audit_policy, repo, branch)` (line 1014): no docstring
-    - `_extract_submission_targets(self, log_rec)` (line 1128): no docstring
-    - `async _build_pending_loaded_targets(self, db_name, action_log_id, audit_policy, resources, ontology_commit_id, spec, compiled_shape, implementation, input_payload, submitted_by, actor_role, base_branch, get_object_type_meta, submission_targets)` (line 1143): no docstring
-    - `async _enforce_pending_target_access(self, db_name, action_log_id, audit_policy, permission_profile, submitted_by, submitted_by_type, actor_role, loaded_targets)` (line 1310): no docstring
-    - `async _reject_action(self, action_log_id, audit_policy, error_key, message, extra, cause)` (line 1418): no docstring
-    - `_build_target_meta(loaded_targets)` (line 1442): no docstring
-    - `_build_rule_base_vars(submitted_by, actor_role, input_payload, target_docs_list, target_meta, db_name, base_branch)` (line 1453): no docstring
-    - `_resolve_input_ref_target(value, loaded_targets)` (line 1474): no docstring
-    - `_inject_submission_input_vars(self, criteria_vars, input_payload, loaded_targets)` (line 1494): no docstring
-    - `_inject_submission_class_vars(self, criteria_vars, loaded_targets)` (line 1507): no docstring
-    - `_build_submission_criteria_vars(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch, target_meta)` (line 1528): no docstring
-    - `async _ensure_submission_actor_for_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, target_meta)` (line 1557): no docstring
-    - `async _evaluate_submission_criteria(self, action_log_id, audit_policy, submission_criteria, criteria_vars, target_meta)` (line 1576): no docstring
-    - `async _reject_submission_criteria_failed(self, action_log_id, audit_policy, submission_criteria, actor_role, target_meta)` (line 1597): no docstring
-    - `async _prepare_submission_criteria_context(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1622): no docstring
-    - `async _enforce_submission_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1654): no docstring
-    - `async _reject_validation_rule(self, action_log_id, audit_policy, error_key, message, rule_index, scope, expr, target, cause)` (line 1699): no docstring
-    - `async _parse_validation_rule(self, action_log_id, audit_policy, rule, rule_idx)` (line 1728): no docstring
-    - `async _enforce_action_scope_validation_rule(self, action_log_id, audit_policy, base_vars, rule_idx, scope, expr, message)` (line 1766): no docstring
-    - `async _enforce_each_target_validation_rule(self, action_log_id, audit_policy, base_vars, target_docs_list, target_meta, rule_idx, scope, expr, message)` (line 1802): no docstring
-    - `async _normalize_validation_rules(self, action_log_id, audit_policy, validation_rules)` (line 1846): no docstring
-    - `_build_validation_rule_context(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1864): no docstring
-    - `async _enforce_single_validation_rule(self, action_log_id, audit_policy, rule, rule_idx, base_vars, target_docs_list, target_meta)` (line 1887): no docstring
-    - `async _enforce_validation_rules(self, action_log_id, audit_policy, validation_rules, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1937): no docstring
-    - `async _enforce_submission_and_validation_rules(self, action_log_id, audit_policy, spec, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1978): no docstring
-    - `async _build_and_commit_pending_patchset(self, db_name, action_log_id, action_type_id, action_type_rid, ontology_commit_id, action_conflict_policy, get_object_type_meta, loaded_targets, log_rec, audit_policy, repo, branch)` (line 2016): no docstring
-    - `async _emit_action_applied_if_needed(self, db_name, action_log_id, command, writeback_target, patchset_commit_id, ontology_commit_id, branch)` (line 2165): no docstring
-    - `async _mark_action_succeeded(self, action_log_id, audit_policy, patchset_commit_id, action_applied_event_id, action_applied_seq)` (line 2222): no docstring
-    - `_dependency_is_satisfied(trigger_on, parent_status)` (line 2244): Returns (satisfied, impossible).
-    - `async _emit_deferred_action_command(self, log_rec, triggered_by_action_log_id)` (line 2275): no docstring
-    - `async _trigger_dependent_actions(self, db_name, parent_action_log_id)` (line 2334): no docstring
-    - `async _ensure_branch(self, repository, branch)` (line 2425): no docstring
-    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 2428): no docstring
-    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 2487): no docstring
+    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 552): no docstring
+    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 574): no docstring
+    - `_audit_result(self, audit_policy, payload)` (line 707): no docstring
+    - `async _prepare_pending_input(self, action_log_id, command, log_rec, spec, audit_policy)` (line 735): no docstring
+    - `_is_public_identifier(value)` (line 812): no docstring
+    - `async _execute_action_pending(self, db_name, action_log_id, command, log_rec, spec, resources, action_type_id, action_type_rid, ontology_commit_id, submitted_by, submitted_by_type, actor_role, permission_profile, audit_policy, repo, branch)` (line 816): no docstring
+    - `_extract_submission_targets(self, log_rec)` (line 930): no docstring
+    - `async _build_pending_loaded_targets(self, db_name, action_log_id, audit_policy, resources, ontology_commit_id, spec, compiled_shape, implementation, input_payload, submitted_by, actor_role, base_branch, get_object_type_meta, submission_targets)` (line 945): no docstring
+    - `async _enforce_pending_target_access(self, db_name, action_log_id, audit_policy, permission_profile, submitted_by, submitted_by_type, actor_role, loaded_targets)` (line 1112): no docstring
+    - `async _reject_action(self, action_log_id, audit_policy, error_key, message, extra, cause)` (line 1220): no docstring
+    - `_build_target_meta(loaded_targets)` (line 1244): no docstring
+    - `_build_rule_base_vars(submitted_by, actor_role, input_payload, target_docs_list, target_meta, db_name, base_branch)` (line 1255): no docstring
+    - `_resolve_input_ref_target(value, loaded_targets)` (line 1276): no docstring
+    - `_inject_submission_input_vars(self, criteria_vars, input_payload, loaded_targets)` (line 1296): no docstring
+    - `_inject_submission_class_vars(self, criteria_vars, loaded_targets)` (line 1309): no docstring
+    - `_build_submission_criteria_vars(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch, target_meta)` (line 1330): no docstring
+    - `async _ensure_submission_actor_for_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, target_meta)` (line 1359): no docstring
+    - `async _evaluate_submission_criteria(self, action_log_id, audit_policy, submission_criteria, criteria_vars, target_meta)` (line 1378): no docstring
+    - `async _reject_submission_criteria_failed(self, action_log_id, audit_policy, submission_criteria, actor_role, target_meta)` (line 1399): no docstring
+    - `async _prepare_submission_criteria_context(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1424): no docstring
+    - `async _enforce_submission_criteria(self, action_log_id, audit_policy, submission_criteria, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1456): no docstring
+    - `async _reject_validation_rule(self, action_log_id, audit_policy, error_key, message, rule_index, scope, expr, target, cause)` (line 1501): no docstring
+    - `async _parse_validation_rule(self, action_log_id, audit_policy, rule, rule_idx)` (line 1530): no docstring
+    - `async _enforce_action_scope_validation_rule(self, action_log_id, audit_policy, base_vars, rule_idx, scope, expr, message)` (line 1568): no docstring
+    - `async _enforce_each_target_validation_rule(self, action_log_id, audit_policy, base_vars, target_docs_list, target_meta, rule_idx, scope, expr, message)` (line 1604): no docstring
+    - `async _normalize_validation_rules(self, action_log_id, audit_policy, validation_rules)` (line 1648): no docstring
+    - `_build_validation_rule_context(self, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1666): no docstring
+    - `async _enforce_single_validation_rule(self, action_log_id, audit_policy, rule, rule_idx, base_vars, target_docs_list, target_meta)` (line 1689): no docstring
+    - `async _enforce_validation_rules(self, action_log_id, audit_policy, validation_rules, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1739): no docstring
+    - `async _enforce_submission_and_validation_rules(self, action_log_id, audit_policy, spec, submitted_by, actor_role, input_payload, loaded_targets, db_name, base_branch)` (line 1780): no docstring
+    - `async _build_and_commit_pending_patchset(self, db_name, action_log_id, action_type_id, action_type_rid, ontology_commit_id, action_conflict_policy, get_object_type_meta, loaded_targets, log_rec, audit_policy, repo, branch)` (line 1818): no docstring
+    - `async _emit_action_applied_if_needed(self, db_name, action_log_id, command, writeback_target, patchset_commit_id, ontology_commit_id, branch)` (line 1967): no docstring
+    - `async _mark_action_succeeded(self, action_log_id, audit_policy, patchset_commit_id, action_applied_event_id, action_applied_seq)` (line 2024): no docstring
+    - `_dependency_is_satisfied(trigger_on, parent_status)` (line 2046): Returns (satisfied, impossible).
+    - `async _emit_deferred_action_command(self, log_rec, triggered_by_action_log_id)` (line 2077): no docstring
+    - `async _trigger_dependent_actions(self, db_name, parent_action_log_id)` (line 2136): no docstring
+    - `async _ensure_branch(self, repository, branch)` (line 2227): no docstring
+    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 2230): no docstring
+    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 2289): no docstring
 
 ## agent
 
@@ -243,27 +247,29 @@
 
 ### `backend/bff/dependencies.py`
 - **Functions**
-  - `async get_foundry_query_service(oms_client)` (line 365): Get FoundryQueryService with modern dependency injection.
-  - `async check_bff_dependencies_health(container)` (line 387): Check health of all BFF dependencies
+  - `_service_unavailable(message, exc)` (line 51): no docstring
+  - `async _health_status_for_service(service)` (line 59): no docstring
+  - `async get_foundry_query_service(oms_client)` (line 373): Get FoundryQueryService with modern dependency injection.
+  - `async check_bff_dependencies_health(container)` (line 395): Check health of all BFF dependencies
 - **Classes**
-  - `BFFDependencyProvider` (line 50): Modern dependency provider for BFF services
-    - `async get_oms_client(container)` (line 59): Get OMS client from container
-    - `async get_action_log_registry(container)` (line 84): Get ActionLogRegistry (Postgres-backed) from container.
-  - `FoundryQueryService` (line 115): OMS client wrapper for Foundry-style ontology/query operations.
-    - `__init__(self, oms_client)` (line 120): Initialize with OMS client dependency
-    - `async list_databases(self)` (line 130): 데이터베이스 목록 조회
-    - `async create_database(self, db_name, description)` (line 141): 데이터베이스 생성
-    - `async delete_database(self, db_name, expected_seq)` (line 146): 데이터베이스 삭제
-    - `async get_database_info(self, db_name)` (line 151): 데이터베이스 정보 조회
-    - `async list_classes(self, db_name, branch)` (line 156): 클래스 목록 조회
-    - `async create_class(self, db_name, class_data, branch, headers)` (line 164): 클래스 생성
-    - `async get_class(self, db_name, class_id, branch)` (line 179): 클래스 조회
-    - `async update_class(self, db_name, class_id, class_data, expected_seq, branch, headers)` (line 206): 클래스 업데이트
-    - `async delete_class(self, db_name, class_id, expected_seq, branch, headers)` (line 222): 클래스 삭제
-    - `async query_database(self, db_name, query)` (line 237): 데이터베이스 쿼리 (Foundry Search Objects v2 adapter).
-    - `_encode_page_token(offset)` (line 303): no docstring
-    - `_build_foundry_where(filters)` (line 307): no docstring
-    - `_map_filter_to_foundry(filter_item)` (line 325): no docstring
+  - `BFFDependencyProvider` (line 66): Modern dependency provider for BFF services
+    - `async get_oms_client(container)` (line 75): Get OMS client from container
+    - `async get_action_log_registry(container)` (line 96): Get ActionLogRegistry (Postgres-backed) from container.
+  - `FoundryQueryService` (line 123): OMS client wrapper for Foundry-style ontology/query operations.
+    - `__init__(self, oms_client)` (line 128): Initialize with OMS client dependency
+    - `async list_databases(self)` (line 138): 데이터베이스 목록 조회
+    - `async create_database(self, db_name, description)` (line 149): 데이터베이스 생성
+    - `async delete_database(self, db_name, expected_seq)` (line 154): 데이터베이스 삭제
+    - `async get_database_info(self, db_name)` (line 159): 데이터베이스 정보 조회
+    - `async list_classes(self, db_name, branch)` (line 164): 클래스 목록 조회
+    - `async create_class(self, db_name, class_data, branch, headers)` (line 172): 클래스 생성
+    - `async get_class(self, db_name, class_id, branch)` (line 187): 클래스 조회
+    - `async update_class(self, db_name, class_id, class_data, expected_seq, branch, headers)` (line 214): 클래스 업데이트
+    - `async delete_class(self, db_name, class_id, expected_seq, branch, headers)` (line 230): 클래스 삭제
+    - `async query_database(self, db_name, query)` (line 245): 데이터베이스 쿼리 (Foundry Search Objects v2 adapter).
+    - `_encode_page_token(offset)` (line 311): no docstring
+    - `_build_foundry_where(filters)` (line 315): no docstring
+    - `_map_filter_to_foundry(filter_item)` (line 333): no docstring
 
 ### `backend/bff/main.py`
 - **Functions**
@@ -507,126 +513,133 @@
 
 ### `backend/bff/routers/foundry_connectivity_v2.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 126): no docstring
-  - `_connection_id_from_rid(connection_rid)` (line 141): no docstring
-  - `_connection_rid(connection_id)` (line 154): no docstring
-  - `_table_import_id_from_rid(table_import_rid)` (line 158): no docstring
-  - `_table_import_rid(table_import_id)` (line 171): no docstring
-  - `_file_import_id_from_rid(file_import_rid)` (line 175): no docstring
-  - `_file_import_rid(file_import_id)` (line 188): no docstring
-  - `_virtual_table_id_from_rid(virtual_table_rid)` (line 192): no docstring
-  - `_virtual_table_rid(virtual_table_id)` (line 205): no docstring
-  - `_dataset_id_from_rid(dataset_rid)` (line 209): no docstring
-  - `_dataset_id_from_any(raw)` (line 222): no docstring
-  - `_dataset_rid(dataset_id)` (line 231): no docstring
-  - `_export_run_rid(run_id)` (line 235): no docstring
-  - `_export_run_id_from_rid(export_run_rid)` (line 239): no docstring
-  - `_coerce_bool(raw, default)` (line 252): no docstring
-  - `_normalize_export_run_method(raw)` (line 265): no docstring
-  - `_normalize_export_run_headers(raw)` (line 272): no docstring
-  - `_normalize_export_run_timeout_seconds(raw)` (line 287): no docstring
-  - `_is_valid_http_url(raw)` (line 296): no docstring
-  - `_task_status_to_export_status(task_status)` (line 301): no docstring
-  - `_export_run_response_from_task(connection_id, task)` (line 313): no docstring
-  - `async _run_connection_export(task_id, connection_id, connection_rid, target_url, method, request_headers, payload, timeout_seconds, dry_run, actor, audit_store)` (line 351): no docstring
-  - `_connector_import_pipeline_id(namespace, connection_id, source_type, source_id)` (line 462): no docstring
-  - `_build_pipeline_job_id(pipeline_id)` (line 472): no docstring
-  - `_parse_allowlist(raw)` (line 476): no docstring
-  - `_invalid_pagination_response(message)` (line 480): no docstring
-  - `_parse_page_size_value(page_size, default)` (line 489): no docstring
-  - `_parse_page_offset(page_token)` (line 501): no docstring
-  - `_is_flag_or_allowlist_enabled(global_enabled, allowlist_raw, db_name)` (line 513): no docstring
-  - `_feature_flags_settings()` (line 522): no docstring
-  - `_jdbc_enabled_for_db(db_name)` (line 531): no docstring
-  - `_cdc_enabled_for_db(db_name)` (line 540): no docstring
-  - `_requires_cdc_feature(import_mode)` (line 549): no docstring
-  - `_connection_source_types()` (line 553): no docstring
-  - `_table_import_source_types()` (line 557): no docstring
-  - `_file_import_source_types()` (line 561): no docstring
-  - `_virtual_table_source_types()` (line 565): no docstring
-  - `_connection_kind_from_source(source)` (line 569): no docstring
-  - `_require_preview_or_400(preview)` (line 584): no docstring
-  - `_default_export_settings()` (line 595): no docstring
-  - `_normalize_export_settings(value)` (line 602): no docstring
-  - `_normalize_markings(value)` (line 630): no docstring
-  - `_normalize_jdbc_driver_file_name(file_name)` (line 647): no docstring
-  - `_upsert_custom_jdbc_driver_metadata(config_json, file_name, sha256_hex, size_bytes, repository, object_key)` (line 662): no docstring
-  - `_public_custom_jdbc_driver_metadata(config)` (line 695): no docstring
-  - `_extract_connection_configuration(payload)` (line 726): no docstring
-  - `_display_name_from_payload(payload, fallback)` (line 734): no docstring
-  - `_validate_parent_rid_matches_connection(payload, connection_id)` (line 738): no docstring
-  - `_resolve_table_import_config(payload, connector_kind, sheet_url, worksheet_name)` (line 757): no docstring
-  - `_resolve_file_import_config(payload, connector_kind)` (line 784): no docstring
-  - `_resolve_virtual_table_config(payload, connector_kind)` (line 814): no docstring
-  - `_extract_destination(payload)` (line 838): no docstring
-  - `_resource_invalid_config_response(resource_kind, message)` (line 870): no docstring
-  - `_resource_import_mode_from_source(source_cfg, resource_kind)` (line 883): no docstring
-  - `_safe_import_mode(raw_mode)` (line 889): no docstring
-  - `_resource_import_config_from_source(source_cfg, resource_kind)` (line 896): no docstring
-  - `async _resolve_dataset_context(payload, dataset_registry)` (line 906): no docstring
-  - `async _load_connection_source(connector_registry, connection_id)` (line 929): no docstring
-  - `async _load_connection_source_or_404(connector_registry, connection_rid)` (line 941): no docstring
-  - `async _load_connector_import_source(connector_registry, connection_id, source_id, source_types)` (line 965): no docstring
-  - `async _list_connection_owned_sources(connector_registry, connection_id, source_types)` (line 985): no docstring
-  - `async _load_table_import_source(connector_registry, connection_id, table_import_id)` (line 1002): no docstring
-  - `async _load_file_import_source(connector_registry, connection_id, file_import_id)` (line 1016): no docstring
-  - `async _load_virtual_table_source(connector_registry, connection_id, virtual_table_id)` (line 1030): no docstring
-  - `async _resolve_output_dataset_rid(source, mapping, dataset_registry)` (line 1044): no docstring
-  - `_resource_parent_rid(cfg, connection_id)` (line 1074): no docstring
-  - `_resource_branch_name(cfg, mapping)` (line 1081): no docstring
-  - `async _build_connector_import_response(connection_id, source, mapping, dataset_registry, rid_builder, config_key, default_config_factory, default_name_factory, name_hint_keys, include_import_mode, include_allow_schema_changes, include_markings)` (line 1087): no docstring
-  - `async _build_table_import_response(connection_id, source, mapping, dataset_registry)` (line 1138): no docstring
-  - `async _build_file_import_response(connection_id, source, mapping, dataset_registry)` (line 1160): no docstring
-  - `async _build_virtual_table_response(connection_id, source, mapping, dataset_registry)` (line 1182): no docstring
-  - `_resolved_display_names(payload, fallback_display_name, fallback_name)` (line 1202): no docstring
-  - `_resolved_allow_schema_changes(payload, existing_cfg, default)` (line 1213): no docstring
-  - `_build_connector_import_source_config(connection_id, display_name, name, import_mode, config_key, resource_config, existing_cfg, dataset_rid, branch_name, allow_schema_changes, resource_kind, extra_updates)` (line 1226): no docstring
-  - `_connector_import_mapping_status(target_db_name, target_class_label)` (line 1265): no docstring
-  - `async _upsert_created_connector_import_mapping(connector_registry, source_type, source_id, target_db_name, target_branch, target_class_label)` (line 1273): no docstring
-  - `async _upsert_replaced_connector_import_mapping(connector_registry, source_type, source_id, mapping, destination_db, destination_branch, destination_object_type)` (line 1299): no docstring
-  - `async _connection_configuration(source, connector_adapter_factory)` (line 1329): no docstring
-  - `async _connection_response(source, connector_adapter_factory)` (line 1345): no docstring
-  - `_iso_timestamp(value)` (line 1391): no docstring
-  - `_normalize_connection_config_for_storage(configuration, kind)` (line 1399): no docstring
-  - `_extract_secrets_from_configuration(configuration, kind)` (line 1421): no docstring
-  - `_extract_secrets_from_payload(payload, kind)` (line 1433): no docstring
-  - `_build_execute_run_output(connection_rid, resource_rid, branch_name, requested_by, resource_field, result_payload, error_detail)` (line 1451): no docstring
-  - `_validated_execute_result_payload(result_payload, resource_kind)` (line 1479): no docstring
-  - `async _record_execute_failure_run(pipeline_registry, pipeline_id, job_id, connection_rid, resource_rid, branch_name, requested_by, error_detail, resource_field, started_at)` (line 1492): no docstring
-  - `async _ensure_connector_import_pipeline(pipeline_registry, connection_id, source, mapping, namespace, pipeline_name_prefix, pipeline_type, location_segment, description_label)` (line 1528): no docstring
-  - `async _execute_connector_import_build(request, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, connection_id, source, mapping, resource_kind, resource_kind_key, resource_log_id, resource_rid, resource_field, pipeline_namespace, pipeline_name_prefix, pipeline_type, location_segment, start_pipelining)` (line 1566): no docstring
-  - `async _load_validated_executable_connector_import(connector_registry, connection_id, source_id, source_types, resource_kind, resource_display_name, resource_error_name, not_found_parameters, validate_cdc)` (line 1699): no docstring
-  - `async create_table_import_v2(connectionRid, payload, request, preview, google_sheets_service, connector_registry, dataset_registry, _, lineage_store)` (line 1767): no docstring
-  - `async get_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, dataset_registry, _)` (line 1999): no docstring
-  - `async list_table_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 2051): no docstring
-  - `async replace_table_import_v2(connectionRid, tableImportRid, payload, preview, connector_registry, dataset_registry, _)` (line 2116): no docstring
-  - `async delete_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, _)` (line 2261): no docstring
-  - `async execute_table_import_v2(connectionRid, tableImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 2318): no docstring
-  - `async create_file_import_v2(connectionRid, payload, preview, connector_registry, dataset_registry, _)` (line 2394): no docstring
-  - `async get_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, dataset_registry, _)` (line 2527): no docstring
-  - `async list_file_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 2580): no docstring
-  - `async replace_file_import_v2(connectionRid, fileImportRid, payload, preview, connector_registry, dataset_registry, _)` (line 2632): no docstring
-  - `async delete_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, _)` (line 2767): no docstring
-  - `async execute_file_import_v2(connectionRid, fileImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 2820): no docstring
-  - `async execute_virtual_table_v2(connectionRid, virtualTableRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 2896): no docstring
-  - `async create_virtual_table_v2(connectionRid, payload, preview, connector_registry, dataset_registry, _)` (line 2973): no docstring
-  - `async get_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, dataset_registry, _)` (line 3095): no docstring
-  - `async list_virtual_tables_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 3147): no docstring
-  - `async replace_virtual_table_v2(connectionRid, virtualTableRid, payload, preview, connector_registry, dataset_registry, _)` (line 3199): no docstring
-  - `async delete_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, _)` (line 3325): no docstring
-  - `async create_connection_v2(payload, request, preview, connector_registry, connector_adapter_factory, _)` (line 3378): no docstring
-  - `async get_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 3475): no docstring
-  - `async list_connections_v2(request, preview, pageSize, pageToken, connector_registry, connector_adapter_factory, _)` (line 3499): no docstring
-  - `async delete_connection_v2(connectionRid, preview, connector_registry, _)` (line 3532): no docstring
-  - `async test_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 3568): no docstring
-  - `async get_connection_configuration_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 3633): no docstring
-  - `async get_connection_configuration_batch_v2(payload, preview, connector_registry, connector_adapter_factory, _)` (line 3666): no docstring
-  - `async update_connection_secrets_v2(connectionRid, payload, preview, connector_registry, _)` (line 3717): no docstring
-  - `async update_connection_export_settings_v2(connectionRid, payload, preview, connector_registry, _)` (line 3763): no docstring
-  - `async create_connection_export_run_v2(connectionRid, payload, request, task_manager, audit_store, preview, connector_registry, _)` (line 3801): no docstring
-  - `async get_connection_export_run_v2(connectionRid, exportRunRid, task_manager, preview, connector_registry, _)` (line 3918): no docstring
-  - `async list_connection_export_runs_v2(connectionRid, task_manager, preview, pageSize, pageToken, connector_registry, _)` (line 3970): no docstring
-  - `async upload_custom_jdbc_drivers_v2(connectionRid, request, driverBytes, fileName, preview, connector_registry, connector_adapter_factory, pipeline_registry, _)` (line 4015): no docstring
+  - `_feature_flags_settings()` (line 115): no docstring
+  - `_jdbc_enabled_for_db(db_name)` (line 123): no docstring
+  - `_cdc_enabled_for_db(db_name)` (line 138): no docstring
+  - `async _run_connection_export(task_id, connection_id, connection_rid, target_url, method, request_headers, payload, timeout_seconds, dry_run, actor, audit_store)` (line 153): no docstring
+  - `_connector_import_pipeline_id(namespace, connection_id, source_type, source_id)` (line 264): no docstring
+  - `_build_pipeline_job_id(pipeline_id)` (line 274): no docstring
+  - `async _resolve_dataset_context(payload, dataset_registry)` (line 278): no docstring
+  - `async _load_connection_source(connector_registry, connection_id)` (line 301): no docstring
+  - `async _load_connection_source_or_404(connector_registry, connection_rid)` (line 313): no docstring
+  - `async _load_connector_import_source(connector_registry, connection_id, source_id, source_types)` (line 337): no docstring
+  - `async _list_connection_owned_sources(connector_registry, connection_id, source_types)` (line 357): no docstring
+  - `async _load_table_import_source(connector_registry, connection_id, table_import_id)` (line 374): no docstring
+  - `async _load_file_import_source(connector_registry, connection_id, file_import_id)` (line 388): no docstring
+  - `async _load_virtual_table_source(connector_registry, connection_id, virtual_table_id)` (line 402): no docstring
+  - `async _resolve_output_dataset_rid(source, mapping, dataset_registry)` (line 416): no docstring
+  - `async _build_connector_import_response(connection_id, source, mapping, dataset_registry, rid_builder, config_key, default_config_factory, default_name_factory, name_hint_keys, include_import_mode, include_allow_schema_changes, include_markings)` (line 446): no docstring
+  - `async _build_table_import_response(connection_id, source, mapping, dataset_registry)` (line 497): no docstring
+  - `async _build_file_import_response(connection_id, source, mapping, dataset_registry)` (line 519): no docstring
+  - `async _build_virtual_table_response(connection_id, source, mapping, dataset_registry)` (line 541): no docstring
+  - `_resolved_display_names(payload, fallback_display_name, fallback_name)` (line 561): no docstring
+  - `_resolved_allow_schema_changes(payload, existing_cfg, default)` (line 572): no docstring
+  - `_build_connector_import_source_config(connection_id, display_name, name, import_mode, config_key, resource_config, existing_cfg, dataset_rid, branch_name, allow_schema_changes, resource_kind, extra_updates)` (line 585): no docstring
+  - `_connector_import_mapping_status(target_db_name, target_class_label)` (line 624): no docstring
+  - `async _upsert_created_connector_import_mapping(connector_registry, source_type, source_id, target_db_name, target_branch, target_class_label)` (line 632): no docstring
+  - `async _upsert_replaced_connector_import_mapping(connector_registry, source_type, source_id, mapping, destination_db, destination_branch, destination_object_type)` (line 658): no docstring
+  - `async _connection_configuration(source, connector_adapter_factory)` (line 688): no docstring
+  - `async _connection_response(source, connector_adapter_factory)` (line 704): no docstring
+  - `async _record_execute_failure_run(pipeline_registry, pipeline_id, job_id, connection_rid, resource_rid, branch_name, requested_by, error_detail, resource_field, started_at)` (line 750): no docstring
+  - `async _ensure_connector_import_pipeline(pipeline_registry, connection_id, source, mapping, namespace, pipeline_name_prefix, pipeline_type, location_segment, description_label)` (line 786): no docstring
+  - `async _execute_connector_import_build(request, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, connection_id, source, mapping, resource_kind, resource_kind_key, resource_log_id, resource_rid, resource_field, pipeline_namespace, pipeline_name_prefix, pipeline_type, location_segment, start_pipelining)` (line 824): no docstring
+  - `async _load_validated_executable_connector_import(connector_registry, connection_id, source_id, source_types, resource_kind, resource_display_name, resource_error_name, not_found_parameters, validate_cdc)` (line 957): no docstring
+  - `async create_table_import_v2(connectionRid, payload, request, preview, google_sheets_service, connector_registry, dataset_registry, _, lineage_store)` (line 1025): no docstring
+  - `async get_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, dataset_registry, _)` (line 1257): no docstring
+  - `async list_table_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 1309): no docstring
+  - `async replace_table_import_v2(connectionRid, tableImportRid, payload, preview, connector_registry, dataset_registry, _)` (line 1374): no docstring
+  - `async delete_table_import_v2(connectionRid, tableImportRid, preview, connector_registry, _)` (line 1519): no docstring
+  - `async execute_table_import_v2(connectionRid, tableImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 1576): no docstring
+  - `async create_file_import_v2(connectionRid, payload, preview, connector_registry, dataset_registry, _)` (line 1652): no docstring
+  - `async get_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, dataset_registry, _)` (line 1785): no docstring
+  - `async list_file_imports_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 1838): no docstring
+  - `async replace_file_import_v2(connectionRid, fileImportRid, payload, preview, connector_registry, dataset_registry, _)` (line 1890): no docstring
+  - `async delete_file_import_v2(connectionRid, fileImportRid, preview, connector_registry, _)` (line 2025): no docstring
+  - `async execute_file_import_v2(connectionRid, fileImportRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 2078): no docstring
+  - `async execute_virtual_table_v2(connectionRid, virtualTableRid, request, preview, google_sheets_service, connector_adapter_factory, connector_registry, pipeline_registry, dataset_registry, objectify_registry, objectify_job_queue, _)` (line 2154): no docstring
+  - `async create_virtual_table_v2(connectionRid, payload, preview, connector_registry, dataset_registry, _)` (line 2231): no docstring
+  - `async get_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, dataset_registry, _)` (line 2353): no docstring
+  - `async list_virtual_tables_v2(connectionRid, preview, pageSize, pageToken, connector_registry, dataset_registry, _)` (line 2405): no docstring
+  - `async replace_virtual_table_v2(connectionRid, virtualTableRid, payload, preview, connector_registry, dataset_registry, _)` (line 2457): no docstring
+  - `async delete_virtual_table_v2(connectionRid, virtualTableRid, preview, connector_registry, _)` (line 2583): no docstring
+  - `async create_connection_v2(payload, request, preview, connector_registry, connector_adapter_factory, _)` (line 2636): no docstring
+  - `async get_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 2733): no docstring
+  - `async list_connections_v2(request, preview, pageSize, pageToken, connector_registry, connector_adapter_factory, _)` (line 2757): no docstring
+  - `async delete_connection_v2(connectionRid, preview, connector_registry, _)` (line 2790): no docstring
+  - `async test_connection_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 2826): no docstring
+  - `async get_connection_configuration_v2(connectionRid, preview, connector_registry, connector_adapter_factory, _)` (line 2891): no docstring
+  - `async get_connection_configuration_batch_v2(payload, preview, connector_registry, connector_adapter_factory, _)` (line 2924): no docstring
+  - `async update_connection_secrets_v2(connectionRid, payload, preview, connector_registry, _)` (line 2975): no docstring
+  - `async update_connection_export_settings_v2(connectionRid, payload, preview, connector_registry, _)` (line 3021): no docstring
+  - `async create_connection_export_run_v2(connectionRid, payload, request, task_manager, audit_store, preview, connector_registry, _)` (line 3059): no docstring
+  - `async get_connection_export_run_v2(connectionRid, exportRunRid, task_manager, preview, connector_registry, _)` (line 3176): no docstring
+  - `async list_connection_export_runs_v2(connectionRid, task_manager, preview, pageSize, pageToken, connector_registry, _)` (line 3228): no docstring
+  - `async upload_custom_jdbc_drivers_v2(connectionRid, request, driverBytes, fileName, preview, connector_registry, connector_adapter_factory, pipeline_registry, _)` (line 3273): no docstring
+
+### `backend/bff/routers/foundry_connectivity_v2_common.py`
+- **Functions**
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 104): no docstring
+  - `_id_from_rid(raw_rid, expected_kind)` (line 119): no docstring
+  - `_connection_id_from_rid(connection_rid)` (line 132): no docstring
+  - `_connection_rid(connection_id)` (line 136): no docstring
+  - `_table_import_id_from_rid(table_import_rid)` (line 140): no docstring
+  - `_table_import_rid(table_import_id)` (line 144): no docstring
+  - `_file_import_id_from_rid(file_import_rid)` (line 148): no docstring
+  - `_file_import_rid(file_import_id)` (line 152): no docstring
+  - `_virtual_table_id_from_rid(virtual_table_rid)` (line 156): no docstring
+  - `_virtual_table_rid(virtual_table_id)` (line 160): no docstring
+  - `_dataset_id_from_rid(dataset_rid)` (line 164): no docstring
+  - `_dataset_id_from_any(raw)` (line 168): no docstring
+  - `_dataset_rid(dataset_id)` (line 177): no docstring
+  - `_export_run_rid(run_id)` (line 181): no docstring
+  - `_export_run_id_from_rid(export_run_rid)` (line 185): no docstring
+  - `_coerce_bool(raw, default)` (line 189): no docstring
+  - `_normalize_export_run_method(raw)` (line 202): no docstring
+  - `_normalize_export_run_headers(raw)` (line 209): no docstring
+  - `_normalize_export_run_timeout_seconds(raw)` (line 224): no docstring
+  - `_is_valid_http_url(raw)` (line 233): no docstring
+  - `_task_status_to_export_status(task_status)` (line 238): no docstring
+  - `_iso_timestamp(value)` (line 250): no docstring
+  - `_export_run_response_from_task(connection_id, task)` (line 258): no docstring
+  - `_parse_allowlist(raw)` (line 296): no docstring
+  - `_invalid_pagination_response(message)` (line 300): no docstring
+  - `_parse_page_size_value(page_size, default)` (line 309): no docstring
+  - `_parse_page_offset(page_token)` (line 321): no docstring
+  - `_is_flag_or_allowlist_enabled(global_enabled, allowlist_raw, db_name)` (line 333): no docstring
+  - `_feature_flags_settings()` (line 342): no docstring
+  - `_jdbc_enabled_for_db(db_name)` (line 350): no docstring
+  - `_cdc_enabled_for_db(db_name)` (line 359): no docstring
+  - `_requires_cdc_feature(import_mode)` (line 368): no docstring
+  - `_connection_source_types()` (line 372): no docstring
+  - `_table_import_source_types()` (line 376): no docstring
+  - `_file_import_source_types()` (line 380): no docstring
+  - `_virtual_table_source_types()` (line 384): no docstring
+  - `_connection_kind_from_source(source)` (line 388): no docstring
+  - `_require_preview_or_400(preview)` (line 403): no docstring
+  - `_default_export_settings()` (line 414): no docstring
+  - `_normalize_export_settings(value)` (line 421): no docstring
+  - `_normalize_markings(value)` (line 436): no docstring
+  - `_normalize_jdbc_driver_file_name(file_name)` (line 453): no docstring
+  - `_upsert_custom_jdbc_driver_metadata(config_json, file_name, sha256_hex, size_bytes, repository, object_key)` (line 468): no docstring
+  - `_public_custom_jdbc_driver_metadata(config)` (line 501): no docstring
+  - `_extract_connection_configuration(payload)` (line 532): no docstring
+  - `_display_name_from_payload(payload, fallback)` (line 540): no docstring
+  - `_validate_parent_rid_matches_connection(payload, connection_id)` (line 544): no docstring
+  - `_resolve_table_import_config(payload, connector_kind, sheet_url, worksheet_name)` (line 563): no docstring
+  - `_resolve_file_import_config(payload, connector_kind)` (line 590): no docstring
+  - `_resolve_virtual_table_config(payload, connector_kind)` (line 620): no docstring
+  - `_extract_destination(payload)` (line 644): no docstring
+  - `_resource_invalid_config_response(resource_kind, message)` (line 669): no docstring
+  - `_resource_import_mode_from_source(source_cfg, resource_kind)` (line 682): no docstring
+  - `_safe_import_mode(raw_mode)` (line 688): no docstring
+  - `_resource_import_config_from_source(source_cfg, resource_kind)` (line 695): no docstring
+  - `_resource_parent_rid(cfg, connection_id)` (line 705): no docstring
+  - `_resource_branch_name(cfg, mapping)` (line 712): no docstring
+  - `_normalize_connection_config_for_storage(configuration, kind)` (line 718): no docstring
+  - `_extract_secrets_from_configuration(configuration, kind)` (line 739): no docstring
+  - `_extract_secrets_from_payload(payload, kind)` (line 751): no docstring
+  - `_build_execute_run_output(connection_rid, resource_rid, branch_name, requested_by, resource_field, result_payload, error_detail)` (line 776): no docstring
+  - `_validated_execute_result_payload(result_payload, resource_kind)` (line 804): no docstring
 
 ### `backend/bff/routers/foundry_datasets_v2.py`
 - **Functions**
@@ -675,207 +688,217 @@
 
 ### `backend/bff/routers/foundry_ontology_v2.py`
 - **Functions**
-  - `_query_type_branch_candidates()` (line 101): no docstring
-  - `_build_pk_spec_from_v2_payload(pk_spec, primary_key, title_property)` (line 211): no docstring
-  - `_build_backing_sources_from_v2_payload(backing_source, backing_sources)` (line 229): no docstring
-  - `_extract_api_response_data(payload)` (line 242): no docstring
-  - `_service_http_error_response(exc, ontology, object_type)` (line 254): no docstring
-  - `_default_expected_head_commit(branch)` (line 285): no docstring
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 292): no docstring
-  - `_passthrough_upstream_error_payload(exc)` (line 307): no docstring
-  - `_named_not_found(error_name, parameters)` (line 321): no docstring
-  - `_error_parameters(ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 330): no docstring
-  - `_not_found_error(error_name, ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 353): no docstring
-  - `_permission_denied(ontology, message, parameters)` (line 376): no docstring
-  - `_preflight_error_response(exc, ontology, parameters)` (line 393): no docstring
-  - `_decode_page_token(page_token, scope)` (line 444): no docstring
-  - `_encode_page_token(offset, scope)` (line 452): no docstring
-  - `_parse_order_by(order_by)` (line 456): no docstring
-  - `_temporary_object_set_rid()` (line 489): no docstring
-  - `_prune_expired_temporary_object_sets(now_epoch)` (line 493): no docstring
-  - `async _store_temporary_object_set(object_set)` (line 499): no docstring
-  - `async _load_temporary_object_set(rid)` (line 508): no docstring
-  - `_collect_object_set_object_types(object_set)` (line 525): no docstring
-  - `_resolve_object_set_object_type(object_set)` (line 554): no docstring
-  - `async _resolve_object_set_definition(object_set)` (line 559): no docstring
-  - `_is_search_around_object_set(object_set)` (line 567): no docstring
-  - `_extract_search_around_link_type(object_set)` (line 574): no docstring
-  - `_dedupe_rows_by_identity(rows)` (line 587): no docstring
-  - `_normalize_sort_value(value)` (line 609): no docstring
-  - `_sort_rows_by_order_by(rows, order_by)` (line 621): no docstring
-  - `async _resolve_search_around_target_primary_keys(oms_client, db_name, branch, object_set)` (line 652): no docstring
-  - `_estimate_search_around_candidate_count(target_primary_keys_by_type)` (line 751): no docstring
-  - `async _execute_search_around_index_pruning(oms_client, db_name, branch, payload, endpoint_scope, link_type, target_object_types, target_primary_keys_by_type)` (line 759): no docstring
-  - `async _audit_search_around_compute_routing(db_name, branch, endpoint_scope, actor, link_type, target_object_types, decision_metadata)` (line 846): no docstring
-  - `async _load_rows_for_search_around_object_set(oms_client, db_name, branch, object_set, payload, endpoint_scope, actor)` (line 897): no docstring
-  - `_object_set_runtime_value_error_response(exc, ontology, parameters)` (line 979): no docstring
-  - `_extract_object_set_where(object_set)` (line 1008): no docstring
-  - `_normalize_object_set_order_by(order_by)` (line 1028): no docstring
-  - `_normalize_select_values(payload)` (line 1038): no docstring
-  - `_to_int_or_none(value)` (line 1057): no docstring
-  - `_build_object_set_search_payload(object_set, payload, default_page_size, require_select)` (line 1064): no docstring
-  - `_get_result_rows(result)` (line 1105): no docstring
-  - `_get_total_count(result)` (line 1112): no docstring
-  - `_get_next_page_token(result)` (line 1120): no docstring
-  - `async _search_object_type_rows(oms_client, db_name, branch, object_type, search_payload)` (line 1130): no docstring
-  - `_derive_page_size(search_payload)` (line 1145): no docstring
-  - `_project_row_with_required_fields(row, select_fields, exclude_rid)` (line 1152): no docstring
-  - `async _load_all_rows_for_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 1179): no docstring
-  - `async _load_rows_for_single_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 1228): no docstring
-  - `async _load_rows_for_multi_object_types(oms_client, db_name, branch, object_types, search_payload, page_token, pagination_scope)` (line 1249): no docstring
-  - `_normalize_link_type_values(payload)` (line 1285): no docstring
-  - `_resolve_source_object_type_from_row(row, fallback_object_type)` (line 1308): no docstring
-  - `_resolve_source_primary_key_from_row(row, primary_key_field)` (line 1322): no docstring
-  - `_build_object_locator(object_type, primary_key)` (line 1338): no docstring
-  - `_build_linked_object_locator(link_type, target_object_type, target_primary_key)` (line 1342): no docstring
-  - `_collect_load_links_rows(rows, requested_links, link_sides_by_source_type, source_primary_key_fields, default_object_type)` (line 1354): no docstring
-  - `_value_by_field(row, field)` (line 1412): no docstring
-  - `_pagination_scope(*parts)` (line 1434): no docstring
-  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 1439): no docstring
-  - `_rid_component(value, fallback)` (line 1444): no docstring
-  - `_default_object_type_rid(db_name, object_type)` (line 1453): no docstring
-  - `_default_property_rid(db_name, object_type, property_name)` (line 1458): no docstring
-  - `_default_link_type_rid(db_name, source_object_type, link_type)` (line 1465): no docstring
-  - `_default_property_contract(db_name, object_type, property_name)` (line 1472): no docstring
-  - `_strictify_foundry_object_type(object_type, db_name, object_type_hint)` (line 1479): no docstring
-  - `_strictify_outgoing_link_type(link_type_payload, db_name, source_object_type)` (line 1595): no docstring
-  - `_strictify_object_type_full_metadata(payload, db_name, object_type_hint)` (line 1637): no docstring
-  - `_log_strict_compat_summary(route, db_name, branch, fixes, dropped)` (line 1678): no docstring
-  - `_full_metadata_branch_contract(branch)` (line 1698): no docstring
-  - `_require_preview_true_for_strict_compat(preview, strict_compat, endpoint)` (line 1702): no docstring
-  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 1712): no docstring
-  - `_strip_typed_ref(value)` (line 1729): Convert typed refs like ``Customer/cust-1`` → ``cust-1``.
-  - `_normalize_primary_key_text(value)` (line 1748): no docstring
-  - `_iter_primary_key_values(value)` (line 1752): no docstring
-  - `_coerce_primary_key_values(value)` (line 1773): no docstring
-  - `_extract_object_type_relationships(resource)` (line 1777): no docstring
-  - `_derive_outgoing_link_types_from_relationships(relationships)` (line 1785): no docstring
-  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1804): no docstring
-  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1824): no docstring
-  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 1841): Extract a deduplicated page without materializing every linked PK.
-  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 1881): no docstring
-  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 1905): no docstring
-  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 1919): no docstring
-  - `async _require_domain_role(request, db_name)` (line 1955): no docstring
-  - `async _require_read_role(request, db_name)` (line 1964): no docstring
-  - `_extract_actor_forward_headers(request)` (line 1973): no docstring
-  - `_validate_ontology_db_name(ontology)` (line 1982): no docstring
-  - `_validate_branch(branch)` (line 1986): no docstring
-  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 1990): no docstring
-  - `_extract_databases(payload)` (line 2021): no docstring
-  - `_extract_ontology_resource_rows(payload)` (line 2037): no docstring
-  - `_extract_ontology_resource(payload)` (line 2041): no docstring
-  - `_localized_text(value)` (line 2046): no docstring
-  - `_to_foundry_named_metadata(resource)` (line 2050): no docstring
-  - `_to_foundry_named_metadata_map(resources)` (line 2088): no docstring
-  - `_dict_or_none(value)` (line 2100): no docstring
-  - `_list_or_none(value)` (line 2104): no docstring
-  - `_first_non_none(*values)` (line 2108): no docstring
-  - `_coerce_optional_bool(value, default)` (line 2115): no docstring
-  - `_extract_project_policy_inheritance(permission_policy, spec)` (line 2129): no docstring
-  - `_to_foundry_action_type(resource)` (line 2197): no docstring
-  - `_to_foundry_action_type_map(resources)` (line 2338): no docstring
-  - `_to_foundry_query_type(resource)` (line 2350): no docstring
-  - `_to_foundry_query_type_map_key(resource)` (line 2380): no docstring
-  - `_to_foundry_query_type_metadata_map(resources)` (line 2393): no docstring
-  - `_resolve_query_placeholder_key(value)` (line 2405): no docstring
-  - `_materialize_query_execution_value(value, parameters)` (line 2426): no docstring
-  - `_resolve_query_execution_object_type(execution, search, spec, metadata)` (line 2451): no docstring
-  - `_extract_query_execution_plan(resource)` (line 2473): no docstring
-  - `_apply_query_execute_options(base_payload, options)` (line 2520): no docstring
-  - `_scoped_error_parameters(ontology, parameters)` (line 2543): no docstring
-  - `_normalize_non_foundry_upstream_error(exc, ontology, parameters, action_surface)` (line 2554): no docstring
-  - `_upstream_status_error_response(exc, ontology, parameters, not_found_response, passthrough_payload, normalize_non_foundry_payload, action_surface)` (line 2633): no docstring
-  - `_upstream_transport_error_response(ontology, parameters)` (line 2667): no docstring
-  - `_internal_error_response(log_message, exc, ontology, parameters)` (line 2680): no docstring
-  - `async _find_resource_by_rid(db_name, branch, resource_type, rid, oms_client, page_size)` (line 2696): no docstring
-  - `_group_outgoing_link_types_by_source(resources)` (line 2722): no docstring
-  - `_group_incoming_link_types_by_target(resources)` (line 2738): Group incoming link types by their *target* object type.
-  - `_strip_prefix(text, prefixes)` (line 2790): no docstring
-  - `_normalize_interface_ref(value)` (line 2801): no docstring
-  - `_normalize_shared_property_ref(value)` (line 2808): no docstring
-  - `_coerce_string_list(value)` (line 2824): no docstring
-  - `_ordered_unique(values)` (line 2851): no docstring
-  - `_extract_interface_implementations(resource)` (line 2863): no docstring
-  - `_extract_interface_names(resource)` (line 2882): no docstring
-  - `_extract_ontology_properties_payload(payload)` (line 2896): no docstring
-  - `_extract_shared_property_type_mapping(resource, ontology_payload)` (line 2900): no docstring
-  - `_to_foundry_object_type_full_metadata(resource, ontology_payload, link_types)` (line 2936): no docstring
-  - `async _list_all_resources_for_type(db_name, branch, resource_type, oms_client, page_size)` (line 2956): no docstring
-  - `_looks_like_action_type_resource(resource)` (line 2985): no docstring
-  - `async _list_action_type_resources_with_fallback(db_name, branch, oms_client)` (line 2995): no docstring
-  - `async _find_action_type_resource_by_id(db_name, branch, action_type, oms_client)` (line 3028): no docstring
-  - `async _find_action_type_resource_by_rid(db_name, branch, action_type_rid, oms_client)` (line 3049): no docstring
-  - `async _list_resources_best_effort(db_name, branch, resource_type, oms_client)` (line 3070): no docstring
-  - `async _list_action_type_resources_best_effort(db_name, branch, oms_client)` (line 3095): no docstring
-  - `async _get_ontology_payload_best_effort(db_name, branch, object_type, oms_client)` (line 3117): no docstring
-  - `_to_foundry_ontology(row)` (line 3137): no docstring
-  - `async list_ontologies_v2(request, oms_client)` (line 3159): no docstring
-  - `async get_ontology_v2(ontologyRid, request, oms_client)` (line 3193): no docstring
-  - `async get_full_metadata_v2(ontologyRid, request, preview, branch, oms_client)` (line 3238): no docstring
-  - `async list_action_types_v2(ontologyRid, request, page_size, page_token, branch, oms_client)` (line 3421): no docstring
-  - `async get_action_type_v2(ontologyRid, actionTypeApiName, request, branch, oms_client)` (line 3487): no docstring
-  - `async get_action_type_by_rid_v2(ontologyRid, actionTypeRid, request, branch, oms_client)` (line 3574): no docstring
-  - `_resolve_apply_action_mode(explicit_mode)` (line 3650): no docstring
-  - `_default_action_parameter_results(parameters)` (line 3659): no docstring
-  - `_extract_action_audit_log_id(payload, data_payload)` (line 3675): no docstring
-  - `_normalize_action_writeback_status(raw_status, audit_log_id, side_effect_delivery)` (line 3691): no docstring
-  - `_normalize_apply_action_response_payload(response, request_parameters)` (line 3705): no docstring
-  - `async apply_action_v2(ontologyRid, actionApiName, body, request, branch, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 3777): no docstring
-  - `async apply_action_batch_v2(ontologyRid, actionApiName, body, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 3861): no docstring
-  - `async list_query_types_v2(ontologyRid, request, page_size, page_token, oms_client)` (line 3942): no docstring
-  - `async get_query_type_v2(ontologyRid, queryApiName, request, version, sdk_package_rid, sdk_version, oms_client)` (line 3999): no docstring
-  - `async execute_query_v2(ontologyRid, queryApiName, body, request, version, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 4091): no docstring
-  - `async list_interface_types_v2(ontologyRid, request, preview, page_size, page_token, branch, oms_client)` (line 4230): no docstring
-  - `async get_interface_type_v2(ontologyRid, interfaceTypeApiName, request, preview, branch, sdk_package_rid, sdk_version, oms_client)` (line 4294): no docstring
-  - `async list_shared_property_types_v2(ontologyRid, request, preview, page_size, page_token, branch, oms_client)` (line 4377): no docstring
-  - `async get_shared_property_type_v2(ontologyRid, sharedPropertyTypeApiName, request, preview, branch, oms_client)` (line 4441): no docstring
-  - `async list_value_types_v2(ontologyRid, request, preview, oms_client)` (line 4521): no docstring
-  - `async get_value_type_v2(ontologyRid, valueTypeApiName, request, preview, oms_client)` (line 4576): no docstring
-  - `async list_object_types_v2(ontologyRid, request, page_size, page_token, branch, oms_client)` (line 4654): no docstring
-  - `async create_object_type_v2(ontologyRid, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 4741): no docstring
-  - `async update_object_type_v2(ontologyRid, objectTypeApiName, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 4831): no docstring
-  - `async get_object_type_v2(ontologyRid, objectTypeApiName, request, branch, oms_client)` (line 4942): no docstring
-  - `async get_object_type_full_metadata_v2(ontologyRid, objectTypeApiName, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 5016): no docstring
-  - `async list_outgoing_link_types_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, branch, oms_client)` (line 5134): no docstring
-  - `async get_outgoing_link_type_v2(ontologyRid, objectTypeApiName, linkTypeApiName, request, branch, oms_client)` (line 5285): no docstring
-  - `async list_incoming_link_types_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, branch, oms_client)` (line 5419): no docstring
-  - `async get_incoming_link_type_v2(ontologyRid, objectTypeApiName, linkTypeApiName, request, branch, oms_client)` (line 5536): no docstring
-  - `async search_objects_v2(ontologyRid, objectTypeApiName, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 5637): no docstring
-  - `async count_objects_v2(ontologyRid, objectTypeApiName, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 5703): no docstring
-  - `async aggregate_objects_v2(ontologyRid, objectTypeApiName, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5766): Delegate aggregation to OMS ES-native aggregate engine.
-  - `async load_object_set_objects_v2(ontologyRid, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5830): no docstring
-  - `async load_object_set_links_v2(ontologyRid, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 5932): no docstring
-  - `async load_object_set_multiple_object_types_v2(ontologyRid, payload, request, branch, preview, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 6142): no docstring
-  - `async load_object_set_objects_or_interfaces_v2(ontologyRid, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 6277): no docstring
-  - `async aggregate_object_set_v2(ontologyRid, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 6405): Delegate objectSet aggregate to OMS ES-native aggregate engine.
-  - `async create_temporary_object_set_v2(ontologyRid, payload, request, sdk_package_rid, sdk_version, oms_client)` (line 6487): no docstring
-  - `async get_object_set_v2(ontologyRid, objectSetRid, request, oms_client)` (line 6513): no docstring
-  - `async list_objects_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 6534): no docstring
-  - `async get_object_v2(ontologyRid, objectTypeApiName, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 6618): no docstring
-  - `async list_linked_objects_v2(ontologyRid, objectTypeApiName, primaryKey, linkTypeApiName, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 6759): no docstring
-  - `async get_linked_object_v2(ontologyRid, objectTypeApiName, primaryKey, linkTypeApiName, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 7044): no docstring
-  - `async get_timeseries_first_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7343): Get the first (earliest) point of a time series property.
-  - `async get_timeseries_last_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7401): Get the last (most recent) point of a time series property.
-  - `async stream_timeseries_points_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7460): Stream all points of a time series property with optional range filter.
-  - `async upload_attachment_v2(request, filename, sdk_package_rid, sdk_version, oms_client)` (line 7534): Upload an attachment payload (Foundry v2 shape).
-  - `async list_attachment_property_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7570): List attachment metadata for a property (single or multiple).
-  - `async get_attachment_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7628): Get metadata for a specific attachment by its RID.
-  - `async get_attachment_content_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7690): Get the content of a single-valued attachment property.
-  - `async get_attachment_content_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7752): Get the content of an attachment by its RID.
+  - `_query_type_branch_candidates()` (line 126): no docstring
+  - `_build_pk_spec_from_v2_payload(pk_spec, primary_key, title_property)` (line 200): no docstring
+  - `_build_backing_sources_from_v2_payload(backing_source, backing_sources)` (line 218): no docstring
+  - `_parse_order_by(order_by)` (line 231): no docstring
+  - `_temporary_object_set_rid()` (line 264): no docstring
+  - `_prune_expired_temporary_object_sets(now_epoch)` (line 268): no docstring
+  - `async _store_temporary_object_set(object_set)` (line 274): no docstring
+  - `async _load_temporary_object_set(rid)` (line 283): no docstring
+  - `_collect_object_set_object_types(object_set)` (line 300): no docstring
+  - `_resolve_object_set_object_type(object_set)` (line 329): no docstring
+  - `async _resolve_object_set_definition(object_set)` (line 334): no docstring
+  - `_is_search_around_object_set(object_set)` (line 342): no docstring
+  - `_extract_search_around_link_type(object_set)` (line 349): no docstring
+  - `_dedupe_rows_by_identity(rows)` (line 362): no docstring
+  - `_normalize_sort_value(value)` (line 384): no docstring
+  - `_sort_rows_by_order_by(rows, order_by)` (line 396): no docstring
+  - `async _resolve_search_around_target_primary_keys(oms_client, db_name, branch, object_set)` (line 427): no docstring
+  - `_estimate_search_around_candidate_count(target_primary_keys_by_type)` (line 526): no docstring
+  - `async _execute_search_around_index_pruning(oms_client, db_name, branch, payload, endpoint_scope, link_type, target_object_types, target_primary_keys_by_type)` (line 534): no docstring
+  - `async _audit_search_around_compute_routing(db_name, branch, endpoint_scope, actor, link_type, target_object_types, decision_metadata)` (line 621): no docstring
+  - `async _load_rows_for_search_around_object_set(oms_client, db_name, branch, object_set, payload, endpoint_scope, actor)` (line 672): no docstring
+  - `_object_set_runtime_value_error_response(exc, ontology, parameters)` (line 754): no docstring
+  - `_extract_object_set_where(object_set)` (line 783): no docstring
+  - `_normalize_object_set_order_by(order_by)` (line 803): no docstring
+  - `_normalize_select_values(payload)` (line 813): no docstring
+  - `_to_int_or_none(value)` (line 832): no docstring
+  - `_build_object_set_search_payload(object_set, payload, default_page_size, require_select)` (line 839): no docstring
+  - `_get_result_rows(result)` (line 880): no docstring
+  - `_get_total_count(result)` (line 887): no docstring
+  - `_get_next_page_token(result)` (line 895): no docstring
+  - `async _search_object_type_rows(oms_client, db_name, branch, object_type, search_payload)` (line 905): no docstring
+  - `_derive_page_size(search_payload)` (line 920): no docstring
+  - `_project_row_with_required_fields(row, select_fields, exclude_rid)` (line 927): no docstring
+  - `async _load_all_rows_for_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 954): no docstring
+  - `async _load_rows_for_single_object_type(oms_client, db_name, branch, object_type, search_payload)` (line 1003): no docstring
+  - `async _load_rows_for_multi_object_types(oms_client, db_name, branch, object_types, search_payload, page_token, pagination_scope)` (line 1024): no docstring
+  - `_normalize_link_type_values(payload)` (line 1060): no docstring
+  - `_resolve_source_object_type_from_row(row, fallback_object_type)` (line 1083): no docstring
+  - `_resolve_source_primary_key_from_row(row, primary_key_field)` (line 1097): no docstring
+  - `_build_object_locator(object_type, primary_key)` (line 1113): no docstring
+  - `_build_linked_object_locator(link_type, target_object_type, target_primary_key)` (line 1117): no docstring
+  - `_collect_load_links_rows(rows, requested_links, link_sides_by_source_type, source_primary_key_fields, default_object_type)` (line 1129): no docstring
+  - `_value_by_field(row, field)` (line 1187): no docstring
+  - `_pagination_scope(*parts)` (line 1209): no docstring
+  - `_is_foundry_v2_strict_compat_enabled(db_name)` (line 1214): no docstring
+  - `_rid_component(value, fallback)` (line 1219): no docstring
+  - `_default_object_type_rid(db_name, object_type)` (line 1228): no docstring
+  - `_default_property_rid(db_name, object_type, property_name)` (line 1233): no docstring
+  - `_default_link_type_rid(db_name, source_object_type, link_type)` (line 1240): no docstring
+  - `_default_property_contract(db_name, object_type, property_name)` (line 1247): no docstring
+  - `_strictify_foundry_object_type(object_type, db_name, object_type_hint)` (line 1254): no docstring
+  - `_strictify_outgoing_link_type(link_type_payload, db_name, source_object_type)` (line 1370): no docstring
+  - `_strictify_object_type_full_metadata(payload, db_name, object_type_hint)` (line 1412): no docstring
+  - `_log_strict_compat_summary(route, db_name, branch, fixes, dropped)` (line 1453): no docstring
+  - `_full_metadata_branch_contract(branch)` (line 1473): no docstring
+  - `_require_preview_true_for_strict_compat(preview, strict_compat, endpoint)` (line 1477): no docstring
+  - `_linked_object_parameters(ontology, object_type, primary_key, link_type, linked_primary_key)` (line 1487): no docstring
+  - `_strip_typed_ref(value)` (line 1504): Convert typed refs like ``Customer/cust-1`` → ``cust-1``.
+  - `_normalize_primary_key_text(value)` (line 1523): no docstring
+  - `_iter_primary_key_values(value)` (line 1527): no docstring
+  - `_coerce_primary_key_values(value)` (line 1548): no docstring
+  - `_extract_object_type_relationships(resource)` (line 1552): no docstring
+  - `_derive_outgoing_link_types_from_relationships(relationships)` (line 1560): no docstring
+  - `_extract_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1579): no docstring
+  - `_iter_linked_primary_keys(source_row, link_type, foreign_key_property)` (line 1599): no docstring
+  - `_extract_linked_primary_keys_page(source_row, link_type, foreign_key_property, offset, page_size)` (line 1616): Extract a deduplicated page without materializing every linked PK.
+  - `_linked_primary_key_exists(source_row, link_type, foreign_key_property, linked_primary_key)` (line 1656): no docstring
+  - `_build_primary_key_where(primary_key_field, primary_key_values)` (line 1680): no docstring
+  - `async _resolve_object_primary_key_field(db_name, object_type, branch, oms_client)` (line 1694): no docstring
+  - `async _require_domain_role(request, db_name)` (line 1730): no docstring
+  - `async _require_read_role(request, db_name)` (line 1741): no docstring
+  - `_extract_actor_forward_headers(request)` (line 1752): no docstring
+  - `_validate_ontology_db_name(ontology)` (line 1761): no docstring
+  - `_validate_branch(branch)` (line 1765): no docstring
+  - `async _resolve_ontology_db_name(ontology, oms_client)` (line 1769): no docstring
+  - `_extract_databases(payload)` (line 1800): no docstring
+  - `_extract_ontology_resource_rows(payload)` (line 1816): no docstring
+  - `_extract_ontology_resource(payload)` (line 1820): no docstring
+  - `_localized_text(value)` (line 1825): no docstring
+  - `_to_foundry_named_metadata(resource)` (line 1829): no docstring
+  - `_to_foundry_named_metadata_map(resources)` (line 1867): no docstring
+  - `_dict_or_none(value)` (line 1879): no docstring
+  - `_list_or_none(value)` (line 1883): no docstring
+  - `_first_non_none(*values)` (line 1887): no docstring
+  - `_coerce_optional_bool(value, default)` (line 1894): no docstring
+  - `_extract_project_policy_inheritance(permission_policy, spec)` (line 1908): no docstring
+  - `_to_foundry_action_type(resource)` (line 1976): no docstring
+  - `_to_foundry_action_type_map(resources)` (line 2117): no docstring
+  - `_to_foundry_query_type(resource)` (line 2129): no docstring
+  - `_to_foundry_query_type_map_key(resource)` (line 2159): no docstring
+  - `_to_foundry_query_type_metadata_map(resources)` (line 2172): no docstring
+  - `_resolve_query_placeholder_key(value)` (line 2184): no docstring
+  - `_materialize_query_execution_value(value, parameters)` (line 2205): no docstring
+  - `_resolve_query_execution_object_type(execution, search, spec, metadata)` (line 2230): no docstring
+  - `_extract_query_execution_plan(resource)` (line 2252): no docstring
+  - `_apply_query_execute_options(base_payload, options)` (line 2299): no docstring
+  - `async _find_resource_by_rid(db_name, branch, resource_type, rid, oms_client, page_size)` (line 2322): no docstring
+  - `_group_outgoing_link_types_by_source(resources)` (line 2348): no docstring
+  - `_group_incoming_link_types_by_target(resources)` (line 2364): Group incoming link types by their *target* object type.
+  - `_strip_prefix(text, prefixes)` (line 2416): no docstring
+  - `_normalize_interface_ref(value)` (line 2427): no docstring
+  - `_normalize_shared_property_ref(value)` (line 2434): no docstring
+  - `_coerce_string_list(value)` (line 2450): no docstring
+  - `_ordered_unique(values)` (line 2477): no docstring
+  - `_extract_interface_implementations(resource)` (line 2489): no docstring
+  - `_extract_interface_names(resource)` (line 2508): no docstring
+  - `_extract_ontology_properties_payload(payload)` (line 2522): no docstring
+  - `_extract_shared_property_type_mapping(resource, ontology_payload)` (line 2526): no docstring
+  - `_to_foundry_object_type_full_metadata(resource, ontology_payload, link_types)` (line 2562): no docstring
+  - `async _list_all_resources_for_type(db_name, branch, resource_type, oms_client, page_size)` (line 2582): no docstring
+  - `_looks_like_action_type_resource(resource)` (line 2611): no docstring
+  - `async _list_action_type_resources_with_fallback(db_name, branch, oms_client)` (line 2621): no docstring
+  - `async _find_action_type_resource_by_id(db_name, branch, action_type, oms_client)` (line 2654): no docstring
+  - `async _find_action_type_resource_by_rid(db_name, branch, action_type_rid, oms_client)` (line 2675): no docstring
+  - `async _list_resources_best_effort(db_name, branch, resource_type, oms_client)` (line 2696): no docstring
+  - `async _list_action_type_resources_best_effort(db_name, branch, oms_client)` (line 2721): no docstring
+  - `async _get_ontology_payload_best_effort(db_name, branch, object_type, oms_client)` (line 2743): no docstring
+  - `_to_foundry_ontology(row)` (line 2763): no docstring
+  - `async list_ontologies_v2(request, oms_client)` (line 2785): no docstring
+  - `async get_ontology_v2(ontologyRid, request, oms_client)` (line 2819): no docstring
+  - `async get_full_metadata_v2(ontologyRid, request, preview, branch, oms_client)` (line 2864): no docstring
+  - `async list_action_types_v2(ontologyRid, request, page_size, page_token, branch, oms_client)` (line 3047): no docstring
+  - `async get_action_type_v2(ontologyRid, actionTypeApiName, request, branch, oms_client)` (line 3113): no docstring
+  - `async get_action_type_by_rid_v2(ontologyRid, actionTypeRid, request, branch, oms_client)` (line 3200): no docstring
+  - `async apply_action_v2(ontologyRid, actionApiName, body, request, branch, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 3278): no docstring
+  - `async apply_action_batch_v2(ontologyRid, actionApiName, body, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 3362): no docstring
+  - `async list_query_types_v2(ontologyRid, request, page_size, page_token, oms_client)` (line 3443): no docstring
+  - `async get_query_type_v2(ontologyRid, queryApiName, request, version, sdk_package_rid, sdk_version, oms_client)` (line 3500): no docstring
+  - `async execute_query_v2(ontologyRid, queryApiName, body, request, version, sdk_package_rid, sdk_version, transaction_id, oms_client)` (line 3592): no docstring
+  - `async list_interface_types_v2(ontologyRid, request, preview, page_size, page_token, branch, oms_client)` (line 3731): no docstring
+  - `async get_interface_type_v2(ontologyRid, interfaceTypeApiName, request, preview, branch, sdk_package_rid, sdk_version, oms_client)` (line 3795): no docstring
+  - `async list_shared_property_types_v2(ontologyRid, request, preview, page_size, page_token, branch, oms_client)` (line 3878): no docstring
+  - `async get_shared_property_type_v2(ontologyRid, sharedPropertyTypeApiName, request, preview, branch, oms_client)` (line 3942): no docstring
+  - `async list_value_types_v2(ontologyRid, request, preview, oms_client)` (line 4022): no docstring
+  - `async get_value_type_v2(ontologyRid, valueTypeApiName, request, preview, oms_client)` (line 4077): no docstring
+  - `async list_object_types_v2(ontologyRid, request, page_size, page_token, branch, oms_client)` (line 4155): no docstring
+  - `async create_object_type_v2(ontologyRid, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 4242): no docstring
+  - `async update_object_type_v2(ontologyRid, objectTypeApiName, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 4332): no docstring
+  - `async get_object_type_v2(ontologyRid, objectTypeApiName, request, branch, oms_client)` (line 4443): no docstring
+  - `async get_object_type_full_metadata_v2(ontologyRid, objectTypeApiName, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 4517): no docstring
+  - `async list_outgoing_link_types_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, branch, oms_client)` (line 4635): no docstring
+  - `async get_outgoing_link_type_v2(ontologyRid, objectTypeApiName, linkTypeApiName, request, branch, oms_client)` (line 4786): no docstring
+  - `async list_incoming_link_types_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, branch, oms_client)` (line 4920): no docstring
+  - `async get_incoming_link_type_v2(ontologyRid, objectTypeApiName, linkTypeApiName, request, branch, oms_client)` (line 5037): no docstring
+  - `async search_objects_v2(ontologyRid, objectTypeApiName, payload, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 5138): no docstring
+  - `async count_objects_v2(ontologyRid, objectTypeApiName, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 5204): no docstring
+  - `async aggregate_objects_v2(ontologyRid, objectTypeApiName, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5267): Delegate aggregation to OMS ES-native aggregate engine.
+  - `async load_object_set_objects_v2(ontologyRid, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5331): no docstring
+  - `async load_object_set_links_v2(ontologyRid, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 5433): no docstring
+  - `async load_object_set_multiple_object_types_v2(ontologyRid, payload, request, branch, preview, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5643): no docstring
+  - `async load_object_set_objects_or_interfaces_v2(ontologyRid, payload, request, branch, preview, sdk_package_rid, sdk_version, oms_client)` (line 5778): no docstring
+  - `async aggregate_object_set_v2(ontologyRid, payload, request, branch, transaction_id, sdk_package_rid, sdk_version, oms_client)` (line 5906): Delegate objectSet aggregate to OMS ES-native aggregate engine.
+  - `async create_temporary_object_set_v2(ontologyRid, payload, request, sdk_package_rid, sdk_version, oms_client)` (line 5988): no docstring
+  - `async get_object_set_v2(ontologyRid, objectSetRid, request, oms_client)` (line 6014): no docstring
+  - `async list_objects_v2(ontologyRid, objectTypeApiName, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 6035): no docstring
+  - `async get_object_v2(ontologyRid, objectTypeApiName, primaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 6119): no docstring
+  - `async list_linked_objects_v2(ontologyRid, objectTypeApiName, primaryKey, linkTypeApiName, request, page_size, page_token, select, order_by, exclude_rid, snapshot, branch, sdk_package_rid, sdk_version, oms_client)` (line 6260): no docstring
+  - `async get_linked_object_v2(ontologyRid, objectTypeApiName, primaryKey, linkTypeApiName, linkedObjectPrimaryKey, request, select, exclude_rid, branch, sdk_package_rid, sdk_version, oms_client)` (line 6545): no docstring
+  - `async get_timeseries_first_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 6844): Get the first (earliest) point of a time series property.
+  - `async get_timeseries_last_point_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 6902): Get the last (most recent) point of a time series property.
+  - `async stream_timeseries_points_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 6961): Stream all points of a time series property with optional range filter.
+  - `async upload_attachment_v2(request, filename, sdk_package_rid, sdk_version, oms_client)` (line 7035): Upload an attachment payload (Foundry v2 shape).
+  - `async list_attachment_property_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7071): List attachment metadata for a property (single or multiple).
+  - `async get_attachment_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7129): Get metadata for a specific attachment by its RID.
+  - `async get_attachment_content_v2(ontologyRid, objectTypeApiName, primaryKey, property, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7191): Get the content of a single-valued attachment property.
+  - `async get_attachment_content_by_rid_v2(ontologyRid, objectTypeApiName, primaryKey, property, attachmentRid, request, branch, sdk_package_rid, sdk_version, oms_client)` (line 7253): Get the content of an attachment by its RID.
 - **Classes**
-  - `OntologyNotFoundError` (line 110): no docstring
-  - `PermissionDeniedError` (line 114): no docstring
-  - `ApiFeaturePreviewUsageOnlyError` (line 118): no docstring
-  - `ObjectSetNotFoundError` (line 122): no docstring
-  - `ApplyActionRequestOptionsV2` (line 146): no docstring
-  - `ApplyActionRequestV2` (line 151): no docstring
-  - `BatchApplyActionRequestItemV2` (line 156): no docstring
-  - `BatchApplyActionRequestOptionsV2` (line 160): no docstring
-  - `BatchApplyActionRequestV2` (line 164): no docstring
-  - `ExecuteQueryRequestV2` (line 169): no docstring
-  - `ObjectTypeContractCreateRequestV2` (line 174): no docstring
-  - `ObjectTypeContractUpdateRequestV2` (line 193): no docstring
+  - `ApplyActionRequestOptionsV2` (line 135): no docstring
+  - `ApplyActionRequestV2` (line 140): no docstring
+  - `BatchApplyActionRequestItemV2` (line 145): no docstring
+  - `BatchApplyActionRequestOptionsV2` (line 149): no docstring
+  - `BatchApplyActionRequestV2` (line 153): no docstring
+  - `ExecuteQueryRequestV2` (line 158): no docstring
+  - `ObjectTypeContractCreateRequestV2` (line 163): no docstring
+  - `ObjectTypeContractUpdateRequestV2` (line 182): no docstring
+
+### `backend/bff/routers/foundry_ontology_v2_actions.py`
+- **Functions**
+  - `_resolve_apply_action_mode(explicit_mode)` (line 6): no docstring
+  - `_default_action_parameter_results(parameters)` (line 15): no docstring
+  - `_extract_action_audit_log_id(payload, data_payload)` (line 31): no docstring
+  - `_normalize_action_writeback_status(raw_status, audit_log_id, side_effect_delivery)` (line 47): no docstring
+  - `_normalize_apply_action_response_payload(response, request_parameters)` (line 61): no docstring
+
+### `backend/bff/routers/foundry_ontology_v2_common.py`
+- **Functions**
+  - `_extract_api_response_data(payload)` (line 10): no docstring
+  - `_default_expected_head_commit(branch)` (line 22): no docstring
+  - `_decode_page_token(page_token, scope)` (line 29): no docstring
+  - `_encode_page_token(offset, scope)` (line 37): no docstring
+
+### `backend/bff/routers/foundry_ontology_v2_errors.py`
+- **Functions**
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 53): no docstring
+  - `_passthrough_upstream_error_payload(exc)` (line 68): no docstring
+  - `_named_not_found(error_name, parameters)` (line 82): no docstring
+  - `_error_parameters(ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 91): no docstring
+  - `_not_found_error(error_name, ontology, object_type, link_type, primary_key, linked_primary_key, parameters)` (line 114): no docstring
+  - `_permission_denied(ontology, message, parameters)` (line 137): no docstring
+  - `_service_http_error_response(exc, ontology, object_type)` (line 154): no docstring
+  - `_preflight_error_response(exc, ontology, parameters)` (line 185): no docstring
+  - `_scoped_error_parameters(ontology, parameters)` (line 236): no docstring
+  - `_normalize_non_foundry_upstream_error(exc, ontology, parameters, action_surface)` (line 247): no docstring
+  - `_upstream_status_error_response(exc, ontology, parameters, not_found_response, passthrough_payload, normalize_non_foundry_payload, action_surface)` (line 326): no docstring
+  - `_upstream_transport_error_response(ontology, parameters)` (line 360): no docstring
+  - `_internal_error_response(log_message, exc, ontology, parameters)` (line 373): no docstring
+- **Classes**
+  - `OntologyNotFoundError` (line 17): no docstring
+  - `PermissionDeniedError` (line 21): no docstring
+  - `ApiFeaturePreviewUsageOnlyError` (line 25): no docstring
+  - `ObjectSetNotFoundError` (line 29): no docstring
 
 ### `backend/bff/routers/foundry_orchestration_v2.py`
 - **Functions**
@@ -1024,17 +1047,17 @@
 
 ### `backend/bff/routers/object_types.py`
 - **Functions**
-  - `async _require_domain_role(request, db_name)` (line 38): no docstring
-  - `_unwrap_data(payload)` (line 45): no docstring
-  - `_extract_resources(payload)` (line 49): no docstring
-  - `_extract_resource(payload)` (line 53): no docstring
-  - `_localized_text(value)` (line 57): no docstring
-  - `_extract_ontology_properties(payload)` (line 61): no docstring
-  - `_normalize_foundry_data_type(value)` (line 65): no docstring
-  - `_to_foundry_data_type(value)` (line 100): no docstring
-  - `_to_foundry_object_type(resource, ontology_payload)` (line 107): no docstring
-  - `async create_object_type_contract(db_name, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 226): no docstring
-  - `async update_object_type_contract(db_name, class_id, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 254): no docstring
+  - `async _require_domain_role(request, db_name)` (line 39): no docstring
+  - `_unwrap_data(payload)` (line 48): no docstring
+  - `_extract_resources(payload)` (line 52): no docstring
+  - `_extract_resource(payload)` (line 56): no docstring
+  - `_localized_text(value)` (line 60): no docstring
+  - `_extract_ontology_properties(payload)` (line 64): no docstring
+  - `_normalize_foundry_data_type(value)` (line 68): no docstring
+  - `_to_foundry_data_type(value)` (line 103): no docstring
+  - `_to_foundry_object_type(resource, ontology_payload)` (line 110): no docstring
+  - `async create_object_type_contract(db_name, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 229): no docstring
+  - `async update_object_type_contract(db_name, class_id, body, request, branch, expected_head_commit, oms_client, dataset_registry, objectify_registry)` (line 257): no docstring
 
 ### `backend/bff/routers/object_types_deps.py`
 
@@ -1046,7 +1069,7 @@
 
 ### `backend/bff/routers/objectify_deps.py`
 - **Functions**
-  - `async _require_db_role(request, db_name, roles)` (line 27): no docstring
+  - `async _require_db_role(request, db_name, roles)` (line 26): no docstring
 
 ### `backend/bff/routers/objectify_enterprise.py`
 - **Functions**
@@ -1076,8 +1099,8 @@
 
 ### `backend/bff/routers/ontology.py`
 - **Functions**
-  - `async _require_domain_role(request, db_name)` (line 17): no docstring
-  - `async create_ontology_compat(db_name, ontology, request, branch, mapper, oms_client)` (line 32): no docstring
+  - `async _require_domain_role(request, db_name)` (line 18): no docstring
+  - `async create_ontology_compat(db_name, ontology, request, branch, mapper, oms_client)` (line 35): no docstring
 
 ### `backend/bff/routers/ontology_agent.py`
 - **Functions**
@@ -1090,15 +1113,15 @@
 
 ### `backend/bff/routers/ontology_extensions.py`
 - **Functions**
-  - `async _require_domain_role(request, db_name)` (line 21): no docstring
-  - `_default_expected_head_commit(branch)` (line 28): no docstring
-  - `async list_resources(db_name, request, resource_type, branch, limit, offset, oms_client)` (line 37): no docstring
-  - `async list_resources_by_type(db_name, resource_type, request, branch, limit, offset, oms_client)` (line 59): no docstring
-  - `async create_resource(db_name, resource_type, payload, request, branch, expected_head_commit, oms_client)` (line 81): no docstring
-  - `async get_resource(db_name, resource_type, resource_id, request, branch, oms_client)` (line 103): no docstring
-  - `async update_resource(db_name, resource_type, resource_id, payload, request, branch, expected_head_commit, oms_client)` (line 123): no docstring
-  - `async delete_resource(db_name, resource_type, resource_id, request, branch, expected_head_commit, oms_client)` (line 147): no docstring
-  - `async record_deployment(db_name, payload, request, oms_client)` (line 169): no docstring
+  - `async _require_domain_role(request, db_name)` (line 22): no docstring
+  - `_default_expected_head_commit(branch)` (line 31): no docstring
+  - `async list_resources(db_name, request, resource_type, branch, limit, offset, oms_client)` (line 40): no docstring
+  - `async list_resources_by_type(db_name, resource_type, request, branch, limit, offset, oms_client)` (line 62): no docstring
+  - `async create_resource(db_name, resource_type, payload, request, branch, expected_head_commit, oms_client)` (line 84): no docstring
+  - `async get_resource(db_name, resource_type, resource_id, request, branch, oms_client)` (line 106): no docstring
+  - `async update_resource(db_name, resource_type, resource_id, payload, request, branch, expected_head_commit, oms_client)` (line 126): no docstring
+  - `async delete_resource(db_name, resource_type, resource_id, request, branch, expected_head_commit, oms_client)` (line 150): no docstring
+  - `async record_deployment(db_name, payload, request, oms_client)` (line 172): no docstring
 
 ### `backend/bff/routers/ontology_ops.py`
 
@@ -1312,8 +1335,8 @@
 
 ### `backend/bff/routers/role_deps.py`
 - **Functions**
-  - `async enforce_required_database_role(request, db_name, roles)` (line 19): no docstring
-  - `require_database_role(roles)` (line 26): no docstring
+  - `async enforce_required_database_role(request, db_name, roles)` (line 20): no docstring
+  - `require_database_role(roles)` (line 29): no docstring
 
 ### `backend/bff/routers/schema_changes.py`
 - **Functions**
@@ -1580,6 +1603,11 @@
   - `MessageErrorPolicy` (line 17): no docstring
     - `matches(self, normalized_message)` (line 23): no docstring
 
+### `backend/bff/services/database_role_guard.py`
+- **Functions**
+  - `async enforce_database_role_or_http_error(headers, db_name, required_roles, allow_if_registry_unavailable, require_env_key, enforce_fn)` (line 18): no docstring
+  - `async enforce_database_role_or_permission_error(headers, db_name, required_roles, denied_error_factory, allow_if_registry_unavailable, require_env_key, enforce_fn)` (line 49): no docstring
+
 ### `backend/bff/services/database_service.py`
 - **Functions**
   - `_is_dev_mode()` (line 43): no docstring
@@ -1590,11 +1618,11 @@
   - `async list_databases(request, oms, dataset_registry)` (line 143): 데이터베이스 목록 조회
   - `async create_database(body, http_request, oms)` (line 198): 데이터베이스 생성
   - `async delete_database(db_name, http_request, expected_seq, oms)` (line 282): 데이터베이스 삭제
-  - `async get_database(db_name, oms)` (line 358): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 382): Resolve the current `expected_seq` for database (aggregate) operations.
-  - `async list_classes(db_name, type, limit, oms)` (line 406): 데이터베이스의 클래스 목록 조회
-  - `async create_class(db_name, class_data, oms)` (line 458): 데이터베이스에 새 클래스 생성
-  - `async get_class(db_name, class_id, oms)` (line 518): 특정 클래스 조회
+  - `async get_database(db_name, oms)` (line 365): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 389): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_classes(db_name, type, limit, oms)` (line 413): 데이터베이스의 클래스 목록 조회
+  - `async create_class(db_name, class_data, oms)` (line 465): 데이터베이스에 새 클래스 생성
+  - `async get_class(db_name, class_id, oms)` (line 525): 특정 클래스 조회
 
 ### `backend/bff/services/dataset_ingest_commit_service.py`
 - **Functions**
@@ -1717,21 +1745,22 @@
 
 ### `backend/bff/services/instances_service.py`
 - **Functions**
-  - `_is_action_log_class_id(class_id)` (line 50): no docstring
-  - `_action_log_as_instance(record)` (line 54): no docstring
-  - `_projection_unavailable_detail(message, base_branch, overlay_branch, writeback_enabled, class_id, instance_id)` (line 58): no docstring
-  - `async _apply_access_policy_to_instances(dataset_registry, db_name, class_id, instances)` (line 83): no docstring
-  - `_normalize_es_search_result(result)` (line 104): Normalize Elasticsearch search results across return shapes.
-  - `_resolve_overlay_context(db_name, class_id, overlay_branch)` (line 146): no docstring
-  - `_sanitize_search_query(search)` (line 170): no docstring
-  - `_overlay_key_for_doc(doc)` (line 193): no docstring
-  - `_merge_overlay_instances(base_instances, overlay_instances)` (line 211): no docstring
-  - `async list_class_instances(db_name, class_id, request_headers, base_branch, overlay_branch, branch, limit, offset, search, status_filter, action_type_id, submitted_by, elasticsearch_service, dataset_registry, action_logs)` (line 240): no docstring
-  - `async get_class_sample_values(db_name, class_id, property_name, base_branch, branch, limit, elasticsearch_service, dataset_registry)` (line 463): no docstring
-  - `async _server_merge_fallback(db_name, class_id, instance_id, resolved_base_branch, resolved_overlay_branch, writeback_enabled, dataset_registry)` (line 577): no docstring
-  - `async get_instance_detail(db_name, class_id, instance_id, request_headers, base_branch, overlay_branch, branch, elasticsearch_service, dataset_registry, action_logs)` (line 645): no docstring
+  - `_is_action_log_class_id(class_id)` (line 51): no docstring
+  - `async _require_action_log_role(request_headers, db_name)` (line 55): no docstring
+  - `_action_log_as_instance(record)` (line 64): no docstring
+  - `_projection_unavailable_detail(message, base_branch, overlay_branch, writeback_enabled, class_id, instance_id)` (line 68): no docstring
+  - `async _apply_access_policy_to_instances(dataset_registry, db_name, class_id, instances)` (line 93): no docstring
+  - `_normalize_es_search_result(result)` (line 114): Normalize Elasticsearch search results across return shapes.
+  - `_resolve_overlay_context(db_name, class_id, overlay_branch)` (line 156): no docstring
+  - `_sanitize_search_query(search)` (line 180): no docstring
+  - `_overlay_key_for_doc(doc)` (line 203): no docstring
+  - `_merge_overlay_instances(base_instances, overlay_instances)` (line 221): no docstring
+  - `async list_class_instances(db_name, class_id, request_headers, base_branch, overlay_branch, branch, limit, offset, search, status_filter, action_type_id, submitted_by, elasticsearch_service, dataset_registry, action_logs)` (line 250): no docstring
+  - `async get_class_sample_values(db_name, class_id, property_name, base_branch, branch, limit, elasticsearch_service, dataset_registry)` (line 466): no docstring
+  - `async _server_merge_fallback(db_name, class_id, instance_id, resolved_base_branch, resolved_overlay_branch, writeback_enabled, dataset_registry)` (line 580): no docstring
+  - `async get_instance_detail(db_name, class_id, instance_id, request_headers, base_branch, overlay_branch, branch, elasticsearch_service, dataset_registry, action_logs)` (line 648): no docstring
 - **Classes**
-  - `OverlayContext` (line 44): no docstring
+  - `OverlayContext` (line 45): no docstring
 
 ### `backend/bff/services/label_mapping_service.py`
 - **Functions**
@@ -1877,28 +1906,28 @@
 
 ### `backend/bff/services/objectify_dag_service.py`
 - **Functions**
-  - `async run_objectify_dag(db_name, body, request, dataset_registry, objectify_registry, job_queue, oms_client)` (line 616): Enterprise helper: enqueue multiple objectify jobs in dependency order.
+  - `async run_objectify_dag(db_name, body, request, dataset_registry, objectify_registry, job_queue, oms_client)` (line 617): Enterprise helper: enqueue multiple objectify jobs in dependency order.
 - **Classes**
-  - `_DagPlanItem` (line 44): no docstring
-    - `to_dict(self)` (line 52): no docstring
-  - `_ObjectifyDagOrchestrator` (line 63): no docstring
-    - `__init__(self, db_name, body, dataset_registry, objectify_registry, job_queue, oms_client)` (line 64): no docstring
-    - `async _fetch_object_type_contract(self, class_id)` (line 94): no docstring
-    - `async _resolve_mapping_spec_for_object_type(self, class_id, backing_source)` (line 115): no docstring
-    - `async _fetch_relationship_targets(self, class_id)` (line 167): no docstring
-    - `async _load_class_info(self, class_id)` (line 185): no docstring
-    - `async _build_dependency_closure(self, start)` (line 233): no docstring
-    - `_toposort(self, start)` (line 282): no docstring
-    - `_build_plan(self, ordered)` (line 334): no docstring
-    - `async compute_plan(self, class_ids)` (line 351): no docstring
-    - `async _enqueue_class_job(self, class_id, run_id, start)` (line 359): no docstring
-    - `_extract_command_status(payload)` (line 420): no docstring
-    - `_is_dataset_primary_mode(report)` (line 430): no docstring
-    - `async _wait_for_objectify_submitted(self, job_id, timeout_seconds)` (line 437): no docstring
-    - `async _wait_for_command_terminal(self, command_id, timeout_seconds)` (line 474): no docstring
-    - `async _wait_for_class_ready(self, class_id)` (line 500): no docstring
-    - `async _run_ready_orchestrator(self, ordered, initial_classes, start)` (line 508): no docstring
-    - `async enqueue_plan(self, ordered, start)` (line 555): no docstring
+  - `_DagPlanItem` (line 45): no docstring
+    - `to_dict(self)` (line 53): no docstring
+  - `_ObjectifyDagOrchestrator` (line 64): no docstring
+    - `__init__(self, db_name, body, dataset_registry, objectify_registry, job_queue, oms_client)` (line 65): no docstring
+    - `async _fetch_object_type_contract(self, class_id)` (line 95): no docstring
+    - `async _resolve_mapping_spec_for_object_type(self, class_id, backing_source)` (line 116): no docstring
+    - `async _fetch_relationship_targets(self, class_id)` (line 168): no docstring
+    - `async _load_class_info(self, class_id)` (line 186): no docstring
+    - `async _build_dependency_closure(self, start)` (line 234): no docstring
+    - `_toposort(self, start)` (line 283): no docstring
+    - `_build_plan(self, ordered)` (line 335): no docstring
+    - `async compute_plan(self, class_ids)` (line 352): no docstring
+    - `async _enqueue_class_job(self, class_id, run_id, start)` (line 360): no docstring
+    - `_extract_command_status(payload)` (line 421): no docstring
+    - `_is_dataset_primary_mode(report)` (line 431): no docstring
+    - `async _wait_for_objectify_submitted(self, job_id, timeout_seconds)` (line 438): no docstring
+    - `async _wait_for_command_terminal(self, command_id, timeout_seconds)` (line 475): no docstring
+    - `async _wait_for_class_ready(self, class_id)` (line 501): no docstring
+    - `async _run_ready_orchestrator(self, ordered, initial_classes, start)` (line 509): no docstring
+    - `async enqueue_plan(self, ordered, start)` (line 556): no docstring
 
 ### `backend/bff/services/objectify_mapping_spec_service.py`
 - **Functions**
@@ -1915,51 +1944,51 @@
 
 ### `backend/bff/services/oms_client.py`
 - **Classes**
-  - `OntologyRef` (line 30): no docstring
-  - `OMSClient` (line 35): OMS gRPC client with HTTP-like compatibility helpers for existing BFF services.
-    - `__init__(self, _base_url, base_url)` (line 38): no docstring
-    - `_get_auth_token()` (line 46): no docstring
-    - `base_url(self)` (line 51): no docstring
-    - `_default_headers(self)` (line 54): no docstring
-    - `_merged_headers(self, headers)` (line 62): no docstring
-    - `async _request_http_compat(self, method, path, headers, params, json_body, binary_body)` (line 68): no docstring
-    - `async _call_unary(self, rpc_name, path_for_error, json_body, binary_body, headers, query, **fields)` (line 90): no docstring
-    - `_decode_json_or_empty(response)` (line 113): no docstring
-    - `_raise_for_status(response)` (line 119): no docstring
-    - `async get(self, path, **kwargs)` (line 122): no docstring
-    - `async post(self, path, **kwargs)` (line 140): no docstring
-    - `async put(self, path, **kwargs)` (line 162): no docstring
-    - `async delete(self, path, **kwargs)` (line 182): no docstring
-    - `async check_health(self)` (line 200): no docstring
-    - `async list_databases(self)` (line 209): no docstring
-    - `async create_database(self, db_name, description)` (line 214): no docstring
-    - `async delete_database(self, db_name, expected_seq)` (line 224): no docstring
-    - `async get_database(self, db_name)` (line 234): no docstring
-    - `async create_ontology(self, db_name, ontology_data, branch, headers)` (line 243): no docstring
-    - `async get_ontology(self, db_name, class_id, branch)` (line 279): no docstring
-    - `async list_ontologies(self, db_name, branch)` (line 304): no docstring
-    - `async get_ontologies(self, db_name, branch)` (line 314): no docstring
-    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 342): no docstring
-    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 362): no docstring
-    - `async create_ontology_resource(self, db_name, resource_type, payload, branch, expected_head_commit)` (line 381): no docstring
-    - `async record_ontology_deployment(self, db_name, target_branch, ontology_commit_id, snapshot_rid, deployed_by, metadata)` (line 402): no docstring
-    - `async update_ontology_resource(self, db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 427): no docstring
-    - `async delete_ontology_resource(self, db_name, resource_type, resource_id, branch, expected_head_commit)` (line 450): no docstring
-    - `async update_ontology(self, db_name, class_id, ontology_data, expected_seq, branch, headers)` (line 471): no docstring
-    - `async delete_ontology(self, db_name, class_id, expected_seq, branch, headers)` (line 494): no docstring
-    - `async search_objects_v2(self, db_name, object_type, where, page_size, page_token, select, order_by, order_direction, exclude_rid, snapshot, branch)` (line 517): no docstring
-    - `async aggregate_objects_v2(self, db_name, object_type, payload, branch)` (line 559): no docstring
-    - `async get_timeseries_first_point(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 578): no docstring
-    - `async get_timeseries_last_point(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 601): no docstring
-    - `async stream_timeseries_points(self, db_name, object_type, primary_key, property_name, payload, branch, headers)` (line 624): no docstring
-    - `async upload_attachment(self, filename, data, content_type, headers)` (line 660): no docstring
-    - `async list_property_attachments(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 680): no docstring
-    - `async get_attachment_by_rid(self, db_name, object_type, primary_key, property_name, attachment_rid, branch, headers)` (line 703): no docstring
-    - `async get_attachment_content(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 728): no docstring
-    - `async get_attachment_content_by_rid(self, db_name, object_type, primary_key, property_name, attachment_rid, branch, headers)` (line 751): no docstring
-    - `async database_exists(self, db_name)` (line 776): no docstring
-    - `async __aenter__(self)` (line 786): no docstring
-    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 789): no docstring
+  - `OntologyRef` (line 31): no docstring
+  - `OMSClient` (line 36): OMS gRPC client with HTTP-like compatibility helpers for existing BFF services.
+    - `__init__(self, _base_url, base_url)` (line 39): no docstring
+    - `_get_auth_token()` (line 47): no docstring
+    - `base_url(self)` (line 52): no docstring
+    - `_default_headers(self)` (line 55): no docstring
+    - `_merged_headers(self, headers)` (line 63): no docstring
+    - `async _request_http_compat(self, method, path, headers, params, json_body, binary_body)` (line 69): no docstring
+    - `async _call_unary(self, rpc_name, path_for_error, json_body, binary_body, headers, query, **fields)` (line 100): no docstring
+    - `_decode_json_or_empty(response)` (line 132): no docstring
+    - `_raise_for_status(response)` (line 138): no docstring
+    - `async get(self, path, **kwargs)` (line 141): no docstring
+    - `async post(self, path, **kwargs)` (line 159): no docstring
+    - `async put(self, path, **kwargs)` (line 181): no docstring
+    - `async delete(self, path, **kwargs)` (line 201): no docstring
+    - `async check_health(self)` (line 219): no docstring
+    - `async list_databases(self)` (line 228): no docstring
+    - `async create_database(self, db_name, description)` (line 233): no docstring
+    - `async delete_database(self, db_name, expected_seq)` (line 243): no docstring
+    - `async get_database(self, db_name)` (line 253): no docstring
+    - `async create_ontology(self, db_name, ontology_data, branch, headers)` (line 262): no docstring
+    - `async get_ontology(self, db_name, class_id, branch)` (line 298): no docstring
+    - `async list_ontologies(self, db_name, branch)` (line 323): no docstring
+    - `async get_ontologies(self, db_name, branch)` (line 333): no docstring
+    - `async list_ontology_resources(self, db_name, resource_type, branch, limit, offset)` (line 361): no docstring
+    - `async get_ontology_resource(self, db_name, resource_type, resource_id, branch)` (line 381): no docstring
+    - `async create_ontology_resource(self, db_name, resource_type, payload, branch, expected_head_commit)` (line 400): no docstring
+    - `async record_ontology_deployment(self, db_name, target_branch, ontology_commit_id, snapshot_rid, deployed_by, metadata)` (line 421): no docstring
+    - `async update_ontology_resource(self, db_name, resource_type, resource_id, payload, branch, expected_head_commit)` (line 446): no docstring
+    - `async delete_ontology_resource(self, db_name, resource_type, resource_id, branch, expected_head_commit)` (line 469): no docstring
+    - `async update_ontology(self, db_name, class_id, ontology_data, expected_seq, branch, headers)` (line 490): no docstring
+    - `async delete_ontology(self, db_name, class_id, expected_seq, branch, headers)` (line 513): no docstring
+    - `async search_objects_v2(self, db_name, object_type, where, page_size, page_token, select, order_by, order_direction, exclude_rid, snapshot, branch)` (line 536): no docstring
+    - `async aggregate_objects_v2(self, db_name, object_type, payload, branch)` (line 578): no docstring
+    - `async get_timeseries_first_point(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 597): no docstring
+    - `async get_timeseries_last_point(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 620): no docstring
+    - `async stream_timeseries_points(self, db_name, object_type, primary_key, property_name, payload, branch, headers)` (line 643): no docstring
+    - `async upload_attachment(self, filename, data, content_type, headers)` (line 679): no docstring
+    - `async list_property_attachments(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 699): no docstring
+    - `async get_attachment_by_rid(self, db_name, object_type, primary_key, property_name, attachment_rid, branch, headers)` (line 722): no docstring
+    - `async get_attachment_content(self, db_name, object_type, primary_key, property_name, branch, headers)` (line 747): no docstring
+    - `async get_attachment_content_by_rid(self, db_name, object_type, primary_key, property_name, attachment_rid, branch, headers)` (line 770): no docstring
+    - `async database_exists(self, db_name)` (line 795): no docstring
+    - `async __aenter__(self)` (line 805): no docstring
+    - `async __aexit__(self, _exc_type, _exc_val, _exc_tb)` (line 808): no docstring
 
 ### `backend/bff/services/oms_error_policy.py`
 - **Functions**
@@ -2064,8 +2093,8 @@
 
 ### `backend/bff/services/pipeline_catalog_service.py`
 - **Functions**
-  - `async list_pipelines(db_name, branch, pipeline_registry, request)` (line 43): no docstring
-  - `async create_pipeline(payload, audit_store, pipeline_registry, dataset_registry, event_store, request)` (line 70): no docstring
+  - `async list_pipelines(db_name, branch, pipeline_registry, request)` (line 44): no docstring
+  - `async create_pipeline(payload, audit_store, pipeline_registry, dataset_registry, event_store, request)` (line 71): no docstring
 
 ### `backend/bff/services/pipeline_cleansing_utils.py`
 - **Functions**
@@ -2084,10 +2113,10 @@
 
 ### `backend/bff/services/pipeline_dataset_upload_context.py`
 - **Functions**
-  - `async _prepare_dataset_upload_context(request, db_name, branch, pipeline_registry)` (line 36): no docstring
-  - `_build_dataset_upload_response(result, preview, source, tabular_analysis, schema_json)` (line 74): no docstring
+  - `async _prepare_dataset_upload_context(request, db_name, branch, pipeline_registry)` (line 37): no docstring
+  - `_build_dataset_upload_response(result, preview, source, tabular_analysis, schema_json)` (line 76): no docstring
 - **Classes**
-  - `_DatasetUploadContext` (line 27): no docstring
+  - `_DatasetUploadContext` (line 28): no docstring
 
 ### `backend/bff/services/pipeline_dataset_upload_service.py`
 - **Functions**
@@ -2107,102 +2136,106 @@
   - `async get_pipeline_readiness(pipeline_id, branch, pipeline_registry, dataset_registry, request)` (line 97): no docstring
   - `async update_pipeline(pipeline_id, payload, audit_store, pipeline_registry, dataset_registry, request, event_store)` (line 278): no docstring
 
+### `backend/bff/services/pipeline_execution_queue.py`
+- **Functions**
+  - `_job_enqueue_failure_payload(message, error, pipeline_id, job_id, node_id, mode, queued)` (line 15): no docstring
+  - `async publish_preview_pipeline_job(pipeline_job_queue, pipeline_registry, job, pipeline_id, node_id)` (line 46): no docstring
+  - `async publish_build_pipeline_job(pipeline_job_queue, pipeline_registry, job, pipeline_id, node_id)` (line 91): no docstring
+
 ### `backend/bff/services/pipeline_execution_service.py`
 - **Functions**
-  - `_build_ontology_ref(branch)` (line 136): no docstring
-  - `_parse_optional_bool(value)` (line 141): no docstring
-  - `_resolve_output_contract_from_definition(definition_json, node_id, output_name)` (line 154): no docstring
-  - `_extract_deploy_dependencies_raw(sanitized, definition_json)` (line 219): no docstring
-  - `_parse_deploy_schedule_fields(sanitized, output)` (line 231): no docstring
-  - `_parse_deploy_request_payload(sanitized)` (line 279): no docstring
-  - `async _resolve_deploy_pipeline_context(pipeline_registry, pipeline_id, db_name_hint, branch, dependencies_raw)` (line 319): no docstring
-  - `_resolve_deploy_definition_and_db(definition_json, latest, expectations, schema_contract, outputs, db_name, pipeline)` (line 381): no docstring
-  - `_extract_build_run_errors(output_json)` (line 413): no docstring
-  - `async _resolve_promote_artifact_record_and_job_id(pipeline_registry, pipeline_id, artifact_id, build_job_id)` (line 422): no docstring
-  - `async _resolve_successful_build_output_json(pipeline_registry, pipeline_id, build_job_id, definition_hash, artifact_record)` (line 474): no docstring
-  - `async _resolve_promote_artifact_record_fallback(pipeline_registry, pipeline_id, build_job_id, artifact_record)` (line 527): no docstring
-  - `_resolve_build_ontology_from_output_json(output_json, resolved_branch)` (line 543): no docstring
-  - `async _collect_proposal_mapping_spec_mismatches(objectify_registry, proposal_bundle, resolved_branch)` (line 568): no docstring
-  - `_assert_proposal_bundle_core_alignment(proposal_bundle, resolved_build_job_id, definition_hash, artifact_record, build_ontology_commit, output_json)` (line 639): no docstring
-  - `async _assert_proposal_mapping_spec_alignment(objectify_registry, proposal_bundle, resolved_branch)` (line 717): no docstring
-  - `async _validate_proposal_bundle_alignment(proposal_required, proposal_bundle, resolved_build_job_id, definition_hash, artifact_record, build_ontology_commit, output_json, resolved_branch, objectify_registry)` (line 738): no docstring
-  - `async _resolve_promote_build_source_context(pipeline_registry, objectify_registry, pipeline_id, artifact_id, build_job_id, definition_hash, resolved_branch, proposal_required, proposal_bundle)` (line 767): no docstring
-  - `_parse_pipeline_run_request_payload(sanitized, allow_sampling_strategy, default_limit)` (line 844): no docstring
-  - `_merge_definition_contract_overrides(definition_json, expectations, schema_contract)` (line 892): no docstring
-  - `async _resolve_pipeline_run_context(pipeline_registry, pipeline_id, request_payload, validate_db, clear_node_for_streaming_pipeline, archived_branch_error)` (line 906): no docstring
-  - `_build_preview_job_id(pipeline_id, node_id, definition_hash)` (line 973): no docstring
-  - `_build_preview_existing_run_response(pipeline_id, job_id, limit, preflight, existing_run)` (line 985): no docstring
-  - `async _record_preview_run_queued(pipeline_registry, pipeline_id, job_id, node_id, limit)` (line 1024): no docstring
-  - `_build_preview_definition(definition_json, branch, preview_limit, sampling_strategy)` (line 1050): no docstring
-  - `async _publish_preview_pipeline_job(pipeline_job_queue, pipeline_registry, job, pipeline_id, node_id)` (line 1071): no docstring
-  - `async _append_preview_command_event(event_store, pipeline_id, limit)` (line 1125): no docstring
-  - `_assert_build_preflight_passes(preflight)` (line 1145): no docstring
-  - `async _resolve_build_ontology_head_commit(oms_client, db_name, ontology_branch)` (line 1158): no docstring
-  - `_build_definition_with_ontology_meta(definition_json, ontology_branch, ontology_head_commit_id)` (line 1195): no docstring
-  - `async _publish_build_pipeline_job(pipeline_job_queue, pipeline_registry, job, pipeline_id, node_id)` (line 1213): no docstring
-  - `async _emit_build_requested_event(emit_pipeline_control_plane_event, pipeline_id, job_id, db_name, branch, node_id, definition_hash, limit, principal_type, principal_id)` (line 1258): no docstring
-  - `async _prepare_preview_execution(pipeline_id, sanitized, pipeline_registry, dataset_registry)` (line 1312): no docstring
-  - `async _dispatch_preview_execution(pipeline_id, prepared, pipeline_registry, pipeline_job_queue, event_store)` (line 1360): no docstring
-  - `async _prepare_build_execution(pipeline_id, sanitized, pipeline_registry, dataset_registry, oms_client)` (line 1432): no docstring
-  - `async _dispatch_build_execution(pipeline_id, prepared, pipeline_registry, pipeline_job_queue, emit_pipeline_control_plane_event, request)` (line 1484): no docstring
-  - `async _record_preview_validation_failure(pipeline_registry, pipeline_id, node_id, error_detail)` (line 1551): no docstring
-  - `async _log_pipeline_preview_failure(audit_store, request, pipeline_id, error_detail)` (line 1587): no docstring
-  - `async preview_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, event_store)` (line 1606): no docstring
-  - `async build_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, emit_pipeline_control_plane_event)` (line 1697): no docstring
-  - `_extract_promote_outputs_list(artifact_record, output_json)` (line 1775): no docstring
-  - `_select_outputs_for_promotion(outputs_list, node_id, is_streaming_promotion)` (line 1790): no docstring
-  - `_resolve_build_artifact_context(selected_outputs, output_json, artifact_record)` (line 1819): no docstring
-  - `_resolve_promote_output_selection(output_json, artifact_record, pipeline, node_id)` (line 1873): no docstring
-  - `_coerce_optional_int(value, field_name)` (line 1914): no docstring
-  - `_extract_staged_dataset_name(item)` (line 1922): no docstring
-  - `_extract_artifact_path_from_output(item, staged_bucket, staged_prefix)` (line 1933): no docstring
-  - `_extract_promote_output_runtime_fields(item)` (line 1989): no docstring
-  - `_normalize_promote_output_item(item, staged_bucket, staged_prefix)` (line 2033): no docstring
-  - `async _collect_output_breaking_changes(dataset_registry, db_name, resolved_branch, normalized_output)` (line 2069): no docstring
-  - `async _normalize_promote_outputs(selected_outputs, staged_bucket, build_ref, dataset_registry, db_name, resolved_branch)` (line 2089): no docstring
-  - `_collect_policy_mismatches(normalized_outputs, definition_json, execution_semantics)` (line 2126): no docstring
-  - `_assert_breaking_changes_replay_policy(any_breaking_changes, replay_on_deploy, is_streaming_promotion, normalized_outputs)` (line 2195): no docstring
-  - `async _prepare_promote_outputs_for_deploy(output_json, artifact_record, pipeline, node_id, dataset_registry, db_name, resolved_branch, definition_json, replay_on_deploy)` (line 2216): no docstring
-  - `async _merge_promote_build_branch(request, pipeline_registry, acquire_pipeline_publish_lock, release_pipeline_publish_lock, pipeline_id, resolved_branch, promote_job_id, staged_bucket, build_ref, build_job_id, node_id, pipeline, db_name)` (line 2268): no docstring
-  - `_build_dataset_sample_json(columns, rows, row_count, delta_row_count, write_mode_requested, write_mode_resolved, runtime_write_mode, pk_columns, post_filtering_column, write_policy_hash)` (line 2337): no docstring
-  - `async _ensure_dataset_key_spec_alignment(dataset_registry, dataset_id, pk_columns, node_id)` (line 2368): no docstring
-  - `_resolve_mapping_spec_from_bundle(proposal_bundle, dataset_id, dataset_branch)` (line 2437): no docstring
-  - `async _resolve_mapping_spec_reference(objectify_registry, proposal_bundle, dataset_id, dataset_branch, staged_dataset_name, schema_hash)` (line 2462): no docstring
-  - `async _upsert_promoted_dataset_version(dataset_registry, db_name, resolved_branch, staged_dataset_name, schema_columns, sample_rows, row_count, delta_row_count, write_mode_requested, write_mode_resolved, runtime_write_mode, pk_columns, post_filtering_column, write_policy_hash, source_ref, merge_commit_id, promoted_artifact_key, promoted_from_artifact_id)` (line 2489): no docstring
-  - `_extract_materialization_fields(item, staged_bucket, merge_commit_id)` (line 2552): no docstring
-  - `async _record_promoted_output_manifest(pipeline_registry, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, staged_bucket, merge_commit_id, build_ontology_commit, mapping_spec_id, mapping_spec_version, mapping_spec_target_class_id, dataset_version_id, staged_dataset_name, resolved_branch, principal_id, item)` (line 2576): no docstring
-  - `async _finalize_promoted_output_registration(dataset_registry, objectify_registry, pipeline_registry, proposal_bundle, definition_json, item, dataset, schema_hash, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, staged_bucket, merge_commit_id, build_ontology_commit, resolved_branch, principal_id, staged_dataset_name, dataset_version_id)` (line 2625): no docstring
-  - `_build_promoted_output_payload(item, staged_dataset_name, dataset_id, dataset_version_id, promoted_artifact_key, artifact_path, merge_commit_id, replay_on_deploy, artifact_id)` (line 2688): no docstring
-  - `async _materialize_single_promoted_output(item, context, dataset_registry, objectify_registry, proposal_bundle, pipeline_registry)` (line 2724): no docstring
-  - `async _materialize_promoted_build_outputs(normalized_outputs, merge_commit_id, staged_bucket, dataset_registry, objectify_registry, proposal_bundle, db_name, resolved_branch, pipeline_registry, pipeline_id, build_job_id, definition_hash, build_ontology_commit, principal_id, replay_on_deploy, artifact_id, definition_json, build_ref)` (line 2802): no docstring
-  - `_build_promoted_run_output_json(build_outputs, build_ontology, build_job_id, artifact_id, staged_bucket, build_ref, resolved_branch, merge_commit_id, promote_job_id)` (line 2854): no docstring
-  - `async _record_deploy_build_and_run(pipeline_registry, pipeline_id, build_outputs, build_ontology, build_job_id, artifact_id, staged_bucket, build_ref, resolved_branch, merge_commit_id, promote_job_id, node_id, definition_hash, definition_commit_id)` (line 2883): no docstring
-  - `async _emit_pipeline_deploy_promoted_event(emit_pipeline_control_plane_event, pipeline_id, promote_job_id, principal_id, build_job_id, artifact_id, db_name, resolved_branch, node_id, merge_commit_id, definition_hash, replay_on_deploy, principal_type)` (line 2940): no docstring
-  - `async _record_promoted_build_output_lineage(lineage_store, build_outputs, db_name, resolved_branch, pipeline_id, build_job_id, artifact_id)` (line 2978): no docstring
-  - `async _apply_deploy_pipeline_updates(pipeline_registry, pipeline_id, schedule_interval_seconds, schedule_cron, branch, proposal_status, proposal_title, proposal_description, dependencies)` (line 3018): no docstring
-  - `async _prepare_deploy_execution(pipeline_id, sanitized, pipeline_registry)` (line 3078): no docstring
-  - `async _resolve_deploy_promotion_payload(prepared, pipeline_id, pipeline_registry, dataset_registry, objectify_registry)` (line 3123): no docstring
-  - `async _emit_pipeline_deploy_requested_event(emit_pipeline_control_plane_event, pipeline_id, promote_job_id, principal_id, build_job_id, artifact_id, db_name, resolved_branch, node_id, definition_hash, replay_on_deploy, principal_type)` (line 3167): no docstring
-  - `async _merge_and_materialize_deploy_outputs(prepared, promotion_payload, request_input, pipeline_context, pipeline_id, request, pipeline_registry, dataset_registry, objectify_registry, acquire_pipeline_publish_lock, release_pipeline_publish_lock, principal_id, promote_job_id)` (line 3203): no docstring
-  - `async _record_deploy_execution_side_effects(prepared, promotion_payload, pipeline_context, pipeline_id, request_input, build_outputs, merge_commit_id, promote_job_id, principal_id, principal_type, pipeline_registry, lineage_store, emit_pipeline_control_plane_event)` (line 3257): no docstring
-  - `async _dispatch_deploy_execution(prepared, pipeline_id, request, pipeline_registry, dataset_registry, objectify_registry, lineage_store, emit_pipeline_control_plane_event, acquire_pipeline_publish_lock, release_pipeline_publish_lock)` (line 3326): no docstring
-  - `_build_deploy_audit_metadata(result)` (line 3407): no docstring
-  - `_build_deploy_success_response(pipeline_id, result)` (line 3419): no docstring
-  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store, emit_pipeline_control_plane_event, _acquire_pipeline_publish_lock, _release_pipeline_publish_lock)` (line 3437): no docstring
+  - `_build_ontology_ref(branch)` (line 138): no docstring
+  - `_parse_optional_bool(value)` (line 143): no docstring
+  - `_resolve_output_contract_from_definition(definition_json, node_id, output_name)` (line 156): no docstring
+  - `_extract_deploy_dependencies_raw(sanitized, definition_json)` (line 221): no docstring
+  - `_parse_deploy_schedule_fields(sanitized, output)` (line 233): no docstring
+  - `_parse_deploy_request_payload(sanitized)` (line 281): no docstring
+  - `async _resolve_deploy_pipeline_context(pipeline_registry, pipeline_id, db_name_hint, branch, dependencies_raw)` (line 321): no docstring
+  - `_resolve_deploy_definition_and_db(definition_json, latest, expectations, schema_contract, outputs, db_name, pipeline)` (line 383): no docstring
+  - `_extract_build_run_errors(output_json)` (line 415): no docstring
+  - `async _resolve_promote_artifact_record_and_job_id(pipeline_registry, pipeline_id, artifact_id, build_job_id)` (line 424): no docstring
+  - `async _resolve_successful_build_output_json(pipeline_registry, pipeline_id, build_job_id, definition_hash, artifact_record)` (line 476): no docstring
+  - `async _resolve_promote_artifact_record_fallback(pipeline_registry, pipeline_id, build_job_id, artifact_record)` (line 529): no docstring
+  - `_resolve_build_ontology_from_output_json(output_json, resolved_branch)` (line 545): no docstring
+  - `async _collect_proposal_mapping_spec_mismatches(objectify_registry, proposal_bundle, resolved_branch)` (line 570): no docstring
+  - `_assert_proposal_bundle_core_alignment(proposal_bundle, resolved_build_job_id, definition_hash, artifact_record, build_ontology_commit, output_json)` (line 641): no docstring
+  - `async _assert_proposal_mapping_spec_alignment(objectify_registry, proposal_bundle, resolved_branch)` (line 719): no docstring
+  - `async _validate_proposal_bundle_alignment(proposal_required, proposal_bundle, resolved_build_job_id, definition_hash, artifact_record, build_ontology_commit, output_json, resolved_branch, objectify_registry)` (line 740): no docstring
+  - `async _resolve_promote_build_source_context(pipeline_registry, objectify_registry, pipeline_id, artifact_id, build_job_id, definition_hash, resolved_branch, proposal_required, proposal_bundle)` (line 769): no docstring
+  - `_parse_pipeline_run_request_payload(sanitized, allow_sampling_strategy, default_limit)` (line 846): no docstring
+  - `_merge_definition_contract_overrides(definition_json, expectations, schema_contract)` (line 894): no docstring
+  - `async _resolve_pipeline_run_context(pipeline_registry, pipeline_id, request_payload, validate_db, clear_node_for_streaming_pipeline, archived_branch_error)` (line 908): no docstring
+  - `_build_preview_job_id(pipeline_id, node_id, definition_hash)` (line 975): no docstring
+  - `_build_preview_existing_run_response(pipeline_id, job_id, limit, preflight, existing_run)` (line 987): no docstring
+  - `async _record_preview_run_queued(pipeline_registry, pipeline_id, job_id, node_id, limit)` (line 1026): no docstring
+  - `_build_preview_definition(definition_json, branch, preview_limit, sampling_strategy)` (line 1052): no docstring
+  - `async _append_preview_command_event(event_store, pipeline_id, limit)` (line 1073): no docstring
+  - `_assert_build_preflight_passes(preflight)` (line 1093): no docstring
+  - `async _resolve_build_ontology_head_commit(oms_client, db_name, ontology_branch)` (line 1106): no docstring
+  - `_build_definition_with_ontology_meta(definition_json, ontology_branch, ontology_head_commit_id)` (line 1143): no docstring
+  - `async _emit_build_requested_event(emit_pipeline_control_plane_event, pipeline_id, job_id, db_name, branch, node_id, definition_hash, limit, principal_type, principal_id)` (line 1161): no docstring
+  - `async _prepare_preview_execution(pipeline_id, sanitized, pipeline_registry, dataset_registry)` (line 1215): no docstring
+  - `async _dispatch_preview_execution(pipeline_id, prepared, pipeline_registry, pipeline_job_queue, event_store)` (line 1263): no docstring
+  - `async _prepare_build_execution(pipeline_id, sanitized, pipeline_registry, dataset_registry, oms_client)` (line 1335): no docstring
+  - `async _dispatch_build_execution(pipeline_id, prepared, pipeline_registry, pipeline_job_queue, emit_pipeline_control_plane_event, request)` (line 1387): no docstring
+  - `async _record_preview_validation_failure(pipeline_registry, pipeline_id, node_id, error_detail)` (line 1454): no docstring
+  - `async _log_pipeline_preview_failure(audit_store, request, pipeline_id, error_detail)` (line 1490): no docstring
+  - `async preview_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, event_store)` (line 1509): no docstring
+  - `async build_pipeline(pipeline_id, payload, request, audit_store, pipeline_registry, pipeline_job_queue, dataset_registry, oms_client, emit_pipeline_control_plane_event)` (line 1594): no docstring
+  - `_extract_promote_outputs_list(artifact_record, output_json)` (line 1666): no docstring
+  - `_select_outputs_for_promotion(outputs_list, node_id, is_streaming_promotion)` (line 1681): no docstring
+  - `_resolve_build_artifact_context(selected_outputs, output_json, artifact_record)` (line 1710): no docstring
+  - `_resolve_promote_output_selection(output_json, artifact_record, pipeline, node_id)` (line 1764): no docstring
+  - `_coerce_optional_int(value, field_name)` (line 1805): no docstring
+  - `_extract_staged_dataset_name(item)` (line 1813): no docstring
+  - `_extract_artifact_path_from_output(item, staged_bucket, staged_prefix)` (line 1824): no docstring
+  - `_extract_promote_output_runtime_fields(item)` (line 1880): no docstring
+  - `_normalize_promote_output_item(item, staged_bucket, staged_prefix)` (line 1924): no docstring
+  - `async _collect_output_breaking_changes(dataset_registry, db_name, resolved_branch, normalized_output)` (line 1960): no docstring
+  - `async _normalize_promote_outputs(selected_outputs, staged_bucket, build_ref, dataset_registry, db_name, resolved_branch)` (line 1980): no docstring
+  - `_collect_policy_mismatches(normalized_outputs, definition_json, execution_semantics)` (line 2017): no docstring
+  - `_assert_breaking_changes_replay_policy(any_breaking_changes, replay_on_deploy, is_streaming_promotion, normalized_outputs)` (line 2086): no docstring
+  - `async _prepare_promote_outputs_for_deploy(output_json, artifact_record, pipeline, node_id, dataset_registry, db_name, resolved_branch, definition_json, replay_on_deploy)` (line 2107): no docstring
+  - `async _merge_promote_build_branch(request, pipeline_registry, acquire_pipeline_publish_lock, release_pipeline_publish_lock, pipeline_id, resolved_branch, promote_job_id, staged_bucket, build_ref, build_job_id, node_id, pipeline, db_name)` (line 2159): no docstring
+  - `_build_dataset_sample_json(columns, rows, row_count, delta_row_count, write_mode_requested, write_mode_resolved, runtime_write_mode, pk_columns, post_filtering_column, write_policy_hash)` (line 2228): no docstring
+  - `async _ensure_dataset_key_spec_alignment(dataset_registry, dataset_id, pk_columns, node_id)` (line 2259): no docstring
+  - `_resolve_mapping_spec_from_bundle(proposal_bundle, dataset_id, dataset_branch)` (line 2328): no docstring
+  - `async _resolve_mapping_spec_reference(objectify_registry, proposal_bundle, dataset_id, dataset_branch, staged_dataset_name, schema_hash)` (line 2353): no docstring
+  - `async _upsert_promoted_dataset_version(dataset_registry, db_name, resolved_branch, staged_dataset_name, schema_columns, sample_rows, row_count, delta_row_count, write_mode_requested, write_mode_resolved, runtime_write_mode, pk_columns, post_filtering_column, write_policy_hash, source_ref, merge_commit_id, promoted_artifact_key, promoted_from_artifact_id)` (line 2380): no docstring
+  - `_extract_materialization_fields(item, staged_bucket, merge_commit_id)` (line 2443): no docstring
+  - `async _record_promoted_output_manifest(pipeline_registry, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, staged_bucket, merge_commit_id, build_ontology_commit, mapping_spec_id, mapping_spec_version, mapping_spec_target_class_id, dataset_version_id, staged_dataset_name, resolved_branch, principal_id, item)` (line 2467): no docstring
+  - `async _finalize_promoted_output_registration(dataset_registry, objectify_registry, pipeline_registry, proposal_bundle, definition_json, item, dataset, schema_hash, pipeline_id, db_name, build_job_id, artifact_id, definition_hash, staged_bucket, merge_commit_id, build_ontology_commit, resolved_branch, principal_id, staged_dataset_name, dataset_version_id)` (line 2516): no docstring
+  - `_build_promoted_output_payload(item, staged_dataset_name, dataset_id, dataset_version_id, promoted_artifact_key, artifact_path, merge_commit_id, replay_on_deploy, artifact_id)` (line 2579): no docstring
+  - `async _materialize_single_promoted_output(item, context, dataset_registry, objectify_registry, proposal_bundle, pipeline_registry)` (line 2615): no docstring
+  - `async _materialize_promoted_build_outputs(normalized_outputs, merge_commit_id, staged_bucket, dataset_registry, objectify_registry, proposal_bundle, db_name, resolved_branch, pipeline_registry, pipeline_id, build_job_id, definition_hash, build_ontology_commit, principal_id, replay_on_deploy, artifact_id, definition_json, build_ref)` (line 2693): no docstring
+  - `_build_promoted_run_output_json(build_outputs, build_ontology, build_job_id, artifact_id, staged_bucket, build_ref, resolved_branch, merge_commit_id, promote_job_id)` (line 2745): no docstring
+  - `async _record_deploy_build_and_run(pipeline_registry, pipeline_id, build_outputs, build_ontology, build_job_id, artifact_id, staged_bucket, build_ref, resolved_branch, merge_commit_id, promote_job_id, node_id, definition_hash, definition_commit_id)` (line 2774): no docstring
+  - `async _emit_pipeline_deploy_promoted_event(emit_pipeline_control_plane_event, pipeline_id, promote_job_id, principal_id, build_job_id, artifact_id, db_name, resolved_branch, node_id, merge_commit_id, definition_hash, replay_on_deploy, principal_type)` (line 2831): no docstring
+  - `async _record_promoted_build_output_lineage(lineage_store, build_outputs, db_name, resolved_branch, pipeline_id, build_job_id, artifact_id)` (line 2869): no docstring
+  - `async _apply_deploy_pipeline_updates(pipeline_registry, pipeline_id, schedule_interval_seconds, schedule_cron, branch, proposal_status, proposal_title, proposal_description, dependencies)` (line 2909): no docstring
+  - `async _prepare_deploy_execution(pipeline_id, sanitized, pipeline_registry)` (line 2969): no docstring
+  - `async _resolve_deploy_promotion_payload(prepared, pipeline_id, pipeline_registry, dataset_registry, objectify_registry)` (line 3014): no docstring
+  - `async _emit_pipeline_deploy_requested_event(emit_pipeline_control_plane_event, pipeline_id, promote_job_id, principal_id, build_job_id, artifact_id, db_name, resolved_branch, node_id, definition_hash, replay_on_deploy, principal_type)` (line 3058): no docstring
+  - `async _merge_and_materialize_deploy_outputs(prepared, promotion_payload, request_input, pipeline_context, pipeline_id, request, pipeline_registry, dataset_registry, objectify_registry, acquire_pipeline_publish_lock, release_pipeline_publish_lock, principal_id, promote_job_id)` (line 3094): no docstring
+  - `async _record_deploy_execution_side_effects(prepared, promotion_payload, pipeline_context, pipeline_id, request_input, build_outputs, merge_commit_id, promote_job_id, principal_id, principal_type, pipeline_registry, lineage_store, emit_pipeline_control_plane_event)` (line 3148): no docstring
+  - `async _dispatch_deploy_execution(prepared, pipeline_id, request, pipeline_registry, dataset_registry, objectify_registry, lineage_store, emit_pipeline_control_plane_event, acquire_pipeline_publish_lock, release_pipeline_publish_lock)` (line 3217): no docstring
+  - `_build_deploy_audit_metadata(result)` (line 3298): no docstring
+  - `_build_deploy_success_response(pipeline_id, result)` (line 3310): no docstring
+  - `async deploy_pipeline(pipeline_id, payload, request, pipeline_registry, dataset_registry, objectify_registry, oms_client, lineage_store, audit_store, emit_pipeline_control_plane_event, _acquire_pipeline_publish_lock, _release_pipeline_publish_lock)` (line 3328): no docstring
 - **Classes**
-  - `_DeployRequestPayload` (line 65): no docstring
-  - `_DeployPipelineContext` (line 86): no docstring
-  - `_PromoteBuildSourceContext` (line 96): no docstring
-  - `_PromoteOutputSelection` (line 105): no docstring
-  - `_PreparedPromoteOutputs` (line 114): no docstring
-  - `_PromotedOutputMaterializationContext` (line 121): no docstring
-  - `_PipelineRunRequestPayload` (line 823): no docstring
-  - `_PipelineRunContext` (line 835): no docstring
-  - `_PreparedPreviewExecution` (line 1291): no docstring
-  - `_PreparedBuildExecution` (line 1301): no docstring
-  - `_PreparedDeployExecution` (line 3045): no docstring
-  - `_DeployPromotionPayload` (line 3055): no docstring
-  - `_DeployExecutionResult` (line 3066): no docstring
+  - `_DeployRequestPayload` (line 67): no docstring
+  - `_DeployPipelineContext` (line 88): no docstring
+  - `_PromoteBuildSourceContext` (line 98): no docstring
+  - `_PromoteOutputSelection` (line 107): no docstring
+  - `_PreparedPromoteOutputs` (line 116): no docstring
+  - `_PromotedOutputMaterializationContext` (line 123): no docstring
+  - `_PipelineRunRequestPayload` (line 825): no docstring
+  - `_PipelineRunContext` (line 837): no docstring
+  - `_PreparedPreviewExecution` (line 1194): no docstring
+  - `_PreparedBuildExecution` (line 1204): no docstring
+  - `_PreparedDeployExecution` (line 2936): no docstring
+  - `_DeployPromotionPayload` (line 2946): no docstring
+  - `_DeployExecutionResult` (line 2957): no docstring
 
 ### `backend/bff/services/pipeline_join_evaluator.py`
 - **Functions**
@@ -2813,7 +2846,9 @@
 
 ### `backend/bff/tests/test_oms_client_http_helpers.py`
 - **Functions**
-  - `async test_oms_client_http_helpers_roundtrip_json()` (line 8): no docstring
+  - `async test_oms_client_http_helpers_roundtrip_json()` (line 10): no docstring
+  - `async test_oms_client_http_helpers_wrap_transport_errors()` (line 37): no docstring
+  - `async test_oms_client_grpc_helpers_wrap_transport_errors()` (line 57): no docstring
 
 ### `backend/bff/tests/test_ontology_router_helpers.py`
 - **Functions**
@@ -4045,15 +4080,18 @@
 
 ### `backend/oms/dependencies.py`
 - **Functions**
-  - `ValidatedDatabaseName(db_name)` (line 165): 데이터베이스 이름 검증 의존성 - Modernized version
-  - `ValidatedClassId(class_id)` (line 177): 클래스 ID 검증 의존성 - Modernized version
-  - `async ensure_database_exists(db_name)` (line 190): 데이터베이스 존재 확인 및 검증된 이름 반환 - Modernized version
-  - `async check_oms_dependencies_health(container)` (line 212): Check health of all OMS dependencies
+  - `_log_optional_dependency_failure(name, exc, error)` (line 54): no docstring
+  - `async _health_status_for_service(service)` (line 61): no docstring
+  - `ValidatedDatabaseName(db_name)` (line 177): 데이터베이스 이름 검증 의존성 - Modernized version
+  - `ValidatedClassId(class_id)` (line 189): 클래스 ID 검증 의존성 - Modernized version
+  - `async database_exists_in_registry(db_name)` (line 202): no docstring
+  - `async ensure_database_exists(db_name)` (line 216): 데이터베이스 존재 확인 및 검증된 이름 반환 - Modernized version
+  - `async check_oms_dependencies_health(container)` (line 238): Check health of all OMS dependencies
 - **Classes**
-  - `OMSDependencyProvider` (line 53): Modern dependency provider for OMS services
-    - `async get_event_store(container)` (line 62): Get S3/MinIO Event Store - The Single Source of Truth.
-    - `async get_command_status_service(container)` (line 72): Get command status service from container
-    - `async get_processed_event_registry(container)` (line 133): no docstring
+  - `OMSDependencyProvider` (line 71): Modern dependency provider for OMS services
+    - `async get_event_store(container)` (line 80): Get S3/MinIO Event Store - The Single Source of Truth.
+    - `async get_command_status_service(container)` (line 90): Get command status service from container
+    - `async get_processed_event_registry(container)` (line 148): no docstring
 
 ### `backend/oms/entities/__init__.py`
 
@@ -4185,67 +4223,65 @@
 
 ### `backend/oms/routers/action_async.py`
 - **Functions**
-  - `async _ensure_ontology_database_exists(ontology)` (line 222): no docstring
-  - `_resolve_v2_apply_mode(explicit_mode)` (line 233): no docstring
-  - `_default_action_parameter_results(parameters)` (line 246): no docstring
-  - `_normalize_locator_value(value)` (line 266): no docstring
-  - `_extract_first_non_empty(payload, keys)` (line 270): no docstring
-  - `_collect_writeback_target_markers(payload, markers)` (line 278): no docstring
-  - `_estimate_writeback_object_count(parameters)` (line 292): no docstring
-  - `_resolve_writeback_execution_backend(spark_routed)` (line 302): no docstring
-  - `_build_writeback_compute_routing_metadata(action_type_id, branch, parameters_list)` (line 308): no docstring
-  - `_stamp_compute_routing_metadata_on_submit_items(request, routing_metadata)` (line 341): no docstring
-  - `async _submit_action_batch_with_compute_backend(db_name, action_type_id, request, event_store, routing_metadata)` (line 353): no docstring
-  - `async _submit_action_batch_via_on_demand_job(db_name, action_type_id, request, event_store, spark_job_id)` (line 398): no docstring
-  - `_foundry_valid_action_validation_payload_for_parameters(parameters, action_log_id, writeback_status, side_effect_delivery)` (line 420): no docstring
-  - `_resolve_writeback_target(db_name, raw_target)` (line 446): no docstring
-  - `_normalize_batch_dependency_entries(item)` (line 462): no docstring
-  - `_validate_batch_dependency_graph(request_ids, dependencies_by_request_id)` (line 472): no docstring
-  - `async submit_action_async(db_name, action_type_id, request, base_branch, event_store)` (line 522): Internal helper that submits one Action for async execution.
-  - `async submit_action_batch_async(db_name, action_type_id, request, event_store)` (line 557): no docstring
-  - `async simulate_action_async(db_name, action_type_id, request)` (line 711): Simulate an Action writeback (dry-run).
-  - `async apply_action_v2_oms(ontology, action, body, branch, sdk_package_rid, sdk_version, transaction_id, event_store)` (line 1124): no docstring
-  - `async apply_action_batch_v2_oms(ontology, action, body, branch, sdk_package_rid, sdk_version, event_store)` (line 1214): no docstring
+  - `async _ensure_ontology_database_exists(ontology)` (line 221): no docstring
+  - `_resolve_v2_apply_mode(explicit_mode)` (line 225): no docstring
+  - `_default_action_parameter_results(parameters)` (line 238): no docstring
+  - `_normalize_locator_value(value)` (line 258): no docstring
+  - `_extract_first_non_empty(payload, keys)` (line 262): no docstring
+  - `_collect_writeback_target_markers(payload, markers)` (line 270): no docstring
+  - `_estimate_writeback_object_count(parameters)` (line 284): no docstring
+  - `_resolve_writeback_execution_backend(spark_routed)` (line 294): no docstring
+  - `_build_writeback_compute_routing_metadata(action_type_id, branch, parameters_list)` (line 300): no docstring
+  - `_stamp_compute_routing_metadata_on_submit_items(request, routing_metadata)` (line 333): no docstring
+  - `async _submit_action_batch_with_compute_backend(db_name, action_type_id, request, event_store, routing_metadata)` (line 345): no docstring
+  - `async _submit_action_batch_via_on_demand_job(db_name, action_type_id, request, event_store, spark_job_id)` (line 390): no docstring
+  - `_foundry_valid_action_validation_payload_for_parameters(parameters, action_log_id, writeback_status, side_effect_delivery)` (line 412): no docstring
+  - `_resolve_writeback_target(db_name, raw_target)` (line 438): no docstring
+  - `_normalize_batch_dependency_entries(item)` (line 454): no docstring
+  - `_validate_batch_dependency_graph(request_ids, dependencies_by_request_id)` (line 464): no docstring
+  - `async submit_action_async(db_name, action_type_id, request, base_branch, event_store)` (line 514): Internal helper that submits one Action for async execution.
+  - `async submit_action_batch_async(db_name, action_type_id, request, event_store)` (line 549): no docstring
+  - `async simulate_action_async(db_name, action_type_id, request)` (line 703): Simulate an Action writeback (dry-run).
+  - `async apply_action_v2_oms(ontology, action, body, branch, sdk_package_rid, sdk_version, transaction_id, event_store)` (line 1116): no docstring
+  - `async apply_action_batch_v2_oms(ontology, action, body, branch, sdk_package_rid, sdk_version, event_store)` (line 1206): no docstring
 - **Classes**
-  - `ActionSubmitRequest` (line 61): no docstring
-  - `ActionSubmitResponse` (line 72): no docstring
-  - `ActionSubmitBatchDependencyRequest` (line 83): no docstring
-    - `_normalize_trigger_on(cls, value)` (line 89): no docstring
-  - `ActionSubmitBatchItemRequest` (line 96): no docstring
-  - `ActionSubmitBatchRequest` (line 111): no docstring
-  - `ActionSubmitBatchItemResponse` (line 117): no docstring
-  - `ActionSubmitBatchResponse` (line 125): no docstring
-  - `ActionSimulateScenarioRequest` (line 132): no docstring
-  - `ActionSimulateStatePatch` (line 140): Patch-like state override for decision simulation (what-if).
-  - `ActionSimulateObservedBaseOverrides` (line 151): Override observed_base snapshot fields/links to simulate stale reads.
-  - `ActionSimulateTargetAssumption` (line 158): no docstring
-  - `ActionSimulateAssumptions` (line 165): no docstring
-  - `ActionSimulateRequest` (line 172): no docstring
-  - `ApplyActionRequestOptionsV2` (line 196): no docstring
-  - `ApplyActionRequestV2` (line 200): no docstring
-  - `ApplyActionBatchRequestItemV2` (line 207): no docstring
-  - `ApplyActionBatchRequestOptionsV2` (line 211): no docstring
-  - `ApplyActionBatchRequestV2` (line 215): no docstring
+  - `ActionSubmitRequest` (line 60): no docstring
+  - `ActionSubmitResponse` (line 71): no docstring
+  - `ActionSubmitBatchDependencyRequest` (line 82): no docstring
+    - `_normalize_trigger_on(cls, value)` (line 88): no docstring
+  - `ActionSubmitBatchItemRequest` (line 95): no docstring
+  - `ActionSubmitBatchRequest` (line 110): no docstring
+  - `ActionSubmitBatchItemResponse` (line 116): no docstring
+  - `ActionSubmitBatchResponse` (line 124): no docstring
+  - `ActionSimulateScenarioRequest` (line 131): no docstring
+  - `ActionSimulateStatePatch` (line 139): Patch-like state override for decision simulation (what-if).
+  - `ActionSimulateObservedBaseOverrides` (line 150): Override observed_base snapshot fields/links to simulate stale reads.
+  - `ActionSimulateTargetAssumption` (line 157): no docstring
+  - `ActionSimulateAssumptions` (line 164): no docstring
+  - `ActionSimulateRequest` (line 171): no docstring
+  - `ApplyActionRequestOptionsV2` (line 195): no docstring
+  - `ApplyActionRequestV2` (line 199): no docstring
+  - `ApplyActionBatchRequestItemV2` (line 206): no docstring
+  - `ApplyActionBatchRequestOptionsV2` (line 210): no docstring
+  - `ApplyActionBatchRequestV2` (line 214): no docstring
 
 ### `backend/oms/routers/attachments.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 57): no docstring
-  - `_generate_attachment_rid()` (line 78): no docstring
-  - `_detect_media_type(filename)` (line 82): Guess MIME type from filename extension.
-  - `_attachment_s3_key(attachment_rid, filename)` (line 88): Build S3 key for an attachment file.
-  - `_attachments_bucket(storage)` (line 93): no docstring
-  - `_has_actor_headers(request)` (line 100): no docstring
-  - `async _require_domain_role_if_actor(request, db_name)` (line 104): no docstring
-  - `_parse_attachment_metadata(value)` (line 115): Parse attachment metadata from an ES property value.
-  - `_find_attachment_by_rid(attachments, rid)` (line 140): Find an attachment by its RID.
-  - `_attachment_v2_response(att)` (line 151): Format a single AttachmentV2 response.
-  - `async _find_instance_by_pk(es, db_name, branch, object_type, primary_key)` (line 161): Resolve a single instance by its primary key via ES term search.
-  - `_extract_attachment_property(source, property_name)` (line 189): Extract attachment property value from an instance ES document.
-  - `async upload_attachment(request, filename, storage)` (line 223): Upload a file as a temporary attachment.
-  - `async list_property_attachments(ontology, objectType, primaryKey, property, request, branch, es)` (line 286): List attachment metadata for a property (single or multiple).
-  - `async get_attachment_content(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 363): Get the content of a single-valued attachment property.
-  - `async get_attachment_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es)` (line 454): Get metadata for a single attachment by its RID.
-  - `async get_attachment_content_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es, storage)` (line 530): Get the content of an attachment by its RID.
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 59): no docstring
+  - `_generate_attachment_rid()` (line 80): no docstring
+  - `_detect_media_type(filename)` (line 84): Guess MIME type from filename extension.
+  - `_attachment_s3_key(attachment_rid, filename)` (line 90): Build S3 key for an attachment file.
+  - `_attachments_bucket(storage)` (line 95): no docstring
+  - `_parse_attachment_metadata(value)` (line 102): Parse attachment metadata from an ES property value.
+  - `_find_attachment_by_rid(attachments, rid)` (line 127): Find an attachment by its RID.
+  - `_attachment_v2_response(att)` (line 138): Format a single AttachmentV2 response.
+  - `async _find_instance_by_pk(es, db_name, branch, object_type, primary_key)` (line 148): Resolve a single instance by its primary key via ES term search.
+  - `_extract_attachment_property(source, property_name)` (line 176): Extract attachment property value from an instance ES document.
+  - `async upload_attachment(request, filename, storage)` (line 210): Upload a file as a temporary attachment.
+  - `async list_property_attachments(ontology, objectType, primaryKey, property, request, branch, es)` (line 273): List attachment metadata for a property (single or multiple).
+  - `async get_attachment_content(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 342): Get the content of a single-valued attachment property.
+  - `async get_attachment_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es)` (line 425): Get metadata for a single attachment by its RID.
+  - `async get_attachment_content_by_rid(ontology, objectType, primaryKey, property, attachmentRid, request, branch, es, storage)` (line 493): Get the content of an attachment by its RID.
 
 ### `backend/oms/routers/command_status.py`
 - **Functions**
@@ -4254,10 +4290,17 @@
 
 ### `backend/oms/routers/database.py`
 - **Functions**
-  - `async list_databases()` (line 34): 데이터베이스 목록 조회
-  - `async create_database(request, event_store, command_status_service)` (line 61): 새 데이터베이스 생성
-  - `async delete_database(db_name, expected_seq, event_store, command_status_service)` (line 177): 데이터베이스 삭제
-  - `async database_exists(db_name)` (line 257): 데이터베이스 존재 여부 확인
+  - `async list_databases()` (line 30): 데이터베이스 목록 조회
+  - `async create_database(request, event_store, command_status_service)` (line 57): 새 데이터베이스 생성
+  - `async delete_database(db_name, expected_seq, event_store, command_status_service)` (line 173): 데이터베이스 삭제
+  - `async database_exists(db_name)` (line 253): 데이터베이스 존재 여부 확인
+
+### `backend/oms/routers/foundry_role_guard.py`
+- **Functions**
+  - `has_actor_headers(request)` (line 19): no docstring
+  - `async require_domain_role_if_actor(request, db_name, require_env_key, enforce_fn)` (line 23): no docstring
+  - `async require_domain_role_if_actor_or_response(request, db_name, foundry_error, require_env_key, enforce_fn)` (line 40): no docstring
+  - `foundry_role_guard_error_response(foundry_error, exc)` (line 60): no docstring
 
 ### `backend/oms/routers/instance.py`
 - **Functions**
@@ -4406,54 +4449,60 @@
 
 ### `backend/oms/routers/timeseries.py`
 - **Functions**
-  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 49): no docstring
-  - `_ts_s3_key(db_name, branch, class_id, instance_id, property_name)` (line 70): Build canonical S3 key for a time series property.
-  - `_timeseries_bucket(storage)` (line 81): no docstring
-  - `_resolve_timeseries_location(db_name, branch, object_type, primary_key, property_name, ts_ref, default_bucket)` (line 88): no docstring
-  - `_has_actor_headers(request)` (line 115): no docstring
-  - `async _require_domain_role_if_actor(request, db_name)` (line 119): no docstring
-  - `async _find_instance_by_pk(es, db_name, branch, object_type, primary_key)` (line 130): Resolve a single instance by its primary key via ES term search.
-  - `_extract_ts_property(source, property_name)` (line 158): Extract time series S3 reference from an instance ES document.
-  - `async _load_ts_points(storage, bucket, key)` (line 177): Load time series points from S3 JSON file.
-  - `_filter_points_by_range(points, range_spec)` (line 196): Apply optional time range filter to points list.
-  - `_filter_absolute(points, start_time, end_time)` (line 217): no docstring
-  - `_duration_to_timedelta(duration)` (line 243): no docstring
-  - `_filter_relative(points, range_spec)` (line 254): no docstring
-  - `async get_first_point(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 295): Get the first (earliest) point of a time series property.
-  - `async get_last_point(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 377): Get the last (most recent) point of a time series property.
-  - `async stream_points(ontology, objectType, primaryKey, property, request, payload, branch, es, storage)` (line 459): Stream all points of a time series property with optional range filter.
+  - `_foundry_error(status_code, error_code, error_name, parameters)` (line 51): no docstring
+  - `_ts_s3_key(db_name, branch, class_id, instance_id, property_name)` (line 72): Build canonical S3 key for a time series property.
+  - `_timeseries_bucket(storage)` (line 83): no docstring
+  - `_resolve_timeseries_location(db_name, branch, object_type, primary_key, property_name, ts_ref, default_bucket)` (line 90): no docstring
+  - `async _find_instance_by_pk(es, db_name, branch, object_type, primary_key)` (line 117): Resolve a single instance by its primary key via ES term search.
+  - `_extract_ts_property(source, property_name)` (line 145): Extract time series S3 reference from an instance ES document.
+  - `async _load_ts_points(storage, bucket, key)` (line 164): Load time series points from S3 JSON file.
+  - `_filter_points_by_range(points, range_spec)` (line 183): Apply optional time range filter to points list.
+  - `_filter_absolute(points, start_time, end_time)` (line 204): no docstring
+  - `_duration_to_timedelta(duration)` (line 230): no docstring
+  - `_filter_relative(points, range_spec)` (line 241): no docstring
+  - `async get_first_point(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 282): Get the first (earliest) point of a time series property.
+  - `async get_last_point(ontology, objectType, primaryKey, property, request, branch, es, storage)` (line 356): Get the last (most recent) point of a time series property.
+  - `async stream_points(ontology, objectType, primaryKey, property, request, payload, branch, es, storage)` (line 430): Stream all points of a time series property with optional range filter.
 
 ### `backend/oms/services/__init__.py`
 
 ### `backend/oms/services/action_simulation_service.py`
 - **Functions**
-  - `_enterprise_payload_for_error(error_key)` (line 68): no docstring
-  - `_attach_enterprise(payload)` (line 93): no docstring
-  - `_assumption_is_forbidden_field(field)` (line 117): no docstring
-  - `_extract_link_fields(ops)` (line 126): no docstring
-  - `_extract_patch_field_lists(patch)` (line 146): no docstring
-  - `_apply_assumption_patch(scope, base_state, patch)` (line 169): no docstring
-  - `_apply_observed_base_overrides(observed_base, overrides)` (line 222): no docstring
-  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 345): no docstring
-  - `_first_defined(*values)` (line 354): no docstring
-  - `_coerce_optional_bool(value, default)` (line 361): no docstring
-  - `_resolve_project_policy_contract(action_spec)` (line 375): no docstring
-  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 434): no docstring
-  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 557): no docstring
-  - `async preflight_action_writeback(resources, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, permission_profile, base_branch, overlay_branch)` (line 808): no docstring
-  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1394): no docstring
-  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1483): no docstring
+  - `_enterprise_payload_for_error(error_key)` (line 69): no docstring
+  - `_attach_enterprise(payload)` (line 94): no docstring
+  - `_assumption_is_forbidden_field(field)` (line 118): no docstring
+  - `_extract_link_fields(ops)` (line 127): no docstring
+  - `_extract_patch_field_lists(patch)` (line 147): no docstring
+  - `_apply_assumption_patch(scope, base_state, patch)` (line 170): no docstring
+  - `_apply_observed_base_overrides(observed_base, overrides)` (line 223): no docstring
+  - `_coerce_overlay_branch(db_name, writeback_target, overlay_branch)` (line 346): no docstring
+  - `_first_defined(*values)` (line 355): no docstring
+  - `_coerce_optional_bool(value, default)` (line 362): no docstring
+  - `_resolve_project_policy_contract(action_spec)` (line 376): no docstring
+  - `async enforce_action_permission(db_name, submitted_by, submitted_by_type, action_spec)` (line 435): no docstring
+  - `async _check_writeback_dataset_acl_alignment(db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, dataset_registry, class_ids)` (line 573): no docstring
+  - `async preflight_action_writeback(resources, base_storage, dataset_registry, db_name, action_type_id, ontology_commit_id, action_spec, action_type_rid, input_payload, assumptions, submitted_by, submitted_by_type, actor_role, permission_profile, base_branch, overlay_branch)` (line 824): no docstring
+  - `build_patchset_for_scenario(preflight, action_log_id, conflict_policy_override)` (line 1419): no docstring
+  - `async simulate_effects_for_patchset(base_storage, lakefs_storage, db_name, base_branch, overlay_branch, writeback_repo, writeback_branch, action_log_id, patchset_id, targets, base_overrides_by_target)` (line 1508): no docstring
 - **Classes**
-  - `ActionSimulationRejected` (line 61): no docstring
-    - `__init__(self, payload, status_code)` (line 62): no docstring
-  - `ActionSimulationScenario` (line 305): no docstring
-  - `TargetPreflight` (line 311): no docstring
-  - `ActionPreflight` (line 329): no docstring
+  - `ActionSimulationRejected` (line 62): no docstring
+    - `__init__(self, payload, status_code)` (line 63): no docstring
+  - `ActionSimulationScenario` (line 306): no docstring
+  - `TargetPreflight` (line 312): no docstring
+  - `ActionPreflight` (line 330): no docstring
 
 ### `backend/oms/services/action_submit_service.py`
 - **Functions**
-  - `_resolve_writeback_target(db_name, raw_target)` (line 61): no docstring
-  - `async submit_action_request(db_name, action_type_id, request_payload, base_branch_alias, event_store, deployments_factory, resources_factory, settings_getter, storage_factory, dataset_registry_factory, compile_action_change_shape_fn, evaluate_action_target_data_access_fn)` (line 77): Submit an async action command and return ActionSubmitResponse-compatible dict.
+  - `_resolve_writeback_target(db_name, raw_target)` (line 59): no docstring
+  - `async submit_action_request(db_name, action_type_id, request_payload, base_branch_alias, event_store, deployments_factory, resources_factory, settings_getter, storage_factory, dataset_registry_factory, compile_action_change_shape_fn, evaluate_action_target_data_access_fn)` (line 75): Submit an async action command and return ActionSubmitResponse-compatible dict.
+
+### `backend/oms/services/action_target_state_service.py`
+- **Functions**
+  - `async load_action_target_states(db_name, base_branch, compiled_targets, resources, storage, required_interfaces, allow_missing_base_state, skip_invalid_targets, contract_branch, load_runtime_contract_fn)` (line 29): no docstring
+- **Classes**
+  - `LoadedActionTargetState` (line 14): no docstring
+  - `ActionTargetStateLoadError` (line 22): no docstring
+    - `__init__(self, kind, message, **details)` (line 23): no docstring
 
 ### `backend/oms/services/event_store.py`
 
@@ -5448,285 +5497,288 @@
 
 ### `backend/shared/config/settings.py`
 - **Functions**
-  - `_is_docker_environment()` (line 27): no docstring
-  - `_clamp_int(raw, default, min_value, max_value)` (line 36): no docstring
-  - `_parse_boolish(raw)` (line 46): no docstring
-  - `_strip_optional_text(raw)` (line 57): no docstring
-  - `_strip_text_if_not_none(raw)` (line 64): no docstring
-  - `_normalize_base_branch(raw)` (line 70): no docstring
-  - `_clamp_flush_timeout_seconds(raw, default)` (line 74): no docstring
-  - `_env_truthy(name)` (line 82): no docstring
-  - `_should_load_dotenv()` (line 87): Whether settings should read from a local `.env` file.
-  - `get_settings()` (line 4424): Get the global settings instance
-  - `reload_settings()` (line 4438): Reload settings from environment (useful for testing)
-  - `build_client_ssl_config(settings)` (line 4450): SSL config for HTTP clients (httpx/requests/etc).
-  - `build_server_ssl_config(settings)` (line 4471): SSL config for uvicorn (server-side TLS).
-  - `_get_dev_cors_origins()` (line 4501): no docstring
-  - `_get_environment_default_origins(settings)` (line 4517): no docstring
-  - `resolve_cors_origins(settings)` (line 4527): Resolve CORS origins with production safety.
-  - `build_cors_middleware_config(settings)` (line 4569): no docstring
-  - `get_cors_debug_info(settings)` (line 4599): no docstring
+  - `get_settings()` (line 4355): Get the global settings instance
+  - `reload_settings()` (line 4369): Reload settings from environment (useful for testing)
+  - `build_client_ssl_config(settings)` (line 4381): SSL config for HTTP clients (httpx/requests/etc).
+  - `build_server_ssl_config(settings)` (line 4402): SSL config for uvicorn (server-side TLS).
+  - `_get_dev_cors_origins()` (line 4432): no docstring
+  - `_get_environment_default_origins(settings)` (line 4448): no docstring
+  - `resolve_cors_origins(settings)` (line 4458): Resolve CORS origins with production safety.
+  - `build_cors_middleware_config(settings)` (line 4500): no docstring
+  - `get_cors_debug_info(settings)` (line 4530): no docstring
 - **Classes**
-  - `Environment` (line 107): Application environment types
-  - `DatabaseSettings` (line 114): Database configuration settings
-    - `clamp_elasticsearch_default_shards(cls, v)` (line 221): no docstring
-    - `clamp_elasticsearch_default_replicas(cls, v)` (line 226): no docstring
-    - `postgres_url(self)` (line 235): Construct PostgreSQL connection URL
-    - `kafka_servers(self)` (line 242): Get Kafka bootstrap servers
-    - `elasticsearch_url(self)` (line 249): Construct Elasticsearch URL with authentication
-    - `redis_url(self)` (line 258): Construct Redis URL
-  - `ServiceSettings` (line 267): Service configuration settings
-    - `get_oms_base_url_override(cls, v)` (line 432): no docstring
-    - `get_oms_grpc_target_override(cls, v)` (line 440): no docstring
-    - `get_bff_base_url_override(cls, v)` (line 446): no docstring
-    - `get_agent_base_url_override(cls, v)` (line 454): no docstring
-    - `resolve_funnel_excel_timeout(cls, v)` (line 462): no docstring
-    - `clamp_funnel_excel_timeout(cls, v)` (line 470): no docstring
-    - `resolve_funnel_infer_timeout(cls, v)` (line 479): no docstring
-    - `clamp_funnel_infer_timeout(cls, v)` (line 487): no docstring
-    - `oms_base_url(self)` (line 495): Construct OMS base URL
-    - `oms_grpc_target(self)` (line 503): Construct OMS gRPC target host:port.
-    - `bff_base_url(self)` (line 510): Construct BFF base URL
-    - `agent_base_url(self)` (line 518): Construct Agent base URL
-    - `cors_origins_list(self)` (line 526): Parse CORS origins from JSON string
-  - `LLMSettings` (line 538): LLM gateway settings (shared across services).
-    - `fallback_anthropic_api_key(cls, v)` (line 625): no docstring
-    - `fallback_google_api_key(cls, v)` (line 633): no docstring
-    - `fallback_openai_api_key(cls, v)` (line 641): no docstring
-    - `fallback_openai_base_url(cls, v)` (line 655): no docstring
-    - `fallback_openai_model(cls, v)` (line 669): no docstring
-    - `anthropic_api_key_effective(self)` (line 682): no docstring
-    - `google_api_key_effective(self)` (line 686): no docstring
-    - `mock_json_for_task(self, task)` (line 689): Resolve the mock provider JSON payload for a task.
-  - `ObservabilitySettings` (line 732): Logging/observability settings (shared across services/workers).
-    - `normalize_log_level(cls, v)` (line 846): no docstring
-    - `fallback_run_id(cls, v)` (line 863): no docstring
-    - `fallback_code_sha(cls, v)` (line 874): no docstring
-    - `normalize_otel_service_version(cls, v)` (line 885): no docstring
-    - `normalize_jaeger_endpoint(cls, v)` (line 891): no docstring
-    - `clamp_trace_sample_rate(cls, v)` (line 897): no docstring
-    - `parse_otel_export_otlp(cls, v)` (line 910): no docstring
-    - `clamp_metric_export_interval_seconds(cls, v)` (line 915): no docstring
-    - `service_name_effective(self)` (line 923): no docstring
-    - `lineage_required_effective(self)` (line 931): no docstring
-    - `enterprise_catalog_ref_effective(self)` (line 939): no docstring
-    - `otel_export_otlp_effective(self)` (line 949): no docstring
-  - `GraphQuerySettings` (line 955): Graph query guardrails (graph federation).
-    - `clamp_max_hops(cls, v)` (line 973): no docstring
-    - `clamp_max_limit(cls, v)` (line 978): no docstring
-    - `clamp_max_paths(cls, v)` (line 983): no docstring
-  - `FeatureFlagsSettings` (line 987): Feature flags / opt-in endpoints.
-  - `PipelineSettings` (line 1038): Pipeline Builder + pipeline worker settings.
-    - `fallback_publish_lock_timeout(cls, v)` (line 1233): no docstring
-    - `clamp_jobs_max_retries(cls, v)` (line 1242): no docstring
-    - `clamp_job_queue_flush_timeout_seconds(cls, v)` (line 1247): no docstring
-    - `clamp_jobs_backoff_base_seconds(cls, v)` (line 1256): no docstring
-    - `clamp_jobs_backoff_max_seconds(cls, v)` (line 1261): no docstring
-    - `clamp_spark_executor_threads(cls, v)` (line 1266): no docstring
-    - `normalize_spark_driver_memory(cls, v)` (line 1271): no docstring
-    - `clamp_spark_shuffle_partitions(cls, v)` (line 1277): no docstring
-    - `clamp_spark_streaming_await_timeout_seconds(cls, v)` (line 1282): no docstring
-    - `clamp_kafka_schema_registry_timeout_seconds(cls, v)` (line 1287): no docstring
-    - `normalize_spark_streaming_default_trigger(cls, v)` (line 1292): no docstring
-    - `clamp_lock_ttl_seconds(cls, v)` (line 1302): no docstring
-    - `clamp_lock_renew_seconds(cls, v)` (line 1307): no docstring
-    - `clamp_lock_retry_seconds(cls, v)` (line 1312): no docstring
-    - `clamp_lock_acquire_timeout_seconds(cls, v)` (line 1317): no docstring
-    - `clamp_publish_lock_acquire_timeout_seconds(cls, v)` (line 1322): no docstring
-    - `clamp_scheduler_poll_seconds(cls, v)` (line 1327): no docstring
-    - `protected_branches_set(self)` (line 1331): no docstring
-    - `fallback_branches_list(self)` (line 1338): no docstring
-  - `OntologySettings` (line 1346): Ontology API + linter governance settings.
-    - `strip_protected_branches(cls, v)` (line 1433): no docstring
-    - `parse_optional_bool(cls, v)` (line 1438): no docstring
-    - `normalize_resource_storage_backend(cls, v)` (line 1443): no docstring
-    - `clamp_search_around_spark_threshold(cls, v)` (line 1454): no docstring
-    - `clamp_writeback_spark_threshold(cls, v)` (line 1459): no docstring
-    - `protected_branches_set(self)` (line 1463): no docstring
-    - `allow_implicit_primary_key_effective(self, is_production, branch)` (line 1468): no docstring
-    - `allow_implicit_title_key_effective(self, is_production, branch)` (line 1477): no docstring
-  - `AgentRuntimeSettings` (line 1487): Agent runtime settings (agent service tool runner).
-    - `clamp_context_upload_max_bytes(cls, v)` (line 1613): no docstring
-    - `clamp_context_upload_max_text_chars(cls, v)` (line 1618): no docstring
-    - `clamp_context_upload_clamav_port(cls, v)` (line 1628): no docstring
-    - `fallback_bff_token(cls, v)` (line 1633): no docstring
-    - `fallback_command_timeout(cls, v)` (line 1641): no docstring
-  - `AgentPlanSettings` (line 1651): LLM-native control plane settings (planner + allowlist bootstrap).
-  - `PipelinePlanSettings` (line 1681): Pipeline plan planner settings (LLM-backed pipeline definition proposals).
-  - `ClientSettings` (line 1698): Internal service-to-service client settings (BFF/OMS/etc).
-    - `clamp_agent_proxy_timeout(cls, v)` (line 1731): no docstring
-    - `fallback_oms_client_token(cls, v)` (line 1740): no docstring
-    - `fallback_bff_admin_token(cls, v)` (line 1751): no docstring
-  - `MCPSettings` (line 1761): MCP integration settings (BFF/agent).
-  - `AuthSettings` (line 1783): Service auth configuration (BFF/OMS).
-    - `bff_auth_disable_allowed(self)` (line 1975): no docstring
-    - `oms_auth_disable_allowed(self)` (line 1979): no docstring
-    - `_split_tokens(raw)` (line 1983): no docstring
-    - `_tokens_from_values(cls, *values)` (line 1990): no docstring
-    - `bff_expected_tokens(self)` (line 1997): no docstring
-    - `bff_agent_tokens(self)` (line 2001): no docstring
-    - `oms_expected_tokens(self)` (line 2005): no docstring
-    - `bff_expected_token(self)` (line 2009): no docstring
-    - `bff_admin_only_token(self)` (line 2019): no docstring
-    - `oms_grpc_service_token_effective(self)` (line 2024): no docstring
-    - `oms_grpc_expected_service_tokens(self)` (line 2032): no docstring
-    - `oms_expected_token(self)` (line 2047): no docstring
-    - `admin_bypass_tokens(self)` (line 2052): no docstring
-    - `is_bff_auth_required(self, allow_pytest, default_required)` (line 2063): no docstring
-    - `is_agent_auth_required(self, default_required)` (line 2072): no docstring
-    - `is_oms_auth_required(self, default_required)` (line 2079): no docstring
-    - `_parse_exempt_paths(raw, defaults)` (line 2087): no docstring
-    - `resolve_bff_exempt_paths(self, defaults)` (line 2094): no docstring
-    - `resolve_agent_exempt_paths(self, defaults)` (line 2097): no docstring
-    - `resolve_oms_exempt_paths(self, defaults)` (line 2100): no docstring
-    - `dev_master_role_set(self)` (line 2104): no docstring
-  - `RateLimitSettings` (line 2108): Rate limiter runtime configuration.
-    - `clamp_local_max_entries(cls, v)` (line 2130): no docstring
-  - `MessagingSettings` (line 2134): Kafka topic/group configuration settings
-  - `StorageSettings` (line 2250): Storage configuration settings
-    - `normalize_minio_endpoint_url(cls, v)` (line 2305): no docstring
-    - `clamp_lakefs_client_timeout(cls, v)` (line 2383): no docstring
-    - `normalize_lakefs_credentials_source(cls, v)` (line 2391): no docstring
-    - `use_ssl(self)` (line 2402): Determine if SSL should be used based on endpoint URL
-    - `lakefs_api_url_effective(self)` (line 2407): Return lakeFS API base URL (without /api/v1).
-    - `lakefs_s3_endpoint_effective(self)` (line 2415): Return lakeFS S3 Gateway endpoint URL.
-  - `CacheSettings` (line 2422): Cache and TTL configuration settings
-    - `clamp_command_status_ttl_seconds(cls, v)` (line 2460): no docstring
-  - `SecuritySettings` (line 2464): Security configuration settings
-  - `PerformanceSettings` (line 2538): Performance and optimization settings
-    - `clamp_pg_pool_min(cls, v)` (line 2666): no docstring
-    - `clamp_pg_pool_max(cls, v)` (line 2681): no docstring
-    - `clamp_pg_command_timeout_seconds(cls, v)` (line 2696): no docstring
-    - `clamp_lineage_latest_edges_max_ids(cls, v)` (line 2701): no docstring
-  - `EventSourcingSettings` (line 2705): Event sourcing / CQRS tuning settings
-    - `normalize_event_store_strings(cls, v)` (line 2807): no docstring
-  - `BranchVirtualizationSettings` (line 2813): Branch virtualization defaults (OCC seeding).
-  - `InstanceWorkerSettings` (line 2831): Instance worker runtime settings.
-    - `fallback_allow_pk_generation(cls, v)` (line 2869): no docstring
-    - `fallback_relationship_strict(cls, v)` (line 2875): no docstring
-    - `clamp_max_retry_attempts(cls, v)` (line 2881): no docstring
-    - `clamp_untyped_ref_max_retry_attempts(cls, v)` (line 2886): no docstring
-    - `clamp_untyped_ref_backoff_max_seconds(cls, v)` (line 2891): no docstring
-  - `OntologyWorkerSettings` (line 2899): Ontology worker runtime settings.
-    - `clamp_max_retry_attempts(cls, v)` (line 2925): no docstring
-  - `ProjectionWorkerSettings` (line 2929): Projection worker runtime settings.
-    - `clamp_max_retries(cls, v)` (line 2951): no docstring
-  - `ActionWorkerSettings` (line 2955): Action worker runtime settings.
-    - `clamp_dlq_retries(cls, v)` (line 2981): no docstring
-    - `clamp_max_retry_attempts(cls, v)` (line 2986): no docstring
-  - `ActionOutboxSettings` (line 2990): Action outbox worker settings.
-    - `clamp_batch_size(cls, v)` (line 3012): no docstring
-  - `OntologyDeployOutboxSettings` (line 3016): Ontology deployment outbox worker settings (OMS embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3084): no docstring
-    - `clamp_batch_size(cls, v)` (line 3089): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 3094): no docstring
+  - `Environment` (line 38): Application environment types
+  - `DatabaseSettings` (line 45): Database configuration settings
+    - `clamp_elasticsearch_default_shards(cls, v)` (line 152): no docstring
+    - `clamp_elasticsearch_default_replicas(cls, v)` (line 157): no docstring
+    - `postgres_url(self)` (line 166): Construct PostgreSQL connection URL
+    - `kafka_servers(self)` (line 173): Get Kafka bootstrap servers
+    - `elasticsearch_url(self)` (line 180): Construct Elasticsearch URL with authentication
+    - `redis_url(self)` (line 189): Construct Redis URL
+  - `ServiceSettings` (line 198): Service configuration settings
+    - `get_oms_base_url_override(cls, v)` (line 363): no docstring
+    - `get_oms_grpc_target_override(cls, v)` (line 371): no docstring
+    - `get_bff_base_url_override(cls, v)` (line 377): no docstring
+    - `get_agent_base_url_override(cls, v)` (line 385): no docstring
+    - `resolve_funnel_excel_timeout(cls, v)` (line 393): no docstring
+    - `clamp_funnel_excel_timeout(cls, v)` (line 401): no docstring
+    - `resolve_funnel_infer_timeout(cls, v)` (line 410): no docstring
+    - `clamp_funnel_infer_timeout(cls, v)` (line 418): no docstring
+    - `oms_base_url(self)` (line 426): Construct OMS base URL
+    - `oms_grpc_target(self)` (line 434): Construct OMS gRPC target host:port.
+    - `bff_base_url(self)` (line 441): Construct BFF base URL
+    - `agent_base_url(self)` (line 449): Construct Agent base URL
+    - `cors_origins_list(self)` (line 457): Parse CORS origins from JSON string
+  - `LLMSettings` (line 469): LLM gateway settings (shared across services).
+    - `fallback_anthropic_api_key(cls, v)` (line 556): no docstring
+    - `fallback_google_api_key(cls, v)` (line 564): no docstring
+    - `fallback_openai_api_key(cls, v)` (line 572): no docstring
+    - `fallback_openai_base_url(cls, v)` (line 586): no docstring
+    - `fallback_openai_model(cls, v)` (line 600): no docstring
+    - `anthropic_api_key_effective(self)` (line 613): no docstring
+    - `google_api_key_effective(self)` (line 617): no docstring
+    - `mock_json_for_task(self, task)` (line 620): Resolve the mock provider JSON payload for a task.
+  - `ObservabilitySettings` (line 663): Logging/observability settings (shared across services/workers).
+    - `normalize_log_level(cls, v)` (line 777): no docstring
+    - `fallback_run_id(cls, v)` (line 794): no docstring
+    - `fallback_code_sha(cls, v)` (line 805): no docstring
+    - `normalize_otel_service_version(cls, v)` (line 816): no docstring
+    - `normalize_jaeger_endpoint(cls, v)` (line 822): no docstring
+    - `clamp_trace_sample_rate(cls, v)` (line 828): no docstring
+    - `parse_otel_export_otlp(cls, v)` (line 841): no docstring
+    - `clamp_metric_export_interval_seconds(cls, v)` (line 846): no docstring
+    - `service_name_effective(self)` (line 854): no docstring
+    - `lineage_required_effective(self)` (line 862): no docstring
+    - `enterprise_catalog_ref_effective(self)` (line 870): no docstring
+    - `otel_export_otlp_effective(self)` (line 880): no docstring
+  - `GraphQuerySettings` (line 886): Graph query guardrails (graph federation).
+    - `clamp_max_hops(cls, v)` (line 904): no docstring
+    - `clamp_max_limit(cls, v)` (line 909): no docstring
+    - `clamp_max_paths(cls, v)` (line 914): no docstring
+  - `FeatureFlagsSettings` (line 918): Feature flags / opt-in endpoints.
+  - `PipelineSettings` (line 969): Pipeline Builder + pipeline worker settings.
+    - `fallback_publish_lock_timeout(cls, v)` (line 1164): no docstring
+    - `clamp_jobs_max_retries(cls, v)` (line 1173): no docstring
+    - `clamp_job_queue_flush_timeout_seconds(cls, v)` (line 1178): no docstring
+    - `clamp_jobs_backoff_base_seconds(cls, v)` (line 1187): no docstring
+    - `clamp_jobs_backoff_max_seconds(cls, v)` (line 1192): no docstring
+    - `clamp_spark_executor_threads(cls, v)` (line 1197): no docstring
+    - `normalize_spark_driver_memory(cls, v)` (line 1202): no docstring
+    - `clamp_spark_shuffle_partitions(cls, v)` (line 1208): no docstring
+    - `clamp_spark_streaming_await_timeout_seconds(cls, v)` (line 1213): no docstring
+    - `clamp_kafka_schema_registry_timeout_seconds(cls, v)` (line 1218): no docstring
+    - `normalize_spark_streaming_default_trigger(cls, v)` (line 1223): no docstring
+    - `clamp_lock_ttl_seconds(cls, v)` (line 1233): no docstring
+    - `clamp_lock_renew_seconds(cls, v)` (line 1238): no docstring
+    - `clamp_lock_retry_seconds(cls, v)` (line 1243): no docstring
+    - `clamp_lock_acquire_timeout_seconds(cls, v)` (line 1248): no docstring
+    - `clamp_publish_lock_acquire_timeout_seconds(cls, v)` (line 1253): no docstring
+    - `clamp_scheduler_poll_seconds(cls, v)` (line 1258): no docstring
+    - `protected_branches_set(self)` (line 1262): no docstring
+    - `fallback_branches_list(self)` (line 1269): no docstring
+  - `OntologySettings` (line 1277): Ontology API + linter governance settings.
+    - `strip_protected_branches(cls, v)` (line 1364): no docstring
+    - `parse_optional_bool(cls, v)` (line 1369): no docstring
+    - `normalize_resource_storage_backend(cls, v)` (line 1374): no docstring
+    - `clamp_search_around_spark_threshold(cls, v)` (line 1385): no docstring
+    - `clamp_writeback_spark_threshold(cls, v)` (line 1390): no docstring
+    - `protected_branches_set(self)` (line 1394): no docstring
+    - `allow_implicit_primary_key_effective(self, is_production, branch)` (line 1399): no docstring
+    - `allow_implicit_title_key_effective(self, is_production, branch)` (line 1408): no docstring
+  - `AgentRuntimeSettings` (line 1418): Agent runtime settings (agent service tool runner).
+    - `clamp_context_upload_max_bytes(cls, v)` (line 1544): no docstring
+    - `clamp_context_upload_max_text_chars(cls, v)` (line 1549): no docstring
+    - `clamp_context_upload_clamav_port(cls, v)` (line 1559): no docstring
+    - `fallback_bff_token(cls, v)` (line 1564): no docstring
+    - `fallback_command_timeout(cls, v)` (line 1572): no docstring
+  - `AgentPlanSettings` (line 1582): LLM-native control plane settings (planner + allowlist bootstrap).
+  - `PipelinePlanSettings` (line 1612): Pipeline plan planner settings (LLM-backed pipeline definition proposals).
+  - `ClientSettings` (line 1629): Internal service-to-service client settings (BFF/OMS/etc).
+    - `clamp_agent_proxy_timeout(cls, v)` (line 1662): no docstring
+    - `fallback_oms_client_token(cls, v)` (line 1671): no docstring
+    - `fallback_bff_admin_token(cls, v)` (line 1682): no docstring
+  - `MCPSettings` (line 1692): MCP integration settings (BFF/agent).
+  - `AuthSettings` (line 1714): Service auth configuration (BFF/OMS).
+    - `bff_auth_disable_allowed(self)` (line 1906): no docstring
+    - `oms_auth_disable_allowed(self)` (line 1910): no docstring
+    - `_split_tokens(raw)` (line 1914): no docstring
+    - `_tokens_from_values(cls, *values)` (line 1921): no docstring
+    - `bff_expected_tokens(self)` (line 1928): no docstring
+    - `bff_agent_tokens(self)` (line 1932): no docstring
+    - `oms_expected_tokens(self)` (line 1936): no docstring
+    - `bff_expected_token(self)` (line 1940): no docstring
+    - `bff_admin_only_token(self)` (line 1950): no docstring
+    - `oms_grpc_service_token_effective(self)` (line 1955): no docstring
+    - `oms_grpc_expected_service_tokens(self)` (line 1963): no docstring
+    - `oms_expected_token(self)` (line 1978): no docstring
+    - `admin_bypass_tokens(self)` (line 1983): no docstring
+    - `is_bff_auth_required(self, allow_pytest, default_required)` (line 1994): no docstring
+    - `is_agent_auth_required(self, default_required)` (line 2003): no docstring
+    - `is_oms_auth_required(self, default_required)` (line 2010): no docstring
+    - `_parse_exempt_paths(raw, defaults)` (line 2018): no docstring
+    - `resolve_bff_exempt_paths(self, defaults)` (line 2025): no docstring
+    - `resolve_agent_exempt_paths(self, defaults)` (line 2028): no docstring
+    - `resolve_oms_exempt_paths(self, defaults)` (line 2031): no docstring
+    - `dev_master_role_set(self)` (line 2035): no docstring
+  - `RateLimitSettings` (line 2039): Rate limiter runtime configuration.
+    - `clamp_local_max_entries(cls, v)` (line 2061): no docstring
+  - `MessagingSettings` (line 2065): Kafka topic/group configuration settings
+  - `StorageSettings` (line 2181): Storage configuration settings
+    - `normalize_minio_endpoint_url(cls, v)` (line 2236): no docstring
+    - `clamp_lakefs_client_timeout(cls, v)` (line 2314): no docstring
+    - `normalize_lakefs_credentials_source(cls, v)` (line 2322): no docstring
+    - `use_ssl(self)` (line 2333): Determine if SSL should be used based on endpoint URL
+    - `lakefs_api_url_effective(self)` (line 2338): Return lakeFS API base URL (without /api/v1).
+    - `lakefs_s3_endpoint_effective(self)` (line 2346): Return lakeFS S3 Gateway endpoint URL.
+  - `CacheSettings` (line 2353): Cache and TTL configuration settings
+    - `clamp_command_status_ttl_seconds(cls, v)` (line 2391): no docstring
+  - `SecuritySettings` (line 2395): Security configuration settings
+  - `PerformanceSettings` (line 2469): Performance and optimization settings
+    - `clamp_pg_pool_min(cls, v)` (line 2597): no docstring
+    - `clamp_pg_pool_max(cls, v)` (line 2612): no docstring
+    - `clamp_pg_command_timeout_seconds(cls, v)` (line 2627): no docstring
+    - `clamp_lineage_latest_edges_max_ids(cls, v)` (line 2632): no docstring
+  - `EventSourcingSettings` (line 2636): Event sourcing / CQRS tuning settings
+    - `normalize_event_store_strings(cls, v)` (line 2738): no docstring
+  - `BranchVirtualizationSettings` (line 2744): Branch virtualization defaults (OCC seeding).
+  - `InstanceWorkerSettings` (line 2762): Instance worker runtime settings.
+    - `fallback_allow_pk_generation(cls, v)` (line 2800): no docstring
+    - `fallback_relationship_strict(cls, v)` (line 2806): no docstring
+    - `clamp_max_retry_attempts(cls, v)` (line 2812): no docstring
+    - `clamp_untyped_ref_max_retry_attempts(cls, v)` (line 2817): no docstring
+    - `clamp_untyped_ref_backoff_max_seconds(cls, v)` (line 2822): no docstring
+  - `OntologyWorkerSettings` (line 2830): Ontology worker runtime settings.
+    - `clamp_max_retry_attempts(cls, v)` (line 2856): no docstring
+  - `ProjectionWorkerSettings` (line 2860): Projection worker runtime settings.
+    - `clamp_max_retries(cls, v)` (line 2882): no docstring
+  - `ActionWorkerSettings` (line 2886): Action worker runtime settings.
+    - `clamp_dlq_retries(cls, v)` (line 2912): no docstring
+    - `clamp_max_retry_attempts(cls, v)` (line 2917): no docstring
+  - `ActionOutboxSettings` (line 2921): Action outbox worker settings.
+    - `clamp_batch_size(cls, v)` (line 2943): no docstring
+  - `OntologyDeployOutboxSettings` (line 2947): Ontology deployment outbox worker settings (OMS embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3015): no docstring
+    - `clamp_batch_size(cls, v)` (line 3020): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 3025): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3030): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3035): no docstring
+    - `clamp_retention_days(cls, v)` (line 3040): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 3045): no docstring
+    - `clamp_purge_limit(cls, v)` (line 3050): no docstring
+  - `ConnectorSyncSettings` (line 3054): Connector sync worker settings.
+    - `clamp_max_retries(cls, v)` (line 3094): no docstring
     - `clamp_backoff_base_seconds(cls, v)` (line 3099): no docstring
     - `clamp_backoff_max_seconds(cls, v)` (line 3104): no docstring
-    - `clamp_retention_days(cls, v)` (line 3109): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 3114): no docstring
-    - `clamp_purge_limit(cls, v)` (line 3119): no docstring
-  - `ConnectorSyncSettings` (line 3123): Connector sync worker settings.
-    - `clamp_max_retries(cls, v)` (line 3163): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3168): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3173): no docstring
-  - `ConnectorTriggerSettings` (line 3177): Connector trigger service settings.
-    - `strip_source_type(cls, v)` (line 3207): no docstring
-    - `clamp_tick_seconds(cls, v)` (line 3212): no docstring
-    - `clamp_poll_concurrency(cls, v)` (line 3217): no docstring
-    - `clamp_outbox_batch(cls, v)` (line 3222): no docstring
-  - `ObjectifySettings` (line 3226): Objectify worker settings.
-    - `strip_worker_handler(cls, v)` (line 3302): no docstring
-    - `clamp_batch_size(cls, v)` (line 3307): no docstring
-    - `clamp_row_batch_size(cls, v)` (line 3312): no docstring
-    - `clamp_bulk_update_batch_size(cls, v)` (line 3317): no docstring
-    - `clamp_list_page_size(cls, v)` (line 3324): no docstring
-    - `clamp_max_rows(cls, v)` (line 3329): no docstring
-    - `clamp_lineage_max_links(cls, v)` (line 3334): no docstring
-    - `clamp_max_retries(cls, v)` (line 3339): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3344): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3349): no docstring
-    - `normalize_ontology_pk_validation_mode(cls, v)` (line 3354): no docstring
-    - `clamp_dataset_primary_index_chunk_size(cls, v)` (line 3368): no docstring
-    - `bulk_update_batch_size_effective(self)` (line 3372): no docstring
-  - `IngestReconcilerSettings` (line 3376): Dataset ingest reconciler worker settings.
-    - `fallback_alert_webhook_url(cls, v)` (line 3439): no docstring
-    - `clamp_poll_seconds(cls, v)` (line 3448): no docstring
-    - `clamp_stale_seconds(cls, v)` (line 3453): no docstring
-    - `clamp_limit(cls, v)` (line 3458): no docstring
-    - `clamp_lock_key(cls, v)` (line 3463): no docstring
-    - `clamp_alert_published_threshold(cls, v)` (line 3468): no docstring
-    - `clamp_alert_aborted_threshold(cls, v)` (line 3473): no docstring
-    - `clamp_alert_cooldown_seconds(cls, v)` (line 3478): no docstring
-  - `DatasetIngestOutboxSettings` (line 3482): Dataset ingest outbox worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3575): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3585): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3590): no docstring
-    - `clamp_max_retries(cls, v)` (line 3595): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 3600): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 3605): no docstring
-    - `clamp_retention_days(cls, v)` (line 3610): no docstring
-    - `clamp_purge_limit(cls, v)` (line 3615): no docstring
-    - `clamp_dlq_max_in_flight(cls, v)` (line 3620): no docstring
-    - `clamp_dlq_delivery_timeout_ms(cls, v)` (line 3625): no docstring
-    - `clamp_dlq_request_timeout_ms(cls, v)` (line 3630): no docstring
-    - `clamp_dlq_retries(cls, v)` (line 3635): no docstring
-  - `ObjectifyOutboxWorkerSettings` (line 3639): Objectify outbox worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3727): no docstring
-    - `clamp_batch_size(cls, v)` (line 3732): no docstring
-    - `clamp_backoff_base_seconds(cls, v)` (line 3742): no docstring
-    - `clamp_backoff_max_seconds(cls, v)` (line 3747): no docstring
-    - `clamp_claim_timeout_seconds(cls, v)` (line 3752): no docstring
-    - `clamp_purge_interval_seconds(cls, v)` (line 3757): no docstring
-    - `clamp_retention_days(cls, v)` (line 3762): no docstring
-    - `clamp_purge_limit(cls, v)` (line 3767): no docstring
-    - `clamp_producer_max_in_flight(cls, v)` (line 3772): no docstring
-    - `clamp_producer_delivery_timeout_ms(cls, v)` (line 3777): no docstring
-    - `clamp_producer_request_timeout_ms(cls, v)` (line 3782): no docstring
-    - `clamp_producer_retries(cls, v)` (line 3787): no docstring
-  - `ObjectifyReconcilerSettings` (line 3791): Objectify reconciler worker settings (BFF embedded worker).
-    - `clamp_poll_seconds(cls, v)` (line 3829): no docstring
-    - `clamp_stale_after_seconds(cls, v)` (line 3834): no docstring
-    - `clamp_enqueued_stale_seconds(cls, v)` (line 3839): no docstring
-    - `clamp_lock_key(cls, v)` (line 3844): no docstring
-    - `enqueued_stale_seconds_effective(self)` (line 3848): no docstring
-  - `WritebackMaterializerSettings` (line 3853): Writeback materializer worker settings.
-    - `db_names_list(self)` (line 3885): no docstring
-  - `EventPublisherSettings` (line 3892): Event publisher (message relay) settings.
-    - `fallback_poll_interval(cls, v)` (line 3954): no docstring
-    - `fallback_batch_size(cls, v)` (line 3962): no docstring
-    - `fallback_topic_bootstrap_timeout(cls, v)` (line 3970): no docstring
-    - `clamp_poll_interval_seconds(cls, v)` (line 3976): no docstring
-    - `clamp_batch_size(cls, v)` (line 3981): no docstring
-    - `clamp_kafka_flush_batch_size(cls, v)` (line 3986): no docstring
-    - `clamp_metrics_log_interval_seconds(cls, v)` (line 3993): no docstring
-    - `clamp_lookback_seconds(cls, v)` (line 3998): no docstring
-    - `clamp_lookback_max_keys(cls, v)` (line 4003): no docstring
-    - `clamp_dedup_max_events(cls, v)` (line 4008): no docstring
-    - `clamp_dedup_checkpoint_max_events(cls, v)` (line 4013): no docstring
-    - `clamp_topic_bootstrap_timeout_seconds(cls, v)` (line 4018): no docstring
-    - `kafka_flush_batch_size_effective(self)` (line 4022): no docstring
-  - `AgentRetentionWorkerSettings` (line 4026): Agent session retention worker settings (SEC-005).
-    - `clamp_poll_seconds(cls, v)` (line 4048): no docstring
-    - `clamp_retention_days(cls, v)` (line 4053): no docstring
-    - `normalize_action(cls, v)` (line 4058): no docstring
-  - `SchemaChangeMonitorSettings` (line 4069): Schema change monitor settings for proactive drift detection.
-    - `clamp_check_interval(cls, v)` (line 4095): no docstring
-    - `clamp_cooldown(cls, v)` (line 4100): no docstring
-  - `ChaosSettings` (line 4104): Chaos/fault injection settings (test-only).
-    - `coerce_enabled(cls, v)` (line 4135): no docstring
-    - `coerce_crash_once(cls, v)` (line 4146): no docstring
-    - `clamp_crash_exit_code(cls, v)` (line 4157): no docstring
-  - `WorkersSettings` (line 4161): Workers/services runtime settings.
-  - `WritebackSettings` (line 4191): Ontology writeback + read overlay settings
-  - `TestSettings` (line 4261): Test environment configuration
-  - `GoogleSheetsSettings` (line 4285): Google Sheets integration settings
-    - `fallback_google_api_key(cls, v)` (line 4321): no docstring
-  - `ApplicationSettings` (line 4328): Main application settings - aggregates all other settings
-    - `normalize_environment(cls, v)` (line 4380): no docstring
-    - `is_development(self)` (line 4401): Check if running in development mode
-    - `is_production(self)` (line 4406): Check if running in production mode
-    - `is_test(self)` (line 4411): Check if running in test mode
-    - `is_pytest(self)` (line 4416): Check if running under pytest (PYTEST_CURRENT_TEST set).
+  - `ConnectorTriggerSettings` (line 3108): Connector trigger service settings.
+    - `strip_source_type(cls, v)` (line 3138): no docstring
+    - `clamp_tick_seconds(cls, v)` (line 3143): no docstring
+    - `clamp_poll_concurrency(cls, v)` (line 3148): no docstring
+    - `clamp_outbox_batch(cls, v)` (line 3153): no docstring
+  - `ObjectifySettings` (line 3157): Objectify worker settings.
+    - `strip_worker_handler(cls, v)` (line 3233): no docstring
+    - `clamp_batch_size(cls, v)` (line 3238): no docstring
+    - `clamp_row_batch_size(cls, v)` (line 3243): no docstring
+    - `clamp_bulk_update_batch_size(cls, v)` (line 3248): no docstring
+    - `clamp_list_page_size(cls, v)` (line 3255): no docstring
+    - `clamp_max_rows(cls, v)` (line 3260): no docstring
+    - `clamp_lineage_max_links(cls, v)` (line 3265): no docstring
+    - `clamp_max_retries(cls, v)` (line 3270): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3275): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3280): no docstring
+    - `normalize_ontology_pk_validation_mode(cls, v)` (line 3285): no docstring
+    - `clamp_dataset_primary_index_chunk_size(cls, v)` (line 3299): no docstring
+    - `bulk_update_batch_size_effective(self)` (line 3303): no docstring
+  - `IngestReconcilerSettings` (line 3307): Dataset ingest reconciler worker settings.
+    - `fallback_alert_webhook_url(cls, v)` (line 3370): no docstring
+    - `clamp_poll_seconds(cls, v)` (line 3379): no docstring
+    - `clamp_stale_seconds(cls, v)` (line 3384): no docstring
+    - `clamp_limit(cls, v)` (line 3389): no docstring
+    - `clamp_lock_key(cls, v)` (line 3394): no docstring
+    - `clamp_alert_published_threshold(cls, v)` (line 3399): no docstring
+    - `clamp_alert_aborted_threshold(cls, v)` (line 3404): no docstring
+    - `clamp_alert_cooldown_seconds(cls, v)` (line 3409): no docstring
+  - `DatasetIngestOutboxSettings` (line 3413): Dataset ingest outbox worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3506): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3516): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3521): no docstring
+    - `clamp_max_retries(cls, v)` (line 3526): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 3531): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 3536): no docstring
+    - `clamp_retention_days(cls, v)` (line 3541): no docstring
+    - `clamp_purge_limit(cls, v)` (line 3546): no docstring
+    - `clamp_dlq_max_in_flight(cls, v)` (line 3551): no docstring
+    - `clamp_dlq_delivery_timeout_ms(cls, v)` (line 3556): no docstring
+    - `clamp_dlq_request_timeout_ms(cls, v)` (line 3561): no docstring
+    - `clamp_dlq_retries(cls, v)` (line 3566): no docstring
+  - `ObjectifyOutboxWorkerSettings` (line 3570): Objectify outbox worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3658): no docstring
+    - `clamp_batch_size(cls, v)` (line 3663): no docstring
+    - `clamp_backoff_base_seconds(cls, v)` (line 3673): no docstring
+    - `clamp_backoff_max_seconds(cls, v)` (line 3678): no docstring
+    - `clamp_claim_timeout_seconds(cls, v)` (line 3683): no docstring
+    - `clamp_purge_interval_seconds(cls, v)` (line 3688): no docstring
+    - `clamp_retention_days(cls, v)` (line 3693): no docstring
+    - `clamp_purge_limit(cls, v)` (line 3698): no docstring
+    - `clamp_producer_max_in_flight(cls, v)` (line 3703): no docstring
+    - `clamp_producer_delivery_timeout_ms(cls, v)` (line 3708): no docstring
+    - `clamp_producer_request_timeout_ms(cls, v)` (line 3713): no docstring
+    - `clamp_producer_retries(cls, v)` (line 3718): no docstring
+  - `ObjectifyReconcilerSettings` (line 3722): Objectify reconciler worker settings (BFF embedded worker).
+    - `clamp_poll_seconds(cls, v)` (line 3760): no docstring
+    - `clamp_stale_after_seconds(cls, v)` (line 3765): no docstring
+    - `clamp_enqueued_stale_seconds(cls, v)` (line 3770): no docstring
+    - `clamp_lock_key(cls, v)` (line 3775): no docstring
+    - `enqueued_stale_seconds_effective(self)` (line 3779): no docstring
+  - `WritebackMaterializerSettings` (line 3784): Writeback materializer worker settings.
+    - `db_names_list(self)` (line 3816): no docstring
+  - `EventPublisherSettings` (line 3823): Event publisher (message relay) settings.
+    - `fallback_poll_interval(cls, v)` (line 3885): no docstring
+    - `fallback_batch_size(cls, v)` (line 3893): no docstring
+    - `fallback_topic_bootstrap_timeout(cls, v)` (line 3901): no docstring
+    - `clamp_poll_interval_seconds(cls, v)` (line 3907): no docstring
+    - `clamp_batch_size(cls, v)` (line 3912): no docstring
+    - `clamp_kafka_flush_batch_size(cls, v)` (line 3917): no docstring
+    - `clamp_metrics_log_interval_seconds(cls, v)` (line 3924): no docstring
+    - `clamp_lookback_seconds(cls, v)` (line 3929): no docstring
+    - `clamp_lookback_max_keys(cls, v)` (line 3934): no docstring
+    - `clamp_dedup_max_events(cls, v)` (line 3939): no docstring
+    - `clamp_dedup_checkpoint_max_events(cls, v)` (line 3944): no docstring
+    - `clamp_topic_bootstrap_timeout_seconds(cls, v)` (line 3949): no docstring
+    - `kafka_flush_batch_size_effective(self)` (line 3953): no docstring
+  - `AgentRetentionWorkerSettings` (line 3957): Agent session retention worker settings (SEC-005).
+    - `clamp_poll_seconds(cls, v)` (line 3979): no docstring
+    - `clamp_retention_days(cls, v)` (line 3984): no docstring
+    - `normalize_action(cls, v)` (line 3989): no docstring
+  - `SchemaChangeMonitorSettings` (line 4000): Schema change monitor settings for proactive drift detection.
+    - `clamp_check_interval(cls, v)` (line 4026): no docstring
+    - `clamp_cooldown(cls, v)` (line 4031): no docstring
+  - `ChaosSettings` (line 4035): Chaos/fault injection settings (test-only).
+    - `coerce_enabled(cls, v)` (line 4066): no docstring
+    - `coerce_crash_once(cls, v)` (line 4077): no docstring
+    - `clamp_crash_exit_code(cls, v)` (line 4088): no docstring
+  - `WorkersSettings` (line 4092): Workers/services runtime settings.
+  - `WritebackSettings` (line 4122): Ontology writeback + read overlay settings
+  - `TestSettings` (line 4192): Test environment configuration
+  - `GoogleSheetsSettings` (line 4216): Google Sheets integration settings
+    - `fallback_google_api_key(cls, v)` (line 4252): no docstring
+  - `ApplicationSettings` (line 4259): Main application settings - aggregates all other settings
+    - `normalize_environment(cls, v)` (line 4311): no docstring
+    - `is_development(self)` (line 4332): Check if running in development mode
+    - `is_production(self)` (line 4337): Check if running in production mode
+    - `is_test(self)` (line 4342): Check if running in test mode
+    - `is_pytest(self)` (line 4347): Check if running under pytest (PYTEST_CURRENT_TEST set).
+
+### `backend/shared/config/settings_support.py`
+- **Functions**
+  - `_is_docker_environment()` (line 7): no docstring
+  - `_clamp_int(raw, default, min_value, max_value)` (line 16): no docstring
+  - `_parse_boolish(raw)` (line 26): no docstring
+  - `_strip_optional_text(raw)` (line 37): no docstring
+  - `_strip_text_if_not_none(raw)` (line 44): no docstring
+  - `_normalize_base_branch(raw)` (line 50): no docstring
+  - `_clamp_flush_timeout_seconds(raw, default)` (line 54): no docstring
+  - `_env_truthy(name)` (line 62): no docstring
+  - `_should_load_dotenv()` (line 67): no docstring
 
 ### `backend/shared/dependencies/__init__.py`
 
@@ -5856,6 +5908,15 @@
 ### `backend/shared/errors/http_error_mapper.py`
 - **Functions**
   - `code_for_http_status(status_code)` (line 16): Map an HTTP status code to the most appropriate ``ErrorCode``.
+
+### `backend/shared/errors/infra_errors.py`
+- **Classes**
+  - `RegistryUnavailableError` (line 6): no docstring
+    - `__init__(self, message, registry, operation, cause)` (line 7): no docstring
+  - `StorageUnavailableError` (line 21): no docstring
+    - `__init__(self, message, operation, bucket, path, cause)` (line 22): no docstring
+  - `UpstreamUnavailableError` (line 38): no docstring
+    - `__init__(self, message, service, operation, path, cause)` (line 39): no docstring
 
 ### `backend/shared/errors/runtime_exception_policy.py`
 - **Functions**
@@ -6523,6 +6584,8 @@
     - `__init__(self, metrics_collector)` (line 935): Initialize middleware
     - `async __call__(self, request, call_next)` (line 945): Process request and collect metrics
 
+### `backend/shared/observability/otel_imports.py`
+
 ### `backend/shared/observability/request_context.py`
 - **Functions**
   - `_norm(value)` (line 46): no docstring
@@ -6538,35 +6601,35 @@
 
 ### `backend/shared/observability/tracing.py`
 - **Functions**
-  - `_sanitize_span_attributes(attributes)` (line 29): Ensure span attributes satisfy OpenTelemetry type constraints.
-  - `get_tracing_service(service_name)` (line 577): no docstring
-  - `trace_endpoint(name)` (line 586): Lazily create a tracing decorator for request handlers.
-  - `trace_db_operation(name)` (line 599): no docstring
-  - `trace_external_call(name)` (line 605): no docstring
-  - `trace_storage_operation(name, system)` (line 610): Trace storage operations (S3/MinIO, Elasticsearch, Redis, etc.).
-  - `trace_kafka_operation(name)` (line 617): Trace Kafka produce/consume operations.
-  - `_lazy_trace(name, kind, attributes)` (line 624): no docstring
+  - `_sanitize_span_attributes(attributes)` (line 63): Ensure span attributes satisfy OpenTelemetry type constraints.
+  - `get_tracing_service(service_name)` (line 490): no docstring
+  - `trace_endpoint(name)` (line 499): Lazily create a tracing decorator for request handlers.
+  - `trace_db_operation(name)` (line 512): no docstring
+  - `trace_external_call(name)` (line 518): no docstring
+  - `trace_storage_operation(name, system)` (line 523): Trace storage operations (S3/MinIO, Elasticsearch, Redis, etc.).
+  - `trace_kafka_operation(name)` (line 530): Trace Kafka produce/consume operations.
+  - `_lazy_trace(name, kind, attributes)` (line 537): no docstring
 - **Classes**
-  - `_SettingsValue` (line 179): no docstring
-    - `__init__(self, getter)` (line 180): no docstring
-    - `__get__(self, instance, owner)` (line 183): no docstring
-  - `OpenTelemetryConfig` (line 187): no docstring
-  - `TracingService` (line 212): Distributed tracing facade.
-    - `__init__(self, service_name)` (line 220): no docstring
-    - `_log_no_op_once(self, reason)` (line 234): no docstring
-    - `initialize(self)` (line 241): no docstring
-    - `instrument_fastapi(self, app)` (line 347): no docstring
-    - `instrument_clients(self)` (line 364): no docstring
-    - `runtime_status(self)` (line 457): no docstring
-    - `span(self, name, kind, attributes)` (line 475): no docstring
-    - `trace(self, name, kind, attributes)` (line 497): no docstring
-    - `get_current_span(self)` (line 517): no docstring
-    - `record_exception(self, exception)` (line 522): no docstring
-    - `set_span_attribute(self, key, value)` (line 529): no docstring
-    - `get_trace_id(self)` (line 535): no docstring
-    - `get_span_id(self)` (line 544): no docstring
-    - `inject_trace_context(self, headers)` (line 553): no docstring
-    - `extract_trace_context(self, headers)` (line 563): no docstring
+  - `_SettingsValue` (line 92): no docstring
+    - `__init__(self, getter)` (line 93): no docstring
+    - `__get__(self, instance, owner)` (line 96): no docstring
+  - `OpenTelemetryConfig` (line 100): no docstring
+  - `TracingService` (line 125): Distributed tracing facade.
+    - `__init__(self, service_name)` (line 133): no docstring
+    - `_log_no_op_once(self, reason)` (line 147): no docstring
+    - `initialize(self)` (line 154): no docstring
+    - `instrument_fastapi(self, app)` (line 260): no docstring
+    - `instrument_clients(self)` (line 277): no docstring
+    - `runtime_status(self)` (line 370): no docstring
+    - `span(self, name, kind, attributes)` (line 388): no docstring
+    - `trace(self, name, kind, attributes)` (line 410): no docstring
+    - `get_current_span(self)` (line 430): no docstring
+    - `record_exception(self, exception)` (line 435): no docstring
+    - `set_span_attribute(self, key, value)` (line 442): no docstring
+    - `get_trace_id(self)` (line 448): no docstring
+    - `get_span_id(self)` (line 457): no docstring
+    - `inject_trace_context(self, headers)` (line 466): no docstring
+    - `extract_trace_context(self, headers)` (line 476): no docstring
 
 ### `backend/shared/routers/__init__.py`
 
@@ -6642,18 +6705,27 @@
 
 ### `backend/shared/security/database_access.py`
 - **Functions**
-  - `resolve_database_actor(headers)` (line 39): no docstring
-  - `normalize_database_role(value)` (line 50): no docstring
-  - `async fetch_database_access_entries(db_names)` (line 60): no docstring
-  - `async list_database_names()` (line 98): no docstring
-  - `async upsert_database_access_entry(db_name, principal_type, principal_id, principal_name, role)` (line 122): no docstring
-  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 178): no docstring
-  - `resolve_database_actor_with_name(headers)` (line 194): no docstring
-  - `async ensure_database_access_table(conn)` (line 200): no docstring
-  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 237): no docstring
-  - `async has_database_access_config(db_name)` (line 267): no docstring
-  - `async delete_database_access_entries(db_name)` (line 282): no docstring
-  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, require_env_key)` (line 296): no docstring
+  - `resolve_database_actor(headers)` (line 79): no docstring
+  - `normalize_database_role(value)` (line 90): no docstring
+  - `async fetch_database_access_entries(db_names)` (line 100): no docstring
+  - `async list_database_names()` (line 138): no docstring
+  - `async upsert_database_access_entry(db_name, principal_type, principal_id, principal_name, role)` (line 162): no docstring
+  - `async upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 218): no docstring
+  - `resolve_database_actor_with_name(headers)` (line 234): no docstring
+  - `async ensure_database_access_table(conn)` (line 240): no docstring
+  - `async _connect_database_access_registry(operation)` (line 277): no docstring
+  - `async inspect_database_access(db_name, principal_type, principal_id)` (line 285): no docstring
+  - `async get_database_access_role(db_name, principal_type, principal_id)` (line 347): no docstring
+  - `async has_database_access_config(db_name)` (line 361): no docstring
+  - `async delete_database_access_entries(db_name)` (line 366): no docstring
+  - `async enforce_database_role(headers, db_name, required_roles, allow_if_unconfigured, allow_if_registry_unavailable, require_env_key)` (line 380): no docstring
+- **Classes**
+  - `DatabaseAccessState` (line 51): no docstring
+  - `DatabaseAccessRegistryUnavailableError` (line 57): Raised when the database-access registry cannot be reached.
+  - `DatabaseAccessInspection` (line 62): no docstring
+    - `is_configured(self)` (line 67): no docstring
+    - `is_unconfigured(self)` (line 71): no docstring
+    - `is_unavailable(self)` (line 75): no docstring
 
 ### `backend/shared/security/input_sanitizer.py`
 - **Functions**
@@ -8521,127 +8593,130 @@
 
 ### `backend/shared/services/registries/dataset_registry.py`
 - **Functions**
-  - `_inject_dataset_version(outbox_entries, dataset_version_id)` (line 271): Ensure dataset_version_id is propagated into outbox payloads that depend on it.
+  - `_inject_dataset_version(outbox_entries, dataset_version_id)` (line 46): Ensure dataset_version_id is propagated into outbox payloads that depend on it.
 - **Classes**
-  - `DatasetRecord` (line 29): no docstring
-  - `DatasetVersionRecord` (line 43): no docstring
-  - `DatasetIngestRequestRecord` (line 56): no docstring
-  - `DatasetIngestTransactionRecord` (line 80): no docstring
-  - `DatasetIngestOutboxItem` (line 94): no docstring
-  - `BackingDatasourceRecord` (line 112): no docstring
-  - `BackingDatasourceVersionRecord` (line 127): no docstring
-  - `KeySpecRecord` (line 139): no docstring
-  - `GatePolicyRecord` (line 150): no docstring
-  - `GateResultRecord` (line 162): no docstring
-  - `AccessPolicyRecord` (line 174): no docstring
-  - `InstanceEditRecord` (line 187): no docstring
-  - `RelationshipSpecRecord` (line 200): no docstring
-  - `RelationshipIndexResultRecord` (line 226): no docstring
-  - `LinkEditRecord` (line 243): no docstring
-  - `SchemaMigrationPlanRecord` (line 260): no docstring
-  - `DatasetRegistry` (line 305): no docstring
-    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 306): no docstring
-    - `_row_to_backing(row)` (line 326): no docstring
-    - `_row_to_backing_version(row)` (line 342): no docstring
-    - `_row_to_key_spec(row)` (line 355): no docstring
-    - `_key_spec_scope_lock_key(dataset_id, dataset_version_id)` (line 367): no docstring
-    - `_row_to_gate_policy(row)` (line 371): no docstring
-    - `_row_to_gate_result(row)` (line 384): no docstring
-    - `_row_to_access_policy(row)` (line 397): no docstring
-    - `_row_to_instance_edit(row)` (line 411): no docstring
-    - `_row_to_relationship_spec(row)` (line 428): no docstring
-    - `_row_to_relationship_index_result(row)` (line 461): no docstring
-    - `_row_to_link_edit(row)` (line 479): no docstring
-    - `_row_to_schema_migration_plan(row)` (line 497): no docstring
-    - `async _ensure_tables(self, conn)` (line 509): no docstring
-    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch, dataset_id)` (line 1196): no docstring
-    - `async list_datasets(self, db_name, branch)` (line 1248): no docstring
-    - `async list_all_datasets(self, branch, limit, offset, order_by)` (line 1303): no docstring
-    - `async count_datasets_by_db_names(self, db_names, branch)` (line 1364): no docstring
-    - `async get_dataset(self, dataset_id)` (line 1396): no docstring
-    - `async delete_dataset(self, dataset_id)` (line 1424): Delete a dataset and all related records (CASCADE).
-    - `async get_dataset_by_name(self, db_name, name, branch)` (line 1435): no docstring
-    - `async update_schema(self, dataset_id, schema_json)` (line 1471): Update the schema_json of an existing dataset.
-    - `async get_dataset_by_source_ref(self, db_name, source_type, source_ref, branch)` (line 1493): no docstring
-    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 1531): no docstring
-    - `async get_latest_version(self, dataset_id)` (line 1625): no docstring
-    - `async get_version(self, version_id)` (line 1656): no docstring
-    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 1685): no docstring
-    - `async create_backing_datasource(self, dataset_id, db_name, name, branch, description, source_type, source_ref, backing_id)` (line 1718): no docstring
-    - `async get_backing_datasource(self, backing_id)` (line 1756): no docstring
-    - `async get_backing_datasource_by_dataset(self, dataset_id, branch)` (line 1773): no docstring
-    - `async list_backing_datasources(self, db_name, branch, limit)` (line 1799): no docstring
-    - `async get_or_create_backing_datasource(self, dataset, source_type, source_ref)` (line 1825): no docstring
-    - `async create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1850): no docstring
-    - `async _resolve_backing_datasource_version_materialization(self, backing_id, dataset_version_id, schema_hash)` (line 1874): no docstring
-    - `async _insert_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, artifact_key, metadata_payload)` (line 1910): no docstring
-    - `async _reconcile_backing_datasource_version(self, record, schema_hash, artifact_key)` (line 1939): no docstring
-    - `async get_backing_datasource_version(self, version_id)` (line 1968): no docstring
-    - `async get_backing_datasource_version_by_dataset_version(self, dataset_version_id)` (line 1989): no docstring
-    - `async get_backing_datasource_version_for_dataset(self, backing_id, dataset_version_id)` (line 2012): no docstring
-    - `async list_backing_datasource_versions(self, backing_id, limit)` (line 2037): no docstring
-    - `async get_or_create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 2060): no docstring
-    - `async create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 2093): no docstring
-    - `async _get_key_spec_for_scope(self, conn, dataset_id, dataset_version_id)` (line 2124): no docstring
-    - `async get_or_create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 2158): no docstring
-    - `async get_key_spec(self, key_spec_id)` (line 2205): no docstring
-    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 2221): no docstring
-    - `async list_key_specs(self, dataset_id, limit)` (line 2246): no docstring
-    - `async upsert_gate_policy(self, scope, name, description, rules, status)` (line 2268): no docstring
-    - `async get_gate_policy(self, scope, name)` (line 2304): no docstring
-    - `async list_gate_policies(self, scope, limit)` (line 2326): no docstring
-    - `async record_gate_result(self, scope, subject_type, subject_id, status, details, policy_name)` (line 2348): no docstring
-    - `async list_gate_results(self, scope, subject_type, subject_id, limit)` (line 2390): no docstring
-    - `async upsert_access_policy(self, db_name, scope, subject_type, subject_id, policy, status)` (line 2418): no docstring
-    - `async get_access_policy(self, db_name, scope, subject_type, subject_id, status)` (line 2455): no docstring
-    - `async list_access_policies(self, db_name, scope, subject_type, subject_id, status, limit)` (line 2484): no docstring
-    - `async record_instance_edit(self, db_name, class_id, instance_id, edit_type, metadata, status, fields)` (line 2518): no docstring
-    - `async count_instance_edits(self, db_name, class_id, status)` (line 2558): no docstring
-    - `async list_instance_edits(self, db_name, class_id, instance_id, status, limit)` (line 2581): no docstring
-    - `async clear_instance_edits(self, db_name, class_id)` (line 2612): no docstring
-    - `async remap_instance_edits(self, db_name, class_id, id_map, status)` (line 2635): no docstring
-    - `async get_instance_edit_field_stats(self, db_name, class_id, fields, status)` (line 2673): no docstring
-    - `async apply_instance_edit_field_moves(self, db_name, class_id, field_moves, status)` (line 2747): no docstring
-    - `async update_instance_edit_status_by_fields(self, db_name, class_id, fields, new_status, status, metadata_note)` (line 2811): no docstring
-    - `async create_relationship_spec(self, link_type_id, db_name, source_object_type, target_object_type, predicate, spec_type, dataset_id, mapping_spec_id, mapping_spec_version, spec, dataset_version_id, status, auto_sync, relationship_spec_id)` (line 2868): no docstring
-    - `async update_relationship_spec(self, relationship_spec_id, status, spec, auto_sync, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version)` (line 2923): no docstring
-    - `async record_relationship_index_result(self, relationship_spec_id, status, stats, errors, dataset_version_id, mapping_spec_version, lineage, indexed_at)` (line 2981): no docstring
-    - `async get_relationship_spec(self, relationship_spec_id, link_type_id)` (line 3065): no docstring
-    - `async list_relationship_specs(self, db_name, dataset_id, status, limit)` (line 3096): no docstring
-    - `async list_relationship_specs_by_relationship_object_type(self, db_name, relationship_object_type, status, limit)` (line 3128): no docstring
-    - `async list_relationship_index_results(self, relationship_spec_id, link_type_id, db_name, status, limit)` (line 3161): no docstring
-    - `async record_link_edit(self, db_name, link_type_id, branch, source_object_type, target_object_type, predicate, source_instance_id, target_instance_id, edit_type, status, metadata, edit_id)` (line 3193): no docstring
-    - `async list_link_edits(self, db_name, link_type_id, branch, status, source_instance_id, target_instance_id, limit)` (line 3243): no docstring
-    - `async clear_link_edits(self, db_name, link_type_id, branch)` (line 3281): no docstring
-    - `async create_schema_migration_plan(self, db_name, subject_type, subject_id, plan, status, plan_id)` (line 3307): no docstring
-    - `async list_schema_migration_plans(self, db_name, subject_type, subject_id, status, limit)` (line 3340): no docstring
-    - `async get_ingest_request_by_key(self, idempotency_key)` (line 3371): no docstring
-    - `async get_ingest_request(self, ingest_request_id)` (line 3415): no docstring
-    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 3459): no docstring
-    - `async get_ingest_transaction(self, ingest_request_id)` (line 3534): no docstring
-    - `async get_ingest_transaction_by_id(self, transaction_id)` (line 3566): no docstring
-    - `async list_ingest_transactions_for_dataset(self, dataset_id, branch, limit, offset)` (line 3598): no docstring
-    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3649): no docstring
-    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3688): no docstring
-    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3729): no docstring
-    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3767): no docstring
-    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3832): no docstring
-    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3865): no docstring
-    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3897): no docstring
-    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 4007): no docstring
-    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 4276): no docstring
-    - `async mark_ingest_outbox_published(self, outbox_id)` (line 4353): no docstring
-    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4372): no docstring
-    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4399): no docstring
-    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4419): no docstring
-    - `async get_ingest_outbox_metrics(self)` (line 4449): no docstring
-    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4491): Best-effort reconciliation for ingest atomicity.
+  - `DatasetRegistry` (line 80): no docstring
+    - `__init__(self, dsn, schema, pool_min, pool_max)` (line 81): no docstring
+    - `_row_to_backing(row)` (line 101): no docstring
+    - `_row_to_backing_version(row)` (line 117): no docstring
+    - `_row_to_key_spec(row)` (line 130): no docstring
+    - `_key_spec_scope_lock_key(dataset_id, dataset_version_id)` (line 142): no docstring
+    - `_row_to_gate_policy(row)` (line 146): no docstring
+    - `_row_to_gate_result(row)` (line 159): no docstring
+    - `_row_to_access_policy(row)` (line 172): no docstring
+    - `_row_to_instance_edit(row)` (line 186): no docstring
+    - `_row_to_relationship_spec(row)` (line 203): no docstring
+    - `_row_to_relationship_index_result(row)` (line 236): no docstring
+    - `_row_to_link_edit(row)` (line 254): no docstring
+    - `_row_to_schema_migration_plan(row)` (line 272): no docstring
+    - `async _ensure_tables(self, conn)` (line 284): no docstring
+    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch, dataset_id)` (line 971): no docstring
+    - `async list_datasets(self, db_name, branch)` (line 1023): no docstring
+    - `async list_all_datasets(self, branch, limit, offset, order_by)` (line 1078): no docstring
+    - `async count_datasets_by_db_names(self, db_names, branch)` (line 1139): no docstring
+    - `async get_dataset(self, dataset_id)` (line 1171): no docstring
+    - `async delete_dataset(self, dataset_id)` (line 1199): Delete a dataset and all related records (CASCADE).
+    - `async get_dataset_by_name(self, db_name, name, branch)` (line 1210): no docstring
+    - `async update_schema(self, dataset_id, schema_json)` (line 1246): Update the schema_json of an existing dataset.
+    - `async get_dataset_by_source_ref(self, db_name, source_type, source_ref, branch)` (line 1268): no docstring
+    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, version_id, ingest_request_id, promoted_from_artifact_id)` (line 1306): no docstring
+    - `async get_latest_version(self, dataset_id)` (line 1400): no docstring
+    - `async get_version(self, version_id)` (line 1431): no docstring
+    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 1460): no docstring
+    - `async create_backing_datasource(self, dataset_id, db_name, name, branch, description, source_type, source_ref, backing_id)` (line 1493): no docstring
+    - `async get_backing_datasource(self, backing_id)` (line 1531): no docstring
+    - `async get_backing_datasource_by_dataset(self, dataset_id, branch)` (line 1548): no docstring
+    - `async list_backing_datasources(self, db_name, branch, limit)` (line 1574): no docstring
+    - `async get_or_create_backing_datasource(self, dataset, source_type, source_ref)` (line 1600): no docstring
+    - `async create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1625): no docstring
+    - `async _resolve_backing_datasource_version_materialization(self, backing_id, dataset_version_id, schema_hash)` (line 1649): no docstring
+    - `async _insert_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, artifact_key, metadata_payload)` (line 1685): no docstring
+    - `async _reconcile_backing_datasource_version(self, record, schema_hash, artifact_key)` (line 1714): no docstring
+    - `async get_backing_datasource_version(self, version_id)` (line 1743): no docstring
+    - `async get_backing_datasource_version_by_dataset_version(self, dataset_version_id)` (line 1764): no docstring
+    - `async get_backing_datasource_version_for_dataset(self, backing_id, dataset_version_id)` (line 1787): no docstring
+    - `async list_backing_datasource_versions(self, backing_id, limit)` (line 1812): no docstring
+    - `async get_or_create_backing_datasource_version(self, backing_id, dataset_version_id, schema_hash, metadata)` (line 1835): no docstring
+    - `async create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 1868): no docstring
+    - `async _get_key_spec_for_scope(self, conn, dataset_id, dataset_version_id)` (line 1899): no docstring
+    - `async get_or_create_key_spec(self, dataset_id, spec, dataset_version_id, status, key_spec_id)` (line 1933): no docstring
+    - `async get_key_spec(self, key_spec_id)` (line 1980): no docstring
+    - `async get_key_spec_for_dataset(self, dataset_id, dataset_version_id)` (line 1996): no docstring
+    - `async list_key_specs(self, dataset_id, limit)` (line 2021): no docstring
+    - `async upsert_gate_policy(self, scope, name, description, rules, status)` (line 2043): no docstring
+    - `async get_gate_policy(self, scope, name)` (line 2079): no docstring
+    - `async list_gate_policies(self, scope, limit)` (line 2101): no docstring
+    - `async record_gate_result(self, scope, subject_type, subject_id, status, details, policy_name)` (line 2123): no docstring
+    - `async list_gate_results(self, scope, subject_type, subject_id, limit)` (line 2165): no docstring
+    - `async upsert_access_policy(self, db_name, scope, subject_type, subject_id, policy, status)` (line 2193): no docstring
+    - `async get_access_policy(self, db_name, scope, subject_type, subject_id, status)` (line 2230): no docstring
+    - `async list_access_policies(self, db_name, scope, subject_type, subject_id, status, limit)` (line 2259): no docstring
+    - `async record_instance_edit(self, db_name, class_id, instance_id, edit_type, metadata, status, fields)` (line 2293): no docstring
+    - `async count_instance_edits(self, db_name, class_id, status)` (line 2333): no docstring
+    - `async list_instance_edits(self, db_name, class_id, instance_id, status, limit)` (line 2356): no docstring
+    - `async clear_instance_edits(self, db_name, class_id)` (line 2387): no docstring
+    - `async remap_instance_edits(self, db_name, class_id, id_map, status)` (line 2410): no docstring
+    - `async get_instance_edit_field_stats(self, db_name, class_id, fields, status)` (line 2448): no docstring
+    - `async apply_instance_edit_field_moves(self, db_name, class_id, field_moves, status)` (line 2522): no docstring
+    - `async update_instance_edit_status_by_fields(self, db_name, class_id, fields, new_status, status, metadata_note)` (line 2586): no docstring
+    - `async create_relationship_spec(self, link_type_id, db_name, source_object_type, target_object_type, predicate, spec_type, dataset_id, mapping_spec_id, mapping_spec_version, spec, dataset_version_id, status, auto_sync, relationship_spec_id)` (line 2643): no docstring
+    - `async update_relationship_spec(self, relationship_spec_id, status, spec, auto_sync, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version)` (line 2698): no docstring
+    - `async record_relationship_index_result(self, relationship_spec_id, status, stats, errors, dataset_version_id, mapping_spec_version, lineage, indexed_at)` (line 2756): no docstring
+    - `async get_relationship_spec(self, relationship_spec_id, link_type_id)` (line 2840): no docstring
+    - `async list_relationship_specs(self, db_name, dataset_id, status, limit)` (line 2871): no docstring
+    - `async list_relationship_specs_by_relationship_object_type(self, db_name, relationship_object_type, status, limit)` (line 2903): no docstring
+    - `async list_relationship_index_results(self, relationship_spec_id, link_type_id, db_name, status, limit)` (line 2936): no docstring
+    - `async record_link_edit(self, db_name, link_type_id, branch, source_object_type, target_object_type, predicate, source_instance_id, target_instance_id, edit_type, status, metadata, edit_id)` (line 2968): no docstring
+    - `async list_link_edits(self, db_name, link_type_id, branch, status, source_instance_id, target_instance_id, limit)` (line 3018): no docstring
+    - `async clear_link_edits(self, db_name, link_type_id, branch)` (line 3056): no docstring
+    - `async create_schema_migration_plan(self, db_name, subject_type, subject_id, plan, status, plan_id)` (line 3082): no docstring
+    - `async list_schema_migration_plans(self, db_name, subject_type, subject_id, status, limit)` (line 3115): no docstring
+    - `async get_ingest_request_by_key(self, idempotency_key)` (line 3146): no docstring
+    - `async get_ingest_request(self, ingest_request_id)` (line 3190): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 3234): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 3309): no docstring
+    - `async get_ingest_transaction_by_id(self, transaction_id)` (line 3341): no docstring
+    - `async list_ingest_transactions_for_dataset(self, dataset_id, branch, limit, offset)` (line 3373): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id, status)` (line 3424): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3463): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 3504): no docstring
+    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 3542): no docstring
+    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 3607): no docstring
+    - `async update_ingest_request_payload(self, ingest_request_id, schema_json, sample_json, row_count, source_metadata)` (line 3640): no docstring
+    - `async approve_ingest_schema(self, ingest_request_id, schema_json, approved_by)` (line 3672): no docstring
+    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, apply_schema, outbox_entries)` (line 3782): no docstring
+    - `async claim_ingest_outbox_batch(self, limit, claimed_by, claim_timeout_seconds)` (line 4051): no docstring
+    - `async mark_ingest_outbox_published(self, outbox_id)` (line 4128): no docstring
+    - `async mark_ingest_outbox_failed(self, outbox_id, error, next_attempt_at)` (line 4147): no docstring
+    - `async mark_ingest_outbox_dead(self, outbox_id, error)` (line 4174): no docstring
+    - `async purge_ingest_outbox(self, retention_days, limit)` (line 4194): no docstring
+    - `async get_ingest_outbox_metrics(self)` (line 4224): no docstring
+    - `async reconcile_ingest_state(self, stale_after_seconds, limit, use_lock, lock_key)` (line 4266): Best-effort reconciliation for ingest atomicity.
 
 ### `backend/shared/services/registries/dataset_registry_get_or_create.py`
 - **Functions**
   - `is_unique_violation_error(exc)` (line 17): no docstring
   - `async get_or_create_record(lookup, create, conflict_context)` (line 33): no docstring
   - `async get_or_create_dataset_record(lookup, create, conflict_context)` (line 57): no docstring
+
+### `backend/shared/services/registries/dataset_registry_models.py`
+- **Classes**
+  - `DatasetRecord` (line 9): no docstring
+  - `DatasetVersionRecord` (line 23): no docstring
+  - `DatasetIngestRequestRecord` (line 36): no docstring
+  - `DatasetIngestTransactionRecord` (line 60): no docstring
+  - `DatasetIngestOutboxItem` (line 74): no docstring
+  - `BackingDatasourceRecord` (line 92): no docstring
+  - `BackingDatasourceVersionRecord` (line 107): no docstring
+  - `KeySpecRecord` (line 119): no docstring
+  - `GatePolicyRecord` (line 130): no docstring
+  - `GateResultRecord` (line 142): no docstring
+  - `AccessPolicyRecord` (line 154): no docstring
+  - `InstanceEditRecord` (line 167): no docstring
+  - `RelationshipSpecRecord` (line 180): no docstring
+  - `RelationshipIndexResultRecord` (line 206): no docstring
+  - `LinkEditRecord` (line 223): no docstring
+  - `SchemaMigrationPlanRecord` (line 240): no docstring
 
 ### `backend/shared/services/registries/lineage_store.py`
 - **Functions**
@@ -9034,31 +9109,31 @@
 
 ### `backend/shared/services/storage/storage_service.py`
 - **Functions**
-  - `create_storage_service(settings)` (line 906): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
+  - `create_storage_service(settings)` (line 910): 스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
 - **Classes**
-  - `StorageService` (line 33): S3/MinIO 스토리지 서비스 - Event Sourcing 지원
-    - `__init__(self, endpoint_url, access_key, secret_key, region, use_ssl, ssl_verify)` (line 57): 스토리지 서비스 초기화
-    - `async create_bucket(self, bucket_name)` (line 95): 버킷 생성
-    - `async bucket_exists(self, bucket_name)` (line 117): 버킷 존재 여부 확인
-    - `async save_json(self, bucket, key, data, metadata)` (line 137): JSON 데이터를 S3에 저장하고 체크섬 반환
-    - `async save_bytes(self, bucket, key, data, content_type, metadata)` (line 185): Raw bytes를 S3에 저장하고 체크섬 반환
-    - `async save_fileobj(self, bucket, key, fileobj, content_type, metadata, checksum)` (line 233): Stream a file-like object into S3 and return a checksum.
-    - `async load_json(self, bucket, key)` (line 290): S3에서 JSON 데이터 로드
-    - `async load_bytes(self, bucket, key)` (line 312): S3에서 Raw bytes 로드
-    - `async load_bytes_lines(self, bucket, key, max_lines, max_bytes)` (line 332): Load up to `max_lines` newline-delimited lines from the start of an object.
-    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 391): 저장된 파일의 체크섬 검증
-    - `async delete_object(self, bucket, key)` (line 417): S3 객체 삭제
-    - `async delete_prefix(self, bucket, prefix)` (line 435): Delete all objects under a prefix.
-    - `async list_objects(self, bucket, prefix, max_keys)` (line 478): 버킷의 객체 목록 조회
-    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 507): Paginated object listing (returns next continuation token if more).
-    - `async iter_objects(self, bucket, prefix, max_keys)` (line 529): Async iterator over all objects under prefix (pagination-aware).
-    - `async get_object_metadata(self, bucket, key)` (line 553): 객체 메타데이터 조회
-    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 581): 인스턴스 이벤트 저장 경로 생성
-    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 603): 특정 인스턴스의 모든 Command 파일 목록 조회
-    - `async list_command_files(self, bucket, prefix)` (line 667): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
-    - `async replay_instance_state(self, bucket, command_files)` (line 708): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
-    - `is_instance_deleted(self, instance_state)` (line 868): 인스턴스가 삭제된 상태인지 확인
-    - `get_deletion_info(self, instance_state)` (line 882): 삭제된 인스턴스의 삭제 정보 반환
+  - `StorageService` (line 35): S3/MinIO 스토리지 서비스 - Event Sourcing 지원
+    - `__init__(self, endpoint_url, access_key, secret_key, region, use_ssl, ssl_verify)` (line 59): 스토리지 서비스 초기화
+    - `async create_bucket(self, bucket_name)` (line 97): 버킷 생성
+    - `async bucket_exists(self, bucket_name)` (line 119): 버킷 존재 여부 확인
+    - `async save_json(self, bucket, key, data, metadata)` (line 139): JSON 데이터를 S3에 저장하고 체크섬 반환
+    - `async save_bytes(self, bucket, key, data, content_type, metadata)` (line 187): Raw bytes를 S3에 저장하고 체크섬 반환
+    - `async save_fileobj(self, bucket, key, fileobj, content_type, metadata, checksum)` (line 235): Stream a file-like object into S3 and return a checksum.
+    - `async load_json(self, bucket, key)` (line 292): S3에서 JSON 데이터 로드
+    - `async load_bytes(self, bucket, key)` (line 314): S3에서 Raw bytes 로드
+    - `async load_bytes_lines(self, bucket, key, max_lines, max_bytes)` (line 334): Load up to `max_lines` newline-delimited lines from the start of an object.
+    - `async verify_checksum(self, bucket, key, expected_checksum)` (line 393): 저장된 파일의 체크섬 검증
+    - `async delete_object(self, bucket, key)` (line 419): S3 객체 삭제
+    - `async delete_prefix(self, bucket, prefix)` (line 437): Delete all objects under a prefix.
+    - `async list_objects(self, bucket, prefix, max_keys)` (line 480): 버킷의 객체 목록 조회
+    - `async list_objects_paginated(self, bucket, prefix, max_keys, continuation_token)` (line 509): Paginated object listing (returns next continuation token if more).
+    - `async iter_objects(self, bucket, prefix, max_keys)` (line 531): Async iterator over all objects under prefix (pagination-aware).
+    - `async get_object_metadata(self, bucket, key)` (line 555): 객체 메타데이터 조회
+    - `generate_instance_path(self, db_name, class_id, instance_id, command_id)` (line 583): 인스턴스 이벤트 저장 경로 생성
+    - `async get_all_commands_for_instance(self, bucket, db_name, class_id, instance_id)` (line 605): 특정 인스턴스의 모든 Command 파일 목록 조회
+    - `async list_command_files(self, bucket, prefix)` (line 669): List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
+    - `async replay_instance_state(self, bucket, command_files, strict)` (line 710): Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
+    - `is_instance_deleted(self, instance_state)` (line 872): 인스턴스가 삭제된 상태인지 확인
+    - `get_deletion_info(self, instance_state)` (line 886): 삭제된 인스턴스의 삭제 정보 반환
 
 ### `backend/shared/setup.py`
 
@@ -10536,13 +10611,14 @@
 ### `backend/tests/unit/config/test_config_drift_guards.py`
 - **Functions**
   - `_disable_env_file(monkeypatch)` (line 11): no docstring
-  - `_iter_runtime_python_files(repo_backend)` (line 17): no docstring
-  - `test_app_config_reflects_current_settings(monkeypatch)` (line 51): no docstring
-  - `test_no_os_getenv_calls_outside_settings_module()` (line 61): no docstring
-  - `test_no_application_settings_instantiation_outside_settings_module()` (line 84): no docstring
-  - `test_no_import_global_settings_symbol_outside_settings_module()` (line 107): no docstring
-  - `test_no_foundry_strict_opt_out_env_keys_reintroduced()` (line 132): no docstring
-  - `test_no_external_funnel_address_env_keys_reintroduced()` (line 156): no docstring
+  - `_settings_ssot_allowed_files(repo_backend)` (line 17): no docstring
+  - `_iter_runtime_python_files(repo_backend)` (line 24): no docstring
+  - `test_app_config_reflects_current_settings(monkeypatch)` (line 58): no docstring
+  - `test_no_os_getenv_calls_outside_settings_module()` (line 68): no docstring
+  - `test_no_application_settings_instantiation_outside_settings_module()` (line 89): no docstring
+  - `test_no_import_global_settings_symbol_outside_settings_module()` (line 110): no docstring
+  - `test_no_foundry_strict_opt_out_env_keys_reintroduced()` (line 133): no docstring
+  - `test_no_external_funnel_address_env_keys_reintroduced()` (line 157): no docstring
 
 ### `backend/tests/unit/config/test_foundry_surface_topology_guard.py`
 - **Functions**
@@ -11149,36 +11225,40 @@
 
 ### `backend/tests/unit/oms/test_action_async_permission_profile_api.py`
 - **Functions**
-  - `_build_action_spec()` (line 15): no docstring
-  - `_install_deployment_and_resource_mocks(monkeypatch, action_spec)` (line 44): no docstring
-  - `action_async_app()` (line 77): no docstring
-  - `async test_submit_batch_returns_403_for_datasource_derived_without_data_engineer_role(action_async_app, monkeypatch)` (line 94): no docstring
-  - `async test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable(action_async_app, monkeypatch)` (line 126): no docstring
-  - `async test_submit_batch_returns_403_when_target_class_misses_required_interface(action_async_app, monkeypatch)` (line 176): no docstring
-  - `async test_submit_batch_returns_503_when_target_edit_access_is_unverifiable(action_async_app, monkeypatch)` (line 222): no docstring
-  - `async test_simulate_use_branch_head_no_longer_requires_terminus(action_async_app, monkeypatch)` (line 282): no docstring
+  - `_inspection(role, state)` (line 16): no docstring
+  - `_build_action_spec()` (line 24): no docstring
+  - `_install_deployment_and_resource_mocks(monkeypatch, action_spec)` (line 53): no docstring
+  - `action_async_app()` (line 86): no docstring
+  - `async test_ensure_ontology_database_exists_raises_503_when_registry_unavailable(monkeypatch)` (line 103): no docstring
+  - `async test_submit_batch_returns_403_for_datasource_derived_without_data_engineer_role(action_async_app, monkeypatch)` (line 119): no docstring
+  - `async test_simulate_returns_503_when_datasource_derived_data_access_is_unverifiable(action_async_app, monkeypatch)` (line 151): no docstring
+  - `async test_submit_batch_returns_403_when_target_class_misses_required_interface(action_async_app, monkeypatch)` (line 201): no docstring
+  - `async test_submit_batch_returns_503_when_target_edit_access_is_unverifiable(action_async_app, monkeypatch)` (line 247): no docstring
+  - `async test_simulate_use_branch_head_no_longer_requires_terminus(action_async_app, monkeypatch)` (line 307): no docstring
+  - `async test_simulate_returns_503_when_database_access_registry_is_unavailable(action_async_app, monkeypatch)` (line 357): no docstring
 - **Classes**
-  - `_FakeEventStore` (line 71): no docstring
-    - `async append_event(self, _event)` (line 72): no docstring
+  - `_FakeEventStore` (line 80): no docstring
+    - `async append_event(self, _event)` (line 81): no docstring
 
 ### `backend/tests/unit/oms/test_attachments_router.py`
 - **Functions**
-  - `mock_es()` (line 81): no docstring
-  - `mock_storage()` (line 88): no docstring
-  - `override_deps(mock_es, mock_storage)` (line 96): no docstring
-  - `async test_upload_attachment_stores_to_s3_and_returns_metadata(mock_storage)` (line 115): no docstring
-  - `async test_upload_attachment_rejects_empty_body(mock_storage)` (line 134): no docstring
-  - `async test_list_property_attachments_single(mock_es)` (line 153): no docstring
-  - `async test_list_property_attachments_supports_id_only_property_entries(mock_es)` (line 168): no docstring
-  - `async test_list_property_attachments_multiple(mock_es)` (line 184): no docstring
-  - `async test_list_property_attachments_404_not_found(mock_es)` (line 202): no docstring
-  - `async test_get_attachment_by_rid_returns_metadata(mock_es)` (line 221): no docstring
-  - `async test_get_attachment_by_rid_not_found(mock_es)` (line 235): no docstring
-  - `async test_get_attachment_content_returns_binary(mock_es, mock_storage)` (line 252): no docstring
-  - `async test_get_attachment_content_by_rid_returns_binary(mock_es, mock_storage)` (line 265): no docstring
-  - `async test_get_attachment_content_404_when_s3_missing(mock_es, mock_storage)` (line 277): no docstring
-  - `async test_attachments_skip_role_enforcement_without_actor_headers(monkeypatch)` (line 291): no docstring
-  - `async test_attachments_return_permission_denied_when_actor_header_present_and_role_check_fails(monkeypatch)` (line 306): no docstring
+  - `mock_es()` (line 82): no docstring
+  - `mock_storage()` (line 89): no docstring
+  - `override_deps(mock_es, mock_storage)` (line 97): no docstring
+  - `async test_upload_attachment_stores_to_s3_and_returns_metadata(mock_storage)` (line 116): no docstring
+  - `async test_upload_attachment_rejects_empty_body(mock_storage)` (line 135): no docstring
+  - `async test_list_property_attachments_single(mock_es)` (line 154): no docstring
+  - `async test_list_property_attachments_supports_id_only_property_entries(mock_es)` (line 169): no docstring
+  - `async test_list_property_attachments_multiple(mock_es)` (line 185): no docstring
+  - `async test_list_property_attachments_404_not_found(mock_es)` (line 203): no docstring
+  - `async test_get_attachment_by_rid_returns_metadata(mock_es)` (line 222): no docstring
+  - `async test_get_attachment_by_rid_not_found(mock_es)` (line 236): no docstring
+  - `async test_get_attachment_content_returns_binary(mock_es, mock_storage)` (line 253): no docstring
+  - `async test_get_attachment_content_by_rid_returns_binary(mock_es, mock_storage)` (line 266): no docstring
+  - `async test_get_attachment_content_404_when_s3_missing(mock_es, mock_storage)` (line 278): no docstring
+  - `async test_attachments_skip_role_enforcement_without_actor_headers(monkeypatch)` (line 292): no docstring
+  - `async test_attachments_return_permission_denied_when_actor_header_present_and_role_check_fails(monkeypatch)` (line 307): no docstring
+  - `async test_attachments_return_503_when_actor_role_check_is_unverifiable(monkeypatch)` (line 330): no docstring
 
 ### `backend/tests/unit/oms/test_database_router_backend_profile.py`
 - **Functions**
@@ -11186,10 +11266,11 @@
 
 ### `backend/tests/unit/oms/test_dependencies_database_exists.py`
 - **Functions**
-  - `async test_ensure_database_exists_uses_postgres_registry_when_terminus_missing(monkeypatch)` (line 11): no docstring
-  - `async test_ensure_database_exists_returns_name_when_present(monkeypatch)` (line 27): no docstring
-  - `async test_ensure_database_exists_raises_404_when_missing_in_postgres_registry(monkeypatch)` (line 40): no docstring
-  - `async test_ensure_database_exists_raises_404_when_missing()` (line 54): no docstring
+  - `async test_ensure_database_exists_uses_postgres_registry_when_terminus_missing(monkeypatch)` (line 12): no docstring
+  - `async test_ensure_database_exists_returns_name_when_present(monkeypatch)` (line 30): no docstring
+  - `async test_ensure_database_exists_raises_404_when_missing_in_postgres_registry(monkeypatch)` (line 45): no docstring
+  - `async test_ensure_database_exists_raises_503_when_registry_is_unavailable_by_default()` (line 59): no docstring
+  - `async test_ensure_database_exists_raises_503_when_registry_unavailable(monkeypatch)` (line 67): no docstring
 
 ### `backend/tests/unit/oms/test_dependencies_terminus_profile_gate.py`
 - **Functions**
@@ -11291,19 +11372,20 @@
 
 ### `backend/tests/unit/oms/test_timeseries_router.py`
 - **Functions**
-  - `mock_es()` (line 50): no docstring
-  - `mock_storage()` (line 57): no docstring
-  - `override_deps(mock_es, mock_storage)` (line 65): no docstring
-  - `async test_get_first_point_returns_earliest_point(mock_es, mock_storage)` (line 84): no docstring
-  - `async test_get_first_point_404_when_instance_not_found(mock_es)` (line 98): no docstring
-  - `async test_get_first_point_404_when_property_not_timeseries(mock_es)` (line 112): no docstring
-  - `async test_get_last_point_returns_latest_point(mock_es, mock_storage)` (line 138): no docstring
-  - `async test_get_first_point_supports_id_only_property_entries(mock_es, mock_storage)` (line 152): no docstring
-  - `async test_stream_points_returns_all_points(mock_es, mock_storage)` (line 172): no docstring
-  - `async test_stream_points_with_absolute_range(mock_es, mock_storage)` (line 188): no docstring
-  - `async test_stream_points_404_when_no_ts_data(mock_es, mock_storage)` (line 211): no docstring
-  - `async test_timeseries_skips_role_enforcement_without_actor_headers(monkeypatch)` (line 227): no docstring
-  - `async test_timeseries_returns_permission_denied_when_actor_header_present_and_role_check_fails(monkeypatch)` (line 242): no docstring
+  - `mock_es()` (line 51): no docstring
+  - `mock_storage()` (line 58): no docstring
+  - `override_deps(mock_es, mock_storage)` (line 66): no docstring
+  - `async test_get_first_point_returns_earliest_point(mock_es, mock_storage)` (line 85): no docstring
+  - `async test_get_first_point_404_when_instance_not_found(mock_es)` (line 99): no docstring
+  - `async test_get_first_point_404_when_property_not_timeseries(mock_es)` (line 113): no docstring
+  - `async test_get_last_point_returns_latest_point(mock_es, mock_storage)` (line 139): no docstring
+  - `async test_get_first_point_supports_id_only_property_entries(mock_es, mock_storage)` (line 153): no docstring
+  - `async test_stream_points_returns_all_points(mock_es, mock_storage)` (line 173): no docstring
+  - `async test_stream_points_with_absolute_range(mock_es, mock_storage)` (line 189): no docstring
+  - `async test_stream_points_404_when_no_ts_data(mock_es, mock_storage)` (line 212): no docstring
+  - `async test_timeseries_skips_role_enforcement_without_actor_headers(monkeypatch)` (line 228): no docstring
+  - `async test_timeseries_returns_permission_denied_when_actor_header_present_and_role_check_fails(monkeypatch)` (line 243): no docstring
+  - `async test_timeseries_returns_503_when_actor_role_check_is_unverifiable(monkeypatch)` (line 266): no docstring
 
 ### `backend/tests/unit/openapi/test_architecture_quality_docs_guard.py`
 - **Functions**
@@ -11574,6 +11656,11 @@
   - `_ValueErrorAuditStore` (line 20): no docstring
     - `async list_logs(self, **_kwargs)` (line 21): no docstring
 
+### `backend/tests/unit/routers/test_bff_role_deps.py`
+- **Functions**
+  - `_request()` (line 11): no docstring
+  - `async test_enforce_required_database_role_raises_503_when_registry_unavailable(monkeypatch)` (line 23): no docstring
+
 ### `backend/tests/unit/routers/test_database_router_openapi_visibility.py`
 - **Functions**
   - `test_removed_legacy_routes_not_exposed_in_openapi()` (line 6): no docstring
@@ -11720,15 +11807,21 @@
 
 ### `backend/tests/unit/security/test_database_access.py`
 - **Functions**
-  - `async test_get_database_access_role_returns_none_when_table_missing(monkeypatch)` (line 24): no docstring
-  - `async test_has_database_access_config_returns_false_when_table_missing(monkeypatch)` (line 41): no docstring
-  - `async test_enforce_database_role_allows_when_unconfigured_and_flag_unset(monkeypatch)` (line 58): no docstring
-  - `async test_enforce_database_role_denies_when_flag_true_and_no_role(monkeypatch)` (line 82): no docstring
+  - `async test_get_database_access_role_returns_none_when_table_missing(monkeypatch)` (line 32): no docstring
+  - `async test_inspect_database_access_reports_configured_role(monkeypatch)` (line 49): no docstring
+  - `async test_get_database_access_role_returns_none_when_registry_unavailable(monkeypatch)` (line 66): no docstring
+  - `async test_inspect_database_access_reports_unavailable_when_registry_unreachable(monkeypatch)` (line 80): no docstring
+  - `async test_has_database_access_config_returns_false_when_table_missing(monkeypatch)` (line 94): no docstring
+  - `async test_has_database_access_config_returns_false_when_registry_unavailable(monkeypatch)` (line 111): no docstring
+  - `async test_enforce_database_role_allows_when_unconfigured_and_flag_unset(monkeypatch)` (line 125): no docstring
+  - `async test_enforce_database_role_denies_when_flag_true_and_no_role(monkeypatch)` (line 145): no docstring
+  - `async test_enforce_database_role_raises_when_registry_unavailable_and_not_allowed(monkeypatch)` (line 166): no docstring
+  - `async test_enforce_database_role_allows_when_registry_unavailable_and_explicitly_enabled(monkeypatch)` (line 187): no docstring
 - **Classes**
-  - `_FakeConn` (line 7): no docstring
-    - `__init__(self, fetchrow_exception, fetchrow_result)` (line 8): no docstring
-    - `async fetchrow(self, *args, **kwargs)` (line 13): no docstring
-    - `async close(self)` (line 18): no docstring
+  - `_FakeConn` (line 15): no docstring
+    - `__init__(self, fetchrow_exception, fetchrow_result)` (line 16): no docstring
+    - `async fetchrow(self, *args, **kwargs)` (line 21): no docstring
+    - `async close(self)` (line 26): no docstring
 
 ### `backend/tests/unit/security/test_input_sanitizer_branch.py`
 - **Functions**
@@ -11799,15 +11892,17 @@
 
 ### `backend/tests/unit/services/test_action_simulation_permission_profile.py`
 - **Functions**
-  - `async test_enforce_action_permission_allows_ontology_roles_model(monkeypatch)` (line 13): no docstring
-  - `async test_enforce_action_permission_rejects_policy_mismatch(monkeypatch)` (line 33): no docstring
-  - `async test_enforce_action_permission_allows_datasource_derived_without_policy(monkeypatch)` (line 55): no docstring
-  - `async test_enforce_action_permission_rejects_datasource_derived_for_non_engineer_role(monkeypatch)` (line 74): no docstring
-  - `async test_enforce_action_permission_rejects_edits_beyond_actions_without_engineer_role(monkeypatch)` (line 95): no docstring
-  - `async test_enforce_action_permission_rejects_invalid_permission_profile(monkeypatch)` (line 120): no docstring
-  - `async test_enforce_action_permission_allows_when_project_policy_inheritance_matches(monkeypatch)` (line 139): no docstring
-  - `async test_enforce_action_permission_rejects_when_required_project_policy_is_missing(monkeypatch)` (line 176): no docstring
-  - `async test_enforce_action_permission_rejects_when_inherited_project_policy_denies(monkeypatch)` (line 214): no docstring
+  - `_inspection(role, state)` (line 12): no docstring
+  - `async test_enforce_action_permission_allows_ontology_roles_model(monkeypatch)` (line 22): no docstring
+  - `async test_enforce_action_permission_rejects_policy_mismatch(monkeypatch)` (line 42): no docstring
+  - `async test_enforce_action_permission_allows_datasource_derived_without_policy(monkeypatch)` (line 64): no docstring
+  - `async test_enforce_action_permission_rejects_datasource_derived_for_non_engineer_role(monkeypatch)` (line 83): no docstring
+  - `async test_enforce_action_permission_rejects_edits_beyond_actions_without_engineer_role(monkeypatch)` (line 104): no docstring
+  - `async test_enforce_action_permission_rejects_invalid_permission_profile(monkeypatch)` (line 129): no docstring
+  - `async test_enforce_action_permission_allows_when_project_policy_inheritance_matches(monkeypatch)` (line 148): no docstring
+  - `async test_enforce_action_permission_rejects_when_required_project_policy_is_missing(monkeypatch)` (line 185): no docstring
+  - `async test_enforce_action_permission_rejects_when_inherited_project_policy_denies(monkeypatch)` (line 223): no docstring
+  - `async test_enforce_action_permission_rejects_when_registry_is_unavailable(monkeypatch)` (line 260): no docstring
 
 ### `backend/tests/unit/services/test_action_simulation_scenarios.py`
 - **Functions**
@@ -11816,6 +11911,19 @@
   - `test_conflict_policy_base_wins_skips()` (line 62): no docstring
   - `test_conflict_policy_writeback_wins_applies()` (line 79): no docstring
   - `test_no_conflict_does_not_reject_under_fail()` (line 94): no docstring
+
+### `backend/tests/unit/services/test_action_target_state_service.py`
+- **Functions**
+  - `async test_load_action_target_states_reuses_contract_and_state_for_duplicate_targets()` (line 36): no docstring
+  - `async test_load_action_target_states_raises_when_contract_missing()` (line 74): no docstring
+  - `async test_load_action_target_states_raises_when_required_interfaces_missing()` (line 95): no docstring
+  - `async test_load_action_target_states_raises_when_base_state_missing()` (line 117): no docstring
+  - `async test_load_action_target_states_raises_when_storage_is_unavailable()` (line 138): no docstring
+- **Classes**
+  - `_FakeStorage` (line 14): no docstring
+    - `__init__(self, state, list_exception)` (line 15): no docstring
+    - `async list_command_files(self, bucket, prefix)` (line 21): no docstring
+    - `async replay_instance_state(self, bucket, command_files, strict)` (line 28): no docstring
 
 ### `backend/tests/unit/services/test_admin_recompute_projection_service.py`
 - **Functions**
@@ -13441,6 +13549,8 @@
   - `test_storage_service_does_not_disable_tls_verify_by_default(monkeypatch)` (line 50): no docstring
   - `test_storage_service_respects_explicit_tls_verify_flag(monkeypatch)` (line 75): no docstring
   - `test_storage_service_supports_tls_ca_bundle_path(monkeypatch)` (line 101): no docstring
+  - `async test_replay_instance_state_best_effort_skips_invalid_command_files()` (line 129): no docstring
+  - `async test_replay_instance_state_strict_raises_on_invalid_command_file()` (line 160): no docstring
 - **Classes**
   - `_FakeS3Client` (line 8): no docstring
     - `__init__(self, pages)` (line 9): no docstring
@@ -13925,10 +14035,12 @@
 
 ### `backend/tests/unit/workers/test_action_worker_permission_profile.py`
 - **Functions**
-  - `_worker_without_init()` (line 10): no docstring
-  - `async test_action_worker_enforce_permission_allows_datasource_derived_without_policy(monkeypatch)` (line 16): no docstring
-  - `async test_action_worker_enforce_permission_rejects_edits_beyond_actions_without_engineer_role(monkeypatch)` (line 40): no docstring
-  - `async test_action_worker_enforce_permission_rejects_invalid_permission_profile(monkeypatch)` (line 64): no docstring
+  - `_worker_without_init()` (line 11): no docstring
+  - `_inspection(role, state)` (line 15): no docstring
+  - `async test_action_worker_enforce_permission_allows_datasource_derived_without_policy(monkeypatch)` (line 25): no docstring
+  - `async test_action_worker_enforce_permission_rejects_edits_beyond_actions_without_engineer_role(monkeypatch)` (line 49): no docstring
+  - `async test_action_worker_enforce_permission_rejects_invalid_permission_profile(monkeypatch)` (line 73): no docstring
+  - `async test_action_worker_enforce_permission_rejects_when_registry_is_unavailable(monkeypatch)` (line 93): no docstring
 
 ### `backend/tests/unit/workers/test_action_worker_submission_validation_rules.py`
 - **Functions**

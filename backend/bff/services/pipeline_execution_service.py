@@ -27,7 +27,9 @@ from bff.routers.pipeline_shared import (
     _require_pipeline_idempotency_key,
     _resolve_principal,
 )
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.oms_client import OMSClient
+from bff.services.pipeline_execution_queue import publish_build_pipeline_job, publish_preview_pipeline_job
 from bff.services.ontology_occ_guard_service import (
     resolve_branch_head_commit_with_bootstrap,
 )
@@ -38,7 +40,7 @@ from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_
 from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.models.pipeline_job import PipelineJob
 from shared.models.requests import ApiResponse
-from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
+from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
@@ -1068,60 +1070,6 @@ def _build_preview_definition(
     return preview_definition
 
 
-async def _publish_preview_pipeline_job(
-    *,
-    pipeline_job_queue: PipelineJobQueue,
-    pipeline_registry: PipelineRegistry,
-    job: PipelineJob,
-    pipeline_id: str,
-    node_id: Optional[str],
-) -> None:
-    try:
-        await pipeline_job_queue.publish(job)
-    except Exception as exc:
-        error = str(exc)
-        error_payload = build_error_envelope(
-            service_name="bff",
-            message="Failed to enqueue pipeline preview job",
-            detail=error,
-            code=ErrorCode.INTERNAL_ERROR,
-            category=ErrorCategory.INTERNAL,
-            status_code=500,
-            errors=[error],
-            context={
-                "pipeline_id": pipeline_id,
-                "job_id": job.job_id,
-                "node_id": node_id,
-                "mode": "preview",
-                "queued": False,
-            },
-            external_code="PIPELINE_EXECUTION_FAILED",
-        )
-        await pipeline_registry.record_preview(
-            pipeline_id=pipeline_id,
-            status="FAILED",
-            row_count=0,
-            sample_json=error_payload,
-            job_id=job.job_id,
-            node_id=node_id,
-        )
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job.job_id,
-            mode="preview",
-            status="FAILED",
-            node_id=node_id,
-            sample_json=error_payload,
-            finished_at=utcnow(),
-        )
-        logger.error("Failed to enqueue pipeline preview job %s: %s", job.job_id, exc)
-        raise classified_http_exception(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Failed to enqueue preview job",
-            code=ErrorCode.UPSTREAM_UNAVAILABLE,
-        ) from exc
-
-
 async def _append_preview_command_event(
     *,
     event_store: Any,
@@ -1208,51 +1156,6 @@ def _build_definition_with_ontology_meta(
         },
     }
     return build_definition
-
-
-async def _publish_build_pipeline_job(
-    *,
-    pipeline_job_queue: PipelineJobQueue,
-    pipeline_registry: PipelineRegistry,
-    job: PipelineJob,
-    pipeline_id: str,
-    node_id: Optional[str],
-) -> None:
-    try:
-        await pipeline_job_queue.publish(job)
-    except Exception as exc:
-        error = str(exc)
-        error_payload = build_error_envelope(
-            service_name="bff",
-            message="Failed to enqueue pipeline build job",
-            detail=error,
-            code=ErrorCode.INTERNAL_ERROR,
-            category=ErrorCategory.INTERNAL,
-            status_code=500,
-            errors=[error],
-            context={
-                "pipeline_id": pipeline_id,
-                "job_id": job.job_id,
-                "node_id": node_id,
-                "mode": "build",
-            },
-            external_code="PIPELINE_EXECUTION_FAILED",
-        )
-        await pipeline_registry.record_run(
-            pipeline_id=pipeline_id,
-            job_id=job.job_id,
-            mode="build",
-            status="FAILED",
-            node_id=node_id,
-            output_json=error_payload,
-            finished_at=utcnow(),
-        )
-        logger.error("Failed to enqueue pipeline build job %s: %s", job.job_id, exc)
-        raise classified_http_exception(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Failed to enqueue build job",
-            code=ErrorCode.UPSTREAM_UNAVAILABLE,
-        ) from exc
 
 
 async def _emit_build_requested_event(
@@ -1405,7 +1308,7 @@ async def _dispatch_preview_execution(
         preview_limit=prepared.request_payload.limit,
         branch=prepared.run_context.pipeline.branch,
     )
-    await _publish_preview_pipeline_job(
+    await publish_preview_pipeline_job(
         pipeline_job_queue=pipeline_job_queue,
         pipeline_registry=pipeline_registry,
         job=job,
@@ -1517,7 +1420,7 @@ async def _dispatch_build_execution(
         preview_limit=prepared.request_payload.limit,
         branch=prepared.run_context.pipeline.branch,
     )
-    await _publish_build_pipeline_job(
+    await publish_build_pipeline_job(
         pipeline_job_queue=pipeline_job_queue,
         pipeline_registry=pipeline_registry,
         job=job,
@@ -1632,18 +1535,12 @@ async def preview_pipeline(
         )
         if request is not None:
             enforce_db_scope_or_403(request, db_name=prepared.run_context.db_name)
-            try:
-                await enforce_database_role(
-                    headers=request.headers,
-                    db_name=prepared.run_context.db_name,
-                    required_roles=DATA_ENGINEER_ROLES,
-                )
-            except ValueError as exc:
-                raise classified_http_exception(
-                    status.HTTP_403_FORBIDDEN,
-                    str(exc),
-                    code=ErrorCode.PERMISSION_DENIED,
-                ) from exc
+            await enforce_database_role_or_http_error(
+                headers=request.headers,
+                db_name=prepared.run_context.db_name,
+                required_roles=DATA_ENGINEER_ROLES,
+                allow_if_registry_unavailable=True,
+            )
         node_id = prepared.run_context.node_id
         response = await _dispatch_preview_execution(
             pipeline_id=pipeline_id,
@@ -1724,18 +1621,12 @@ async def build_pipeline(
         )
         if request is not None:
             enforce_db_scope_or_403(request, db_name=prepared.run_context.db_name)
-            try:
-                await enforce_database_role(
-                    headers=request.headers,
-                    db_name=prepared.run_context.db_name,
-                    required_roles=DATA_ENGINEER_ROLES,
-                )
-            except ValueError as exc:
-                raise classified_http_exception(
-                    status.HTTP_403_FORBIDDEN,
-                    str(exc),
-                    code=ErrorCode.PERMISSION_DENIED,
-                ) from exc
+            await enforce_database_role_or_http_error(
+                headers=request.headers,
+                db_name=prepared.run_context.db_name,
+                required_roles=DATA_ENGINEER_ROLES,
+                allow_if_registry_unavailable=True,
+            )
         response = await _dispatch_build_execution(
             pipeline_id=pipeline_id,
             prepared=prepared,
@@ -3463,18 +3354,12 @@ async def deploy_pipeline(
             pipeline_registry=pipeline_registry,
         )
         enforce_db_scope_or_403(request, db_name=prepared.db_name)
-        try:
-            await enforce_database_role(
-                headers=request.headers,
-                db_name=prepared.db_name,
-                required_roles=DATA_ENGINEER_ROLES,
-            )
-        except ValueError as exc:
-            raise classified_http_exception(
-                status.HTTP_403_FORBIDDEN,
-                str(exc),
-                code=ErrorCode.PERMISSION_DENIED,
-            ) from exc
+        await enforce_database_role_or_http_error(
+            headers=request.headers,
+            db_name=prepared.db_name,
+            required_roles=DATA_ENGINEER_ROLES,
+            allow_if_registry_unavailable=True,
+        )
         result = await _dispatch_deploy_execution(
             prepared=prepared,
             pipeline_id=pipeline_id,

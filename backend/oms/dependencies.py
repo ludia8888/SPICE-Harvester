@@ -45,9 +45,27 @@ from oms.services.event_store import EventStore, event_store
 
 # Import validation functions
 from shared.security.input_sanitizer import validate_db_name, validate_class_id
-from shared.security.database_access import has_database_access_config
+from shared.security.database_access import inspect_database_access
 
 SERVICE_NAME = "OMS"
+logger = logging.getLogger(__name__)
+
+
+def _log_optional_dependency_failure(name: str, exc: Exception, *, error: bool = False) -> None:
+    if error:
+        logger.error("%s unavailable: %s", name, exc, exc_info=True)
+        return
+    logger.warning("%s unavailable: %s", name, exc)
+
+
+async def _health_status_for_service(service: object) -> str:
+    if hasattr(service, "health_check"):
+        is_healthy = await service.health_check()
+        return "healthy" if is_healthy else "unhealthy"
+    if hasattr(service, "check_connection"):
+        is_connected = await service.check_connection()
+        return "connected" if is_connected else "disconnected"
+    return "available"
 
 
 class OMSDependencyProvider:
@@ -77,9 +95,6 @@ class OMSDependencyProvider:
         
         This replaces the global command_status_service variable and get_command_status_service() function.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         try:
             # Check if already created
             if container.has(CommandStatusService) and container.is_created(CommandStatusService):
@@ -91,8 +106,8 @@ class OMSDependencyProvider:
                 # First try from container
                 if container.has(RedisService):
                     redis_service = await container.get(RedisService)
-            except Exception as e:
-                logger.warning(f"Could not get Redis from container: {e}")
+            except Exception as exc:
+                _log_optional_dependency_failure("Redis container service", exc)
             
             # If Redis not available, try direct connection
             if redis_service is None:
@@ -106,8 +121,8 @@ class OMSDependencyProvider:
                         password=settings.database.redis_password,
                     )
                     await redis_service.connect()
-                except Exception as e:
-                    logger.warning(f"Direct Redis connection failed: {e}")
+                except Exception as exc:
+                    _log_optional_dependency_failure("Direct Redis connection", exc)
                     redis_service = None
             
             if redis_service is None:
@@ -124,8 +139,8 @@ class OMSDependencyProvider:
             
             return command_status_service
             
-        except Exception as e:
-            logger.error(f"Failed to get command status service: {e}")
+        except Exception as exc:
+            _log_optional_dependency_failure("CommandStatusService", exc, error=True)
             # Don't raise HTTPException, just return None to allow system to continue
             return None
 
@@ -133,23 +148,20 @@ class OMSDependencyProvider:
     async def get_processed_event_registry(
         container: ServiceContainer = Depends(get_container),
     ) -> Optional[ProcessedEventRegistry]:
-        import logging
-        logger = logging.getLogger(__name__)
-
         try:
             if container.has(ProcessedEventRegistry) and container.is_created(ProcessedEventRegistry):
                 return await container.get(ProcessedEventRegistry)
 
             try:
                 registry = await create_processed_event_registry(validate=False)
-            except Exception as e:
-                logger.warning(f"ProcessedEventRegistry connection failed: {e}")
+            except Exception as exc:
+                _log_optional_dependency_failure("ProcessedEventRegistry connection", exc)
                 return None
 
             container.register_instance(ProcessedEventRegistry, registry)
             return registry
-        except Exception as e:
-            logger.warning(f"Failed to get ProcessedEventRegistry: {e}")
+        except Exception as exc:
+            _log_optional_dependency_failure("ProcessedEventRegistry", exc)
             return None
 
 
@@ -187,11 +199,25 @@ def ValidatedClassId(class_id: str = Path(..., description="클래스 ID")) -> s
 
 
 # Combined validation for database existence check - Modernized version
+async def database_exists_in_registry(
+    *,
+    db_name: str,
+) -> bool:
+    inspection = await inspect_database_access(db_name=db_name)
+    if inspection.is_unavailable:
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Database access registry unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        )
+    return inspection.is_configured
+
+
 async def ensure_database_exists(
     db_name: Annotated[str, ValidatedDatabaseName],
 ) -> str:
     """데이터베이스 존재 확인 및 검증된 이름 반환 - Modernized version"""
-    if await has_database_access_config(db_name=db_name):
+    if await database_exists_in_registry(db_name=db_name):
         return db_name
     raise classified_http_exception(
         status.HTTP_404_NOT_FOUND,
@@ -235,20 +261,12 @@ async def check_oms_dependencies_health(
             try:
                 if container.has(service_type):
                     service = await container.get(service_type)
-                    # Perform basic health check if available
-                    if hasattr(service, 'health_check'):
-                        is_healthy = await service.health_check()
-                        health_status[service_name] = "healthy" if is_healthy else "unhealthy"
-                    elif hasattr(service, 'check_connection'):
-                        is_connected = await service.check_connection()
-                        health_status[service_name] = "connected" if is_connected else "disconnected"
-                    else:
-                        health_status[service_name] = "available"
+                    health_status[service_name] = await _health_status_for_service(service)
                 else:
                     health_status[service_name] = "not_registered"
-            except Exception as e:
-                logging.getLogger(__name__).warning("Exception fallback at oms/dependencies.py:300", exc_info=True)
-                health_status[service_name] = f"error: {str(e)}"
+            except Exception as exc:
+                logger.warning("OMS dependency health check failed for %s", service_name, exc_info=True)
+                health_status[service_name] = f"error: {str(exc)}"
         
         return {
             "status": "ok",
@@ -257,7 +275,7 @@ async def check_oms_dependencies_health(
         }
         
     except Exception as e:
-        logging.getLogger(__name__).warning("Exception fallback at oms/dependencies.py:309", exc_info=True)
+        logger.warning("OMS dependency health check crashed", exc_info=True)
         return build_error_envelope(
             service_name=SERVICE_NAME,
             message="OMS dependency health check failed",

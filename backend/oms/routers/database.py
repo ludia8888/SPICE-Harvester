@@ -9,16 +9,12 @@ import logging
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 
-from oms.dependencies import EventStoreDep, CommandStatusServiceDep
+from oms.dependencies import CommandStatusServiceDep, EventStoreDep, database_exists_in_registry
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
 from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
-from shared.security.database_access import (
-    has_database_access_config,
-    list_database_names,
-    upsert_database_owner,
-)
+from shared.security.database_access import list_database_names, upsert_database_owner
 from shared.config.app_config import AppConfig
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
@@ -265,7 +261,7 @@ async def database_exists(db_name: str):
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
 
-        exists = await has_database_access_config(db_name=db_name)
+        exists = await database_exists_in_registry(db_name=db_name)
         
         return ApiResponse.success(
             message=f"데이터베이스 '{db_name}' 존재 여부: {exists}",

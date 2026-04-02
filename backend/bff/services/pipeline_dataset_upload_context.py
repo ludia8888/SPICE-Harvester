@@ -15,9 +15,10 @@ from typing import Any, Dict, Optional
 from fastapi import Request
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.http_idempotency import require_idempotency_key
 from shared.security.auth_utils import enforce_db_scope
-from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
+from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.utils.path_utils import safe_lakefs_ref
@@ -50,10 +51,11 @@ async def _prepare_dataset_upload_context(
     except ValueError as exc:
         raise classified_http_exception(403, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DATA_ENGINEER_ROLES)
-    except ValueError as exc:
-        raise classified_http_exception(403, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+    await enforce_database_role_or_http_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DATA_ENGINEER_ROLES,
+    )
 
     actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
     lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)

@@ -23,7 +23,7 @@ from shared.config.settings import get_settings
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 from shared.security.database_access import (
     fetch_database_access_entries,
-    get_database_access_role,
+    inspect_database_access,
     resolve_database_actor_with_name,
     upsert_database_owner,
 )
@@ -300,11 +300,18 @@ async def delete_database(
 
         actor_type, actor_id, _actor_name = resolve_database_actor_with_name(http_request.headers)
         if not _is_dev_mode():
-            role = await get_database_access_role(
+            inspection = await inspect_database_access(
                 db_name=validated_db_name,
                 principal_type=actor_type,
                 principal_id=actor_id,
             )
+            if inspection.is_unavailable:
+                raise classified_http_exception(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "Database access registry unavailable",
+                    code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                )
+            role = inspection.role
             if not role or role.lower() != "owner":
                 raise classified_http_exception(status.HTTP_403_FORBIDDEN, "Only owners can delete projects.", code=ErrorCode.PERMISSION_DENIED)
 

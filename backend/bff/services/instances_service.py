@@ -13,13 +13,14 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.utils.action_log_serialization import ACTION_LOG_CLASS_ID, serialize_action_log_record
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
-from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
+from shared.security.database_access import DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import (
     sanitize_es_query,
     validate_branch_name,
@@ -49,6 +50,15 @@ class OverlayContext:
 
 def _is_action_log_class_id(class_id: str) -> bool:
     return str(class_id or "").strip().lower() == ACTION_LOG_CLASS_ID.lower()
+
+
+async def _require_action_log_role(*, request_headers: Dict[str, str], db_name: str) -> None:
+    await enforce_database_role_or_http_error(
+        headers=request_headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        allow_if_registry_unavailable=True,
+    )
 
 
 def _action_log_as_instance(record: ActionLogRecord) -> Dict[str, Any]:
@@ -260,14 +270,7 @@ async def list_class_instances(
     resolved_base_branch = validate_branch_name(branch or base_branch or "main")
 
     if _is_action_log_class_id(class_id):
-        try:
-            await enforce_database_role(
-                headers=request_headers,
-                db_name=db_name,
-                required_roles=DOMAIN_MODEL_ROLES,
-            )
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+        await _require_action_log_role(request_headers=request_headers, db_name=db_name)
 
         if search:
             raise classified_http_exception(
@@ -661,14 +664,7 @@ async def get_instance_detail(
     resolved_base_branch = validate_branch_name(branch or base_branch or "main")
 
     if _is_action_log_class_id(class_id):
-        try:
-            await enforce_database_role(
-                headers=request_headers,
-                db_name=db_name,
-                required_roles=DOMAIN_MODEL_ROLES,
-            )
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+        await _require_action_log_role(request_headers=request_headers, db_name=db_name)
 
         try:
             action_log_uuid = UUID(str(instance_id))

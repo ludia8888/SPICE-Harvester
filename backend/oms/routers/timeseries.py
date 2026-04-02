@@ -20,11 +20,14 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from oms.routers.foundry_role_guard import (
+    require_domain_role_if_actor_or_response,
+)
 from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep, StorageServiceDep
 from shared.observability.tracing import trace_endpoint
-from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
+from shared.security.database_access import enforce_database_role
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_branch_name,
@@ -34,7 +37,6 @@ from shared.security.input_sanitizer import (
 from shared.utils.instance_properties import iter_instance_properties
 
 logger = logging.getLogger(__name__)
-_ACTOR_HEADER_KEYS = ("X-User-ID", "X-User", "X-Actor")
 
 timeseries_router = APIRouter(
     prefix="/v2/ontologies/{ontology}/objects",
@@ -110,21 +112,6 @@ def _resolve_timeseries_location(
         return default_bucket, canonical_key
 
     return default_bucket, ref.lstrip("/") or canonical_key
-
-
-def _has_actor_headers(request: Request) -> bool:
-    return any(str(request.headers.get(key) or "").strip() for key in _ACTOR_HEADER_KEYS)
-
-
-async def _require_domain_role_if_actor(request: Request, *, db_name: str) -> None:
-    if not _has_actor_headers(request):
-        return
-    await enforce_database_role(
-        headers=request.headers,
-        db_name=db_name,
-        required_roles=DOMAIN_MODEL_ROLES,
-        require_env_key="OMS_REQUIRE_DB_ACCESS",
-    )
 
 
 async def _find_instance_by_pk(
@@ -314,22 +301,14 @@ async def get_first_point(
             error_name="InvalidArgument",
             parameters={"message": str(exc)},
         )
-    try:
-        await _require_domain_role_if_actor(request, db_name=db_name)
-    except ValueError as exc:
-        if str(exc).strip().lower() == "permission denied":
-            return _foundry_error(
-                status.HTTP_403_FORBIDDEN,
-                error_code="PERMISSION_DENIED",
-                error_name="PermissionDenied",
-                parameters={"message": "Permission denied"},
-            )
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": str(exc)},
-        )
+    guard_response = await require_domain_role_if_actor_or_response(
+        request,
+        db_name=db_name,
+        foundry_error=_foundry_error,
+        enforce_fn=enforce_database_role,
+    )
+    if guard_response is not None:
+        return guard_response
 
     source = await _find_instance_by_pk(
         es, db_name=db_name, branch=branch, object_type=object_type, primary_key=primaryKey,
@@ -396,22 +375,14 @@ async def get_last_point(
             error_name="InvalidArgument",
             parameters={"message": str(exc)},
         )
-    try:
-        await _require_domain_role_if_actor(request, db_name=db_name)
-    except ValueError as exc:
-        if str(exc).strip().lower() == "permission denied":
-            return _foundry_error(
-                status.HTTP_403_FORBIDDEN,
-                error_code="PERMISSION_DENIED",
-                error_name="PermissionDenied",
-                parameters={"message": "Permission denied"},
-            )
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": str(exc)},
-        )
+    guard_response = await require_domain_role_if_actor_or_response(
+        request,
+        db_name=db_name,
+        foundry_error=_foundry_error,
+        enforce_fn=enforce_database_role,
+    )
+    if guard_response is not None:
+        return guard_response
 
     source = await _find_instance_by_pk(
         es, db_name=db_name, branch=branch, object_type=object_type, primary_key=primaryKey,
@@ -479,22 +450,14 @@ async def stream_points(
             error_name="InvalidArgument",
             parameters={"message": str(exc)},
         )
-    try:
-        await _require_domain_role_if_actor(request, db_name=db_name)
-    except ValueError as exc:
-        if str(exc).strip().lower() == "permission denied":
-            return _foundry_error(
-                status.HTTP_403_FORBIDDEN,
-                error_code="PERMISSION_DENIED",
-                error_name="PermissionDenied",
-                parameters={"message": "Permission denied"},
-            )
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"message": str(exc)},
-        )
+    guard_response = await require_domain_role_if_actor_or_response(
+        request,
+        db_name=db_name,
+        foundry_error=_foundry_error,
+        enforce_fn=enforce_database_role,
+    )
+    if guard_response is not None:
+        return guard_response
 
     source = await _find_instance_by_pk(
         es, db_name=db_name, branch=branch, object_type=object_type, primary_key=primaryKey,

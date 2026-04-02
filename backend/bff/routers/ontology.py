@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Query, Request, status
 
 from bff.dependencies import LabelMapper, LabelMapperDep, OMSClientDep
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.input_validation_service import enforce_db_scope_or_403
 from bff.services import ontology_crud_service
 from bff.services.oms_client import OMSClient
@@ -16,10 +17,12 @@ router = APIRouter(tags=["Ontology Management"])
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
     enforce_db_scope_or_403(request, db_name=db_name)
-    try:
-        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
-    except ValueError as exc:
-        raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+    await enforce_database_role_or_http_error(
+        headers=request.headers,
+        db_name=db_name,
+        required_roles=DOMAIN_MODEL_ROLES,
+        enforce_fn=enforce_database_role,
+    )
 
 
 @router.post(

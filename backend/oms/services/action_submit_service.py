@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from fastapi import status
 
+from oms.services.action_target_state_service import ActionTargetStateLoadError, load_action_target_states
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
@@ -39,10 +40,7 @@ from shared.utils.action_permission_profile import (
     requires_action_data_access_enforcement,
     resolve_action_permission_profile,
 )
-from shared.utils.action_runtime_contracts import (
-    extract_required_action_interfaces,
-    load_action_target_runtime_contract,
-)
+from shared.utils.action_runtime_contracts import extract_required_action_interfaces
 from shared.utils.action_template_engine import (
     ActionImplementationError,
     compile_action_change_shape,
@@ -237,58 +235,68 @@ async def submit_action_request(
                     code=ErrorCode.STORAGE_UNAVAILABLE,
                 )
             required_interfaces = set(extract_required_action_interfaces(spec))
-            class_interface_refs: dict[str, list[str]] = {}
-            class_field_types: dict[str, dict[str, str]] = {}
-
-            async def _ensure_class_contract(class_id: str) -> None:
-                if class_id in class_interface_refs:
-                    return
-                contract = await load_action_target_runtime_contract(
-                    db_name=db_name,
-                    class_id=class_id,
-                    branch=ontology_commit_id,
-                    resources=resources,
-                )
-                if contract is None:
-                    raise classified_http_exception(
-                        status.HTTP_404_NOT_FOUND,
-                        f"target class not found at ontology commit: {class_id}",
-                        code=ErrorCode.RESOURCE_NOT_FOUND,
-                    )
-                class_interface_refs[class_id] = contract.interfaces
-                class_field_types[class_id] = contract.field_types
 
             if storage:
                 max_targets = max(0, int(settings.writeback.writeback_submission_snapshot_max_targets))
                 access_scan_limit = len(compiled_shape) if (enforce_data_access or enforce_edit_access) else max_targets
+                try:
+                    loaded_targets = await load_action_target_states(
+                        db_name=db_name,
+                        base_branch=resolved_base_branch,
+                        contract_branch=ontology_commit_id,
+                        compiled_targets=compiled_shape[: max(0, access_scan_limit)],
+                        resources=resources,
+                        storage=storage,
+                        required_interfaces=required_interfaces,
+                        allow_missing_base_state=True,
+                        skip_invalid_targets=True,
+                    )
+                except ActionTargetStateLoadError as exc:
+                    if exc.kind == "target_class_not_found":
+                        raise classified_http_exception(
+                            status.HTTP_404_NOT_FOUND,
+                            f"target class not found at ontology commit: {exc.details.get('class_id')}",
+                            code=ErrorCode.RESOURCE_NOT_FOUND,
+                        ) from exc
+                    if exc.kind == "required_interfaces_missing":
+                        raise classified_http_exception(
+                            status.HTTP_403_FORBIDDEN,
+                            (
+                                "Action target class does not satisfy required interfaces "
+                                f"(class_id={exc.details.get('class_id')}, missing={exc.details.get('missing_interfaces')})"
+                            ),
+                            code=ErrorCode.PERMISSION_DENIED,
+                        ) from exc
+                    if exc.kind == "storage_unavailable":
+                        if enforce_data_access:
+                            raise classified_http_exception(
+                                status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Unable to verify action target data access policy",
+                                code=ErrorCode.STORAGE_UNAVAILABLE,
+                            ) from exc
+                        if enforce_edit_access:
+                            raise classified_http_exception(
+                                status.HTTP_503_SERVICE_UNAVAILABLE,
+                                "Unable to verify action target edit permissions",
+                                code=ErrorCode.STORAGE_UNAVAILABLE,
+                            ) from exc
+                        raise
+                    raise
+
+                loaded_targets_by_key = {
+                    (target.class_id, target.instance_id): target
+                    for target in loaded_targets
+                }
                 for idx, item in enumerate(compiled_shape[: max(0, access_scan_limit)]):
                     target_class_id = str(item.class_id or "").strip()
                     target_instance_id = str(item.instance_id or "").strip()
                     if not target_class_id or not target_instance_id:
                         continue
                     changes = dict(item.changes or {})
-                    await _ensure_class_contract(target_class_id)
-                    if required_interfaces:
-                        implemented = set(class_interface_refs.get(target_class_id, []))
-                        missing = sorted(required_interfaces - implemented)
-                        if missing:
-                            raise classified_http_exception(
-                                status.HTTP_403_FORBIDDEN,
-                                (
-                                    "Action target class does not satisfy required interfaces "
-                                    f"(class_id={target_class_id}, missing={missing})"
-                                ),
-                                code=ErrorCode.PERMISSION_DENIED,
-                            )
-
-                    prefix = f"{db_name}/{resolved_base_branch}/{target_class_id}/{target_instance_id}/"
-                    command_files = await storage.list_command_files(bucket=AppConfig.INSTANCE_BUCKET, prefix=prefix)
-                    base_state = await storage.replay_instance_state(
-                        bucket=AppConfig.INSTANCE_BUCKET,
-                        command_files=command_files,
-                    )
-                    if not isinstance(base_state, dict):
-                        base_state = {}
+                    loaded_target = loaded_targets_by_key.get((target_class_id, target_instance_id))
+                    if loaded_target is None:
+                        continue
+                    base_state = dict(loaded_target.base_state)
                     if enforce_data_access or enforce_edit_access:
                         access_targets.append(
                             {
@@ -296,7 +304,7 @@ async def submit_action_request(
                                 "instance_id": target_instance_id,
                                 "base_state": base_state,
                                 "changes": changes,
-                                "field_types": class_field_types.get(target_class_id, {}),
+                                "field_types": loaded_target.field_types,
                             }
                         )
 

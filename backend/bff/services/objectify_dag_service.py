@@ -21,12 +21,13 @@ from fastapi import HTTPException, Request, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.schemas.objectify_requests import RunObjectifyDAGRequest
+from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.oms_client import OMSClient
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.models.objectify_job import ObjectifyJob
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
-from shared.security.database_access import DATA_ENGINEER_ROLES, enforce_database_role
+from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_branch_name, validate_class_id
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.pipeline.pipeline_dataset_utils import build_branch_candidates
@@ -637,10 +638,11 @@ async def run_objectify_dag(
         except ValueError as exc:
             raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
 
-        try:
-            await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DATA_ENGINEER_ROLES)
-        except ValueError as exc:
-            raise classified_http_exception(status.HTTP_403_FORBIDDEN, str(exc), code=ErrorCode.PERMISSION_DENIED) from exc
+        await enforce_database_role_or_http_error(
+            headers=request.headers,
+            db_name=db_name,
+            required_roles=DATA_ENGINEER_ROLES,
+        )
 
         orchestrator = _ObjectifyDagOrchestrator(
             db_name=db_name,
