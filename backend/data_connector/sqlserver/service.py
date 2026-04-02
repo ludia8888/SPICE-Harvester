@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from data_connector.adapters.base import ConnectorAdapter, ConnectorConnectionTestResult, ConnectorExtractResult
 from data_connector.adapters.blocking_query import run_blocking_query
-from data_connector.adapters.sql_query_guard import normalize_sql_query
+from data_connector.adapters.sql_query_guard import build_ordered_wrapper_query, normalize_sql_query
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
 
@@ -177,9 +177,12 @@ class SqlServerConnectorService(ConnectorAdapter):
 
         token = sync_state.get("watermark")
         tie_token = sync_state.get("watermark_tiebreaker")
+        order_columns = [watermark_column]
+        if tie_breaker:
+            order_columns.append(tie_breaker)
 
         if token is None:
-            query = base_query
+            query = build_ordered_wrapper_query(base_query, order_columns=order_columns, alias="base")
             params: list[Any] = []
         else:
             if tie_breaker and tie_token is not None:
@@ -238,8 +241,11 @@ class SqlServerConnectorService(ConnectorAdapter):
 
         token = sync_state.get("cdc_token")
         tie_token = sync_state.get("cdc_tiebreaker")
+        order_columns = [token_column] if token_column else []
+        if tie_breaker:
+            order_columns.append(tie_breaker)
         if token is None or not token_column:
-            query = cdc_query
+            query = build_ordered_wrapper_query(cdc_query, order_columns=order_columns, alias="cdc") if order_columns else cdc_query
             params: list[Any] = []
         else:
             if tie_breaker and tie_token is not None:

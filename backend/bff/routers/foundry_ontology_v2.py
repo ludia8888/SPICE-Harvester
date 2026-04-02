@@ -6,16 +6,14 @@ existing OMS/BFF ontology resources.
 
 import asyncio
 import logging
-import time
 from typing import Any, Dict
-from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from bff.dependencies import OMSClientDep
+from bff.dependencies import OMSClientDep, get_redis_service
 from bff.services.database_role_guard import enforce_database_role_or_permission_error
 from bff.routers.foundry_ontology_v2_actions import (
     _normalize_apply_action_response_payload,
@@ -60,7 +58,9 @@ from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectT
 from bff.services.oms_client import OMSClient
 from bff.services import object_type_contract_service
 from shared.config.settings import get_settings
+from shared.errors.infra_errors import RegistryUnavailableError
 from shared.foundry.compute_routing import choose_search_around_backend
+from shared.foundry.temporary_object_set_store import FoundryTemporaryObjectSetStore
 from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispatcher
 from shared.foundry.auth import require_scopes
 from shared.foundry.rids import build_rid
@@ -76,6 +76,7 @@ from shared.security.input_sanitizer import (
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.core.audit_log_store import AuditLogStore
+from shared.services.storage.redis_service import RedisService
 from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
 from shared.utils.ontology_fields import list_ontology_properties
 from shared.utils.object_type_backing import list_backing_sources
@@ -89,9 +90,6 @@ _DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
     "name": "table",
     "color": "#4C6A9A",
 }
-_TEMP_OBJECT_SET_TTL_SECONDS = 60 * 60
-_TEMP_OBJECT_SET_STORE: dict[str, tuple[float, dict[str, Any]]] = {}
-_TEMP_OBJECT_SET_LOCK = asyncio.Lock()
 _SEARCH_ROUTING_AUDIT_STORE: AuditLogStore | None = None
 _SEARCH_ROUTING_AUDIT_DISABLED = False
 _FORWARDED_ACTOR_HEADER_KEYS = (
@@ -261,40 +259,35 @@ def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
     return {"orderType": "fields", "fields": fields}
 
 
-def _temporary_object_set_rid() -> str:
-    return f"ri.object-set.main.versioned-object-set.{uuid4()}"
+def _temporary_object_set_store(redis_service: RedisService) -> FoundryTemporaryObjectSetStore:
+    settings = get_settings()
+    return FoundryTemporaryObjectSetStore(
+        redis_service=redis_service,
+        ttl_seconds=int(settings.cache.foundry_temp_object_set_ttl_seconds),
+    )
 
 
-def _prune_expired_temporary_object_sets(now_epoch: float) -> None:
-    expired = [rid for rid, (expires_at, _) in _TEMP_OBJECT_SET_STORE.items() if expires_at <= now_epoch]
-    for rid in expired:
-        _TEMP_OBJECT_SET_STORE.pop(rid, None)
+async def _store_temporary_object_set(
+    object_set: dict[str, Any],
+    *,
+    redis_service: RedisService,
+) -> str:
+    store = _temporary_object_set_store(redis_service)
+    return await store.create(object_set)
 
 
-async def _store_temporary_object_set(object_set: dict[str, Any]) -> str:
-    rid = _temporary_object_set_rid()
-    now_epoch = time.time()
-    async with _TEMP_OBJECT_SET_LOCK:
-        _prune_expired_temporary_object_sets(now_epoch)
-        _TEMP_OBJECT_SET_STORE[rid] = (now_epoch + _TEMP_OBJECT_SET_TTL_SECONDS, dict(object_set))
-    return rid
-
-
-async def _load_temporary_object_set(rid: str) -> dict[str, Any]:
-    normalized_rid = str(rid or "").strip()
-    if not normalized_rid:
-        raise ObjectSetNotFoundError("objectSetRid is required")
-    now_epoch = time.time()
-    async with _TEMP_OBJECT_SET_LOCK:
-        _prune_expired_temporary_object_sets(now_epoch)
-        record = _TEMP_OBJECT_SET_STORE.get(normalized_rid)
-        if record is None:
-            raise ObjectSetNotFoundError(f"ObjectSet not found: {normalized_rid}")
-        expires_at, object_set = record
-        if expires_at <= now_epoch:
-            _TEMP_OBJECT_SET_STORE.pop(normalized_rid, None)
-            raise ObjectSetNotFoundError(f"ObjectSet not found: {normalized_rid}")
-        return dict(object_set)
+async def _load_temporary_object_set(
+    rid: str,
+    *,
+    redis_service: RedisService,
+) -> dict[str, Any]:
+    store = _temporary_object_set_store(redis_service)
+    try:
+        return await store.get(rid)
+    except LookupError as exc:
+        raise ObjectSetNotFoundError(str(exc)) from exc
+    except RegistryUnavailableError:
+        raise
 
 
 def _collect_object_set_object_types(object_set: Any) -> list[str]:
@@ -335,7 +328,19 @@ async def _resolve_object_set_definition(object_set: Any) -> dict[str, Any]:
     if isinstance(object_set, dict):
         return dict(object_set)
     if isinstance(object_set, str):
-        return await _load_temporary_object_set(object_set)
+        raise ValueError("Temporary objectSet RID resolution requires redis_service")
+    raise ValueError("objectSet is required")
+
+
+async def _resolve_object_set_definition_with_store(
+    object_set: Any,
+    *,
+    redis_service: RedisService,
+) -> dict[str, Any]:
+    if isinstance(object_set, dict):
+        return dict(object_set)
+    if isinstance(object_set, str):
+        return await _load_temporary_object_set(object_set, redis_service=redis_service)
     raise ValueError("objectSet is required")
 
 
@@ -430,9 +435,13 @@ async def _resolve_search_around_target_primary_keys(
     db_name: str,
     branch: str,
     object_set: dict[str, Any],
+    redis_service: RedisService,
 ) -> tuple[dict[str, list[str]], str]:
     link_type = _extract_search_around_link_type(object_set)
-    source_object_set = await _resolve_object_set_definition(object_set.get("objectSet"))
+    source_object_set = await _resolve_object_set_definition_with_store(
+        object_set.get("objectSet"),
+        redis_service=redis_service,
+    )
     source_object_types = _collect_object_set_object_types(source_object_set)
     if not source_object_types:
         raise ValueError("searchAround.objectSet.objectType is required")
@@ -678,12 +687,14 @@ async def _load_rows_for_search_around_object_set(
     payload: dict[str, Any],
     endpoint_scope: str,
     actor: str | None = None,
+    redis_service: RedisService,
 ) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
     target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
         oms_client=oms_client,
         db_name=db_name,
         branch=branch,
         object_set=object_set,
+        redis_service=redis_service,
     )
 
     target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
@@ -1728,12 +1739,14 @@ async def _resolve_object_primary_key_field(
 
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
+    request_method = str(request.scope.get("method") or "GET").upper()
+    allow_if_registry_unavailable = request_method in {"GET", "HEAD", "OPTIONS"}
     await enforce_database_role_or_permission_error(
         headers=request.headers,
         db_name=db_name,
         required_roles=DOMAIN_MODEL_ROLES,
         denied_error_factory=PermissionDeniedError,
-        allow_if_registry_unavailable=True,
+        allow_if_registry_unavailable=allow_if_registry_unavailable,
         enforce_fn=enforce_database_role,
     )
 
@@ -3305,7 +3318,7 @@ async def apply_action_v2(
         action_type = str(action or "").strip()
         if not action_type:
             raise ValueError("action is required")
-        await _require_domain_write_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         principal_type, principal_id = resolve_database_actor(request.headers)
         metadata = {"user_id": principal_id, "user_type": principal_type}
         mode = _resolve_apply_action_mode(
@@ -3388,7 +3401,7 @@ async def apply_action_batch_v2(
         action_type = str(action or "").strip()
         if not action_type:
             raise ValueError("action is required")
-        await _require_domain_write_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
         principal_type, principal_id = resolve_database_actor(request.headers)
         metadata = {"user_id": principal_id, "user_type": principal_type}
         requests = list(body.requests or [])
@@ -4267,7 +4280,7 @@ async def create_object_type_v2(
         object_type = str(body.apiName or "").strip()
         if not object_type:
             raise ValueError("apiName is required")
-        await _require_domain_write_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -4359,7 +4372,7 @@ async def update_object_type_v2(
         object_type = str(objectType or "").strip()
         if not object_type:
             raise ValueError("objectType is required")
-        await _require_domain_write_role(request, db_name=db_name)
+        await _require_domain_role(request, db_name=db_name)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,
@@ -5348,6 +5361,7 @@ async def load_object_set_objects_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_type: str | None = None
@@ -5358,7 +5372,10 @@ async def load_object_set_objects_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = transaction_id, sdk_package_rid, sdk_version
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_type = _resolve_object_set_object_type(object_set)
@@ -5389,6 +5406,7 @@ async def load_object_set_objects_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjects",
                 actor=actor,
+                redis_service=redis_service,
             )
         else:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -5450,6 +5468,7 @@ async def load_object_set_links_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
@@ -5462,7 +5481,10 @@ async def load_object_set_links_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         requested_links = _normalize_link_type_values(payload)
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
@@ -5661,6 +5683,7 @@ async def load_object_set_multiple_object_types_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_types: list[str] = []
@@ -5679,7 +5702,10 @@ async def load_object_set_multiple_object_types_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_types = _collect_object_set_object_types(object_set)
@@ -5722,6 +5748,7 @@ async def load_object_set_multiple_object_types_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsMultipleObjectTypes",
                 actor=actor,
+                redis_service=redis_service,
             )
             object_types = resolved_object_types
         elif len(object_types) == 1:
@@ -5795,6 +5822,7 @@ async def load_object_set_objects_or_interfaces_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     search_around = False
     object_types: list[str] = []
@@ -5813,7 +5841,10 @@ async def load_object_set_objects_or_interfaces_v2(
             strict_compat=strict_compat,
             endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
         )
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         search_around = _is_search_around_object_set(object_set)
         if not search_around:
             object_types = _collect_object_set_object_types(object_set)
@@ -5856,6 +5887,7 @@ async def load_object_set_objects_or_interfaces_v2(
                 payload=payload,
                 endpoint_scope="v2/objectSets/loadObjectsOrInterfaces",
                 actor=actor,
+                redis_service=redis_service,
             )
         elif len(object_types) == 1:
             rows, total_count, next_page_token = await _load_rows_for_single_object_type(
@@ -5923,6 +5955,7 @@ async def aggregate_object_set_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     """Delegate objectSet aggregate to OMS ES-native aggregate engine."""
     ontology = ontologyRid
@@ -5930,7 +5963,10 @@ async def aggregate_object_set_v2(
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         branch = _validate_branch(branch)
         _ = transaction_id, sdk_package_rid, sdk_version
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
         object_types = _collect_object_set_object_types(object_set)
         if not object_types:
             raise ValueError("objectSet.objectType is required")
@@ -6003,14 +6039,18 @@ async def create_temporary_object_set_v2(
     sdk_package_rid: str | None = Query(default=None, alias="sdkPackageRid"),
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         _ = sdk_package_rid, sdk_version
         await _require_read_role(request, db_name=db_name)
-        object_set = await _resolve_object_set_definition(payload.get("objectSet"))
-        object_set_rid = await _store_temporary_object_set(object_set)
+        object_set = await _resolve_object_set_definition_with_store(
+            payload.get("objectSet"),
+            redis_service=redis_service,
+        )
+        object_set_rid = await _store_temporary_object_set(object_set, redis_service=redis_service)
         return {"objectSetRid": object_set_rid}
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
@@ -6027,12 +6067,13 @@ async def get_object_set_v2(
     objectSetRid: str,
     request: Request,
     oms_client: OMSClient = OMSClientDep,
+    redis_service: RedisService = Depends(get_redis_service),
 ):
     ontology = ontologyRid
     try:
         db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
         await _require_read_role(request, db_name=db_name)
-        return await _load_temporary_object_set(objectSetRid)
+        return await _load_temporary_object_set(objectSetRid, redis_service=redis_service)
     except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
         return _preflight_error_response(
             exc,

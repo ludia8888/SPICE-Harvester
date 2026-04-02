@@ -40,6 +40,7 @@ from shared.services.pipeline.pipeline_definition_utils import (
 )
 from shared.services.pipeline.pipeline_schema_utils import normalize_number
 from shared.services.pipeline.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
+from shared.services.pipeline.pipeline_expression_utils import normalize_preview_comparison_expression
 from shared.services.pipeline.pipeline_type_utils import (
     infer_xsd_type_from_values,
     normalize_cast_mode,
@@ -2033,7 +2034,7 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     if not expression:
         return None
     # Make a best-effort attempt to interpret Spark-style '=' comparisons in preview mode.
-    expression = re.sub(r"(?<![<>=!])=(?![=])", "==", expression)
+    expression = normalize_preview_comparison_expression(expression)
     lower_expr = expression.lower()
     if lower_expr.startswith("to_timestamp(") and expression.endswith(")"):
         inner = expression[len("to_timestamp(") : -1].strip()

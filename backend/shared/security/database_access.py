@@ -10,6 +10,11 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.errors.infra_errors import RegistryUnavailableError
+from shared.services.registries.runtime_ddl import (
+    allow_runtime_ddl_bootstrap,
+    find_missing_schema_objects,
+    format_missing_schema_objects,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +102,16 @@ def normalize_database_role(value: Optional[str]) -> Optional[str]:
     return normalized or raw
 
 
+def _database_access_schema_missing_message() -> str:
+    return "database_access schema is missing. Apply migrations or enable ALLOW_RUNTIME_DDL_BOOTSTRAP=true."
+
+
 async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str, List[Dict[str, Any]]]:
     names = [str(name).strip() for name in db_names or [] if str(name or "").strip()]
     if not names:
         return {}
 
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="fetch_entries")
     try:
         try:
             rows = await conn.fetch(
@@ -114,8 +123,9 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
                 names,
             )
         except asyncpg.UndefinedTableError:
-            # Treat missing table as "unconfigured" (migrations not applied yet).
-            return {}
+            if allow_runtime_ddl_bootstrap():
+                return {}
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -136,7 +146,7 @@ async def fetch_database_access_entries(*, db_names: Iterable[str]) -> Dict[str,
 
 
 async def list_database_names() -> List[str]:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="list_database_names")
     try:
         try:
             rows = await conn.fetch(
@@ -147,7 +157,9 @@ async def list_database_names() -> List[str]:
                 """
             )
         except asyncpg.UndefinedTableError:
-            return []
+            if allow_runtime_ddl_bootstrap():
+                return []
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -171,7 +183,7 @@ async def upsert_database_access_entry(
         return
     normalized_role = normalize_database_role(role) or role
 
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="upsert_entry")
     try:
         try:
             await conn.execute(
@@ -238,6 +250,25 @@ def resolve_database_actor_with_name(headers: Mapping[str, str]) -> Tuple[str, s
 
 
 async def ensure_database_access_table(conn: asyncpg.Connection) -> None:
+    missing_objects = await find_missing_schema_objects(conn, required_relations=("database_access",))
+    if not missing_objects:
+        return
+    bootstrap_allowed = allow_runtime_ddl_bootstrap()
+    if not bootstrap_allowed:
+        raise DatabaseAccessRegistryUnavailableError(
+            format_missing_schema_objects(
+                "database_access",
+                missing=missing_objects,
+                bootstrap_allowed=False,
+            )
+        )
+    logger.warning(
+        format_missing_schema_objects(
+            "database_access",
+            missing=missing_objects,
+            bootstrap_allowed=True,
+        )
+    )
     # Prefer migrations in production (`backend/database/migrations/008_database_access.sql`).
     # This helper remains for local/dev/test bootstrapping.
     await conn.execute(
@@ -280,6 +311,13 @@ async def _connect_database_access_registry(*, operation: str) -> asyncpg.Connec
     except _DATABASE_ACCESS_UNAVAILABLE_ERRORS as exc:
         logger.warning("Database access registry unavailable during %s: %s", operation, exc)
         return None
+
+
+async def _require_database_access_registry(*, operation: str) -> asyncpg.Connection:
+    conn = await _connect_database_access_registry(operation=operation)
+    if conn is None:
+        raise DatabaseAccessRegistryUnavailableError("Database access registry unavailable")
+    return conn
 
 
 async def inspect_database_access(
@@ -339,7 +377,9 @@ async def inspect_database_access(
                 state=DatabaseAccessState.CONFIGURED if configured else DatabaseAccessState.UNCONFIGURED
             )
         except asyncpg.UndefinedTableError:
-            return DatabaseAccessInspection(state=DatabaseAccessState.UNCONFIGURED)
+            if allow_runtime_ddl_bootstrap():
+                return DatabaseAccessInspection(state=DatabaseAccessState.UNCONFIGURED)
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 
@@ -364,7 +404,7 @@ async def has_database_access_config(*, db_name: str) -> bool:
 
 
 async def delete_database_access_entries(*, db_name: str) -> None:
-    conn = await asyncpg.connect(get_settings().database.postgres_url)
+    conn = await _require_database_access_registry(operation="delete_entries")
     try:
         try:
             await conn.execute(
@@ -372,7 +412,9 @@ async def delete_database_access_entries(*, db_name: str) -> None:
                 db_name,
             )
         except asyncpg.UndefinedTableError:
-            return
+            if allow_runtime_ddl_bootstrap():
+                return
+            raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()
 

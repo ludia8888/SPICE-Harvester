@@ -18,6 +18,11 @@ def _settings_ssot_allowed_files(repo_backend: Path) -> set[Path]:
     return {
         repo_backend / "shared" / "config" / "settings.py",
         repo_backend / "shared" / "config" / "settings_support.py",
+        repo_backend / "shared" / "config" / "settings_agent.py",
+        repo_backend / "shared" / "config" / "settings_infra.py",
+        repo_backend / "shared" / "config" / "settings_observability.py",
+        repo_backend / "shared" / "config" / "settings_security.py",
+        repo_backend / "shared" / "config" / "settings_workers.py",
     }
 
 

@@ -109,6 +109,13 @@ class ObjectifyJobEnqueueResult:
 
 
 class ObjectifyRegistry(PostgresSchemaRegistry):
+    _REQUIRED_TABLES = (
+        "ontology_mapping_specs",
+        "objectify_jobs",
+        "objectify_job_outbox",
+        "objectify_watermarks",
+    )
+
     def __init__(
         self,
         *,
@@ -116,6 +123,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         schema: str = "spice_objectify",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ) -> None:
         perf = get_settings().performance
         resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.objectify_pg_pool_min)
@@ -126,7 +134,11 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             pool_min=resolved_pool_min,
             pool_max=resolved_pool_max,
             command_timeout=int(perf.objectify_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     @staticmethod
     def _mapping_spec_version_lock_key(
@@ -190,6 +202,15 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_version_id UUID"
         )
         await conn.execute(
+            f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS occ_version INT DEFAULT 1 NOT NULL"
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_mapping_specs_occ_version
+            ON {self._schema}.ontology_mapping_specs(mapping_spec_id, occ_version)
+            """
+        )
+        await conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {self._schema}.objectify_jobs (
                 job_id UUID PRIMARY KEY,
@@ -206,6 +227,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 command_id TEXT,
                 error TEXT,
                 report JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                version INT NOT NULL DEFAULT 1,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 completed_at TIMESTAMPTZ
@@ -264,6 +286,9 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         )
         await conn.execute(
             f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS version INT DEFAULT 1 NOT NULL"
         )
         await conn.execute(
             f"""
@@ -1457,20 +1482,20 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         async with self._pool.acquire() as conn:
             try:
                 if target_class_id and not mapping_spec_id:
-                    query = """
+                    query = f"""
                         SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
                                watermark_column, watermark_value, dataset_version_id,
                                lakefs_commit_id, rows_processed, created_at, updated_at
-                        FROM objectify_watermarks
+                        FROM {self._schema}.objectify_watermarks
                         WHERE target_class_id = $1 AND dataset_branch = $2
                         """
                     args = (target_class_id, dataset_branch)
                 else:
-                    query = """
+                    query = f"""
                         SELECT watermark_id, mapping_spec_id, target_class_id, dataset_branch,
                                watermark_column, watermark_value, dataset_version_id,
                                lakefs_commit_id, rows_processed, created_at, updated_at
-                        FROM objectify_watermarks
+                        FROM {self._schema}.objectify_watermarks
                         WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
                         """
                     args = (mapping_spec_id, dataset_branch)
@@ -1485,11 +1510,11 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 if target_class_id and not mapping_spec_id:
                     return None
                 row = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT watermark_id, mapping_spec_id, dataset_branch,
                            watermark_column, watermark_value, dataset_version_id,
                            lakefs_commit_id, rows_processed, created_at, updated_at
-                    FROM objectify_watermarks
+                    FROM {self._schema}.objectify_watermarks
                     WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
                     """,
                     mapping_spec_id,
@@ -1530,8 +1555,8 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             raise RuntimeError("ObjectifyRegistry not connected")
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                INSERT INTO objectify_watermarks (
+                f"""
+                INSERT INTO {self._schema}.objectify_watermarks (
                     watermark_id, mapping_spec_id, dataset_branch,
                     watermark_column, watermark_value, dataset_version_id,
                     lakefs_commit_id, rows_processed, created_at, updated_at
@@ -1544,7 +1569,7 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                     watermark_value = $4,
                     dataset_version_id = $5::uuid,
                     lakefs_commit_id = $6,
-                    rows_processed = objectify_watermarks.rows_processed + $7,
+                    rows_processed = {self._schema}.objectify_watermarks.rows_processed + $7,
                     updated_at = NOW()
                 RETURNING watermark_id, mapping_spec_id, dataset_branch,
                           watermark_column, watermark_value, dataset_version_id,
@@ -1587,8 +1612,8 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
             raise RuntimeError("ObjectifyRegistry not connected")
         async with self._pool.acquire() as conn:
             result = await conn.execute(
-                """
-                DELETE FROM objectify_watermarks
+                f"""
+                DELETE FROM {self._schema}.objectify_watermarks
                 WHERE mapping_spec_id = $1::uuid AND dataset_branch = $2
                 """,
                 mapping_spec_id,
@@ -1610,11 +1635,11 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
         async with self._pool.acquire() as conn:
             if mapping_spec_id:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT watermark_id, mapping_spec_id, dataset_branch,
                            watermark_column, watermark_value, dataset_version_id,
                            lakefs_commit_id, rows_processed, created_at, updated_at
-                    FROM objectify_watermarks
+                    FROM {self._schema}.objectify_watermarks
                     WHERE mapping_spec_id = $1::uuid
                     ORDER BY updated_at DESC
                     LIMIT $2
@@ -1624,11 +1649,11 @@ class ObjectifyRegistry(PostgresSchemaRegistry):
                 )
             else:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     SELECT watermark_id, mapping_spec_id, dataset_branch,
                            watermark_column, watermark_value, dataset_version_id,
                            lakefs_commit_id, rows_processed, created_at, updated_at
-                    FROM objectify_watermarks
+                    FROM {self._schema}.objectify_watermarks
                     ORDER BY updated_at DESC
                     LIMIT $1
                     """,

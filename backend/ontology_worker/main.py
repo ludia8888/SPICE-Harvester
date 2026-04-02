@@ -937,12 +937,20 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 "Database create adapter is postgres-native (db=%s)",
                 db_name,
             )
-            await upsert_database_owner(
-                db_name=db_name,
-                principal_type="user",
-                principal_id="system",
-                principal_name="system",
-            )
+            try:
+                await upsert_database_owner(
+                    db_name=db_name,
+                    principal_type="user",
+                    principal_id="system",
+                    principal_name="system",
+                )
+            except Exception as registry_exc:
+                logger.warning(
+                    "Database access owner sync failed for %s during create; continuing with authoritative event: %s",
+                    db_name,
+                    registry_exc,
+                    exc_info=True,
+                )
             
             # 성공 이벤트 생성
             event = DatabaseEvent(
@@ -991,7 +999,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 "Database delete adapter is postgres-native (db=%s)",
                 db_name,
             )
-            await delete_database_access_entries(db_name=db_name)
+            try:
+                await delete_database_access_entries(db_name=db_name)
+            except Exception as registry_exc:
+                logger.warning(
+                    "Database access cleanup failed for %s during delete; continuing with authoritative event: %s",
+                    db_name,
+                    registry_exc,
+                    exc_info=True,
+                )
             
             # 성공 이벤트 생성
             event = DatabaseEvent(

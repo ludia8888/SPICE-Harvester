@@ -529,6 +529,14 @@ async def enforce_action_permission(
                     ),
                     status_code=503,
                 ) from exc
+            finally:
+                try:
+                    await dataset_registry.close()
+                except Exception:
+                    logger.warning(
+                        "Failed to close DatasetRegistry after inherited project policy lookup",
+                        exc_info=True,
+                    )
             inherited_policy = access_policy.policy if access_policy is not None else None
             if (not isinstance(inherited_policy, dict) or not inherited_policy) and bool(
                 project_policy_contract["require_project_policy"]
@@ -1546,8 +1554,7 @@ async def simulate_effects_for_patchset(
                 writeback_branch=writeback_branch,
             )
             baseline = merged.document
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at oms/services/action_simulation_service.py:1222", exc_info=True)
+        except FileNotFoundError:
             baseline = {
                 "instance_id": instance_id,
                 "class_id": class_id,
@@ -1557,6 +1564,19 @@ async def simulate_effects_for_patchset(
                 "lifecycle_id": lifecycle_id,
                 "data": {},
             }
+        except Exception as exc:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "base_instance_state_unavailable",
+                        "message": "Unable to load authoritative base instance state",
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "base_branch": base_branch,
+                    }
+                ),
+                status_code=503,
+            ) from exc
 
         effective = dict(baseline or {})
         data_payload = effective.get("data") if isinstance(effective.get("data"), dict) else {}

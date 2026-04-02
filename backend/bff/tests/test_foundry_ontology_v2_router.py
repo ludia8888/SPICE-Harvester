@@ -1032,6 +1032,7 @@ async def test_get_ontology_v2_unknown_returns_ontology_not_found():
     assert response.status_code == 404
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "NOT_FOUND"
+    assert payload["errorName"] == "LinkTypeNotFound"
     assert payload["errorName"] == "OntologyNotFound"
 
 
@@ -2903,7 +2904,47 @@ async def test_load_object_set_objects_or_interfaces_v2_search_around_invalid_li
     assert response.status_code == 404
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["errorCode"] == "NOT_FOUND"
-    assert payload["errorName"] == "LinkTypeNotFound"
+
+
+@pytest.mark.asyncio
+async def test_load_object_set_objects_v2_resolves_temporary_object_set_rid(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    request = Request({"type": "http", "headers": []})
+    captured: dict[str, Any] = {}
+
+    async def _fake_load_temporary_object_set(object_set_rid: str, *, redis_service):  # noqa: ANN001
+        captured["rid"] = object_set_rid
+        captured["redis_service"] = redis_service
+        return {"objectType": "Account"}
+
+    redis_service = object()
+    original_require = router_v2._require_read_role
+    router_v2._require_read_role = _noop_require_domain_role
+    monkeypatch.setattr(router_v2, "_load_temporary_object_set", _fake_load_temporary_object_set)
+    try:
+        response = await router_v2.load_object_set_objects_v2(
+            ontologyRid="test_db",
+            payload={
+                "objectSet": "ri.object-set.main.versioned-object-set.temp-1",
+                "select": ["account_id"],
+                "pageSize": 10,
+            },
+            request=request,
+            branch="main",
+            transaction_id=None,
+            sdk_package_rid=None,
+            sdk_version=None,
+            oms_client=_FakeOMSClient(),
+            redis_service=redis_service,  # type: ignore[arg-type]
+        )
+    finally:
+        router_v2._require_read_role = original_require
+
+    assert isinstance(response, dict)
+    assert response["totalCount"] == "1"
+    assert captured["rid"] == "ri.object-set.main.versioned-object-set.temp-1"
+    assert captured["redis_service"] is redis_service
 
 
 @pytest.mark.asyncio

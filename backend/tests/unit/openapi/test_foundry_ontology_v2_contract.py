@@ -1,9 +1,10 @@
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
+from redis.exceptions import ConnectionError as RedisConnectionError
 from unittest.mock import AsyncMock
 
-from bff.dependencies import BFFDependencyProvider
+from bff.dependencies import BFFDependencyProvider, get_redis_service
 from bff.routers import foundry_ontology_v2
 from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
 from shared.security.user_context import UserPrincipal
@@ -31,7 +32,25 @@ def _build_router_test_app(*, oms_client: object) -> FastAPI:
     async def _fake_oms_client():
         return oms_client
 
+    class _FakeRedisService:
+        def __init__(self) -> None:
+            self._values: dict[str, dict] = {}
+
+        async def set_json(self, key: str, value: dict, ttl: int | None = None, ex: int | None = None) -> None:
+            _ = ttl, ex
+            self._values[key] = dict(value)
+
+        async def get_json(self, key: str) -> dict | None:
+            value = self._values.get(key)
+            return dict(value) if isinstance(value, dict) else None
+
+    fake_redis = _FakeRedisService()
+
+    async def _fake_redis_service():
+        return fake_redis
+
     app.dependency_overrides[BFFDependencyProvider.get_oms_client] = _fake_oms_client
+    app.dependency_overrides[get_redis_service] = _fake_redis_service
     return app
 
 
@@ -951,6 +970,50 @@ async def test_foundry_v2_create_temporary_and_get_object_set_roundtrip(
     body = loaded.json()
     assert body["objectType"] == "Order"
     assert body["where"]["field"] == "status"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_v2_create_temporary_returns_503_when_redis_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _fake_resolve_ontology_db_name(*, ontology: str, oms_client):  # noqa: ANN001
+        _ = ontology, oms_client
+        return "sales_db"
+
+    async def _fake_require_domain_role(request, *, db_name: str):  # noqa: ANN001
+        _ = request, db_name
+        return None
+
+    class _FailingRedisService:
+        async def set_json(self, key: str, value: dict, ttl: int | None = None, ex: int | None = None) -> None:
+            _ = key, value, ttl, ex
+            raise RedisConnectionError("redis down")
+
+        async def get_json(self, key: str) -> dict | None:
+            _ = key
+            raise RedisConnectionError("redis down")
+
+    monkeypatch.setattr(foundry_ontology_v2, "_resolve_ontology_db_name", _fake_resolve_ontology_db_name)
+    monkeypatch.setattr(foundry_ontology_v2, "_require_domain_role", _fake_require_domain_role)
+
+    oms_client = AsyncMock()
+    app = _build_router_test_app(oms_client=oms_client)
+
+    async def _failing_redis_service():
+        return _FailingRedisService()
+
+    app.dependency_overrides[get_redis_service] = _failing_redis_service
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            "/api/v2/ontologies/sales_db/objectSets/createTemporary",
+            json={"objectSet": {"objectType": "Order"}},
+        )
+
+    assert created.status_code == 503
+    assert created.json()["errorCode"] == "UPSTREAM_UNAVAILABLE"
 
 
 @pytest.mark.unit

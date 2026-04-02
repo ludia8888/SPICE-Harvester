@@ -37,6 +37,8 @@ class DatasetProfileRecord:
 
 
 class DatasetProfileRegistry(PostgresSchemaRegistry):
+    _REQUIRED_TABLES = ("dataset_profiles",)
+
     def __init__(
         self,
         *,
@@ -44,6 +46,7 @@ class DatasetProfileRegistry(PostgresSchemaRegistry):
         schema: str = "spice_datasets",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ) -> None:
         perf = get_settings().performance
         resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
@@ -54,7 +57,11 @@ class DatasetProfileRegistry(PostgresSchemaRegistry):
             pool_min=resolved_pool_min,
             pool_max=resolved_pool_max,
             command_timeout=int(perf.dataset_registry_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(

@@ -17,6 +17,11 @@ import asyncpg
 from oms.exceptions import DatabaseError, OntologyNotFoundError
 from shared.config.settings import get_settings
 from shared.observability.tracing import trace_external_call
+from shared.services.registries.runtime_ddl import (
+    allow_runtime_ddl_bootstrap,
+    find_missing_schema_objects,
+    format_missing_schema_objects,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +164,7 @@ class OntologyResourceService:
 
     _pg_pools: Dict[str, asyncpg.Pool] = {}
     _pg_pool_lock: Optional[asyncio.Lock] = None
+    _required_relations: Tuple[str, ...] = ("ontology_resources", "ontology_resource_versions")
 
     def __init__(
         self,
@@ -213,65 +219,90 @@ class OntologyResourceService:
     async def _ensure_postgres_schema(self) -> None:
         pool = await self._ensure_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS ontology_resources (
-                    db_name TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    resource_type TEXT NOT NULL,
-                    resource_id TEXT NOT NULL,
-                    label TEXT NOT NULL,
-                    description TEXT,
-                    label_i18n JSONB,
-                    description_i18n JSONB,
-                    spec JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    version BIGINT NOT NULL DEFAULT 1,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (db_name, branch, resource_type, resource_id)
-                );
-                """
+            missing_objects = await find_missing_schema_objects(
+                conn,
+                required_relations=self._required_relations,
             )
-            await conn.execute(
-                """
-                ALTER TABLE ontology_resources
-                ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1;
-                """
+            if not missing_objects:
+                return
+            bootstrap_allowed = allow_runtime_ddl_bootstrap()
+            if not bootstrap_allowed:
+                raise DatabaseError(
+                    format_missing_schema_objects(
+                        "ontology_resources",
+                        missing=missing_objects,
+                        bootstrap_allowed=False,
+                    )
+                )
+            logger.warning(
+                format_missing_schema_objects(
+                    "ontology_resources",
+                    missing=missing_objects,
+                    bootstrap_allowed=True,
+                )
             )
-            await conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_ontology_resources_lookup
-                ON ontology_resources (db_name, branch, resource_type, updated_at DESC);
-                """
-            )
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS ontology_resource_versions (
-                    db_name TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    resource_type TEXT NOT NULL,
-                    resource_id TEXT NOT NULL,
-                    version BIGINT NOT NULL,
-                    operation TEXT NOT NULL,
-                    snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (db_name, branch, resource_type, resource_id, version)
-                );
-                """
-            )
-            await conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_ontology_resource_versions_lookup
-                ON ontology_resource_versions (
-                    db_name,
-                    branch,
-                    resource_type,
-                    resource_id,
-                    version DESC
-                );
-                """
-            )
+            await self._bootstrap_postgres_schema(conn)
+
+    async def _bootstrap_postgres_schema(self, conn: asyncpg.Connection) -> None:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ontology_resources (
+                db_name TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                description TEXT,
+                label_i18n JSONB,
+                description_i18n JSONB,
+                spec JSONB NOT NULL DEFAULT '{}'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                version BIGINT NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (db_name, branch, resource_type, resource_id)
+            );
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE ontology_resources
+            ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 1;
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ontology_resources_lookup
+            ON ontology_resources (db_name, branch, resource_type, updated_at DESC);
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ontology_resource_versions (
+                db_name TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                version BIGINT NOT NULL,
+                operation TEXT NOT NULL,
+                snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (db_name, branch, resource_type, resource_id, version)
+            );
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ontology_resource_versions_lookup
+            ON ontology_resource_versions (
+                db_name,
+                branch,
+                resource_type,
+                resource_id,
+                version DESC
+            );
+            """
+        )
 
     @trace_external_call("oms.ontology_resources.ensure_resource_schema")
     async def ensure_resource_schema(self, db_name: str, *, branch: str) -> None:

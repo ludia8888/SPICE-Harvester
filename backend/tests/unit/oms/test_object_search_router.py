@@ -37,6 +37,31 @@ def mock_es():
     return es
 
 
+def _page_aware_customer_search():
+    async def _search(**kwargs):
+        rows = [
+            {
+                "instance_id": "cust_1",
+                "class_id": "Customer",
+                "data": {"customer_id": "cust_1", "status": "ACTIVE", "nickname": None},
+            },
+            {
+                "instance_id": "cust_2",
+                "class_id": "Customer",
+                "data": {"customer_id": "cust_2", "status": "ACTIVE", "nickname": None},
+            },
+        ]
+        page_size = int(kwargs.get("size", len(rows)))
+        page_offset = int(kwargs.get("from_", 0))
+        return {
+            "total": len(rows),
+            "hits": rows[page_offset : page_offset + page_size],
+            "aggregations": {},
+        }
+
+    return _search
+
+
 @pytest.fixture(autouse=True)
 def override_deps(mock_es):
     async def fake_es():
@@ -49,6 +74,7 @@ def override_deps(mock_es):
 
 @pytest.mark.asyncio
 async def test_search_objects_v2_returns_foundry_shape(mock_es):
+    mock_es.search.side_effect = _page_aware_customer_search()
     payload = {
         "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
         "pageSize": 1,
@@ -79,6 +105,8 @@ async def test_search_objects_v2_prefers_hits_over_missing_object_type_guard(
     mock_es,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    mock_es.search.side_effect = _page_aware_customer_search()
+
     async def fake_missing_guard(**kwargs):  # noqa: ANN001
         _ = kwargs
         return JSONResponse(
@@ -271,6 +299,41 @@ async def test_search_objects_v2_hides_overlay_tombstoned_rows(mock_es):
 
 
 @pytest.mark.asyncio
+async def test_count_objects_v2_deduplicates_overlay_rows(mock_es):
+    mock_es.search.side_effect = [
+        {
+            "total": 2,
+            "hits": [
+                {
+                    "instance_id": "order-1",
+                    "class_id": "Order",
+                    "lifecycle_id": "lc-0",
+                    "updated_at": "2026-02-20T09:00:00+00:00",
+                    "data": {"order_id": "order-1"},
+                },
+                {
+                    "instance_id": "order-1",
+                    "class_id": "Order",
+                    "lifecycle_id": "lc-0",
+                    "event_sequence": 101,
+                    "updated_at": "2026-02-20T09:00:20+00:00",
+                    "patchset_commit_id": "c2",
+                    "data": {"order_id": "order-1"},
+                },
+            ],
+            "aggregations": {},
+        }
+    ]
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v2/ontologies/test_db/objects/Order/count")
+
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_search_objects_v2_allows_missing_where_with_match_all_fallback(mock_es):
     payload = {"pageSize": 5}
     transport = ASGITransport(app=app)
@@ -417,6 +480,7 @@ async def test_search_objects_v2_rejects_page_token_scope_mismatch():
 
 @pytest.mark.asyncio
 async def test_search_objects_v2_accepts_scope_matched_page_token(mock_es):
+    mock_es.search.side_effect = _page_aware_customer_search()
     payload = {
         "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
         "pageSize": 1,
@@ -433,16 +497,17 @@ async def test_search_objects_v2_accepts_scope_matched_page_token(mock_es):
         second = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=second_payload)
 
     assert second.status_code == 200
-    search_call = mock_es.search.call_args
-    assert search_call.kwargs["from_"] == 1
+    body = second.json()
+    assert body["data"][0]["customer_id"] == "cust_2"
 
 
 @pytest.mark.asyncio
-async def test_search_objects_v2_rejects_page_token_when_page_size_changes():
+async def test_search_objects_v2_rejects_page_token_when_page_size_changes(mock_es):
     initial_payload = {
         "where": {"type": "eq", "field": "status", "value": "ACTIVE"},
         "pageSize": 1,
     }
+    mock_es.search.side_effect = _page_aware_customer_search()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         first = await client.post("/v2/ontologies/test_db/objects/Customer/search", json=initial_payload)

@@ -28,7 +28,8 @@ class IdempotencyService:
         self,
         redis_client: aioredis.Redis,
         ttl_seconds: int = 86400,  # 24 hours default
-        namespace: str = "idempotency"
+        namespace: str = "idempotency",
+        processing_ttl_seconds: Optional[int] = None,
     ):
         """
         Initialize idempotency service.
@@ -41,6 +42,9 @@ class IdempotencyService:
         self.redis = redis_client
         self.ttl_seconds = ttl_seconds
         self.namespace = namespace
+        if processing_ttl_seconds is None:
+            processing_ttl_seconds = min(self.ttl_seconds, 300)
+        self.processing_ttl_seconds = max(1, int(processing_ttl_seconds))
         
     def _generate_key(self, event_id: str, aggregate_id: Optional[str] = None) -> str:
         """
@@ -56,6 +60,12 @@ class IdempotencyService:
         if aggregate_id:
             return f"{self.namespace}:{aggregate_id}:{event_id}"
         return f"{self.namespace}:{event_id}"
+
+    def _processing_key(self, event_id: str, aggregate_id: Optional[str] = None) -> str:
+        return f"{self._generate_key(event_id, aggregate_id)}:processing"
+
+    def _result_key(self, event_id: str, aggregate_id: Optional[str] = None) -> str:
+        return f"{self._generate_key(event_id, aggregate_id)}:result"
     
     def _generate_event_hash(self, event_data: Dict[str, Any]) -> str:
         """
@@ -88,13 +98,15 @@ class IdempotencyService:
         Returns:
             Tuple of (is_duplicate, stored_metadata)
         """
-        key = self._generate_key(event_id, aggregate_id)
-        
+        processing_key = self._processing_key(event_id, aggregate_id)
+        result_key = self._result_key(event_id, aggregate_id)
+
         # Prepare metadata to store
         metadata = {
             "event_id": event_id,
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-            "ttl_seconds": self.ttl_seconds
+            "status": "processing",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "ttl_seconds": self.processing_ttl_seconds,
         }
         
         if event_data:
@@ -103,12 +115,20 @@ class IdempotencyService:
         if aggregate_id:
             metadata["aggregate_id"] = aggregate_id
         
-        # Try to set with NX (only if not exists)
+        completed_data = await self.redis.get(result_key)
+        if completed_data:
+            stored_metadata = json.loads(completed_data)
+            logger.warning(
+                f"Duplicate event detected: {event_id}, "
+                f"existing status={stored_metadata.get('status')}"
+            )
+            return True, stored_metadata
+
         success = await self.redis.set(
-            key,
+            processing_key,
             json.dumps(metadata),
-            nx=True,  # Only set if not exists
-            ex=self.ttl_seconds  # Expire after TTL
+            nx=True,
+            ex=self.processing_ttl_seconds,
         )
         
         if success:
@@ -117,12 +137,12 @@ class IdempotencyService:
             return False, None
         else:
             # Event already processed or being processed
-            stored_data = await self.redis.get(key)
+            stored_data = await self.redis.get(processing_key)
             if stored_data:
                 stored_metadata = json.loads(stored_data)
                 logger.warning(
                     f"Duplicate event detected: {event_id}, "
-                    f"originally processed at {stored_metadata.get('processed_at')}"
+                    f"existing status={stored_metadata.get('status')}"
                 )
                 return True, stored_metadata
             else:
@@ -147,13 +167,14 @@ class IdempotencyService:
         Returns:
             Success status
         """
-        key = self._generate_key(event_id, aggregate_id)
+        processing_key = self._processing_key(event_id, aggregate_id)
+        result_key = self._result_key(event_id, aggregate_id)
         
         # Update metadata with result
         metadata = {
             "event_id": event_id,
             "processed_at": datetime.now(timezone.utc).isoformat(),
-            "status": "completed"
+            "status": "completed",
         }
         
         if result:
@@ -162,12 +183,12 @@ class IdempotencyService:
         if aggregate_id:
             metadata["aggregate_id"] = aggregate_id
         
-        # Update with extended TTL
         await self.redis.setex(
-            key,
+            result_key,
             self.ttl_seconds,
             json.dumps(metadata)
         )
+        await self.redis.delete(processing_key)
         
         logger.debug(f"Event {event_id} marked as processed")
         return True
@@ -191,7 +212,8 @@ class IdempotencyService:
         Returns:
             Success status
         """
-        key = self._generate_key(event_id, aggregate_id)
+        processing_key = self._processing_key(event_id, aggregate_id)
+        result_key = self._result_key(event_id, aggregate_id)
         
         # Store failure metadata
         metadata = {
@@ -213,10 +235,11 @@ class IdempotencyService:
         ttl = retry_after if retry_after else 300  # 5 minutes default
         
         await self.redis.setex(
-            key,
+            result_key,
             ttl,
             json.dumps(metadata)
         )
+        await self.redis.delete(processing_key)
         
         logger.error(f"Event {event_id} marked as failed: {error}")
         return True
@@ -236,9 +259,10 @@ class IdempotencyService:
         Returns:
             Processing metadata if exists
         """
-        key = self._generate_key(event_id, aggregate_id)
-        
-        stored_data = await self.redis.get(key)
+        stored_data = await self.redis.get(self._result_key(event_id, aggregate_id))
+        if stored_data:
+            return json.loads(stored_data)
+        stored_data = await self.redis.get(self._processing_key(event_id, aggregate_id))
         if stored_data:
             return json.loads(stored_data)
         return None

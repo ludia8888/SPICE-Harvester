@@ -19,6 +19,12 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.runtime_ddl import (
+    RuntimeDDLDisabledError,
+    allow_runtime_ddl_bootstrap,
+    find_missing_schema_objects,
+    format_missing_schema_objects,
+)
 
 
 class ClaimDecision(str, Enum):
@@ -33,6 +39,10 @@ class ClaimResult:
     decision: ClaimDecision
     attempt_count: int = 0
     existing_status: Optional[str] = None
+
+
+class MissingProcessedEventRegistrySchemaError(RuntimeDDLDisabledError):
+    """Raised when the processed event registry schema is missing."""
 
 
 class ProcessedEventRegistry:
@@ -97,73 +107,91 @@ class ProcessedEventRegistry:
             raise RuntimeError("ProcessedEventRegistry not connected")
 
         async with self._pool.acquire() as conn:
-            await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.processed_events (
-                    handler TEXT NOT NULL,
-                    event_id TEXT NOT NULL,
-                    aggregate_id TEXT,
-                    sequence_number BIGINT,
-                    status TEXT NOT NULL,
-                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    owner TEXT,
-                    heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    processed_at TIMESTAMPTZ,
-                    attempt_count INTEGER NOT NULL DEFAULT 1,
-                    last_error TEXT,
-                    PRIMARY KEY (handler, event_id)
+            missing_objects = await find_missing_schema_objects(
+                conn,
+                schema=self._schema,
+                required_relations=("processed_events", "aggregate_versions"),
+            )
+            if not missing_objects:
+                return
+            bootstrap_allowed = allow_runtime_ddl_bootstrap()
+            if not bootstrap_allowed:
+                raise MissingProcessedEventRegistrySchemaError(
+                    format_missing_schema_objects(
+                        "ProcessedEventRegistry",
+                        missing=missing_objects,
+                        bootstrap_allowed=False,
+                    )
                 )
-                """
-            )
+            await self._bootstrap_schema(conn, missing_objects=missing_objects)
 
-            # Forward-compatible schema evolution (safe in-place upgrades)
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.processed_events ADD COLUMN IF NOT EXISTS owner TEXT"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.processed_events ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.processed_events ALTER COLUMN heartbeat_at SET DEFAULT NOW()"
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.processed_events
-                SET heartbeat_at = COALESCE(heartbeat_at, started_at)
-                WHERE heartbeat_at IS NULL
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.processed_events ALTER COLUMN heartbeat_at SET NOT NULL"
-            )
+    async def _bootstrap_schema(self, conn: asyncpg.Connection, *, missing_objects: list[str]) -> None:
+        await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
 
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.aggregate_versions (
-                    handler TEXT NOT NULL,
-                    aggregate_id TEXT NOT NULL,
-                    last_sequence BIGINT NOT NULL DEFAULT 0,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (handler, aggregate_id)
-                )
-                """
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.processed_events (
+                handler TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                aggregate_id TEXT,
+                sequence_number BIGINT,
+                status TEXT NOT NULL,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                owner TEXT,
+                heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                processed_at TIMESTAMPTZ,
+                attempt_count INTEGER NOT NULL DEFAULT 1,
+                last_error TEXT,
+                PRIMARY KEY (handler, event_id)
             )
+            """
+        )
 
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_processed_events_aggregate ON {self._schema}.processed_events(handler, aggregate_id)"
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.processed_events ADD COLUMN IF NOT EXISTS owner TEXT"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.processed_events ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ"
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.processed_events ALTER COLUMN heartbeat_at SET DEFAULT NOW()"
+        )
+        await conn.execute(
+            f"""
+            UPDATE {self._schema}.processed_events
+            SET heartbeat_at = COALESCE(heartbeat_at, started_at)
+            WHERE heartbeat_at IS NULL
+            """
+        )
+        await conn.execute(
+            f"ALTER TABLE {self._schema}.processed_events ALTER COLUMN heartbeat_at SET NOT NULL"
+        )
+
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self._schema}.aggregate_versions (
+                handler TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                last_sequence BIGINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (handler, aggregate_id)
             )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_processed_events_status ON {self._schema}.processed_events(status)"
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_processed_events_lease
-                ON {self._schema}.processed_events(handler, status, heartbeat_at)
-                WHERE status = 'processing'
-                """
-            )
+            """
+        )
+
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_processed_events_aggregate ON {self._schema}.processed_events(handler, aggregate_id)"
+        )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_processed_events_status ON {self._schema}.processed_events(status)"
+        )
+        await conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_processed_events_lease
+            ON {self._schema}.processed_events(handler, status, heartbeat_at)
+            WHERE status = 'processing'
+            """
+        )
 
     async def claim(
         self,
@@ -391,19 +419,50 @@ class ProcessedEventRegistry:
         if not rows:
             return None
 
-        def _rank(row) -> tuple[int, datetime]:
-            status = str(row["status"])
-            order = {"failed": 4, "retrying": 3, "processing": 3, "done": 2, "skipped_stale": 1}.get(status, 0)
-            ts = (
-                row["processed_at"]
-                or row["heartbeat_at"]
-                or row["started_at"]
+        normalized_rows = [dict(row) for row in rows]
+        statuses = {str(row.get("status") or "") for row in normalized_rows}
+
+        if "processing" in statuses:
+            aggregate_status = "processing"
+        elif "retrying" in statuses:
+            aggregate_status = "retrying"
+        elif "failed" in statuses:
+            aggregate_status = "failed"
+        elif "done" in statuses:
+            aggregate_status = "done"
+        elif "skipped_stale" in statuses:
+            aggregate_status = "skipped_stale"
+        else:
+            aggregate_status = str(normalized_rows[0].get("status") or "")
+
+        def _timestamp(row: dict) -> datetime:
+            value = (
+                row.get("processed_at")
+                or row.get("heartbeat_at")
+                or row.get("started_at")
                 or datetime.fromtimestamp(0, tz=timezone.utc)
             )
-            return order, ts
+            return value if isinstance(value, datetime) else datetime.fromtimestamp(0, tz=timezone.utc)
 
-        best = max(rows, key=_rank)
-        return dict(best)
+        def _row_priority(row: dict) -> tuple[int, datetime]:
+            status_value = str(row.get("status") or "")
+            order = {"processing": 5, "retrying": 4, "failed": 3, "done": 2, "skipped_stale": 1}.get(status_value, 0)
+            return order, _timestamp(row)
+
+        representative = max(normalized_rows, key=_row_priority)
+        aggregate: dict = dict(representative)
+        aggregate["status"] = aggregate_status
+        aggregate["handler"] = None if len(normalized_rows) > 1 else representative.get("handler")
+        aggregate["handler_states"] = normalized_rows
+        aggregate["attempt_count"] = max(int(row.get("attempt_count") or 0) for row in normalized_rows)
+
+        error_row = next(
+            (row for row in sorted(normalized_rows, key=_row_priority, reverse=True) if row.get("last_error")),
+            None,
+        )
+        if error_row is not None:
+            aggregate["last_error"] = error_row.get("last_error")
+        return aggregate
 
     async def mark_done(
         self,

@@ -94,6 +94,13 @@ class OutboxItem:
 
 class ConnectorRegistry(PostgresSchemaRegistry):
     _MAPPING_NAMESPACE: UUID = uuid5(NAMESPACE_URL, "spice-harvester:connector-mappings")
+    _REQUIRED_TABLES = (
+        "connector_sources",
+        "connector_mappings",
+        "connector_sync_state",
+        "connector_update_outbox",
+        "connector_connection_secrets",
+    )
 
     def __init__(
         self,
@@ -102,6 +109,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         schema: str = "spice_connectors",
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ):
         perf = get_settings().performance
         resolved_pool_min = int(pool_min) if pool_min is not None else int(perf.connector_registry_pg_pool_min)
@@ -112,12 +120,16 @@ class ConnectorRegistry(PostgresSchemaRegistry):
             pool_min=resolved_pool_min,
             pool_max=resolved_pool_max,
             command_timeout=int(perf.connector_registry_pg_command_timeout_seconds),
+            allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
         cfg = get_settings()
         self._secrets_encryptor = encryptor_from_keys(cfg.security.data_encryption_keys)
         self._allow_plaintext_connector_secrets = bool(
             cfg.security.allow_plaintext_connector_secrets or cfg.is_test or cfg.is_pytest
         )
+
+    def _required_tables(self) -> tuple[str, ...]:
+        return self._REQUIRED_TABLES
 
     @staticmethod
     def _secret_aad(*, source_type: str, source_id: str) -> bytes:

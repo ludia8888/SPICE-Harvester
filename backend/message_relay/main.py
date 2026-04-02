@@ -11,6 +11,7 @@ Flow:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import signal
@@ -43,6 +44,10 @@ from shared.utils.app_logger import configure_logging
 _LOG_LEVEL = get_settings().observability.log_level
 configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
+
+
+def _client_error_code(exc: ClientError) -> str:
+    return str(exc.response.get("Error", {}).get("Code") or "")
 
 
 class _RecentPublishedEventIds:
@@ -158,29 +163,7 @@ class EventPublisher:
         # Kafka 토픽 생성 확인
         await self.ensure_kafka_topics()
 
-        # Preserve existing checkpoint across restarts to avoid missing events.
-        # Only initialize a fresh checkpoint when none exists in S3.
-        try:
-            existing_checkpoint = await self._load_checkpoint()
-            if existing_checkpoint and existing_checkpoint.get("last_timestamp_ms"):
-                logger.info(
-                    "Preserving existing checkpoint (last_timestamp_ms=%s, last_index_key=%s)",
-                    existing_checkpoint.get("last_timestamp_ms"),
-                    existing_checkpoint.get("last_index_key"),
-                )
-            else:
-                checkpoint = self._initial_checkpoint()
-                await self._save_checkpoint(checkpoint)
-                logger.info("No existing checkpoint found; initialized to default (now - 5min)")
-        except Exception as e:
-            logger.warning(f"Failed to check publisher checkpoint, resetting to default: {e}")
-            try:
-                checkpoint = self._initial_checkpoint()
-                await self._save_checkpoint(checkpoint)
-            except Exception as exc:
-                logger.warning("Failed to reset publisher checkpoint to default: %s", exc, exc_info=True)
-
-        # Ensure bucket exists
+        # Ensure bucket exists before reading or creating checkpoints.
         async with self.session.client(
             "s3",
             **self._s3_client_kwargs(),
@@ -193,6 +176,20 @@ class EventPublisher:
                     Bucket=self.bucket_name,
                     VersioningConfiguration={"Status": "Enabled"},
                 )
+
+        # Preserve existing checkpoint across restarts to avoid missing events.
+        # Only initialize a fresh checkpoint when none exists in S3.
+        existing_checkpoint = await self._load_checkpoint()
+        if existing_checkpoint and existing_checkpoint.get("last_timestamp_ms"):
+            logger.info(
+                "Preserving existing checkpoint (last_timestamp_ms=%s, last_index_key=%s)",
+                existing_checkpoint.get("last_timestamp_ms"),
+                existing_checkpoint.get("last_index_key"),
+            )
+        else:
+            checkpoint = self._initial_checkpoint()
+            await self._save_checkpoint(checkpoint)
+            logger.info("No existing checkpoint found; initialized to default (now - 5min)")
 
         logger.info(
             f"EventPublisher initialized (bucket={self.bucket_name}, endpoint={self.endpoint_url})"
@@ -262,10 +259,17 @@ class EventPublisher:
         ) as s3:
             try:
                 obj = await s3.get_object(Bucket=self.bucket_name, Key=self.checkpoint_key)
-                raw = await obj["Body"].read()
+                try:
+                    raw = await obj["Body"].read()
+                finally:
+                    close_result = obj["Body"].close()
+                    if inspect.isawaitable(close_result):
+                        await close_result
                 return json.loads(raw.decode("utf-8"))
-            except ClientError:
-                return {}
+            except ClientError as exc:
+                if _client_error_code(exc) in {"NoSuchKey", "404"}:
+                    return {}
+                raise
 
     async def _save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         checkpoint["updated_at"] = datetime.now(timezone.utc).isoformat()

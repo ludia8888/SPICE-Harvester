@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 
+@dataclass(frozen=True)
+class ServiceToken(Generic[T]):
+    """Explicit alias token for container registrations."""
+
+    name: str
+    service_type: Optional[Type[T]] = None
+
+
 class ServiceLifecycle(Protocol):
     """Protocol for services that have lifecycle management"""
     
@@ -53,7 +61,7 @@ class ServiceFactory(Protocol, Generic[T]):
 @dataclass
 class ServiceRegistration:
     """Service registration information"""
-    service_type: Type
+    service_type: Optional[Type]
     instance: Optional[Any] = None
     factory: Optional[Callable[[ApplicationSettings], Any]] = None
     singleton: bool = True
@@ -76,7 +84,7 @@ class ServiceContainer:
             settings: Application settings instance
         """
         self.settings = settings
-        self._services: Dict[str, ServiceRegistration] = {}
+        self._services: Dict[object, ServiceRegistration] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
         
@@ -85,10 +93,81 @@ class ServiceContainer:
         """Check if container is initialized"""
         return self._initialized
     
+    def _describe_key(self, key: object) -> str:
+        if isinstance(key, ServiceToken):
+            return f"token:{key.name}"
+        if isinstance(key, type):
+            return key.__name__
+        return repr(key)
+
+    def _describe_registration(self, key: object, registration: ServiceRegistration) -> str:
+        if registration.service_type is not None:
+            return registration.service_type.__name__
+        return self._describe_key(key)
+
+    def _register(
+        self,
+        *,
+        key: object,
+        service_type: Optional[Type[Any]],
+        factory: Optional[Callable[[ApplicationSettings], Any]] = None,
+        instance: Optional[Any] = None,
+        initialized: bool = False,
+        replace: bool = False,
+    ) -> None:
+        key_name = self._describe_key(key)
+        if key in self._services and not replace:
+            raise ValueError(f"Service {key_name} is already registered")
+        if key in self._services and replace:
+            logger.warning("Service %s is already registered, replacing registration", key_name)
+
+        self._services[key] = ServiceRegistration(
+            service_type=service_type,
+            factory=factory,
+            instance=instance,
+            singleton=True,
+            initialized=initialized,
+        )
+        logger.debug("Registered service: %s", key_name)
+
+    async def _get_by_key(self, key: object) -> Any:
+        key_name = self._describe_key(key)
+        if key not in self._services:
+            raise ValueError(f"Service {key_name} is not registered")
+
+        registration = self._services[key]
+        service_name = self._describe_registration(key, registration)
+
+        if registration.instance is not None:
+            return registration.instance
+
+        async with self._lock:
+            if registration.instance is not None:
+                return registration.instance
+
+            if registration.factory is None:
+                raise RuntimeError(f"No factory function registered for {service_name}")
+
+            try:
+                logger.debug("Creating service instance: %s", service_name)
+                instance = registration.factory(self.settings)
+                if hasattr(instance, 'initialize'):
+                    await instance.initialize()
+                    logger.debug("Initialized service: %s", service_name)
+
+                registration.instance = instance
+                registration.initialized = True
+                return instance
+            except Exception as e:
+                logger.error(f"Failed to create service {service_name}: {e}")
+                raise RuntimeError(f"Service creation failed for {service_name}: {e}")
+
     def register_singleton(
-        self, 
-        service_type: Type[T], 
-        factory: Callable[[ApplicationSettings], T]
+        self,
+        service_type: Type[T],
+        factory: Callable[[ApplicationSettings], T],
+        *,
+        replace: bool = False,
     ) -> None:
         """
         Register a singleton service with a factory function
@@ -97,18 +176,28 @@ class ServiceContainer:
             service_type: The service class/type
             factory: Factory function that creates the service
         """
-        service_name = service_type.__name__
-        if service_name in self._services:
-            logger.warning(f"Service {service_name} is already registered, overriding")
-        
-        self._services[service_name] = ServiceRegistration(
+        self._register(
+            key=service_type,
             service_type=service_type,
             factory=factory,
-            singleton=True
+            replace=replace,
         )
-        logger.debug(f"Registered singleton service: {service_name}")
-    
-    def register_instance(self, service_type: Type[T], instance: T) -> None:
+
+    def register_singleton_token(
+        self,
+        token: ServiceToken[T],
+        factory: Callable[[ApplicationSettings], T],
+        *,
+        replace: bool = False,
+    ) -> None:
+        self._register(
+            key=token,
+            service_type=token.service_type,
+            factory=factory,
+            replace=replace,
+        )
+
+    def register_instance(self, service_type: Type[T], instance: T, *, replace: bool = False) -> None:
         """
         Register a service instance directly
         
@@ -116,17 +205,22 @@ class ServiceContainer:
             service_type: The service class/type
             instance: Pre-created service instance
         """
-        service_name = service_type.__name__
-        if service_name in self._services:
-            logger.warning(f"Service {service_name} is already registered, overriding")
-        
-        self._services[service_name] = ServiceRegistration(
+        self._register(
+            key=service_type,
             service_type=service_type,
             instance=instance,
-            singleton=True,
-            initialized=True
+            initialized=True,
+            replace=replace,
         )
-        logger.debug(f"Registered service instance: {service_name}")
+
+    def register_instance_token(self, token: ServiceToken[T], instance: T, *, replace: bool = False) -> None:
+        self._register(
+            key=token,
+            service_type=token.service_type or type(instance),
+            instance=instance,
+            initialized=True,
+            replace=replace,
+        )
     
     async def get(self, service_type: Type[T]) -> T:
         """
@@ -142,43 +236,20 @@ class ServiceContainer:
             ValueError: If service is not registered
             RuntimeError: If service creation fails
         """
-        service_name = service_type.__name__
-        
-        if service_name not in self._services:
-            raise ValueError(f"Service {service_name} is not registered")
-        
-        registration = self._services[service_name]
-        
-        # Return existing instance if available
-        if registration.instance is not None:
-            return registration.instance
-        
-        # Create new instance (thread-safe)
-        async with self._lock:
-            # Double-check pattern - another thread might have created it
-            if registration.instance is not None:
-                return registration.instance
-            
-            if registration.factory is None:
-                raise RuntimeError(f"No factory function registered for {service_name}")
-            
-            try:
-                logger.debug(f"Creating service instance: {service_name}")
-                instance = registration.factory(self.settings)
-                
-                # Initialize if service supports lifecycle
-                if hasattr(instance, 'initialize'):
-                    await instance.initialize()
-                    logger.debug(f"Initialized service: {service_name}")
-                
-                registration.instance = instance
-                registration.initialized = True
-                
-                return instance
-                
-            except Exception as e:
-                logger.error(f"Failed to create service {service_name}: {e}")
-                raise RuntimeError(f"Service creation failed for {service_name}: {e}")
+        return await self._get_by_key(service_type)
+
+    async def get_token(self, token: ServiceToken[T]) -> T:
+        return await self._get_by_key(token)
+
+    async def get_or_none(self, service_type: Type[T]) -> Optional[T]:
+        if not self.has(service_type):
+            return None
+        return await self.get(service_type)
+
+    async def get_token_or_none(self, token: ServiceToken[T]) -> Optional[T]:
+        if not self.has_token(token):
+            return None
+        return await self.get_token(token)
     
     def get_sync(self, service_type: Type[T]) -> T:
         """
@@ -198,12 +269,10 @@ class ServiceContainer:
             ValueError: If service is not registered
             RuntimeError: If service is not yet created or initialized
         """
-        service_name = service_type.__name__
-        
-        if service_name not in self._services:
-            raise ValueError(f"Service {service_name} is not registered")
-        
-        registration = self._services[service_name]
+        if service_type not in self._services:
+            raise ValueError(f"Service {service_type.__name__} is not registered")
+
+        registration = self._services[service_type]
         
         # Only return existing, initialized instances for sync access
         if registration.instance is not None and registration.initialized:
@@ -212,13 +281,13 @@ class ServiceContainer:
         # For sync access, we require services to be pre-created and initialized
         if registration.instance is None:
             raise RuntimeError(
-                f"Service {service_name} has not been created yet. "
+                f"Service {service_type.__name__} has not been created yet. "
                 f"Services requiring async initialization must be created via async get() first."
             )
         
         if not registration.initialized:
             raise RuntimeError(
-                f"Service {service_name} exists but is not fully initialized. "
+                f"Service {service_type.__name__} exists but is not fully initialized. "
                 f"Async initialization is required before sync access."
             )
             
@@ -234,7 +303,10 @@ class ServiceContainer:
         Returns:
             True if service is registered
         """
-        return service_type.__name__ in self._services
+        return service_type in self._services
+
+    def has_token(self, token: ServiceToken[Any]) -> bool:
+        return token in self._services
     
     def is_created(self, service_type: Type[T]) -> bool:
         """
@@ -246,10 +318,14 @@ class ServiceContainer:
         Returns:
             True if service instance exists
         """
-        service_name = service_type.__name__
-        if service_name not in self._services:
+        if service_type not in self._services:
             return False
-        return self._services[service_name].instance is not None
+        return self._services[service_type].instance is not None
+
+    def is_created_token(self, token: ServiceToken[Any]) -> bool:
+        if token not in self._services:
+            return False
+        return self._services[token].instance is not None
     
     async def health_check_all(self) -> Dict[str, bool]:
         """
@@ -260,7 +336,8 @@ class ServiceContainer:
         """
         results = {}
         
-        for service_name, registration in self._services.items():
+        for key, registration in self._services.items():
+            service_name = self._describe_key(key)
             if registration.instance is None:
                 results[service_name] = True  # Not created yet, considered healthy
                 continue
@@ -283,7 +360,8 @@ class ServiceContainer:
         """
         logger.info("Shutting down all services")
         
-        for service_name, registration in self._services.items():
+        for key, registration in self._services.items():
+            service_name = self._describe_key(key)
             if registration.instance is None:
                 continue
             
@@ -310,10 +388,11 @@ class ServiceContainer:
             Dictionary with service information
         """
         info = {}
-        for service_name, registration in self._services.items():
+        for key, registration in self._services.items():
+            service_name = self._describe_key(key)
             instantiated = registration.instance is not None
             info[service_name] = {
-                'type': registration.service_type.__name__,
+                'type': registration.service_type.__name__ if registration.service_type is not None else service_name,
                 'singleton': registration.singleton,
                 'instantiated': instantiated,
                 'created': instantiated,

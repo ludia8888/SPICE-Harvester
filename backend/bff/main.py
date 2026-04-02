@@ -64,7 +64,7 @@ from shared.utils.label_mapper import LabelMapper
 # Foundry parity helpers (used by Foundry v2 routers/dependencies)
 from shared.foundry.errors import FoundryAPIError, foundry_exception_handler
 # NOTE: configure_type_inference_service removed (legacy type inference engine deleted)
-from shared.services.storage.redis_service import create_redis_service
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.websocket_service import get_notification_service
 from shared.services.core.schema_change_monitor import SchemaChangeMonitor, MonitorConfig
 from shared.services.core.schema_drift_detector import SchemaDriftDetector
@@ -793,7 +793,7 @@ async def lifespan(app: FastAPI):
             try:
                 dataset_registry = _bff_container.get_dataset_registry()
                 objectify_registry = _bff_container.get_objectify_registry()
-                redis_service = await container.get_or_none("RedisService")
+                redis_service = await container.get_or_none(RedisService)
                 ws_notification_service = get_notification_service(redis_service) if redis_service else None
 
                 monitor_config = MonitorConfig(

@@ -858,6 +858,7 @@ class EventStore:
                     for obj in page.get("Contents", []):
                         index_keys.append(obj["Key"])
 
+                indexed_events: List[EventEnvelope] = []
                 if index_keys:
                     index_keys.sort()
                     for idx_key in index_keys:
@@ -878,17 +879,7 @@ class EventStore:
 
                         ev_obj = await s3.get_object(Bucket=self.bucket_name, Key=s3_key)
                         ev_data = await ev_obj["Body"].read()
-                        events.append(EventEnvelope.model_validate_json(ev_data))
-
-                    # Preserve ordering by sequence (or 0 if missing).
-                    events.sort(key=lambda e: e.sequence_number or 0)
-                    events = self._dedup_events(events)
-
-                    logger.info(
-                        f"Retrieved {len(events)} events for "
-                        f"{aggregate_type}/{aggregate_id} from S3/MinIO (index)"
-                    )
-                    return events
+                        indexed_events.append(EventEnvelope.model_validate_json(ev_data))
 
                 # Slow fallback: scan events/ and filter by path substring.
                 prefix = "events/"
@@ -905,6 +896,9 @@ class EventStore:
                         if to_version is not None and (event.sequence_number or 0) > to_version:
                             continue
                         events.append(event)
+
+                if indexed_events:
+                    events.extend(indexed_events)
 
                 events.sort(key=lambda e: e.sequence_number or 0)
                 events = self._dedup_events(events)
