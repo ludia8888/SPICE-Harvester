@@ -8,6 +8,7 @@ import logging
 import mimetypes
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from bff.routers.pipeline_datasets_ops import (
@@ -23,6 +24,7 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
+from shared.services.storage.lakefs_client import LakeFSError
 from shared.utils.s3_uri import parse_s3_uri
 
 logger = logging.getLogger(__name__)
@@ -64,8 +66,20 @@ async def list_pipeline_branches(
         lakefs_client = await pipeline_registry.get_lakefs_client(user_id=actor_user_id)
         raw = await lakefs_client.list_branches(repository=repo)
         branch_names = [br.get("name") if isinstance(br, dict) else str(br) for br in raw]
-    except Exception:
-        branch_names = ["main"]
+    except (LakeFSError, httpx.RequestError) as exc:
+        logger.warning("Failed to list pipeline branches from lakeFS: %s", exc, exc_info=True)
+        raise classified_http_exception(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Pipeline branches temporarily unavailable",
+            code=ErrorCode.UPSTREAM_UNAVAILABLE,
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to list pipeline branches: %s", exc, exc_info=True)
+        raise classified_http_exception(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            str(exc),
+            code=ErrorCode.INTERNAL_ERROR,
+        ) from exc
     return ApiResponse.success(data={"branches": branch_names}).to_dict()
 
 

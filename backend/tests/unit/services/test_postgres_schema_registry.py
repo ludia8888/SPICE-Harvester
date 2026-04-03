@@ -91,7 +91,11 @@ async def test_health_check_returns_false_on_query_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_schema_uses_advisory_lock() -> None:
-    registry = _Registry(dsn="postgres://unused", schema="spice_test")
+    registry = _Registry(
+        dsn="postgres://unused",
+        schema="spice_test",
+        allow_runtime_ddl_bootstrap=True,
+    )
     conn = _Conn()
     registry._pool = _Pool(conn)
 
@@ -117,7 +121,11 @@ class _VerifyingRegistry(PostgresSchemaRegistry):
 
 @pytest.mark.asyncio
 async def test_ensure_schema_unlocks_on_table_error() -> None:
-    registry = _FailingRegistry(dsn="postgres://unused", schema="spice_test")
+    registry = _FailingRegistry(
+        dsn="postgres://unused",
+        schema="spice_test",
+        allow_runtime_ddl_bootstrap=True,
+    )
     conn = _Conn()
     registry._pool = _Pool(conn)
 
@@ -130,7 +138,11 @@ async def test_ensure_schema_unlocks_on_table_error() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_schema_retries_until_lock_available() -> None:
-    registry = _Registry(dsn="postgres://unused", schema="spice_test")
+    registry = _Registry(
+        dsn="postgres://unused",
+        schema="spice_test",
+        allow_runtime_ddl_bootstrap=True,
+    )
     registry._schema_lock_poll_interval_seconds = 0
     conn = _Conn(lock_sequence=[False, False, True])
     registry._pool = _Pool(conn)

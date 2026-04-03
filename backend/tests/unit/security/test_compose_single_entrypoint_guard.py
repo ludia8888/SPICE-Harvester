@@ -40,11 +40,11 @@ def test_secure_default_compose_hides_internal_and_data_plane_ports() -> None:
     assert "ports" in bff_service, "BFF must remain the only public entrypoint"
 
 
-def test_full_compose_does_not_republish_oms_port() -> None:
+def test_full_compose_exposes_only_smoke_and_observability_ports() -> None:
     root = _repo_root()
     full_compose = _load_yaml(root / "docker-compose.full.yml")
     services = full_compose.get("services") or {}
-    internal_services = {
+    fully_internal_services = {
         "postgres",
         "redis",
         "elasticsearch",
@@ -52,14 +52,16 @@ def test_full_compose_does_not_republish_oms_port() -> None:
         "zookeeper",
         "minio",
         "lakefs",
-        "oms",
         "agent",
         "ingest-reconciler-worker",
     }
-    for service_name in sorted(internal_services):
+    for service_name in sorted(fully_internal_services):
         service = services.get(service_name)
         assert isinstance(service, dict), f"missing service in full compose: {service_name}"
         assert "ports" not in service, f"{service_name} must stay internal in docker-compose.full.yml"
+
+    oms_service = services.get("oms") or {}
+    assert oms_service.get("ports") == ["8000:8000"], "OMS must publish only the smoke-gate port in full compose"
 
 
 def test_debug_overlay_explicitly_exposes_required_gate_ports() -> None:

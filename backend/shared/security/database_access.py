@@ -378,8 +378,6 @@ async def inspect_database_access(
                 state=DatabaseAccessState.CONFIGURED if configured else DatabaseAccessState.UNCONFIGURED
             )
         except asyncpg.UndefinedTableError:
-            if allow_runtime_ddl_bootstrap():
-                return DatabaseAccessInspection(state=DatabaseAccessState.UNCONFIGURED)
             raise DatabaseAccessRegistryUnavailableError(_database_access_schema_missing_message()) from None
     finally:
         await conn.close()

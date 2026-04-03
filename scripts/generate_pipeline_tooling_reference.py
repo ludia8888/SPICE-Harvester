@@ -39,6 +39,10 @@ PIPELINE_MCP_SERVER = _resolve_mcp_server(
     REPO_ROOT / "backend" / "mcp_servers" / "pipeline_mcp_server.py",
     REPO_ROOT / "backend" / "mcp" / "pipeline_mcp_server.py",
 )
+PIPELINE_MCP_TOOL_SPECS = _resolve_mcp_server(
+    REPO_ROOT / "backend" / "mcp_servers" / "pipeline_mcp_tool_specs.py",
+    REPO_ROOT / "backend" / "mcp" / "pipeline_mcp_tool_specs.py",
+)
 PIPELINE_AGENT_LOOP = REPO_ROOT / "backend" / "bff" / "services" / "pipeline_agent_autonomous_loop.py"
 
 # Ontology Agent sources
@@ -130,8 +134,8 @@ def _literal_eval_from_annassign(
 
 
 def _extract_mcp_tool_specs() -> List[Dict[str, Any]]:
-    src = _read_text(PIPELINE_MCP_SERVER)
-    tree = ast.parse(src, filename=str(PIPELINE_MCP_SERVER))
+    src = _read_text(PIPELINE_MCP_TOOL_SPECS)
+    tree = ast.parse(src, filename=str(PIPELINE_MCP_TOOL_SPECS))
     tool_specs = _literal_eval_from_annassign(tree, target_name="tool_specs", expected_node=ast.List)
     if not isinstance(tool_specs, list) or not all(isinstance(item, dict) for item in tool_specs):
         raise TypeError("tool_specs is not a list[dict]")
@@ -227,7 +231,7 @@ def _render_mcp_tools_md(tool_specs: List[Dict[str, Any]], *, updated_at: str, r
     if rev:
         lines.append(f"> Revision: `{rev}`")
     lines.append(
-        "> Source of truth: `backend/mcp_servers/pipeline_mcp_server.py` (parsed from the `tool_specs` literal)."
+        "> Source of truth: `backend/mcp_servers/pipeline_mcp_tool_specs.py` (parsed from the `tool_specs` literal)."
     )
     lines.append("> Regenerate: `python scripts/generate_pipeline_tooling_reference.py`")
     lines.append("")
@@ -377,7 +381,7 @@ def main() -> int:
     # Pipeline tools
     tool_specs = _extract_mcp_tool_specs()
     allowed_tools = _extract_agent_allowed_tools()
-    source_rev, updated_at = _detect_source_revision([PIPELINE_MCP_SERVER, PIPELINE_AGENT_LOOP])
+    source_rev, updated_at = _detect_source_revision([PIPELINE_MCP_TOOL_SPECS, PIPELINE_AGENT_LOOP])
 
     mcp_names = [str(t.get("name") or "").strip() for t in tool_specs if isinstance(t, dict)]
 

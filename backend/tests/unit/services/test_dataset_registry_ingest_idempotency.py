@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from shared.services.registries import dataset_registry as dataset_registry_module
+from shared.services.registries import dataset_registry_publish as dataset_publish_module
 from shared.services.registries.dataset_registry import DatasetRegistry
 
 
@@ -143,6 +144,13 @@ async def test_publish_ingest_request_recovers_duplicate_commit_by_request_id_fi
     conn = _FakeConnection()
     registry = DatasetRegistry(dsn="postgresql://example.invalid/db")
     registry._pool = _FakePool(conn)
+    messages: list[str] = []
+
+    def _capture_info(message: str, *args: Any, **kwargs: Any) -> None:
+        _ = kwargs
+        messages.append(message % args if args else message)
+
+    monkeypatch.setattr(dataset_publish_module.logger, "info", _capture_info)
 
     version = await registry.publish_ingest_request(
         ingest_request_id="request-1",
@@ -157,6 +165,8 @@ async def test_publish_ingest_request_recovers_duplicate_commit_by_request_id_fi
     assert version.version_id == "version-from-request"
     assert conn.request_lookup_count == 2
     assert conn.commit_lookup_count == 0
+    assert any("Dataset ingest write path contract:" in message for message in messages)
+    assert any("dataset_ingest_publish" in message for message in messages)
 
 
 @pytest.mark.asyncio

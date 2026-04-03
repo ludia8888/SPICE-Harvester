@@ -11,7 +11,9 @@ from shared.observability.logging import TraceContextFilter, install_trace_conte
 
 DEFAULT_LOG_FORMAT = (
     "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s "
-    "req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
+    "req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s "
+    "event=%(event_name)s family=%(event_family)s failure=%(failure_class)s retryable=%(retryable_flag)s "
+    "- %(message)s"
 )
 
 _NOISY_DEPENDENCY_LOG_LEVELS = {

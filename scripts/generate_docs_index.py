@@ -28,6 +28,16 @@ REFERENCE_DOCS = [
     "reference/_generated/REPO_FILE_INVENTORY",
 ]
 
+OPERATIONS_DOCS = [
+    "DEPENDENCY_DEGRADE_POLICY",
+    "DEVELOPMENT_CHANGE_GUIDE",
+    "REGISTRY_OWNERSHIP",
+    "RELEASE_OPERATIONS_POLICY",
+    "SERVICE_BOUNDARIES",
+    "WORKER_RETRY_IDEMPOTENCY",
+    "WRITE_PATH_CONTRACTS",
+]
+
 ONBOARDING_KO_DOCS = [
     "onboarding/ko/01-WHAT-IS-SPICE",
     "onboarding/ko/02-MENTAL-MODEL",
@@ -85,6 +95,14 @@ def _render() -> str:
     lines.append(":caption: Reference")
     lines.append("")
     lines.extend(REFERENCE_DOCS)
+    lines.append("```")
+    lines.append("")
+
+    lines.append("```{toctree}")
+    lines.append(":maxdepth: 2")
+    lines.append(":caption: Operations")
+    lines.append("")
+    lines.extend(OPERATIONS_DOCS)
     lines.append("```")
     lines.append("")
 

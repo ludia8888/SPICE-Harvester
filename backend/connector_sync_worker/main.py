@@ -35,6 +35,12 @@ from shared.models.event_envelope import EventEnvelope
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.core.connector_ingest_service import ConnectorIngestService
+from shared.services.core.write_path_contract import (
+    build_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.kafka.dlq_publisher import (
     EnvelopeDlqSpec,
 )
@@ -313,6 +319,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
     async def _process_connector_update(self, envelope: EventEnvelope) -> Optional[str]:
         if not self.registry or not self.adapter_factory or not self.ingest_service:
             raise RuntimeError("Worker not initialized")
+        followups: list[dict[str, Any]] = []
 
         data = envelope.data or {}
         source_type = str(data.get("source_type") or "").strip()
@@ -395,6 +402,10 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
             source_ref=f"{source_type}:{source_id}",
         )
 
+        dataset = ingest.get("dataset") if isinstance(ingest, dict) else {}
+        version = ingest.get("version") if isinstance(ingest, dict) else {}
+        command_id = str(version.get("version_id") or "").strip() or None
+
         if extract.next_state:
             try:
                 await self.registry.upsert_sync_state_json(
@@ -404,13 +415,35 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                     merge=True,
                 )
             except Exception as exc:
-                raise _SyncStatePersistenceError(
-                    f"sync-state persistence failed after ingest completed for {source_type}:{source_id}"
-                ) from exc
-
-        dataset = ingest.get("dataset") if isinstance(ingest, dict) else {}
-        version = ingest.get("version") if isinstance(ingest, dict) else {}
-        command_id = str(version.get("version_id") or "").strip() or None
+                logger.warning(
+                    "connector_sync_worker sync-state persistence degraded after ingest success (source=%s:%s command_id=%s): %s",
+                    source_type,
+                    source_id,
+                    command_id,
+                    exc,
+                    exc_info=True,
+                )
+                followups.append(
+                    followup_degraded(
+                        "connector_sync_state",
+                        error=str(exc),
+                        details={"source_type": source_type, "source_id": source_id},
+                    )
+                )
+            else:
+                followups.append(
+                    followup_completed(
+                        "connector_sync_state",
+                        details={"source_type": source_type, "source_id": source_id},
+                    )
+                )
+        else:
+            followups.append(
+                followup_skipped(
+                    "connector_sync_state",
+                    details={"reason": "no_next_state"},
+                )
+            )
 
         if command_id and self.lineage and dataset:
             dataset_id = str(dataset.get("dataset_id") or "").strip() or None
@@ -445,15 +478,34 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                     "command_id": str(command_id),
                 },
             )
+            followups.append(
+                followup_completed(
+                    "connector_lineage",
+                    details={"event_id": str(envelope.event_id), "command_id": str(command_id)},
+                )
+            )
+        elif command_id:
+            followups.append(
+                followup_skipped(
+                    "connector_lineage",
+                    details={"reason": "lineage_disabled", "command_id": str(command_id)},
+                )
+            )
+
+        write_path_contract = build_write_path_contract(
+            authoritative_write="dataset_ingest_commit",
+            followups=followups,
+        )
 
         logger.info(
-            "✅ Connector sync completed (source=%s:%s, db=%s, mode=%s, rows=%s, version_id=%s)",
+            "✅ Connector sync completed (source=%s:%s, db=%s, mode=%s, rows=%s, version_id=%s, write_path_contract=%s)",
             source_type,
             source_id,
             db_name,
             import_mode,
             len(extract.rows or []),
             command_id,
+            write_path_contract,
         )
         return command_id
 

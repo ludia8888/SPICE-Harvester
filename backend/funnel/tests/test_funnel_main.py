@@ -24,8 +24,9 @@ async def test_funnel_root_and_health() -> None:
     assert root["status"] == "running"
 
     health = await funnel_main.health_check()
-    assert health["status"] == "success"
-    assert health["data"]["status"] == "healthy"
+    assert health["status"] == "ready"
+    assert health["service"] == "funnel"
+    assert health["dependency_status"]["container"] == "ready"
 
 
 @pytest.mark.asyncio

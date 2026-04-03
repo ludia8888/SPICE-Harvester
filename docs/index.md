@@ -42,6 +42,19 @@ reference/_generated/REPO_FILE_INVENTORY
 
 ```{toctree}
 :maxdepth: 2
+:caption: Operations
+
+DEPENDENCY_DEGRADE_POLICY
+DEVELOPMENT_CHANGE_GUIDE
+REGISTRY_OWNERSHIP
+RELEASE_OPERATIONS_POLICY
+SERVICE_BOUNDARIES
+WORKER_RETRY_IDEMPOTENCY
+WRITE_PATH_CONTRACTS
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Onboarding (한국어)
 
 onboarding/ko/01-WHAT-IS-SPICE

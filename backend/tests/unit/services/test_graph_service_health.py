@@ -23,8 +23,9 @@ async def test_health_green() -> None:
     svc = _make_graph_service(es_status="green")
     result = await graph_service_health(graph_service=svc)
 
-    assert result["status"] == "healthy"
+    assert result["status"] == "ready"
     assert result["services"]["elasticsearch"] == "green"
+    assert result["dependency_status"]["elasticsearch"] == "ready"
     assert "operational" in result["message"]
 
 
@@ -33,8 +34,9 @@ async def test_health_yellow() -> None:
     svc = _make_graph_service(es_status="yellow")
     result = await graph_service_health(graph_service=svc)
 
-    assert result["status"] == "healthy"
+    assert result["status"] == "ready"
     assert result["services"]["elasticsearch"] == "yellow"
+    assert result["dependency_status"]["elasticsearch"] == "ready"
 
 
 @pytest.mark.asyncio
@@ -44,6 +46,8 @@ async def test_health_red() -> None:
 
     assert result["status"] == "degraded"
     assert result["services"]["elasticsearch"] == "red"
+    assert result["dependency_status"]["elasticsearch"] == "degraded"
+    assert result["impact_summary"]["classifications"]["unavailable"] == 1
     assert "degraded" in result["message"].lower()
 
 
@@ -54,6 +58,8 @@ async def test_health_connection_failure() -> None:
 
     result = await graph_service_health(graph_service=svc)
 
-    assert result["status"] == "unhealthy"
+    assert result["status"] == "hard_down"
+    assert result["dependency_status"]["elasticsearch"] == "hard_down"
+    assert "graph.query" in result["affected_features"]
     assert "error" in result
     assert "connection refused" in result["error"]

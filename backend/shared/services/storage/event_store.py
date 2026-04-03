@@ -51,6 +51,18 @@ except Exception:  # pragma: no cover
     AuditLogStore = None  # type: ignore
 
 
+def _client_error_code(exc: ClientError) -> str:
+    return str(exc.response.get("Error", {}).get("Code") or "")
+
+
+def _is_missing_bucket_error(exc: ClientError) -> bool:
+    return _client_error_code(exc) in {"404", "NoSuchBucket", "NotFound"}
+
+
+def _is_missing_object_error(exc: ClientError) -> bool:
+    return _client_error_code(exc) in {"404", "NoSuchKey", "NotFound"}
+
+
 class EventStore:
     """
     The REAL Event Store using S3/MinIO as Single Source of Truth.
@@ -156,7 +168,9 @@ class EventStore:
                     try:
                         await s3.head_bucket(Bucket=self.bucket_name)
                         logger.info(f"✅ Event Store bucket '{self.bucket_name}' exists")
-                    except ClientError:
+                    except ClientError as exc:
+                        if not _is_missing_bucket_error(exc):
+                            raise
                         await s3.create_bucket(Bucket=self.bucket_name)
                         logger.info(f"✅ Created Event Store bucket '{self.bucket_name}'")
 
@@ -1226,8 +1240,10 @@ class EventStore:
                 snapshot_data = await response['Body'].read()
                 return json.loads(snapshot_data)
                 
-        except ClientError:
-            return None
+        except ClientError as exc:
+            if _is_missing_object_error(exc):
+                return None
+            raise
     
     @trace_storage_operation("event_store.save_snapshot", system="s3")
     async def save_snapshot(

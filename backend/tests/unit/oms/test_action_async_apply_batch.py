@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 import pytest
@@ -42,8 +43,10 @@ def app_with_router() -> FastAPI:
 async def test_submit_batch_registers_dependencies_and_defers_children(
     app_with_router: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     calls: List[Dict[str, Any]] = []
+    caplog.set_level(logging.INFO, logger=action_async.logger.name)
 
     async def _fake_submit_action_async(**kwargs: Any) -> action_async.ActionSubmitResponse:  # noqa: ANN401
         request = kwargs["request"]
@@ -105,6 +108,8 @@ async def test_submit_batch_registers_dependencies_and_defers_children(
     assert calls and calls[0]["trigger_on"] == "SUCCEEDED"
     # only root command is emitted immediately
     assert len(app_with_router.state.fake_event_store.events) == 1
+    assert "Action batch write path contract" in caplog.text
+    assert "batch_root_command_events" in caplog.text
 
 
 @pytest.mark.unit
@@ -112,8 +117,10 @@ async def test_submit_batch_registers_dependencies_and_defers_children(
 async def test_submit_batch_marks_created_logs_failed_when_root_event_append_fails(
     app_with_router: FastAPI,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     failed_marks: List[Dict[str, Any]] = []
+    caplog.set_level(logging.WARNING, logger=action_async.logger.name)
 
     async def _fake_submit_action_async(**kwargs: Any) -> action_async.ActionSubmitResponse:  # noqa: ANN401
         request = kwargs["request"]
@@ -182,6 +189,89 @@ async def test_submit_batch_marks_created_logs_failed_when_root_event_append_fai
     assert [entry["action_log_id"] for entry in failed_marks] == [
         "00000000-0000-0000-0000-000000000011",
         "00000000-0000-0000-0000-000000000012",
+    ]
+    assert all(entry["result"]["error"] == "batch_submission_failed" for entry in failed_marks)
+    assert "Action batch write path contract" in caplog.text
+    assert "degraded" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_submit_batch_keeps_already_emitted_roots_pending_when_later_root_append_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed_marks: List[Dict[str, Any]] = []
+
+    async def _fake_submit_action_async(**kwargs: Any) -> action_async.ActionSubmitResponse:  # noqa: ANN401
+        request = kwargs["request"]
+        batch_meta = request.metadata.get("__batch") if isinstance(request.metadata, dict) else {}
+        req_id = str(batch_meta.get("request_id") or "unknown")
+        action_log_id = (
+            "00000000-0000-0000-0000-000000000101"
+            if req_id == "root-a"
+            else "00000000-0000-0000-0000-000000000102"
+        )
+        return action_async.ActionSubmitResponse(
+            action_log_id=action_log_id,
+            status="PENDING",
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            ontology_commit_id="commit-1",
+            base_branch=request.base_branch,
+            overlay_branch=request.overlay_branch or "writeback-demo",
+            writeback_target={"repo": "ontology-writeback", "branch": "writeback-demo"},
+        )
+
+    class _PartiallyFailingEventStore:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def append_event(self, event: Any) -> None:
+            _ = event
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("second root append failed")
+
+    class _FakeRegistry:
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+        async def add_dependency(self, **kwargs: Any) -> None:  # noqa: ANN401
+            _ = kwargs
+
+        async def mark_failed(self, **kwargs: Any) -> None:  # noqa: ANN401
+            failed_marks.append(kwargs)
+
+    monkeypatch.setattr(action_async, "submit_action_async", _fake_submit_action_async)
+    monkeypatch.setattr(action_async, "ActionLogRegistry", _FakeRegistry)
+
+    with pytest.raises(RuntimeError, match="second root append failed"):
+        await action_async.submit_action_batch_async(
+            db_name="demo",
+            action_type_id="ApproveTicket",
+            request=action_async.ActionSubmitBatchRequest(
+                items=[
+                    action_async.ActionSubmitBatchItemRequest(
+                        request_id="root-a",
+                        input={"ticket": {"class_id": "Ticket", "instance_id": "t1"}},
+                        metadata={"user_id": "alice", "user_type": "user"},
+                    ),
+                    action_async.ActionSubmitBatchItemRequest(
+                        request_id="root-b",
+                        input={"ticket": {"class_id": "Ticket", "instance_id": "t2"}},
+                        metadata={"user_id": "alice", "user_type": "user"},
+                    ),
+                ],
+                base_branch="main",
+            ),
+            event_store=_PartiallyFailingEventStore(),  # type: ignore[arg-type]
+        )
+
+    assert [entry["action_log_id"] for entry in failed_marks] == [
+        "00000000-0000-0000-0000-000000000102",
     ]
     assert all(entry["result"]["error"] == "batch_submission_failed" for entry in failed_marks)
 

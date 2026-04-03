@@ -14,6 +14,14 @@ class ErrorCategory(str, Enum):
     INTERNAL = "internal"
 
 
+class ErrorClassification(str, Enum):
+    VALIDATION = "validation"
+    UNAVAILABLE = "unavailable"
+    INTERNAL = "internal"
+    CONFLICT = "conflict"
+    RETRYABLE = "retryable"
+
+
 class ErrorCode(str, Enum):
     REQUEST_VALIDATION_FAILED = "REQUEST_VALIDATION_FAILED"
     INPUT_SANITIZATION_FAILED = "INPUT_SANITIZATION_FAILED"
@@ -136,3 +144,19 @@ def classified_http_exception(
         detail=body,
         headers=(dict(headers) if headers else None),
     )
+
+
+def classify_error_family(
+    *,
+    category: "ErrorCategory | None",
+    retryable: bool = False,
+) -> ErrorClassification:
+    if retryable:
+        return ErrorClassification.RETRYABLE
+    if category == ErrorCategory.CONFLICT:
+        return ErrorClassification.CONFLICT
+    if category == ErrorCategory.UPSTREAM:
+        return ErrorClassification.UNAVAILABLE
+    if category == ErrorCategory.INTERNAL:
+        return ErrorClassification.INTERNAL
+    return ErrorClassification.VALIDATION

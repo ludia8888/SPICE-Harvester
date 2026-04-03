@@ -15,7 +15,12 @@ import asyncpg
 
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
-from shared.services.registries.dataset_registry_get_or_create import get_or_create_record
+from shared.services.registries import dataset_registry_catalog as _catalog_registry
+from shared.services.registries import dataset_registry_edits as _edits_registry
+from shared.services.registries import dataset_registry_governance as _governance_registry
+from shared.services.registries import dataset_registry_ingest as _ingest_registry
+from shared.services.registries import dataset_registry_publish as _publish_registry
+from shared.services.registries import dataset_registry_schema as _schema_registry
 from shared.services.registries.dataset_registry_models import (
     AccessPolicyRecord,
     BackingDatasourceRecord,
@@ -48,10 +53,11 @@ from shared.services.registries.dataset_registry_rows import (
     row_to_relationship_spec,
     row_to_schema_migration_plan,
 )
+from shared.services.registries import dataset_registry_relationships as _relationship_registry
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
-from shared.utils.schema_hash import compute_schema_hash, compute_schema_hash_from_payload
+from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -241,691 +247,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
         return row_to_schema_migration_plan(row)
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
-        async with conn.transaction():
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.datasets (
-                    dataset_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    source_type TEXT NOT NULL,
-                    source_ref TEXT,
-                    branch TEXT NOT NULL DEFAULT 'main',
-                    schema_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (db_name, name, branch)
-                )
-                """
-            )
-
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.datasets
-                    ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT 'main'
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.datasets
-                    DROP CONSTRAINT IF EXISTS datasets_db_name_name_key
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS datasets_db_name_name_branch_key
-                ON {self._schema}.datasets(db_name, name, branch)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.dataset_versions (
-                    version_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    lakefs_commit_id TEXT NOT NULL,
-                    artifact_key TEXT,
-                    row_count INTEGER,
-                    sample_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    ingest_request_id UUID,
-                    promoted_from_artifact_id UUID,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dataset_id, lakefs_commit_id),
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-
-            # Migrate older integer versioning to lakeFS commit ids.
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_versions
-                    ADD COLUMN IF NOT EXISTS lakefs_commit_id TEXT
-                """
-            )
-            # Best-effort backfill:
-            # - If artifact_key is an s3:// URI, the second path segment is the ref (commit/branch).
-            # - Otherwise, synthesize a stable compatibility identifier so existing rows remain addressable.
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_versions
-                SET lakefs_commit_id = COALESCE(
-                    NULLIF(lakefs_commit_id, ''),
-                    NULLIF(
-                        CASE
-                            WHEN split_part(replace(COALESCE(artifact_key, ''), 's3://', ''), '/', 2)
-                                 IN ('', 'datasets', 'pipelines', 'pipelines-staging', 'checkpoints', 'events', 'indexes')
-                            THEN NULL
-                            ELSE split_part(replace(COALESCE(artifact_key, ''), 's3://', ''), '/', 2)
-                        END,
-                        ''
-                    ),
-                    'compat-' || version_id::text
-                )
-                WHERE lakefs_commit_id IS NULL OR lakefs_commit_id = ''
-                """
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.dataset_versions DROP CONSTRAINT IF EXISTS dataset_versions_dataset_id_version_key"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.dataset_versions DROP COLUMN IF EXISTS version"
-            )
-            await conn.execute(
-                f"ALTER TABLE {self._schema}.dataset_versions ALTER COLUMN lakefs_commit_id SET NOT NULL"
-            )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS dataset_versions_dataset_id_lakefs_commit_id_key
-                ON {self._schema}.dataset_versions(dataset_id, lakefs_commit_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_versions
-                    ADD COLUMN IF NOT EXISTS ingest_request_id UUID
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_versions
-                    ADD COLUMN IF NOT EXISTS promoted_from_artifact_id UUID
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE UNIQUE INDEX IF NOT EXISTS dataset_versions_ingest_request_id_key
-                ON {self._schema}.dataset_versions(ingest_request_id)
-                WHERE ingest_request_id IS NOT NULL
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_versions_ingest_request_id
-                ON {self._schema}.dataset_versions(ingest_request_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_versions_promoted_artifact
-                ON {self._schema}.dataset_versions(promoted_from_artifact_id)
-                """
-            )
-
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_datasets_db_name ON {self._schema}.datasets(db_name)"
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_dataset_versions_dataset_id ON {self._schema}.dataset_versions(dataset_id)"
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.dataset_ingest_requests (
-                    ingest_request_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    db_name TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    idempotency_key TEXT NOT NULL,
-                    request_fingerprint TEXT,
-                    status TEXT NOT NULL,
-                    lakefs_commit_id TEXT,
-                    artifact_key TEXT,
-                    schema_json JSONB,
-                    schema_status TEXT NOT NULL DEFAULT 'PENDING',
-                    schema_approved_at TIMESTAMPTZ,
-                    schema_approved_by TEXT,
-                    sample_json JSONB,
-                    row_count INTEGER,
-                    source_metadata JSONB,
-                    error TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    published_at TIMESTAMPTZ,
-                    UNIQUE (idempotency_key),
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_requests_status
-                ON {self._schema}.dataset_ingest_requests(status, created_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS schema_json JSONB
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS schema_status TEXT NOT NULL DEFAULT 'PENDING'
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS schema_approved_at TIMESTAMPTZ
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS schema_approved_by TEXT
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS sample_json JSONB
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS row_count INTEGER
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_requests
-                    ADD COLUMN IF NOT EXISTS source_metadata JSONB
-                """
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_requests
-                SET schema_status = 'PENDING'
-                WHERE schema_status IS NULL
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.dataset_ingest_transactions (
-                    transaction_id UUID PRIMARY KEY,
-                    ingest_request_id UUID NOT NULL,
-                    status TEXT NOT NULL,
-                    lakefs_commit_id TEXT,
-                    artifact_key TEXT,
-                    error TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    committed_at TIMESTAMPTZ,
-                    aborted_at TIMESTAMPTZ,
-                    UNIQUE (ingest_request_id),
-                    FOREIGN KEY (ingest_request_id)
-                        REFERENCES {self._schema}.dataset_ingest_requests(ingest_request_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_transactions_status
-                ON {self._schema}.dataset_ingest_transactions(status, created_at)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.dataset_ingest_outbox (
-                    outbox_id UUID PRIMARY KEY,
-                    ingest_request_id UUID NOT NULL,
-                    kind TEXT NOT NULL,
-                    payload JSONB NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    publish_attempts INTEGER NOT NULL DEFAULT 0,
-                    retry_count INTEGER NOT NULL DEFAULT 0,
-                    error TEXT,
-                    last_error TEXT,
-                    claimed_by TEXT,
-                    claimed_at TIMESTAMPTZ,
-                    next_attempt_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    FOREIGN KEY (ingest_request_id)
-                        REFERENCES {self._schema}.dataset_ingest_requests(ingest_request_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.dataset_ingest_outbox
-                    ADD COLUMN IF NOT EXISTS claimed_by TEXT,
-                    ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
-                    ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ,
-                    ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS last_error TEXT
-                """
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_outbox
-                SET retry_count = GREATEST(retry_count, publish_attempts),
-                    last_error = COALESCE(last_error, error)
-                WHERE retry_count = 0 AND publish_attempts > 0
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_status
-                ON {self._schema}.dataset_ingest_outbox(status, created_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_status_next
-                ON {self._schema}.dataset_ingest_outbox(status, next_attempt_at, created_at)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_claimed
-                ON {self._schema}.dataset_ingest_outbox(status, claimed_at)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.backing_datasources (
-                    backing_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    db_name TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    source_type TEXT NOT NULL DEFAULT 'dataset',
-                    source_ref TEXT,
-                    branch TEXT NOT NULL DEFAULT 'main',
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dataset_id, branch),
-                    UNIQUE (db_name, name, branch),
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_backing_datasources_dataset
-                ON {self._schema}.backing_datasources(dataset_id, branch)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.backing_datasource_versions (
-                    backing_version_id UUID PRIMARY KEY,
-                    backing_id UUID NOT NULL,
-                    dataset_version_id UUID NOT NULL,
-                    schema_hash TEXT NOT NULL,
-                    artifact_key TEXT,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (backing_id, dataset_version_id),
-                    FOREIGN KEY (backing_id)
-                        REFERENCES {self._schema}.backing_datasources(backing_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (dataset_version_id)
-                        REFERENCES {self._schema}.dataset_versions(version_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_backing_versions_dataset_version
-                ON {self._schema}.backing_datasource_versions(dataset_version_id)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.key_specs (
-                    key_spec_id UUID PRIMARY KEY,
-                    dataset_id UUID NOT NULL,
-                    dataset_version_id UUID,
-                    spec JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dataset_id, dataset_version_id),
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (dataset_version_id)
-                        REFERENCES {self._schema}.dataset_versions(version_id)
-                        ON DELETE SET NULL
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_key_specs_dataset
-                ON {self._schema}.key_specs(dataset_id)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.gate_policies (
-                    policy_id UUID PRIMARY KEY,
-                    scope TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    rules JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (scope, name)
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.gate_results (
-                    result_id UUID PRIMARY KEY,
-                    policy_id UUID NOT NULL,
-                    scope TEXT NOT NULL,
-                    subject_type TEXT NOT NULL,
-                    subject_id TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    details JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    FOREIGN KEY (policy_id)
-                        REFERENCES {self._schema}.gate_policies(policy_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_gate_results_subject
-                ON {self._schema}.gate_results(scope, subject_type, subject_id)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.access_policies (
-                    policy_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    scope TEXT NOT NULL,
-                    subject_type TEXT NOT NULL,
-                    subject_id TEXT NOT NULL,
-                    policy JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (db_name, scope, subject_type, subject_id)
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_access_policies_subject
-                ON {self._schema}.access_policies(db_name, subject_type, subject_id)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.instance_edits (
-                    edit_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    class_id TEXT NOT NULL,
-                    instance_id TEXT NOT NULL,
-                    edit_type TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    fields JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_instance_edits_class
-                ON {self._schema}.instance_edits(db_name, class_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_instance_edits_instance
-                ON {self._schema}.instance_edits(db_name, class_id, instance_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.instance_edits
-                    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE'
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.instance_edits
-                    ADD COLUMN IF NOT EXISTS fields JSONB NOT NULL DEFAULT '[]'::jsonb
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_instance_edits_status
-                ON {self._schema}.instance_edits(db_name, class_id, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_instance_edits_fields
-                ON {self._schema}.instance_edits
-                USING GIN (fields)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.relationship_specs (
-                    relationship_spec_id UUID PRIMARY KEY,
-                    link_type_id TEXT NOT NULL,
-                    db_name TEXT NOT NULL,
-                    source_object_type TEXT NOT NULL,
-                    target_object_type TEXT NOT NULL,
-                    predicate TEXT NOT NULL,
-                    spec_type TEXT NOT NULL,
-                    dataset_id UUID NOT NULL,
-                    dataset_version_id UUID,
-                    mapping_spec_id UUID NOT NULL,
-                    mapping_spec_version INTEGER NOT NULL DEFAULT 1,
-                    spec JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    auto_sync BOOLEAN NOT NULL DEFAULT TRUE,
-                    last_index_status TEXT,
-                    last_indexed_at TIMESTAMPTZ,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (link_type_id),
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (dataset_version_id)
-                        REFERENCES {self._schema}.dataset_versions(version_id)
-                        ON DELETE SET NULL
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_relationship_specs_dataset
-                ON {self._schema}.relationship_specs(dataset_id, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_relationship_specs_db
-                ON {self._schema}.relationship_specs(db_name, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.relationship_specs
-                    ADD COLUMN IF NOT EXISTS last_index_result_id UUID
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.relationship_specs
-                    ADD COLUMN IF NOT EXISTS last_index_stats JSONB NOT NULL DEFAULT '{{}}'::jsonb
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.relationship_specs
-                    ADD COLUMN IF NOT EXISTS last_index_dataset_version_id UUID
-                """
-            )
-            await conn.execute(
-                f"""
-                ALTER TABLE {self._schema}.relationship_specs
-                    ADD COLUMN IF NOT EXISTS last_index_mapping_spec_version INTEGER
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.relationship_index_results (
-                    result_id UUID PRIMARY KEY,
-                    relationship_spec_id UUID NOT NULL,
-                    link_type_id TEXT NOT NULL,
-                    db_name TEXT NOT NULL,
-                    dataset_id UUID NOT NULL,
-                    dataset_version_id UUID,
-                    mapping_spec_id UUID NOT NULL,
-                    mapping_spec_version INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    stats JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    lineage JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    FOREIGN KEY (relationship_spec_id)
-                        REFERENCES {self._schema}.relationship_specs(relationship_spec_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (dataset_id)
-                        REFERENCES {self._schema}.datasets(dataset_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (dataset_version_id)
-                        REFERENCES {self._schema}.dataset_versions(version_id)
-                        ON DELETE SET NULL
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_spec
-                ON {self._schema}.relationship_index_results(relationship_spec_id, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_link
-                ON {self._schema}.relationship_index_results(link_type_id, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_db
-                ON {self._schema}.relationship_index_results(db_name, status)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.link_edits (
-                    edit_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    link_type_id TEXT NOT NULL,
-                    branch TEXT NOT NULL DEFAULT 'main',
-                    source_object_type TEXT NOT NULL,
-                    target_object_type TEXT NOT NULL,
-                    predicate TEXT NOT NULL,
-                    source_instance_id TEXT NOT NULL,
-                    target_instance_id TEXT NOT NULL,
-                    edit_type TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'ACTIVE',
-                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_link_edits_link
-                ON {self._schema}.link_edits(link_type_id, status)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_link_edits_source
-                ON {self._schema}.link_edits(db_name, source_object_type, source_instance_id)
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_link_edits_target
-                ON {self._schema}.link_edits(db_name, target_object_type, target_instance_id)
-                """
-            )
-
-            await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._schema}.schema_migration_plans (
-                    plan_id UUID PRIMARY KEY,
-                    db_name TEXT NOT NULL,
-                    subject_type TEXT NOT NULL,
-                    subject_id TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'PENDING',
-                    plan JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_schema_migration_plans_subject
-                ON {self._schema}.schema_migration_plans(db_name, subject_type, subject_id)
-                """
-            )
+        await _schema_registry.ensure_tables(self, conn)
 
     async def create_dataset(
         self,
@@ -939,100 +261,20 @@ class DatasetRegistry(PostgresSchemaRegistry):
         branch: str = "main",
         dataset_id: Optional[str] = None,
     ) -> DatasetRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        dataset_id = dataset_id or str(uuid4())
-        schema_json = schema_json or {}
-        schema_payload = normalize_json_payload(schema_json)
-
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.datasets (
-                    dataset_id, db_name, name, description, source_type, source_ref, branch, schema_json
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-                RETURNING dataset_id, db_name, name, description, source_type, source_ref,
-                          branch, schema_json, created_at, updated_at
-                """,
-                dataset_id,
-                db_name,
-                name,
-                description,
-                source_type,
-                source_ref,
-                branch,
-                schema_payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to create dataset")
-            return DatasetRecord(
-                dataset_id=str(row["dataset_id"]),
-                db_name=str(row["db_name"]),
-                name=str(row["name"]),
-                description=row["description"],
-                source_type=str(row["source_type"]),
-                source_ref=row["source_ref"],
-                branch=str(row["branch"]),
-                schema_json=coerce_json_dataset(row["schema_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
+        return await _catalog_registry.create_dataset(
+            self,
+            db_name=db_name,
+            name=name,
+            description=description,
+            source_type=source_type,
+            source_ref=source_ref,
+            schema_json=schema_json,
+            branch=branch,
+            dataset_id=dataset_id,
+        )
 
     async def list_datasets(self, *, db_name: str, branch: Optional[str] = None) -> List[Dict[str, Any]]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        clause = "WHERE d.db_name = $1"
-        values: List[Any] = [db_name]
-        if branch:
-            clause += f" AND d.branch = ${len(values) + 1}"
-            values.append(branch)
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT d.dataset_id, d.db_name, d.name, d.description, d.source_type,
-                       d.source_ref, d.branch, d.schema_json, d.created_at, d.updated_at,
-                       v.version_id AS dataset_version_id, v.lakefs_commit_id AS latest_commit_id,
-                       v.artifact_key, v.row_count, v.sample_json, v.created_at AS version_created_at
-                FROM {self._schema}.datasets d
-                LEFT JOIN LATERAL (
-                    SELECT version_id, lakefs_commit_id, artifact_key, row_count, sample_json, created_at
-                    FROM {self._schema}.dataset_versions
-                    WHERE dataset_id = d.dataset_id
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                ) v ON TRUE
-                {clause}
-                ORDER BY d.updated_at DESC
-                """,
-                *values,
-            )
-
-        output: List[Dict[str, Any]] = []
-        for row in rows or []:
-            output.append(
-                {
-                    "dataset_id": str(row["dataset_id"]),
-                    "db_name": str(row["db_name"]),
-                    "name": str(row["name"]),
-                    "description": row["description"],
-                    "source_type": str(row["source_type"]),
-                    "source_ref": row["source_ref"],
-                    "branch": str(row["branch"]),
-                    "schema_json": coerce_json_dataset(row["schema_json"]),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "dataset_version_id": str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
-                    "latest_commit_id": row["latest_commit_id"],
-                    "artifact_key": row["artifact_key"],
-                    "row_count": row["row_count"],
-                    "sample_json": coerce_json_dataset(row["sample_json"]),
-                    "version_created_at": row["version_created_at"],
-                }
-            )
-        return output
+        return await _catalog_registry.list_datasets(self, db_name=db_name, branch=branch)
 
     async def list_all_datasets(
         self,
@@ -1042,58 +284,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         offset: int = 0,
         order_by: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        resolved_limit = max(1, int(limit))
-        resolved_offset = max(0, int(offset))
-
-        clause = ""
-        values: List[Any] = []
-        if branch:
-            clause = "WHERE d.branch = $1"
-            values.append(str(branch))
-
-        normalized_order = str(order_by or "").strip().upper()
-        if "CREATED" in normalized_order:
-            order_clause = "ORDER BY d.created_at DESC"
-        elif "NAME" in normalized_order:
-            order_clause = "ORDER BY d.name ASC"
-        else:
-            order_clause = "ORDER BY d.updated_at DESC"
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT d.dataset_id, d.db_name, d.name, d.description, d.source_type,
-                       d.source_ref, d.branch, d.schema_json, d.created_at, d.updated_at
-                FROM {self._schema}.datasets d
-                {clause}
-                {order_clause}
-                LIMIT ${len(values) + 1} OFFSET ${len(values) + 2}
-                """,
-                *values,
-                resolved_limit,
-                resolved_offset,
-            )
-
-        output: List[Dict[str, Any]] = []
-        for row in rows or []:
-            output.append(
-                {
-                    "dataset_id": str(row["dataset_id"]),
-                    "db_name": str(row["db_name"]),
-                    "name": str(row["name"]),
-                    "description": row["description"],
-                    "source_type": str(row["source_type"]),
-                    "source_ref": row["source_ref"],
-                    "branch": str(row["branch"]),
-                    "schema_json": coerce_json_dataset(row["schema_json"]),
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                }
-            )
-        return output
+        return await _catalog_registry.list_all_datasets(
+            self,
+            branch=branch,
+            limit=limit,
+            offset=offset,
+            order_by=order_by,
+        )
 
     async def count_datasets_by_db_names(
         self,
@@ -1101,59 +298,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         db_names: Iterable[str],
         branch: Optional[str] = None,
     ) -> Dict[str, int]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        names = [name for name in db_names if name]
-        if not names:
-            return {}
-
-        clause = "WHERE d.db_name = ANY($1)"
-        values: List[Any] = [names]
-        if branch:
-            clause += f" AND d.branch = ${len(values) + 1}"
-            values.append(branch)
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT d.db_name, COUNT(*) AS count
-                FROM {self._schema}.datasets d
-                {clause}
-                GROUP BY d.db_name
-                """,
-                *values,
-            )
-
-        return {str(row["db_name"]): int(row["count"] or 0) for row in rows or []}
+        return await _catalog_registry.count_datasets_by_db_names(
+            self,
+            db_names=db_names,
+            branch=branch,
+        )
 
     async def get_dataset(self, *, dataset_id: str) -> Optional[DatasetRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT dataset_id, db_name, name, description, source_type,
-                       source_ref, branch, schema_json, created_at, updated_at
-                FROM {self._schema}.datasets
-                WHERE dataset_id = $1
-                """,
-                dataset_id,
-            )
-            if not row:
-                return None
-            return DatasetRecord(
-                dataset_id=str(row["dataset_id"]),
-                db_name=str(row["db_name"]),
-                name=str(row["name"]),
-                description=row["description"],
-                source_type=str(row["source_type"]),
-                source_ref=row["source_ref"],
-                branch=str(row["branch"]),
-                schema_json=coerce_json_dataset(row["schema_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
+        return await _catalog_registry.get_dataset(self, dataset_id=dataset_id)
 
     async def delete_dataset(self, *, dataset_id: str) -> bool:
         """Delete a dataset and all related records (CASCADE)."""
@@ -1173,34 +325,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         name: str,
         branch: str = "main",
     ) -> Optional[DatasetRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT dataset_id, db_name, name, description, source_type,
-                       source_ref, branch, schema_json, created_at, updated_at
-                FROM {self._schema}.datasets
-                WHERE db_name = $1 AND name = $2 AND branch = $3
-                """,
-                db_name,
-                name,
-                branch,
-            )
-            if not row:
-                return None
-            return DatasetRecord(
-                dataset_id=str(row["dataset_id"]),
-                db_name=str(row["db_name"]),
-                name=str(row["name"]),
-                description=row["description"],
-                source_type=str(row["source_type"]),
-                source_ref=row["source_ref"],
-                branch=str(row["branch"]),
-                schema_json=coerce_json_dataset(row["schema_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
+        return await _catalog_registry.get_dataset_by_name(
+            self,
+            db_name=db_name,
+            name=name,
+            branch=branch,
+        )
 
     async def update_schema(
         self,
@@ -1232,35 +362,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         source_ref: str,
         branch: str = "main",
     ) -> Optional[DatasetRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT dataset_id, db_name, name, description, source_type,
-                       source_ref, branch, schema_json, created_at, updated_at
-                FROM {self._schema}.datasets
-                WHERE db_name = $1 AND source_type = $2 AND source_ref = $3 AND branch = $4
-                """,
-                db_name,
-                source_type,
-                source_ref,
-                branch,
-            )
-            if not row:
-                return None
-            return DatasetRecord(
-                dataset_id=str(row["dataset_id"]),
-                db_name=str(row["db_name"]),
-                name=str(row["name"]),
-                description=row["description"],
-                source_type=str(row["source_type"]),
-                source_ref=row["source_ref"],
-                branch=str(row["branch"]),
-                schema_json=coerce_json_dataset(row["schema_json"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
+        return await _catalog_registry.get_dataset_by_source_ref(
+            self,
+            db_name=db_name,
+            source_type=source_type,
+            source_ref=source_ref,
+            branch=branch,
+        )
 
     async def add_version(
         self,
@@ -1275,172 +383,31 @@ class DatasetRegistry(PostgresSchemaRegistry):
         ingest_request_id: Optional[str] = None,
         promoted_from_artifact_id: Optional[str] = None,
     ) -> DatasetVersionRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        version_id = version_id or str(uuid4())
-        sample_json = sample_json or {}
-        sample_payload = normalize_json_payload(sample_json)
-        lakefs_commit_id = str(lakefs_commit_id or "").strip()
-        if not lakefs_commit_id:
-            raise ValueError("lakefs_commit_id is required")
-        if artifact_key:
-            artifact_key = artifact_key.strip()
-            if artifact_key and not is_s3_uri(artifact_key):
-                raise ValueError("artifact_key must be an s3:// URI")
-        schema_payload = None
-        if schema_json is not None:
-            schema_payload = normalize_json_payload(schema_json)
-        schema_hash = self._resolve_version_schema_hash(sample_json=sample_json, schema_json=schema_json)
-
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                if schema_payload is not None:
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.datasets
-                        SET schema_json = $2::jsonb, updated_at = NOW()
-                        WHERE dataset_id = $1
-                        """,
-                        dataset_id,
-                        schema_payload,
-                    )
-                row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {self._schema}.dataset_versions (
-                        version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                        ingest_request_id, promoted_from_artifact_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, $8::uuid)
-                    RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                              ingest_request_id, promoted_from_artifact_id, created_at
-                    """,
-                    version_id,
-                    dataset_id,
-                    lakefs_commit_id,
-                    artifact_key,
-                    row_count,
-                    sample_payload,
-                    ingest_request_id,
-                    promoted_from_artifact_id,
-                )
-                if not row:
-                    raise RuntimeError("Failed to create dataset version")
-                await self._upsert_backing_version_for_dataset_version(
-                    conn,
-                    dataset_id=dataset_id,
-                    dataset_version_id=str(row["version_id"]),
-                    artifact_key=artifact_key,
-                    schema_hash=schema_hash,
-                )
-            if not row:
-                raise RuntimeError("Failed to create dataset version")
-            record = DatasetVersionRecord(
-                version_id=str(row["version_id"]),
-                dataset_id=str(row["dataset_id"]),
-                lakefs_commit_id=str(row["lakefs_commit_id"]),
-                artifact_key=row["artifact_key"],
-                row_count=row["row_count"],
-                sample_json=coerce_json_dataset(row["sample_json"]),
-                ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
-                promoted_from_artifact_id=(
-                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
-                ),
-                created_at=row["created_at"],
-            )
-
-        return record
+        return await _catalog_registry.add_version(
+            self,
+            dataset_id=dataset_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+            row_count=row_count,
+            sample_json=sample_json,
+            schema_json=schema_json,
+            version_id=version_id,
+            ingest_request_id=ingest_request_id,
+            promoted_from_artifact_id=promoted_from_artifact_id,
+        )
 
     async def get_latest_version(self, *, dataset_id: str) -> Optional[DatasetVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, promoted_from_artifact_id, created_at
-                FROM {self._schema}.dataset_versions
-                WHERE dataset_id = $1
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                dataset_id,
-            )
-            if not row:
-                return None
-            return DatasetVersionRecord(
-                version_id=str(row["version_id"]),
-                dataset_id=str(row["dataset_id"]),
-                lakefs_commit_id=str(row["lakefs_commit_id"]),
-                artifact_key=row["artifact_key"],
-                row_count=row["row_count"],
-                sample_json=coerce_json_dataset(row["sample_json"]),
-                ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
-                promoted_from_artifact_id=(
-                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
-                ),
-                created_at=row["created_at"],
-            )
+        return await _catalog_registry.get_latest_version(self, dataset_id=dataset_id)
 
     async def get_version(self, *, version_id: str) -> Optional[DatasetVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, promoted_from_artifact_id, created_at
-                FROM {self._schema}.dataset_versions
-                WHERE version_id = $1::uuid
-                """,
-                version_id,
-            )
-            if not row:
-                return None
-            return DatasetVersionRecord(
-                version_id=str(row["version_id"]),
-                dataset_id=str(row["dataset_id"]),
-                lakefs_commit_id=str(row["lakefs_commit_id"]),
-                artifact_key=row["artifact_key"],
-                row_count=row["row_count"],
-                sample_json=coerce_json_dataset(row["sample_json"]),
-                ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
-                promoted_from_artifact_id=(
-                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
-                ),
-                created_at=row["created_at"],
-            )
+        return await _catalog_registry.get_version(self, version_id=version_id)
 
     async def get_version_by_ingest_request(
         self,
         *,
         ingest_request_id: str,
     ) -> Optional[DatasetVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, promoted_from_artifact_id, created_at
-                FROM {self._schema}.dataset_versions
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-            )
-            if not row:
-                return None
-            return DatasetVersionRecord(
-                version_id=str(row["version_id"]),
-                dataset_id=str(row["dataset_id"]),
-                lakefs_commit_id=str(row["lakefs_commit_id"]),
-                artifact_key=row["artifact_key"],
-                row_count=row["row_count"],
-                sample_json=coerce_json_dataset(row["sample_json"]),
-                ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
-                promoted_from_artifact_id=(
-                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
-                ),
-                created_at=row["created_at"],
-            )
+        return await _catalog_registry.get_version_by_ingest_request(self, ingest_request_id=ingest_request_id)
 
     async def create_backing_datasource(
         self,
@@ -1454,48 +421,20 @@ class DatasetRegistry(PostgresSchemaRegistry):
         source_ref: Optional[str] = None,
         backing_id: Optional[str] = None,
     ) -> BackingDatasourceRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        backing_id = backing_id or str(uuid4())
-        branch = branch or "main"
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.backing_datasources (
-                    backing_id, dataset_id, db_name, name, description, source_type, source_ref, branch
-                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)
-                RETURNING backing_id, dataset_id, db_name, name, description, source_type, source_ref,
-                          branch, status, created_at, updated_at
-                """,
-                backing_id,
-                dataset_id,
-                db_name,
-                name,
-                description,
-                source_type,
-                source_ref,
-                branch,
-            )
-            if not row:
-                raise RuntimeError("Failed to create backing datasource")
-            return self._row_to_backing(row)
+        return await _catalog_registry.create_backing_datasource(
+            self,
+            dataset_id=dataset_id,
+            db_name=db_name,
+            name=name,
+            branch=branch,
+            description=description,
+            source_type=source_type,
+            source_ref=source_ref,
+            backing_id=backing_id,
+        )
 
     async def get_backing_datasource(self, *, backing_id: str) -> Optional[BackingDatasourceRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
-                       branch, status, created_at, updated_at
-                FROM {self._schema}.backing_datasources
-                WHERE backing_id = $1::uuid
-                """,
-                backing_id,
-            )
-            if not row:
-                return None
-            return self._row_to_backing(row)
+        return await _catalog_registry.get_backing_datasource(self, backing_id=backing_id)
 
     async def get_backing_datasource_by_dataset(
         self,
@@ -1503,25 +442,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         dataset_id: str,
         branch: Optional[str] = None,
     ) -> Optional[BackingDatasourceRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
-                       branch, status, created_at, updated_at
-                FROM {self._schema}.backing_datasources
-                WHERE dataset_id = $1::uuid
-                  AND ($2::text IS NULL OR branch = $2)
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                dataset_id,
-                branch,
-            )
-            if not row:
-                return None
-            return self._row_to_backing(row)
+        return await _catalog_registry.get_backing_datasource_by_dataset(
+            self,
+            dataset_id=dataset_id,
+            branch=branch,
+        )
 
     async def list_backing_datasources(
         self,
@@ -1530,24 +455,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         branch: Optional[str] = None,
         limit: int = 200,
     ) -> List[BackingDatasourceRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
-                       branch, status, created_at, updated_at
-                FROM {self._schema}.backing_datasources
-                WHERE db_name = $1
-                  AND ($2::text IS NULL OR branch = $2)
-                ORDER BY created_at DESC
-                LIMIT $3
-                """,
-                db_name,
-                branch,
-                limit,
-            )
-            return [self._row_to_backing(row) for row in rows]
+        return await _catalog_registry.list_backing_datasources(
+            self,
+            db_name=db_name,
+            branch=branch,
+            limit=limit,
+        )
 
     async def get_or_create_backing_datasource(
         self,
@@ -1556,23 +469,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         source_type: str = "dataset",
         source_ref: Optional[str] = None,
     ) -> BackingDatasourceRecord:
-        record, _ = await get_or_create_record(
-            lookup=lambda: self.get_backing_datasource_by_dataset(
-                dataset_id=dataset.dataset_id,
-                branch=dataset.branch,
-            ),
-            create=lambda: self.create_backing_datasource(
-                dataset_id=dataset.dataset_id,
-                db_name=dataset.db_name,
-                name=dataset.name,
-                description=dataset.description,
-                source_type=source_type,
-                source_ref=source_ref,
-                branch=dataset.branch,
-            ),
-            conflict_context=f"backing-datasource:{dataset.db_name}/{dataset.name}@{dataset.branch}",
+        return await _catalog_registry.get_or_create_backing_datasource(
+            self,
+            dataset=dataset,
+            source_type=source_type,
+            source_ref=source_ref,
         )
-        return record
 
     async def create_backing_datasource_version(
         self,
@@ -1582,20 +484,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_hash: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> BackingDatasourceVersionRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        _, version, schema_hash = await self._resolve_backing_datasource_version_materialization(
+        return await _catalog_registry.create_backing_datasource_version(
+            self,
             backing_id=backing_id,
             dataset_version_id=dataset_version_id,
             schema_hash=schema_hash,
-        )
-        metadata_payload = normalize_json_payload(metadata or {})
-        return await self._insert_backing_datasource_version(
-            backing_id=backing_id,
-            dataset_version_id=dataset_version_id,
-            schema_hash=schema_hash,
-            artifact_key=version.artifact_key,
-            metadata_payload=metadata_payload,
+            metadata=metadata,
         )
 
     async def _resolve_backing_datasource_version_materialization(
@@ -1605,34 +499,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         dataset_version_id: str,
         schema_hash: Optional[str] = None,
     ) -> tuple[BackingDatasourceRecord, DatasetVersionRecord, str]:
-        backing = await self.get_backing_datasource(backing_id=backing_id)
-        if not backing:
-            raise RuntimeError("Backing datasource not found")
-        version = await self.get_version(version_id=dataset_version_id)
-        if not version or version.dataset_id != backing.dataset_id:
-            raise RuntimeError("Dataset version mismatch")
-
-        provided_schema_hash = str(schema_hash or "").strip() or None
-        canonical_schema_hash = compute_schema_hash_from_payload(version.sample_json)
-        if not canonical_schema_hash:
-            dataset = await self.get_dataset(dataset_id=backing.dataset_id)
-            canonical_schema_hash = compute_schema_hash_from_payload(
-                dataset.schema_json if dataset else {}
-            )
-        if canonical_schema_hash:
-            if provided_schema_hash and provided_schema_hash != canonical_schema_hash:
-                logger.warning(
-                    "Backing datasource version schema_hash mismatch; using canonical hash "
-                    "(backing_id=%s dataset_version_id=%s provided=%s canonical=%s)",
-                    backing_id,
-                    dataset_version_id,
-                    provided_schema_hash,
-                    canonical_schema_hash,
-                )
-            return backing, version, canonical_schema_hash
-        if provided_schema_hash:
-            return backing, version, provided_schema_hash
-        raise RuntimeError("schema_hash is required for backing datasource version")
+        return await _catalog_registry.resolve_backing_datasource_version_materialization(
+            self,
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+        )
 
     async def _insert_backing_datasource_version(
         self,
@@ -1643,25 +515,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         artifact_key: Optional[str],
         metadata_payload: Dict[str, Any],
     ) -> BackingDatasourceVersionRecord:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.backing_datasource_versions (
-                    backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key, metadata
-                ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)
-                RETURNING backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                          metadata, status, created_at
-                """,
-                str(uuid4()),
-                backing_id,
-                dataset_version_id,
-                schema_hash,
-                artifact_key,
-                metadata_payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to create backing datasource version")
-            return self._row_to_backing_version(row)
+        return await _catalog_registry.insert_backing_datasource_version(
+            self,
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+            artifact_key=artifact_key,
+            metadata_payload=metadata_payload,
+        )
 
     async def _reconcile_backing_datasource_version(
         self,
@@ -1670,71 +531,29 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_hash: str,
         artifact_key: Optional[str],
     ) -> BackingDatasourceVersionRecord:
-        if record.schema_hash == schema_hash and record.artifact_key == artifact_key:
-            return record
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.backing_datasource_versions
-                SET schema_hash = $2,
-                    artifact_key = $3
-                WHERE backing_version_id = $1::uuid
-                RETURNING backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                          metadata, status, created_at
-                """,
-                record.version_id,
-                schema_hash,
-                artifact_key,
-            )
-            if not row:
-                raise RuntimeError("Failed to reconcile backing datasource version")
-            return self._row_to_backing_version(row)
+        return await _catalog_registry.reconcile_backing_datasource_version(
+            self,
+            record=record,
+            schema_hash=schema_hash,
+            artifact_key=artifact_key,
+        )
 
     async def get_backing_datasource_version(
         self,
         *,
         version_id: str,
     ) -> Optional[BackingDatasourceVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                       metadata, status, created_at
-                FROM {self._schema}.backing_datasource_versions
-                WHERE backing_version_id = $1::uuid
-                """,
-                version_id,
-            )
-            if not row:
-                return None
-            return self._row_to_backing_version(row)
+        return await _catalog_registry.get_backing_datasource_version(self, version_id=version_id)
 
     async def get_backing_datasource_version_by_dataset_version(
         self,
         *,
         dataset_version_id: str,
     ) -> Optional[BackingDatasourceVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                       metadata, status, created_at
-                FROM {self._schema}.backing_datasource_versions
-                WHERE dataset_version_id = $1::uuid
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                dataset_version_id,
-            )
-            if not row:
-                return None
-            return self._row_to_backing_version(row)
+        return await _catalog_registry.get_backing_datasource_version_by_dataset_version(
+            self,
+            dataset_version_id=dataset_version_id,
+        )
 
     async def get_backing_datasource_version_for_dataset(
         self,
@@ -1742,24 +561,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         backing_id: str,
         dataset_version_id: str,
     ) -> Optional[BackingDatasourceVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                       metadata, status, created_at
-                FROM {self._schema}.backing_datasource_versions
-                WHERE backing_id = $1::uuid
-                  AND dataset_version_id = $2::uuid
-                LIMIT 1
-                """,
-                backing_id,
-                dataset_version_id,
-            )
-            if not row:
-                return None
-            return self._row_to_backing_version(row)
+        return await _catalog_registry.get_backing_datasource_version_for_dataset(
+            self,
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+        )
 
     async def list_backing_datasource_versions(
         self,
@@ -1767,22 +573,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         backing_id: str,
         limit: int = 200,
     ) -> List[BackingDatasourceVersionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
-                       metadata, status, created_at
-                FROM {self._schema}.backing_datasource_versions
-                WHERE backing_id = $1::uuid
-                ORDER BY created_at DESC
-                LIMIT $2
-                """,
-                backing_id,
-                limit,
-            )
-            return [self._row_to_backing_version(row) for row in rows]
+        return await _catalog_registry.list_backing_datasource_versions(
+            self,
+            backing_id=backing_id,
+            limit=limit,
+        )
 
     async def get_or_create_backing_datasource_version(
         self,
@@ -1792,29 +587,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_hash: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> BackingDatasourceVersionRecord:
-        _, version, resolved_schema_hash = await self._resolve_backing_datasource_version_materialization(
+        return await _catalog_registry.get_or_create_backing_datasource_version(
+            self,
             backing_id=backing_id,
             dataset_version_id=dataset_version_id,
             schema_hash=schema_hash,
-        )
-        record, _ = await get_or_create_record(
-            lookup=lambda: self.get_backing_datasource_version_for_dataset(
-                backing_id=backing_id,
-                dataset_version_id=dataset_version_id,
-            ),
-            create=lambda: self._insert_backing_datasource_version(
-                backing_id=backing_id,
-                dataset_version_id=dataset_version_id,
-                schema_hash=resolved_schema_hash,
-                artifact_key=version.artifact_key,
-                metadata_payload=normalize_json_payload(metadata or {}),
-            ),
-            conflict_context=f"backing-datasource-version:{backing_id}:{dataset_version_id}",
-        )
-        return await self._reconcile_backing_datasource_version(
-            record=record,
-            schema_hash=resolved_schema_hash,
-            artifact_key=version.artifact_key,
+            metadata=metadata,
         )
 
     async def create_key_spec(
@@ -1826,27 +604,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: str = "ACTIVE",
         key_spec_id: Optional[str] = None,
     ) -> KeySpecRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        key_spec_id = key_spec_id or str(uuid4())
-        payload = normalize_json_payload(spec or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.key_specs (
-                    key_spec_id, dataset_id, dataset_version_id, spec, status
-                ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5)
-                RETURNING key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                """,
-                key_spec_id,
-                dataset_id,
-                dataset_version_id,
-                payload,
-                status,
-            )
-            if not row:
-                raise RuntimeError("Failed to create key spec")
-            return self._row_to_key_spec(row)
+        return await _governance_registry.create_key_spec(
+            self,
+            dataset_id=dataset_id,
+            spec=spec,
+            dataset_version_id=dataset_version_id,
+            status=status,
+            key_spec_id=key_spec_id,
+        )
 
     async def _get_key_spec_for_scope(
         self,
@@ -1855,31 +620,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         dataset_id: str,
         dataset_version_id: Optional[str] = None,
     ) -> Optional[asyncpg.Record]:
-        if dataset_version_id:
-            return await conn.fetchrow(
-                f"""
-                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                FROM {self._schema}.key_specs
-                WHERE dataset_id = $1::uuid
-                  AND dataset_version_id = $2::uuid
-                  AND status = 'ACTIVE'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                dataset_id,
-                dataset_version_id,
-            )
-        return await conn.fetchrow(
-            f"""
-            SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-            FROM {self._schema}.key_specs
-            WHERE dataset_id = $1::uuid
-              AND dataset_version_id IS NULL
-              AND status = 'ACTIVE'
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            dataset_id,
+        return await _governance_registry.get_key_spec_for_scope(
+            self,
+            conn,
+            dataset_id=dataset_id,
+            dataset_version_id=dataset_version_id,
         )
 
     async def get_or_create_key_spec(
@@ -1891,59 +636,17 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: str = "ACTIVE",
         key_spec_id: Optional[str] = None,
     ) -> tuple[KeySpecRecord, bool]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        key_spec_id = key_spec_id or str(uuid4())
-        payload = normalize_json_payload(spec or {})
-        lock_key = self._key_spec_scope_lock_key(
+        return await _governance_registry.get_or_create_key_spec(
+            self,
             dataset_id=dataset_id,
+            spec=spec,
             dataset_version_id=dataset_version_id,
+            status=status,
+            key_spec_id=key_spec_id,
         )
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                # `(dataset_id, NULL)` is not unique in Postgres, so dataset-level key specs
-                # must be serialized explicitly to keep creation idempotent.
-                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", lock_key)
-                existing = await self._get_key_spec_for_scope(
-                    conn,
-                    dataset_id=dataset_id,
-                    dataset_version_id=dataset_version_id,
-                )
-                if existing:
-                    return self._row_to_key_spec(existing), False
-
-                row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {self._schema}.key_specs (
-                        key_spec_id, dataset_id, dataset_version_id, spec, status
-                    ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5)
-                    RETURNING key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                    """,
-                    key_spec_id,
-                    dataset_id,
-                    dataset_version_id,
-                    payload,
-                    status,
-                )
-                if not row:
-                    raise RuntimeError("Failed to create key spec")
-                return self._row_to_key_spec(row), True
 
     async def get_key_spec(self, *, key_spec_id: str) -> Optional[KeySpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                FROM {self._schema}.key_specs
-                WHERE key_spec_id = $1::uuid
-                """,
-                key_spec_id,
-            )
-            if not row:
-                return None
-            return self._row_to_key_spec(row)
+        return await _governance_registry.get_key_spec(self, key_spec_id=key_spec_id)
 
     async def get_key_spec_for_dataset(
         self,
@@ -1951,24 +654,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         dataset_id: str,
         dataset_version_id: Optional[str] = None,
     ) -> Optional[KeySpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            if dataset_version_id:
-                row = await self._get_key_spec_for_scope(
-                    conn,
-                    dataset_id=dataset_id,
-                    dataset_version_id=dataset_version_id,
-                )
-                if row:
-                    return self._row_to_key_spec(row)
-            row = await self._get_key_spec_for_scope(
-                conn,
-                dataset_id=dataset_id,
-            )
-            if not row:
-                return None
-            return self._row_to_key_spec(row)
+        return await _governance_registry.get_key_spec_for_dataset(
+            self,
+            dataset_id=dataset_id,
+            dataset_version_id=dataset_version_id,
+        )
 
     async def list_key_specs(
         self,
@@ -1976,21 +666,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         dataset_id: Optional[str] = None,
         limit: int = 200,
     ) -> List[KeySpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
-                FROM {self._schema}.key_specs
-                WHERE ($1::uuid IS NULL OR dataset_id = $1::uuid)
-                ORDER BY created_at DESC
-                LIMIT $2
-                """,
-                dataset_id,
-                limit,
-            )
-            return [self._row_to_key_spec(row) for row in rows]
+        return await _governance_registry.list_key_specs(
+            self,
+            dataset_id=dataset_id,
+            limit=limit,
+        )
 
     async def upsert_gate_policy(
         self,
@@ -2001,32 +681,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         rules: Optional[Dict[str, Any]] = None,
         status: str = "ACTIVE",
     ) -> GatePolicyRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        rules_payload = normalize_json_payload(rules or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.gate_policies (
-                    policy_id, scope, name, description, rules, status
-                ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6)
-                ON CONFLICT (scope, name)
-                DO UPDATE SET description = EXCLUDED.description,
-                              rules = EXCLUDED.rules,
-                              status = EXCLUDED.status,
-                              updated_at = NOW()
-                RETURNING policy_id, scope, name, description, rules, status, created_at, updated_at
-                """,
-                str(uuid4()),
-                scope,
-                name,
-                description,
-                rules_payload,
-                status,
-            )
-            if not row:
-                raise RuntimeError("Failed to upsert gate policy")
-            return self._row_to_gate_policy(row)
+        return await _governance_registry.upsert_gate_policy(
+            self,
+            scope=scope,
+            name=name,
+            description=description,
+            rules=rules,
+            status=status,
+        )
 
     async def get_gate_policy(
         self,
@@ -2034,21 +696,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         scope: str,
         name: str,
     ) -> Optional[GatePolicyRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT policy_id, scope, name, description, rules, status, created_at, updated_at
-                FROM {self._schema}.gate_policies
-                WHERE scope = $1 AND name = $2
-                """,
-                scope,
-                name,
-            )
-            if not row:
-                return None
-            return self._row_to_gate_policy(row)
+        return await _governance_registry.get_gate_policy(
+            self,
+            scope=scope,
+            name=name,
+        )
 
     async def list_gate_policies(
         self,
@@ -2056,21 +708,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         scope: Optional[str] = None,
         limit: int = 200,
     ) -> List[GatePolicyRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT policy_id, scope, name, description, rules, status, created_at, updated_at
-                FROM {self._schema}.gate_policies
-                WHERE ($1::text IS NULL OR scope = $1)
-                ORDER BY created_at DESC
-                LIMIT $2
-                """,
-                scope,
-                limit,
-            )
-            return [self._row_to_gate_policy(row) for row in rows]
+        return await _governance_registry.list_gate_policies(
+            self,
+            scope=scope,
+            limit=limit,
+        )
 
     async def record_gate_result(
         self,
@@ -2082,37 +724,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         details: Optional[Dict[str, Any]] = None,
         policy_name: str = "default",
     ) -> GateResultRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        policy = await self.get_gate_policy(scope=scope, name=policy_name)
-        if not policy:
-            policy = await self.upsert_gate_policy(
-                scope=scope,
-                name=policy_name,
-                description=f"Default gate policy for {scope}",
-                rules={},
-                status="ACTIVE",
-            )
-        payload = normalize_json_payload(details or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.gate_results (
-                    result_id, policy_id, scope, subject_type, subject_id, status, details
-                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb)
-                RETURNING result_id, policy_id, scope, subject_type, subject_id, status, details, created_at
-                """,
-                str(uuid4()),
-                policy.policy_id,
-                scope,
-                subject_type,
-                subject_id,
-                status,
-                payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to record gate result")
-            return self._row_to_gate_result(row)
+        return await _governance_registry.record_gate_result(
+            self,
+            scope=scope,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status=status,
+            details=details,
+            policy_name=policy_name,
+        )
 
     async def list_gate_results(
         self,
@@ -2122,25 +742,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         subject_id: Optional[str] = None,
         limit: int = 200,
     ) -> List[GateResultRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT result_id, policy_id, scope, subject_type, subject_id, status, details, created_at
-                FROM {self._schema}.gate_results
-                WHERE ($1::text IS NULL OR scope = $1)
-                  AND ($2::text IS NULL OR subject_type = $2)
-                  AND ($3::text IS NULL OR subject_id = $3)
-                ORDER BY created_at DESC
-                LIMIT $4
-                """,
-                scope,
-                subject_type,
-                subject_id,
-                limit,
-            )
-            return [self._row_to_gate_result(row) for row in rows]
+        return await _governance_registry.list_gate_results(
+            self,
+            scope=scope,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            limit=limit,
+        )
 
     async def upsert_access_policy(
         self,
@@ -2152,32 +760,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         policy: Optional[Dict[str, Any]] = None,
         status: str = "ACTIVE",
     ) -> AccessPolicyRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        policy_payload = normalize_json_payload(policy or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.access_policies (
-                    policy_id, db_name, scope, subject_type, subject_id, policy, status
-                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7)
-                ON CONFLICT (db_name, scope, subject_type, subject_id)
-                DO UPDATE SET policy = EXCLUDED.policy,
-                              status = EXCLUDED.status,
-                              updated_at = NOW()
-                RETURNING policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
-                """,
-                str(uuid4()),
-                db_name,
-                scope,
-                subject_type,
-                subject_id,
-                policy_payload,
-                status,
-            )
-            if not row:
-                raise RuntimeError("Failed to upsert access policy")
-            return self._row_to_access_policy(row)
+        return await _governance_registry.upsert_access_policy(
+            self,
+            db_name=db_name,
+            scope=scope,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            policy=policy,
+            status=status,
+        )
 
     async def get_access_policy(
         self,
@@ -2188,25 +779,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         subject_id: str,
         status: Optional[str] = "ACTIVE",
     ) -> Optional[AccessPolicyRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
-                FROM {self._schema}.access_policies
-                WHERE db_name = $1 AND scope = $2 AND subject_type = $3 AND subject_id = $4
-                  AND ($5::text IS NULL OR status = $5)
-                """,
-                db_name,
-                scope,
-                subject_type,
-                subject_id,
-                status,
-            )
-            if not row:
-                return None
-            return self._row_to_access_policy(row)
+        return await _governance_registry.get_access_policy(
+            self,
+            db_name=db_name,
+            scope=scope,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status=status,
+        )
 
     async def list_access_policies(
         self,
@@ -2218,29 +798,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[AccessPolicyRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
-                FROM {self._schema}.access_policies
-                WHERE ($1::text IS NULL OR db_name = $1)
-                  AND ($2::text IS NULL OR scope = $2)
-                  AND ($3::text IS NULL OR subject_type = $3)
-                  AND ($4::text IS NULL OR subject_id = $4)
-                  AND ($5::text IS NULL OR status = $5)
-                ORDER BY created_at DESC
-                LIMIT $6
-                """,
-                db_name,
-                scope,
-                subject_type,
-                subject_id,
-                status,
-                limit,
-            )
-            return [self._row_to_access_policy(row) for row in rows]
+        return await _governance_registry.list_access_policies(
+            self,
+            db_name=db_name,
+            scope=scope,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status=status,
+            limit=limit,
+        )
 
     async def record_instance_edit(
         self,
@@ -2253,34 +819,16 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: str = "ACTIVE",
         fields: Optional[List[str]] = None,
     ) -> InstanceEditRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        cleaned_fields = [str(field).strip() for field in (fields or []) if str(field).strip()]
-        metadata_obj = coerce_json_dataset(metadata) if metadata is not None else {}
-        if cleaned_fields:
-            metadata_obj = {**metadata_obj, "fields": cleaned_fields}
-        metadata_payload = normalize_json_payload(metadata_obj)
-        status_value = str(status or "ACTIVE").strip().upper() or "ACTIVE"
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.instance_edits (
-                    edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata
-                ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
-                RETURNING edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata, created_at
-                """,
-                str(uuid4()),
-                db_name,
-                class_id,
-                instance_id,
-                edit_type,
-                status_value,
-                normalize_json_payload(cleaned_fields),
-                metadata_payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to record instance edit")
-            return self._row_to_instance_edit(row)
+        return await _edits_registry.record_instance_edit(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            instance_id=instance_id,
+            edit_type=edit_type,
+            metadata=metadata,
+            status=status,
+            fields=fields,
+        )
 
     async def count_instance_edits(
         self,
@@ -2289,21 +837,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         class_id: str,
         status: Optional[str] = None,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            value = await conn.fetchval(
-                f"""
-                SELECT COUNT(*)
-                FROM {self._schema}.instance_edits
-                WHERE db_name = $1 AND class_id = $2
-                  AND ($3::text IS NULL OR status = $3)
-                """,
-                db_name,
-                class_id,
-                status,
-            )
-            return int(value or 0)
+        return await _edits_registry.count_instance_edits(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            status=status,
+        )
 
     async def list_instance_edits(
         self,
@@ -2314,27 +853,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[InstanceEditRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata, created_at
-                FROM {self._schema}.instance_edits
-                WHERE db_name = $1
-                  AND ($2::text IS NULL OR class_id = $2)
-                  AND ($3::text IS NULL OR instance_id = $3)
-                  AND ($4::text IS NULL OR status = $4)
-                ORDER BY created_at DESC
-                LIMIT $5
-                """,
-                db_name,
-                class_id,
-                instance_id,
-                status,
-                limit,
-            )
-            return [self._row_to_instance_edit(row) for row in rows]
+        return await _edits_registry.list_instance_edits(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            instance_id=instance_id,
+            status=status,
+            limit=limit,
+        )
 
     async def clear_instance_edits(
         self,
@@ -2342,22 +868,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         db_name: str,
         class_id: str,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                f"""
-                DELETE FROM {self._schema}.instance_edits
-                WHERE db_name = $1 AND class_id = $2
-                """,
-                db_name,
-                class_id,
-            )
-            try:
-                return int(str(result).split()[-1])
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2356", exc_info=True)
-                return 0
+        return await _edits_registry.clear_instance_edits(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+        )
 
     async def remap_instance_edits(
         self,
@@ -2367,35 +882,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         id_map: Dict[str, str],
         status: Optional[str] = None,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        if not id_map:
-            return 0
-        updated = 0
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                for old_id, new_id in id_map.items():
-                    if not old_id or not new_id:
-                        continue
-                    result = await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.instance_edits
-                        SET instance_id = $1
-                        WHERE db_name = $2 AND class_id = $3 AND instance_id = $4
-                          AND ($5::text IS NULL OR status = $5)
-                        """,
-                        str(new_id),
-                        db_name,
-                        class_id,
-                        str(old_id),
-                        status,
-                    )
-                    try:
-                        updated += int(str(result).split()[-1])
-                    except Exception:
-                        logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2392", exc_info=True)
-                        continue
-        return updated
+        return await _edits_registry.remap_instance_edits(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            id_map=id_map,
+            status=status,
+        )
 
     async def get_instance_edit_field_stats(
         self,
@@ -2405,71 +898,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         fields: List[str],
         status: Optional[str] = "ACTIVE",
     ) -> Dict[str, Any]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        normalized_fields = [str(field).strip() for field in fields if str(field).strip()]
-        status_value = str(status).strip().upper() if status else None
-        async with self._pool.acquire() as conn:
-            total = await conn.fetchval(
-                f"""
-                SELECT COUNT(*)
-                FROM {self._schema}.instance_edits
-                WHERE db_name = $1 AND class_id = $2
-                  AND ($3::text IS NULL OR status = $3)
-                """,
-                db_name,
-                class_id,
-                status_value,
-            )
-            empty_fields = await conn.fetchval(
-                f"""
-                SELECT COUNT(*)
-                FROM {self._schema}.instance_edits
-                WHERE db_name = $1 AND class_id = $2
-                  AND ($3::text IS NULL OR status = $3)
-                  AND jsonb_array_length(fields) = 0
-                """,
-                db_name,
-                class_id,
-                status_value,
-            )
-            affected = 0
-            if normalized_fields:
-                affected = await conn.fetchval(
-                    f"""
-                    SELECT COUNT(*)
-                    FROM {self._schema}.instance_edits
-                    WHERE db_name = $1 AND class_id = $2
-                      AND ($3::text IS NULL OR status = $3)
-                      AND fields ?| $4::text[]
-                    """,
-                    db_name,
-                    class_id,
-                    status_value,
-                    normalized_fields,
-                )
-            per_field: Dict[str, int] = {}
-            for field in normalized_fields:
-                value = await conn.fetchval(
-                    f"""
-                    SELECT COUNT(*)
-                    FROM {self._schema}.instance_edits
-                    WHERE db_name = $1 AND class_id = $2
-                      AND ($3::text IS NULL OR status = $3)
-                      AND fields ? $4
-                    """,
-                    db_name,
-                    class_id,
-                    status_value,
-                    field,
-                )
-                per_field[field] = int(value or 0)
-            return {
-                "total": int(total or 0),
-                "affected": int(affected or 0),
-                "empty_fields": int(empty_fields or 0),
-                "per_field": per_field,
-            }
+        return await _edits_registry.get_instance_edit_field_stats(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            fields=fields,
+            status=status,
+        )
 
     async def apply_instance_edit_field_moves(
         self,
@@ -2479,61 +914,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         field_moves: Dict[str, str],
         status: Optional[str] = "ACTIVE",
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        if not field_moves:
-            return 0
-        status_value = str(status).strip().upper() if status else None
-        updated = 0
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                for old_field, new_field in field_moves.items():
-                    old_name = str(old_field or "").strip()
-                    new_name = str(new_field or "").strip()
-                    if not old_name or not new_name or old_name == new_name:
-                        continue
-                    result = await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.instance_edits
-                        SET fields = (
-                                SELECT jsonb_agg(
-                                    CASE WHEN value = $1 THEN $2 ELSE value END
-                                )
-                                FROM jsonb_array_elements_text(fields) AS value
-                            ),
-                            metadata = jsonb_set(
-                                metadata,
-                                '{{fields}}',
-                                (
-                                    SELECT jsonb_agg(
-                                        CASE WHEN value = $1 THEN $2 ELSE value END
-                                    )
-                                    FROM jsonb_array_elements_text(
-                                        CASE
-                                            WHEN jsonb_typeof(metadata->'fields') = 'array'
-                                                THEN metadata->'fields'
-                                            ELSE '[]'::jsonb
-                                        END
-                                    ) AS value
-                                ),
-                                true
-                            )
-                        WHERE db_name = $3 AND class_id = $4
-                          AND ($5::text IS NULL OR status = $5)
-                          AND fields ? $1
-                        """,
-                        old_name,
-                        new_name,
-                        db_name,
-                        class_id,
-                        status_value,
-                    )
-                    try:
-                        updated += int(str(result).split()[-1])
-                    except Exception:
-                        logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2529", exc_info=True)
-                        continue
-        return updated
+        return await _edits_registry.apply_instance_edit_field_moves(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            field_moves=field_moves,
+            status=status,
+        )
 
     async def update_instance_edit_status_by_fields(
         self,
@@ -2545,52 +932,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = "ACTIVE",
         metadata_note: Optional[str] = None,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        normalized_fields = [str(field).strip() for field in fields if str(field).strip()]
-        if not normalized_fields:
-            return 0
-        status_value = str(status).strip().upper() if status else None
-        next_status = str(new_status or "").strip().upper()
-        if not next_status:
-            return 0
-        payload_note = metadata_note or None
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                f"""
-                UPDATE {self._schema}.instance_edits
-                SET status = $1,
-                    metadata = jsonb_set(
-                        CASE
-                            WHEN $6::text IS NULL THEN metadata
-                            ELSE jsonb_set(
-                                metadata,
-                                '{{status_note}}',
-                                to_jsonb($6::text),
-                                true
-                            )
-                        END,
-                        '{{status_updated_at}}',
-                        to_jsonb($7::text),
-                        true
-                    )
-                WHERE db_name = $2 AND class_id = $3
-                  AND ($4::text IS NULL OR status = $4)
-                  AND fields ?| $5::text[]
-                """,
-                next_status,
-                db_name,
-                class_id,
-                status_value,
-                normalized_fields,
-                payload_note,
-                utcnow().isoformat(),
-            )
-        try:
-            return int(str(result).split()[-1])
-        except Exception:
-            logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:2586", exc_info=True)
-            return 0
+        return await _edits_registry.update_instance_edit_status_by_fields(
+            self,
+            db_name=db_name,
+            class_id=class_id,
+            fields=fields,
+            new_status=new_status,
+            status=status,
+            metadata_note=metadata_note,
+        )
 
     async def create_relationship_spec(
         self,
@@ -2610,42 +960,23 @@ class DatasetRegistry(PostgresSchemaRegistry):
         auto_sync: bool = True,
         relationship_spec_id: Optional[str] = None,
     ) -> RelationshipSpecRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        relationship_spec_id = relationship_spec_id or str(uuid4())
-        payload = normalize_json_payload(spec or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.relationship_specs (
-                    relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                    predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                    spec, status, auto_sync
-                ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::uuid, $10::uuid, $11, $12::jsonb, $13, $14)
-                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                          spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
-                          last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
-                          created_at, updated_at
-                """,
-                relationship_spec_id,
-                link_type_id,
-                db_name,
-                source_object_type,
-                target_object_type,
-                predicate,
-                spec_type,
-                dataset_id,
-                dataset_version_id,
-                mapping_spec_id,
-                mapping_spec_version,
-                payload,
-                status,
-                auto_sync,
-            )
-            if not row:
-                raise RuntimeError("Failed to create relationship spec")
-            return self._row_to_relationship_spec(row)
+        return await _relationship_registry.create_relationship_spec(
+            self,
+            link_type_id=link_type_id,
+            db_name=db_name,
+            source_object_type=source_object_type,
+            target_object_type=target_object_type,
+            predicate=predicate,
+            spec_type=spec_type,
+            dataset_id=dataset_id,
+            mapping_spec_id=mapping_spec_id,
+            mapping_spec_version=mapping_spec_version,
+            spec=spec,
+            dataset_version_id=dataset_version_id,
+            status=status,
+            auto_sync=auto_sync,
+            relationship_spec_id=relationship_spec_id,
+        )
 
     async def update_relationship_spec(
         self,
@@ -2659,51 +990,17 @@ class DatasetRegistry(PostgresSchemaRegistry):
         mapping_spec_id: Optional[str] = None,
         mapping_spec_version: Optional[int] = None,
     ) -> Optional[RelationshipSpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        updates: List[str] = []
-        values: List[Any] = []
-        if status is not None:
-            updates.append("status = $%s" % (len(values) + 1))
-            values.append(status)
-        if spec is not None:
-            updates.append("spec = $%s::jsonb" % (len(values) + 1))
-            values.append(normalize_json_payload(spec))
-        if auto_sync is not None:
-            updates.append("auto_sync = $%s" % (len(values) + 1))
-            values.append(auto_sync)
-        if dataset_id is not None:
-            updates.append("dataset_id = $%s::uuid" % (len(values) + 1))
-            values.append(dataset_id)
-        if dataset_version_id is not None:
-            updates.append("dataset_version_id = $%s::uuid" % (len(values) + 1))
-            values.append(dataset_version_id)
-        if mapping_spec_id is not None:
-            updates.append("mapping_spec_id = $%s::uuid" % (len(values) + 1))
-            values.append(mapping_spec_id)
-        if mapping_spec_version is not None:
-            updates.append("mapping_spec_version = $%s" % (len(values) + 1))
-            values.append(mapping_spec_version)
-        if not updates:
-            return await self.get_relationship_spec(relationship_spec_id=relationship_spec_id)
-        values.append(relationship_spec_id)
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.relationship_specs
-                SET {", ".join(updates)}, updated_at = NOW()
-                WHERE relationship_spec_id = ${len(values)}::uuid
-                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                          spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
-                          last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
-                          created_at, updated_at
-                """,
-                *values,
-            )
-            if not row:
-                return None
-            return self._row_to_relationship_spec(row)
+        return await _relationship_registry.update_relationship_spec(
+            self,
+            relationship_spec_id=relationship_spec_id,
+            status=status,
+            spec=spec,
+            auto_sync=auto_sync,
+            dataset_id=dataset_id,
+            dataset_version_id=dataset_version_id,
+            mapping_spec_id=mapping_spec_id,
+            mapping_spec_version=mapping_spec_version,
+        )
 
     async def record_relationship_index_result(
         self,
@@ -2717,77 +1014,17 @@ class DatasetRegistry(PostgresSchemaRegistry):
         lineage: Optional[Dict[str, Any]] = None,
         indexed_at: Optional[datetime] = None,
     ) -> Optional[RelationshipIndexResultRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        indexed_at = indexed_at or utcnow()
-        stats_payload = normalize_json_payload(stats or {})
-        errors_payload = normalize_json_payload(errors or [])
-        lineage_payload = normalize_json_payload(lineage or {})
-        async with self._pool.acquire() as conn:
-            spec_row = await conn.fetchrow(
-                f"""
-                SELECT relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
-                       mapping_spec_id, mapping_spec_version
-                FROM {self._schema}.relationship_specs
-                WHERE relationship_spec_id = $1::uuid
-                """,
-                relationship_spec_id,
-            )
-            if not spec_row:
-                return None
-            resolved_dataset_version_id = (
-                dataset_version_id or (str(spec_row["dataset_version_id"]) if spec_row["dataset_version_id"] else None)
-            )
-            resolved_mapping_version = int(mapping_spec_version or spec_row["mapping_spec_version"])
-            result_id = str(uuid4())
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.relationship_index_results (
-                    result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
-                    mapping_spec_id, mapping_spec_version, status, stats, errors, lineage
-                ) VALUES (
-                    $1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid,
-                    $7::uuid, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb
-                )
-                RETURNING result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
-                          mapping_spec_id, mapping_spec_version, status, stats, errors, lineage, created_at
-                """,
-                result_id,
-                relationship_spec_id,
-                str(spec_row["link_type_id"]),
-                str(spec_row["db_name"]),
-                str(spec_row["dataset_id"]),
-                resolved_dataset_version_id,
-                str(spec_row["mapping_spec_id"]),
-                resolved_mapping_version,
-                status,
-                stats_payload,
-                errors_payload,
-                lineage_payload,
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.relationship_specs
-                SET last_index_status = $1,
-                    last_indexed_at = $2,
-                    last_index_result_id = $3::uuid,
-                    last_index_stats = $4::jsonb,
-                    last_index_dataset_version_id = $5::uuid,
-                    last_index_mapping_spec_version = $6,
-                    updated_at = NOW()
-                WHERE relationship_spec_id = $7::uuid
-                """,
-                status,
-                indexed_at,
-                result_id,
-                stats_payload,
-                resolved_dataset_version_id,
-                resolved_mapping_version,
-                relationship_spec_id,
-            )
-            if not row:
-                return None
-            return self._row_to_relationship_index_result(row)
+        return await _relationship_registry.record_relationship_index_result(
+            self,
+            relationship_spec_id=relationship_spec_id,
+            status=status,
+            stats=stats,
+            errors=errors,
+            dataset_version_id=dataset_version_id,
+            mapping_spec_version=mapping_spec_version,
+            lineage=lineage,
+            indexed_at=indexed_at,
+        )
 
     async def get_relationship_spec(
         self,
@@ -2795,30 +1032,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         relationship_spec_id: Optional[str] = None,
         link_type_id: Optional[str] = None,
     ) -> Optional[RelationshipSpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        if not relationship_spec_id and not link_type_id:
-            raise ValueError("relationship_spec_id or link_type_id is required")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
-                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
-                       created_at, updated_at
-                FROM {self._schema}.relationship_specs
-                WHERE ($1::uuid IS NULL OR relationship_spec_id = $1::uuid)
-                  AND ($2::text IS NULL OR link_type_id = $2)
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                relationship_spec_id,
-                link_type_id,
-            )
-            if not row:
-                return None
-            return self._row_to_relationship_spec(row)
+        return await _relationship_registry.get_relationship_spec(
+            self,
+            relationship_spec_id=relationship_spec_id,
+            link_type_id=link_type_id,
+        )
 
     async def list_relationship_specs(
         self,
@@ -2828,29 +1046,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[RelationshipSpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
-                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
-                       created_at, updated_at
-                FROM {self._schema}.relationship_specs
-                WHERE ($1::text IS NULL OR db_name = $1)
-                  AND ($2::uuid IS NULL OR dataset_id = $2::uuid)
-                  AND ($3::text IS NULL OR status = $3)
-                ORDER BY created_at DESC
-                LIMIT $4
-                """,
-                db_name,
-                dataset_id,
-                status,
-                limit,
-            )
-            return [self._row_to_relationship_spec(row) for row in rows]
+        return await _relationship_registry.list_relationship_specs(
+            self,
+            db_name=db_name,
+            dataset_id=dataset_id,
+            status=status,
+            limit=limit,
+        )
 
     async def list_relationship_specs_by_relationship_object_type(
         self,
@@ -2860,30 +1062,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = "ACTIVE",
         limit: int = 200,
     ) -> List[RelationshipSpecRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
-                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
-                       created_at, updated_at
-                FROM {self._schema}.relationship_specs
-                WHERE db_name = $1
-                  AND spec_type = 'object_backed'
-                  AND spec->>'relationship_object_type' = $2
-                  AND ($3::text IS NULL OR status = $3)
-                ORDER BY created_at DESC
-                LIMIT $4
-                """,
-                db_name,
-                relationship_object_type,
-                status,
-                limit,
-            )
-            return [self._row_to_relationship_spec(row) for row in rows]
+        return await _relationship_registry.list_relationship_specs_by_relationship_object_type(
+            self,
+            db_name=db_name,
+            relationship_object_type=relationship_object_type,
+            status=status,
+            limit=limit,
+        )
 
     async def list_relationship_index_results(
         self,
@@ -2894,28 +1079,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[RelationshipIndexResultRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
-                       mapping_spec_id, mapping_spec_version, status, stats, errors, lineage, created_at
-                FROM {self._schema}.relationship_index_results
-                WHERE ($1::uuid IS NULL OR relationship_spec_id = $1::uuid)
-                  AND ($2::text IS NULL OR link_type_id = $2)
-                  AND ($3::text IS NULL OR db_name = $3)
-                  AND ($4::text IS NULL OR status = $4)
-                ORDER BY created_at DESC
-                LIMIT $5
-                """,
-                relationship_spec_id,
-                link_type_id,
-                db_name,
-                status,
-                limit,
-            )
-            return [self._row_to_relationship_index_result(row) for row in rows]
+        return await _edits_registry.list_relationship_index_results(
+            self,
+            relationship_spec_id=relationship_spec_id,
+            link_type_id=link_type_id,
+            db_name=db_name,
+            status=status,
+            limit=limit,
+        )
 
     async def record_link_edit(
         self,
@@ -2933,39 +1104,21 @@ class DatasetRegistry(PostgresSchemaRegistry):
         metadata: Optional[Dict[str, Any]] = None,
         edit_id: Optional[str] = None,
     ) -> LinkEditRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        edit_id = edit_id or str(uuid4())
-        payload = normalize_json_payload(metadata or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.link_edits (
-                    edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
-                    predicate, source_instance_id, target_instance_id, edit_type, status, metadata
-                ) VALUES (
-                    $1::uuid, $2, $3, $4, $5, $6,
-                    $7, $8, $9, $10, $11, $12::jsonb
-                )
-                RETURNING edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
-                          predicate, source_instance_id, target_instance_id, edit_type, status, metadata, created_at
-                """,
-                edit_id,
-                db_name,
-                link_type_id,
-                branch,
-                source_object_type,
-                target_object_type,
-                predicate,
-                source_instance_id,
-                target_instance_id,
-                edit_type,
-                status,
-                payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to record link edit")
-            return self._row_to_link_edit(row)
+        return await _edits_registry.record_link_edit(
+            self,
+            db_name=db_name,
+            link_type_id=link_type_id,
+            branch=branch,
+            source_object_type=source_object_type,
+            target_object_type=target_object_type,
+            predicate=predicate,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
+            edit_type=edit_type,
+            status=status,
+            metadata=metadata,
+            edit_id=edit_id,
+        )
 
     async def list_link_edits(
         self,
@@ -2978,32 +1131,16 @@ class DatasetRegistry(PostgresSchemaRegistry):
         target_instance_id: Optional[str] = None,
         limit: int = 200,
     ) -> List[LinkEditRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
-                       predicate, source_instance_id, target_instance_id, edit_type, status, metadata, created_at
-                FROM {self._schema}.link_edits
-                WHERE db_name = $1
-                  AND ($2::text IS NULL OR link_type_id = $2)
-                  AND ($3::text IS NULL OR branch = $3)
-                  AND ($4::text IS NULL OR status = $4)
-                  AND ($5::text IS NULL OR source_instance_id = $5)
-                  AND ($6::text IS NULL OR target_instance_id = $6)
-                ORDER BY created_at DESC
-                LIMIT $7
-                """,
-                db_name,
-                link_type_id,
-                branch,
-                status,
-                source_instance_id,
-                target_instance_id,
-                limit,
-            )
-            return [self._row_to_link_edit(row) for row in rows]
+        return await _edits_registry.list_link_edits(
+            self,
+            db_name=db_name,
+            link_type_id=link_type_id,
+            branch=branch,
+            status=status,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
+            limit=limit,
+        )
 
     async def clear_link_edits(
         self,
@@ -3012,24 +1149,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         link_type_id: str,
         branch: Optional[str] = None,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                f"""
-                DELETE FROM {self._schema}.link_edits
-                WHERE db_name = $1 AND link_type_id = $2
-                  AND ($3::text IS NULL OR branch = $3)
-                """,
-                db_name,
-                link_type_id,
-                branch,
-            )
-            try:
-                return int(str(result).split()[-1])
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:3024", exc_info=True)
-                return 0
+        return await _edits_registry.clear_link_edits(
+            self,
+            db_name=db_name,
+            link_type_id=link_type_id,
+            branch=branch,
+        )
 
     async def create_schema_migration_plan(
         self,
@@ -3041,28 +1166,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: str = "PENDING",
         plan_id: Optional[str] = None,
     ) -> SchemaMigrationPlanRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        plan_id = plan_id or str(uuid4())
-        payload = normalize_json_payload(plan or {})
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.schema_migration_plans (
-                    plan_id, db_name, subject_type, subject_id, status, plan
-                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb)
-                RETURNING plan_id, db_name, subject_type, subject_id, status, plan, created_at, updated_at
-                """,
-                plan_id,
-                db_name,
-                subject_type,
-                subject_id,
-                status,
-                payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to create schema migration plan")
-            return self._row_to_schema_migration_plan(row)
+        return await _edits_registry.create_schema_migration_plan(
+            self,
+            db_name=db_name,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            plan=plan,
+            status=status,
+            plan_id=plan_id,
+        )
 
     async def list_schema_migration_plans(
         self,
@@ -3073,115 +1185,28 @@ class DatasetRegistry(PostgresSchemaRegistry):
         status: Optional[str] = None,
         limit: int = 200,
     ) -> List[SchemaMigrationPlanRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT plan_id, db_name, subject_type, subject_id, status, plan, created_at, updated_at
-                FROM {self._schema}.schema_migration_plans
-                WHERE ($1::text IS NULL OR db_name = $1)
-                  AND ($2::text IS NULL OR subject_type = $2)
-                  AND ($3::text IS NULL OR subject_id = $3)
-                  AND ($4::text IS NULL OR status = $4)
-                ORDER BY created_at DESC
-                LIMIT $5
-                """,
-                db_name,
-                subject_type,
-                subject_id,
-                status,
-                limit,
-            )
-            return [self._row_to_schema_migration_plan(row) for row in rows]
+        return await _edits_registry.list_schema_migration_plans(
+            self,
+            db_name=db_name,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status=status,
+            limit=limit,
+        )
 
     async def get_ingest_request_by_key(
         self,
         *,
         idempotency_key: str,
     ) -> Optional[DatasetIngestRequestRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                       status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                       schema_approved_at, schema_approved_by,
-                       sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                FROM {self._schema}.dataset_ingest_requests
-                WHERE idempotency_key = $1
-                """,
-                idempotency_key,
-            )
-            if not row:
-                return None
-            return DatasetIngestRequestRecord(
-                ingest_request_id=str(row["ingest_request_id"]),
-                dataset_id=str(row["dataset_id"]),
-                db_name=row["db_name"],
-                branch=row["branch"],
-                idempotency_key=row["idempotency_key"],
-                request_fingerprint=row["request_fingerprint"],
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                schema_json=coerce_json_dataset(row["schema_json"]) or {},
-                schema_status=str(row["schema_status"] or "PENDING"),
-                schema_approved_at=row["schema_approved_at"],
-                schema_approved_by=row["schema_approved_by"],
-                sample_json=coerce_json_dataset(row["sample_json"]) or {},
-                row_count=row["row_count"],
-                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                published_at=row["published_at"],
-            )
+        return await _ingest_registry.get_ingest_request_by_key(self, idempotency_key=idempotency_key)
 
     async def get_ingest_request(
         self,
         *,
         ingest_request_id: str,
     ) -> Optional[DatasetIngestRequestRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                       status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                       schema_approved_at, schema_approved_by,
-                       sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                FROM {self._schema}.dataset_ingest_requests
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-            )
-            if not row:
-                return None
-            return DatasetIngestRequestRecord(
-                ingest_request_id=str(row["ingest_request_id"]),
-                dataset_id=str(row["dataset_id"]),
-                db_name=row["db_name"],
-                branch=row["branch"],
-                idempotency_key=row["idempotency_key"],
-                request_fingerprint=row["request_fingerprint"],
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                schema_json=coerce_json_dataset(row["schema_json"]) or {},
-                schema_status=str(row["schema_status"] or "PENDING"),
-                schema_approved_at=row["schema_approved_at"],
-                schema_approved_by=row["schema_approved_by"],
-                sample_json=coerce_json_dataset(row["sample_json"]) or {},
-                row_count=row["row_count"],
-                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                published_at=row["published_at"],
-            )
+        return await _ingest_registry.get_ingest_request(self, ingest_request_id=ingest_request_id)
 
     async def create_ingest_request(
         self,
@@ -3196,131 +1221,32 @@ class DatasetRegistry(PostgresSchemaRegistry):
         row_count: Optional[int] = None,
         source_metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple[DatasetIngestRequestRecord, bool]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        ingest_request_id = str(uuid4())
-        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
-        sample_payload = normalize_json_payload(sample_json) if sample_json is not None else None
-        source_payload = normalize_json_payload(source_metadata) if source_metadata is not None else None
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.dataset_ingest_requests (
-                    ingest_request_id, dataset_id, db_name, branch, idempotency_key,
-                    request_fingerprint, status, schema_json, sample_json, row_count, source_metadata
-                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'RECEIVED', $7::jsonb, $8::jsonb, $9, $10::jsonb)
-                ON CONFLICT (idempotency_key) DO UPDATE
-                SET updated_at = NOW(),
-                    schema_json = COALESCE(EXCLUDED.schema_json, {self._schema}.dataset_ingest_requests.schema_json),
-                    sample_json = COALESCE(EXCLUDED.sample_json, {self._schema}.dataset_ingest_requests.sample_json),
-                    row_count = COALESCE(EXCLUDED.row_count, {self._schema}.dataset_ingest_requests.row_count),
-                    source_metadata = COALESCE(EXCLUDED.source_metadata, {self._schema}.dataset_ingest_requests.source_metadata)
-                RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                          schema_approved_at, schema_approved_by,
-                          sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                """,
-                ingest_request_id,
-                dataset_id,
-                db_name,
-                branch,
-                idempotency_key,
-                request_fingerprint,
-                schema_payload,
-                sample_payload,
-                row_count,
-                source_payload,
-            )
-            if not row:
-                raise RuntimeError("Failed to create ingest request")
-            record = DatasetIngestRequestRecord(
-                ingest_request_id=str(row["ingest_request_id"]),
-                dataset_id=str(row["dataset_id"]),
-                db_name=row["db_name"],
-                branch=row["branch"],
-                idempotency_key=row["idempotency_key"],
-                request_fingerprint=row["request_fingerprint"],
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                schema_json=coerce_json_dataset(row["schema_json"]) or {},
-                schema_status=str(row["schema_status"] or "PENDING"),
-                schema_approved_at=row["schema_approved_at"],
-                schema_approved_by=row["schema_approved_by"],
-                sample_json=coerce_json_dataset(row["sample_json"]) or {},
-                row_count=row["row_count"],
-                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                published_at=row["published_at"],
-            )
-            is_new = record.ingest_request_id == ingest_request_id
-            return record, is_new
+        return await _ingest_registry.create_ingest_request(
+            self,
+            dataset_id=dataset_id,
+            db_name=db_name,
+            branch=branch,
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+            schema_json=schema_json,
+            sample_json=sample_json,
+            row_count=row_count,
+            source_metadata=source_metadata,
+        )
 
     async def get_ingest_transaction(
         self,
         *,
         ingest_request_id: str,
     ) -> Optional[DatasetIngestTransactionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
-                       error, created_at, updated_at, committed_at, aborted_at
-                FROM {self._schema}.dataset_ingest_transactions
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-            )
-            if not row:
-                return None
-            return DatasetIngestTransactionRecord(
-                transaction_id=str(row["transaction_id"]),
-                ingest_request_id=str(row["ingest_request_id"]),
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                committed_at=row["committed_at"],
-                aborted_at=row["aborted_at"],
-            )
+        return await _ingest_registry.get_ingest_transaction(self, ingest_request_id=ingest_request_id)
 
     async def get_ingest_transaction_by_id(
         self,
         *,
         transaction_id: str,
     ) -> Optional[DatasetIngestTransactionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
-                       error, created_at, updated_at, committed_at, aborted_at
-                FROM {self._schema}.dataset_ingest_transactions
-                WHERE transaction_id = $1::uuid
-                """,
-                transaction_id,
-            )
-            if not row:
-                return None
-            return DatasetIngestTransactionRecord(
-                transaction_id=str(row["transaction_id"]),
-                ingest_request_id=str(row["ingest_request_id"]),
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                committed_at=row["committed_at"],
-                aborted_at=row["aborted_at"],
-            )
+        return await _ingest_registry.get_ingest_transaction_by_id(self, transaction_id=transaction_id)
 
     async def list_ingest_transactions_for_dataset(
         self,
@@ -3330,48 +1256,13 @@ class DatasetRegistry(PostgresSchemaRegistry):
         limit: int = 100,
         offset: int = 0,
     ) -> List[DatasetIngestTransactionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        resolved_limit = max(1, int(limit))
-        resolved_offset = max(0, int(offset))
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT t.transaction_id, t.ingest_request_id, t.status, t.lakefs_commit_id, t.artifact_key,
-                       t.error, t.created_at, t.updated_at, t.committed_at, t.aborted_at
-                FROM {self._schema}.dataset_ingest_transactions t
-                JOIN {self._schema}.dataset_ingest_requests r
-                  ON r.ingest_request_id = t.ingest_request_id
-                WHERE r.dataset_id = $1::uuid
-                  AND r.branch = $2
-                ORDER BY t.created_at DESC
-                LIMIT $3 OFFSET $4
-                """,
-                dataset_id,
-                branch,
-                resolved_limit,
-                resolved_offset,
-            )
-
-        results: List[DatasetIngestTransactionRecord] = []
-        for row in rows or []:
-            results.append(
-                DatasetIngestTransactionRecord(
-                    transaction_id=str(row["transaction_id"]),
-                    ingest_request_id=str(row["ingest_request_id"]),
-                    status=row["status"],
-                    lakefs_commit_id=row["lakefs_commit_id"],
-                    artifact_key=row["artifact_key"],
-                    error=row["error"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                    committed_at=row["committed_at"],
-                    aborted_at=row["aborted_at"],
-                )
-            )
-        return results
+        return await _ingest_registry.list_ingest_transactions_for_dataset(
+            self,
+            dataset_id=dataset_id,
+            branch=branch,
+            limit=limit,
+            offset=offset,
+        )
 
     async def create_ingest_transaction(
         self,
@@ -3379,38 +1270,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         ingest_request_id: str,
         status: str = "OPEN",
     ) -> DatasetIngestTransactionRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        transaction_id = str(uuid4())
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.dataset_ingest_transactions (
-                    transaction_id, ingest_request_id, status
-                ) VALUES ($1::uuid, $2::uuid, $3)
-                ON CONFLICT (ingest_request_id) DO UPDATE
-                SET updated_at = NOW()
-                RETURNING transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
-                          error, created_at, updated_at, committed_at, aborted_at
-                """,
-                transaction_id,
-                ingest_request_id,
-                status,
-            )
-            if not row:
-                raise RuntimeError("Failed to create ingest transaction")
-            return DatasetIngestTransactionRecord(
-                transaction_id=str(row["transaction_id"]),
-                ingest_request_id=str(row["ingest_request_id"]),
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                committed_at=row["committed_at"],
-                aborted_at=row["aborted_at"],
-            )
+        return await _ingest_registry.create_ingest_transaction(
+            self,
+            ingest_request_id=ingest_request_id,
+            status=status,
+        )
 
     async def mark_ingest_transaction_committed(
         self,
@@ -3419,39 +1283,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         lakefs_commit_id: str,
         artifact_key: Optional[str],
     ) -> Optional[DatasetIngestTransactionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_transactions
-                SET status = 'COMMITTED',
-                    lakefs_commit_id = $2,
-                    artifact_key = $3,
-                    committed_at = COALESCE(committed_at, NOW()),
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                RETURNING transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
-                          error, created_at, updated_at, committed_at, aborted_at
-                """,
-                ingest_request_id,
-                lakefs_commit_id,
-                artifact_key,
-            )
-            if not row:
-                return None
-            return DatasetIngestTransactionRecord(
-                transaction_id=str(row["transaction_id"]),
-                ingest_request_id=str(row["ingest_request_id"]),
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                committed_at=row["committed_at"],
-                aborted_at=row["aborted_at"],
-            )
+        return await _ingest_registry.mark_ingest_transaction_committed(
+            self,
+            ingest_request_id=ingest_request_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+        )
 
     async def mark_ingest_transaction_aborted(
         self,
@@ -3459,37 +1296,11 @@ class DatasetRegistry(PostgresSchemaRegistry):
         ingest_request_id: str,
         error: str,
     ) -> Optional[DatasetIngestTransactionRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_transactions
-                SET status = 'ABORTED',
-                    error = $2,
-                    aborted_at = COALESCE(aborted_at, NOW()),
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                RETURNING transaction_id, ingest_request_id, status, lakefs_commit_id, artifact_key,
-                          error, created_at, updated_at, committed_at, aborted_at
-                """,
-                ingest_request_id,
-                error,
-            )
-            if not row:
-                return None
-            return DatasetIngestTransactionRecord(
-                transaction_id=str(row["transaction_id"]),
-                ingest_request_id=str(row["ingest_request_id"]),
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                committed_at=row["committed_at"],
-                aborted_at=row["aborted_at"],
-            )
+        return await _ingest_registry.mark_ingest_transaction_aborted(
+            self,
+            ingest_request_id=ingest_request_id,
+            error=error,
+        )
 
     async def mark_ingest_committed(
         self,
@@ -3498,63 +1309,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         lakefs_commit_id: str,
         artifact_key: Optional[str],
     ) -> DatasetIngestRequestRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_requests
-                SET status = 'RAW_COMMITTED',
-                    lakefs_commit_id = $2,
-                    artifact_key = $3,
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                  AND (lakefs_commit_id IS NULL OR lakefs_commit_id = '')
-                RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                          schema_approved_at, schema_approved_by,
-                          sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                """,
-                ingest_request_id,
-                lakefs_commit_id,
-                artifact_key,
-            )
-            if not row:
-                row = await conn.fetchrow(
-                    f"""
-                    SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                           status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                           schema_approved_at, schema_approved_by,
-                           sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                    FROM {self._schema}.dataset_ingest_requests
-                    WHERE ingest_request_id = $1::uuid
-                    """,
-                    ingest_request_id,
-                )
-            if not row:
-                raise RuntimeError("Ingest request not found")
-            return DatasetIngestRequestRecord(
-                ingest_request_id=str(row["ingest_request_id"]),
-                dataset_id=str(row["dataset_id"]),
-                db_name=row["db_name"],
-                branch=row["branch"],
-                idempotency_key=row["idempotency_key"],
-                request_fingerprint=row["request_fingerprint"],
-                status=row["status"],
-                lakefs_commit_id=row["lakefs_commit_id"],
-                artifact_key=row["artifact_key"],
-                schema_json=coerce_json_dataset(row["schema_json"]) or {},
-                schema_status=str(row["schema_status"] or "PENDING"),
-                schema_approved_at=row["schema_approved_at"],
-                schema_approved_by=row["schema_approved_by"],
-                sample_json=coerce_json_dataset(row["sample_json"]) or {},
-                row_count=row["row_count"],
-                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
-                error=row["error"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                published_at=row["published_at"],
-            )
+        return await _ingest_registry.mark_ingest_committed(
+            self,
+            ingest_request_id=ingest_request_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+        )
 
     async def mark_ingest_failed(
         self,
@@ -3562,32 +1322,7 @@ class DatasetRegistry(PostgresSchemaRegistry):
         ingest_request_id: str,
         error: str,
     ) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_requests
-                SET status = 'FAILED',
-                    error = $2,
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-                error,
-            )
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_transactions
-                SET status = 'ABORTED',
-                    error = $2,
-                    aborted_at = COALESCE(aborted_at, NOW()),
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-                error,
-            )
+        await _ingest_registry.mark_ingest_failed(self, ingest_request_id=ingest_request_id, error=error)
 
     async def update_ingest_request_payload(
         self,
@@ -3598,28 +1333,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         row_count: Optional[int] = None,
         source_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
-        sample_payload = normalize_json_payload(sample_json) if sample_json is not None else None
-        source_payload = normalize_json_payload(source_metadata) if source_metadata is not None else None
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_requests
-                SET schema_json = COALESCE($2::jsonb, schema_json),
-                    sample_json = COALESCE($3::jsonb, sample_json),
-                    row_count = COALESCE($4, row_count),
-                    source_metadata = COALESCE($5::jsonb, source_metadata),
-                    updated_at = NOW()
-                WHERE ingest_request_id = $1::uuid
-                """,
-                ingest_request_id,
-                schema_payload,
-                sample_payload,
-                row_count,
-                source_payload,
-            )
+        await _ingest_registry.update_ingest_request_payload(
+            self,
+            ingest_request_id=ingest_request_id,
+            schema_json=schema_json,
+            sample_json=sample_json,
+            row_count=row_count,
+            source_metadata=source_metadata,
+        )
 
     async def approve_ingest_schema(
         self,
@@ -3628,108 +1349,12 @@ class DatasetRegistry(PostgresSchemaRegistry):
         schema_json: Optional[Dict[str, Any]] = None,
         approved_by: Optional[str] = None,
     ) -> tuple[DatasetRecord, DatasetIngestRequestRecord]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        approved_at = utcnow()
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    f"""
-                    SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                           status, lakefs_commit_id, artifact_key, schema_json, schema_status,
-                           schema_approved_at, schema_approved_by,
-                           sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
-                    FROM {self._schema}.dataset_ingest_requests
-                    WHERE ingest_request_id = $1::uuid
-                    FOR UPDATE
-                    """,
-                    ingest_request_id,
-                )
-                if not row:
-                    raise RuntimeError("Ingest request not found")
-                # Approving schema means promoting the ingest-request schema_json into the dataset's
-                # authoritative schema_json. Keep payload as a dict for validation, then serialize
-                # once for asyncpg/jsonb binding.
-                payload = schema_json if schema_json is not None else coerce_json_dataset(row["schema_json"])
-                payload = payload or {}
-                if not isinstance(payload, dict):
-                    raise ValueError("schema_json must be an object")
-                if not payload:
-                    raise ValueError("schema_json is required to approve")
-                payload_json = normalize_json_payload(payload)
-
-                dataset_id = str(row["dataset_id"])
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.datasets
-                    SET schema_json = $2::jsonb, updated_at = NOW()
-                    WHERE dataset_id = $1::uuid
-                    """,
-                    dataset_id,
-                    payload_json,
-                )
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.dataset_ingest_requests
-                    SET schema_json = $2::jsonb,
-                        schema_status = 'APPROVED',
-                        schema_approved_at = $4,
-                        schema_approved_by = $3,
-                        updated_at = NOW()
-                    WHERE ingest_request_id = $1::uuid
-                    """,
-                    ingest_request_id,
-                    payload_json,
-                    approved_by,
-                    approved_at,
-                )
-                dataset_row = await conn.fetchrow(
-                    f"""
-                    SELECT dataset_id, db_name, name, description, source_type,
-                           source_ref, branch, schema_json, created_at, updated_at
-                    FROM {self._schema}.datasets
-                    WHERE dataset_id = $1::uuid
-                    """,
-                    dataset_id,
-                )
-                if not dataset_row:
-                    raise RuntimeError("Dataset not found for ingest request")
-
-        dataset_record = DatasetRecord(
-            dataset_id=str(dataset_row["dataset_id"]),
-            db_name=str(dataset_row["db_name"]),
-            name=str(dataset_row["name"]),
-            description=dataset_row["description"],
-            source_type=str(dataset_row["source_type"]),
-            source_ref=dataset_row["source_ref"],
-            branch=str(dataset_row["branch"]),
-            schema_json=coerce_json_dataset(dataset_row["schema_json"]),
-            created_at=dataset_row["created_at"],
-            updated_at=dataset_row["updated_at"],
+        return await _ingest_registry.approve_ingest_schema(
+            self,
+            ingest_request_id=ingest_request_id,
+            schema_json=schema_json,
+            approved_by=approved_by,
         )
-        updated_request = DatasetIngestRequestRecord(
-            ingest_request_id=str(row["ingest_request_id"]),
-            dataset_id=str(row["dataset_id"]),
-            db_name=row["db_name"],
-            branch=row["branch"],
-            idempotency_key=row["idempotency_key"],
-            request_fingerprint=row["request_fingerprint"],
-            status=row["status"],
-            lakefs_commit_id=row["lakefs_commit_id"],
-            artifact_key=row["artifact_key"],
-            schema_json=payload,
-            schema_status="APPROVED",
-            schema_approved_at=approved_at,
-            schema_approved_by=approved_by,
-            sample_json=coerce_json_dataset(row["sample_json"]) or {},
-            row_count=row["row_count"],
-            source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
-            error=row["error"],
-            created_at=row["created_at"],
-            updated_at=dataset_row["updated_at"],
-            published_at=row["published_at"],
-        )
-        return dataset_record, updated_request
 
     async def publish_ingest_request(
         self,
@@ -3744,302 +1369,18 @@ class DatasetRegistry(PostgresSchemaRegistry):
         apply_schema: bool = True,
         outbox_entries: Optional[List[Dict[str, Any]]] = None,
     ) -> DatasetVersionRecord:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        sample_json = sample_json or {}
-        sample_payload = normalize_json_payload(sample_json)
-        schema_payload = None
-        if schema_json is not None:
-            schema_payload = normalize_json_payload(schema_json)
-        schema_hash = self._resolve_version_schema_hash(sample_json=sample_json, schema_json=schema_json)
-
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                if schema_payload is not None and apply_schema:
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.datasets
-                        SET schema_json = $2::jsonb, updated_at = NOW()
-                        WHERE dataset_id = $1
-                        """,
-                        dataset_id,
-                        schema_payload,
-                    )
-                existing = await conn.fetchrow(
-                    f"""
-                    SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                           ingest_request_id, promoted_from_artifact_id, created_at
-                    FROM {self._schema}.dataset_versions
-                    WHERE ingest_request_id = $1::uuid
-                    """,
-                    ingest_request_id,
-                )
-                if existing:
-                    dataset_version_id = str(existing["version_id"])
-                    await self._upsert_backing_version_for_dataset_version(
-                        conn,
-                        dataset_id=dataset_id,
-                        dataset_version_id=dataset_version_id,
-                        artifact_key=artifact_key,
-                        schema_hash=schema_hash,
-                    )
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.dataset_ingest_requests
-                        SET status = 'PUBLISHED',
-                            published_at = COALESCE(published_at, NOW()),
-                            updated_at = NOW()
-                        WHERE ingest_request_id = $1::uuid
-                        """,
-                        ingest_request_id,
-                    )
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.dataset_ingest_transactions
-                        SET status = 'COMMITTED',
-                            committed_at = COALESCE(committed_at, NOW()),
-                            updated_at = NOW()
-                        WHERE ingest_request_id = $1::uuid
-                        """,
-                        ingest_request_id,
-                    )
-                    if outbox_entries:
-                        has_outbox = await conn.fetchval(
-                            f"""
-                            SELECT 1 FROM {self._schema}.dataset_ingest_outbox
-                            WHERE ingest_request_id = $1::uuid
-                              AND status <> 'dead'
-                            LIMIT 1
-                            """,
-                            ingest_request_id,
-                        )
-                        if not has_outbox:
-                            _inject_dataset_version(outbox_entries, dataset_version_id)
-                            for entry in outbox_entries:
-                                payload = entry.get("payload") or {}
-                                if isinstance(payload, dict):
-                                    enrich_metadata_with_current_trace(payload)
-                                await conn.execute(
-                                    f"""
-                                    INSERT INTO {self._schema}.dataset_ingest_outbox (
-                                        outbox_id, ingest_request_id, kind, payload, status
-                                    ) VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, 'pending')
-                                    """,
-                                    str(uuid4()),
-                                    ingest_request_id,
-                                    str(entry.get("kind") or "eventstore"),
-                                    normalize_json_payload(payload),
-                                )
-                    return DatasetVersionRecord(
-                        version_id=dataset_version_id,
-                        dataset_id=str(existing["dataset_id"]),
-                        lakefs_commit_id=str(existing["lakefs_commit_id"]),
-                        artifact_key=existing["artifact_key"],
-                        row_count=existing["row_count"],
-                        sample_json=coerce_json_dataset(existing["sample_json"]),
-                        ingest_request_id=str(existing["ingest_request_id"]) if existing["ingest_request_id"] else None,
-                        promoted_from_artifact_id=(
-                            str(existing["promoted_from_artifact_id"]) if existing["promoted_from_artifact_id"] else None
-                        ),
-                        created_at=existing["created_at"],
-                    )
-
-                try:
-                    async with conn.transaction():
-                        row = await conn.fetchrow(
-                            f"""
-                            INSERT INTO {self._schema}.dataset_versions (
-                                version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                                ingest_request_id, promoted_from_artifact_id
-                            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, NULL)
-                            RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                                      ingest_request_id, promoted_from_artifact_id, created_at
-                            """,
-                            str(uuid4()),
-                            dataset_id,
-                            lakefs_commit_id,
-                            artifact_key,
-                            row_count,
-                            sample_payload,
-                            ingest_request_id,
-                        )
-                except asyncpg.UniqueViolationError:
-                    existing = await conn.fetchrow(
-                        f"""
-                        SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                               ingest_request_id, promoted_from_artifact_id, created_at
-                        FROM {self._schema}.dataset_versions
-                        WHERE ingest_request_id = $1::uuid
-                        LIMIT 1
-                        """,
-                        ingest_request_id,
-                    )
-                    if not existing:
-                        existing = await conn.fetchrow(
-                            f"""
-                            SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                                   ingest_request_id, promoted_from_artifact_id, created_at
-                            FROM {self._schema}.dataset_versions
-                            WHERE dataset_id = $1 AND lakefs_commit_id = $2
-                            LIMIT 1
-                            """,
-                            dataset_id,
-                            lakefs_commit_id,
-                        )
-                    if (
-                        existing
-                        and existing["ingest_request_id"]
-                        and str(existing["ingest_request_id"]) != ingest_request_id
-                    ):
-                        raise RuntimeError(
-                            "dataset version already linked to a different ingest_request_id"
-                        )
-                    if not existing:
-                        raise
-                    dataset_version_id = str(existing["version_id"])
-                    await self._upsert_backing_version_for_dataset_version(
-                        conn,
-                        dataset_id=dataset_id,
-                        dataset_version_id=dataset_version_id,
-                        artifact_key=artifact_key,
-                        schema_hash=schema_hash,
-                    )
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.dataset_ingest_requests
-                        SET status = 'PUBLISHED',
-                            lakefs_commit_id = $2,
-                            artifact_key = $3,
-                            published_at = NOW(),
-                            updated_at = NOW()
-                        WHERE ingest_request_id = $1::uuid
-                        """,
-                        ingest_request_id,
-                        lakefs_commit_id,
-                        artifact_key,
-                    )
-                    await conn.execute(
-                        f"""
-                        UPDATE {self._schema}.dataset_ingest_transactions
-                        SET status = 'COMMITTED',
-                            lakefs_commit_id = $2,
-                            artifact_key = $3,
-                            committed_at = COALESCE(committed_at, NOW()),
-                            updated_at = NOW()
-                        WHERE ingest_request_id = $1::uuid
-                        """,
-                        ingest_request_id,
-                        lakefs_commit_id,
-                        artifact_key,
-                    )
-                    if outbox_entries:
-                        has_outbox = await conn.fetchval(
-                            f"""
-                            SELECT 1 FROM {self._schema}.dataset_ingest_outbox
-                            WHERE ingest_request_id = $1::uuid
-                              AND status <> 'dead'
-                            LIMIT 1
-                            """,
-                            ingest_request_id,
-                        )
-                        if not has_outbox:
-                            _inject_dataset_version(outbox_entries, dataset_version_id)
-                            for entry in outbox_entries:
-                                payload = entry.get("payload") or {}
-                                if isinstance(payload, dict):
-                                    enrich_metadata_with_current_trace(payload)
-                                await conn.execute(
-                                    f"""
-                                    INSERT INTO {self._schema}.dataset_ingest_outbox (
-                                        outbox_id, ingest_request_id, kind, payload, status
-                                    ) VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, 'pending')
-                                    """,
-                                    str(uuid4()),
-                                    ingest_request_id,
-                                    str(entry.get("kind") or "eventstore"),
-                                    normalize_json_payload(payload),
-                                )
-                    return DatasetVersionRecord(
-                        version_id=dataset_version_id,
-                        dataset_id=str(existing["dataset_id"]),
-                        lakefs_commit_id=str(existing["lakefs_commit_id"]),
-                        artifact_key=existing["artifact_key"],
-                        row_count=existing["row_count"],
-                        sample_json=coerce_json_dataset(existing["sample_json"]),
-                        ingest_request_id=str(existing["ingest_request_id"]) if existing["ingest_request_id"] else None,
-                        promoted_from_artifact_id=(
-                            str(existing["promoted_from_artifact_id"]) if existing["promoted_from_artifact_id"] else None
-                        ),
-                        created_at=existing["created_at"],
-                    )
-                if not row:
-                    raise RuntimeError("Failed to publish dataset version")
-                dataset_version_id = str(row["version_id"])
-                await self._upsert_backing_version_for_dataset_version(
-                    conn,
-                    dataset_id=dataset_id,
-                    dataset_version_id=dataset_version_id,
-                    artifact_key=artifact_key,
-                    schema_hash=schema_hash,
-                )
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.dataset_ingest_requests
-                    SET status = 'PUBLISHED',
-                        lakefs_commit_id = $2,
-                        artifact_key = $3,
-                        published_at = NOW(),
-                        updated_at = NOW()
-                    WHERE ingest_request_id = $1::uuid
-                    """,
-                    ingest_request_id,
-                    lakefs_commit_id,
-                    artifact_key,
-                )
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.dataset_ingest_transactions
-                    SET status = 'COMMITTED',
-                        lakefs_commit_id = $2,
-                        artifact_key = $3,
-                        committed_at = COALESCE(committed_at, NOW()),
-                        updated_at = NOW()
-                    WHERE ingest_request_id = $1::uuid
-                    """,
-                    ingest_request_id,
-                    lakefs_commit_id,
-                    artifact_key,
-                )
-                if outbox_entries:
-                    _inject_dataset_version(outbox_entries, dataset_version_id)
-                    for entry in outbox_entries:
-                        payload = entry.get("payload") or {}
-                        if isinstance(payload, dict):
-                            enrich_metadata_with_current_trace(payload)
-                        await conn.execute(
-                            f"""
-                            INSERT INTO {self._schema}.dataset_ingest_outbox (
-                                outbox_id, ingest_request_id, kind, payload, status
-                            ) VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, 'pending')
-                            """,
-                            str(uuid4()),
-                            ingest_request_id,
-                            str(entry.get("kind") or "eventstore"),
-                            normalize_json_payload(payload),
-                        )
-                return DatasetVersionRecord(
-                    version_id=dataset_version_id,
-                    dataset_id=str(row["dataset_id"]),
-                    lakefs_commit_id=str(row["lakefs_commit_id"]),
-                    artifact_key=row["artifact_key"],
-                    row_count=row["row_count"],
-                    sample_json=coerce_json_dataset(row["sample_json"]),
-                    ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
-                    promoted_from_artifact_id=(
-                        str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
-                    ),
-                    created_at=row["created_at"],
-                )
+        return await _publish_registry.publish_ingest_request(
+            self,
+            ingest_request_id=ingest_request_id,
+            dataset_id=dataset_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+            row_count=row_count,
+            sample_json=sample_json,
+            schema_json=schema_json,
+            apply_schema=apply_schema,
+            outbox_entries=outbox_entries,
+        )
 
     async def claim_ingest_outbox_batch(
         self,
@@ -4048,94 +1389,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         claimed_by: Optional[str] = None,
         claim_timeout_seconds: int = 300,
     ) -> List[DatasetIngestOutboxItem]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                claim_timeout = max(0, int(claim_timeout_seconds))
-                clause = """
-                    WHERE (
-                        status IN ('pending', 'failed')
-                        AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
-                    )
-                """
-                values: List[Any] = [limit]
-                if claim_timeout > 0:
-                    clause += f"""
-                        OR (
-                            status = 'publishing'
-                            AND (claimed_at IS NULL OR claimed_at <= NOW() - (${len(values) + 1}::int * INTERVAL '1 second'))
-                        )
-                    """
-                    values.append(claim_timeout)
-                rows = await conn.fetch(
-                    f"""
-                    SELECT outbox_id, ingest_request_id, kind, payload, status, publish_attempts, error,
-                           retry_count, last_error,
-                           claimed_by, claimed_at, next_attempt_at, created_at, updated_at
-                    FROM {self._schema}.dataset_ingest_outbox
-                    {clause}
-                    ORDER BY created_at ASC
-                    LIMIT $1
-                    FOR UPDATE SKIP LOCKED
-                    """,
-                    *values,
-                )
-                if not rows:
-                    return []
-                outbox_ids = [str(row["outbox_id"]) for row in rows]
-                await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.dataset_ingest_outbox
-                    SET status = 'publishing',
-                        publish_attempts = publish_attempts + 1,
-                        retry_count = retry_count + 1,
-                        claimed_by = $2,
-                        claimed_at = NOW(),
-                        updated_at = NOW()
-                    WHERE outbox_id = ANY($1::uuid[])
-                    """,
-                    outbox_ids,
-                    claimed_by,
-                )
-                return [
-                    DatasetIngestOutboxItem(
-                        outbox_id=str(row["outbox_id"]),
-                        ingest_request_id=str(row["ingest_request_id"]),
-                        kind=row["kind"],
-                        payload=coerce_json_dataset(row["payload"]),
-                        status=row["status"],
-                        publish_attempts=int(row["publish_attempts"]),
-                        error=row["error"],
-                        retry_count=int(row["retry_count"] or 0),
-                        last_error=row["last_error"],
-                        claimed_by=str(row["claimed_by"]) if row["claimed_by"] else None,
-                        claimed_at=row["claimed_at"],
-                        next_attempt_at=row["next_attempt_at"],
-                        created_at=row["created_at"],
-                        updated_at=row["updated_at"],
-                    )
-                    for row in rows
-                ]
+        return await _publish_registry.claim_ingest_outbox_batch(
+            self,
+            limit=limit,
+            claimed_by=claimed_by,
+            claim_timeout_seconds=claim_timeout_seconds,
+        )
 
     async def mark_ingest_outbox_published(self, *, outbox_id: str) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_outbox
-                SET status = 'published',
-                    updated_at = NOW(),
-                    next_attempt_at = NULL,
-                    error = NULL,
-                    last_error = NULL,
-                    claimed_by = NULL,
-                    claimed_at = NULL
-                WHERE outbox_id = $1::uuid
-                """,
-                outbox_id,
-            )
+        await _publish_registry.mark_ingest_outbox_published(self, outbox_id=outbox_id)
 
     async def mark_ingest_outbox_failed(
         self,
@@ -4144,45 +1406,15 @@ class DatasetRegistry(PostgresSchemaRegistry):
         error: str,
         next_attempt_at: Optional[datetime] = None,
     ) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_outbox
-                SET status = 'failed',
-                    error = $2,
-                    last_error = $2,
-                    next_attempt_at = $3,
-                    claimed_by = NULL,
-                    claimed_at = NULL,
-                    updated_at = NOW()
-                WHERE outbox_id = $1::uuid
-                """,
-                outbox_id,
-                error,
-                next_attempt_at,
-            )
+        await _publish_registry.mark_ingest_outbox_failed(
+            self,
+            outbox_id=outbox_id,
+            error=error,
+            next_attempt_at=next_attempt_at,
+        )
 
     async def mark_ingest_outbox_dead(self, *, outbox_id: str, error: str) -> None:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_outbox
-                SET status = 'dead',
-                    error = $2,
-                    last_error = $2,
-                    next_attempt_at = NULL,
-                    claimed_by = NULL,
-                    claimed_at = NULL,
-                    updated_at = NOW()
-                WHERE outbox_id = $1::uuid
-                """,
-                outbox_id,
-                error,
-            )
+        await _publish_registry.mark_ingest_outbox_dead(self, outbox_id=outbox_id, error=error)
 
     async def purge_ingest_outbox(
         self,
@@ -4190,71 +1422,14 @@ class DatasetRegistry(PostgresSchemaRegistry):
         retention_days: int = 7,
         limit: int = 10_000,
     ) -> int:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        retention_days = max(1, int(retention_days))
-        limit = max(1, int(limit))
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                WITH doomed AS (
-                    SELECT ctid
-                    FROM {self._schema}.dataset_ingest_outbox
-                    WHERE status = 'published'
-                      AND updated_at < NOW() - ($1::int * INTERVAL '1 day')
-                    ORDER BY updated_at ASC
-                    LIMIT $2
-                )
-                DELETE FROM {self._schema}.dataset_ingest_outbox
-                WHERE ctid IN (SELECT ctid FROM doomed)
-                RETURNING 1
-                """,
-                retention_days,
-                limit,
-            )
-        return len(rows or [])
+        return await _publish_registry.purge_ingest_outbox(
+            self,
+            retention_days=retention_days,
+            limit=limit,
+        )
 
     async def get_ingest_outbox_metrics(self) -> Dict[str, Any]:
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT status, count(*) AS count, MIN(created_at) AS oldest_created_at,
-                       MIN(next_attempt_at) AS next_attempt_at,
-                       MAX(retry_count) AS max_retry
-                FROM {self._schema}.dataset_ingest_outbox
-                GROUP BY status
-                """
-            )
-        counts = {str(row["status"]): int(row["count"]) for row in rows or []}
-        backlog_statuses = {"pending", "publishing", "failed"}
-        backlog = sum(counts.get(status, 0) for status in backlog_statuses)
-        oldest_candidates = [
-            row["oldest_created_at"]
-            for row in rows or []
-            if row["status"] in backlog_statuses and row["oldest_created_at"]
-        ]
-        oldest_created = min(oldest_candidates) if oldest_candidates else None
-        next_attempt = min(
-            (row["next_attempt_at"] for row in rows or [] if row["next_attempt_at"]), default=None
-        )
-        now = datetime.now(timezone.utc)
-        oldest_age_seconds = None
-        if oldest_created:
-            try:
-                oldest_age_seconds = int((now - oldest_created).total_seconds())
-            except Exception:
-                logging.getLogger(__name__).warning("Exception fallback at shared/services/registries/dataset_registry.py:4116", exc_info=True)
-                oldest_age_seconds = None
-
-        return {
-            "counts": counts,
-            "backlog": backlog,
-            "oldest_created_at": oldest_created.isoformat() if oldest_created else None,
-            "oldest_age_seconds": oldest_age_seconds,
-            "next_attempt_at": next_attempt.isoformat() if next_attempt else None,
-        }
+        return await _publish_registry.get_ingest_outbox_metrics(self)
 
     async def reconcile_ingest_state(
         self,
@@ -4264,256 +1439,10 @@ class DatasetRegistry(PostgresSchemaRegistry):
         use_lock: bool = True,
         lock_key: Optional[int] = None,
     ) -> Dict[str, int]:
-        """
-        Best-effort reconciliation for ingest atomicity.
-
-        - Publishes RAW_COMMITTED ingests that never finalized into dataset_versions.
-        - Closes OPEN transactions that are stale (marks ingest FAILED/ABORTED).
-        - Repairs transactions that should be COMMITTED based on ingest status.
-        """
-        if not self._pool:
-            raise RuntimeError("DatasetRegistry not connected")
-
-        results = {"published": 0, "outbox_repaired": 0, "aborted": 0, "committed_tx": 0, "skipped": 0}
-        cutoff = utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
-
-        lock_conn: Optional[asyncpg.Connection] = None
-        resolved_lock_key = int(lock_key) if lock_key is not None else int(get_settings().workers.ingest_reconciler.lock_key)
-
-        try:
-            if use_lock and resolved_lock_key is not None:
-                lock_conn = await self._pool.acquire()
-                locked = await lock_conn.fetchval("SELECT pg_try_advisory_lock($1)", resolved_lock_key)
-                if not locked:
-                    results["skipped"] = 1
-                    return results
-
-            # 1) Publish RAW_COMMITTED ingests that never created a dataset_version.
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT ingest_request_id, dataset_id, db_name, branch, lakefs_commit_id, artifact_key,
-                           schema_json, sample_json, row_count
-                    FROM {self._schema}.dataset_ingest_requests
-                    WHERE status = 'RAW_COMMITTED'
-                      AND lakefs_commit_id IS NOT NULL
-                      AND artifact_key IS NOT NULL
-                    ORDER BY updated_at ASC
-                    LIMIT $1
-                    """,
-                    limit,
-                )
-
-            for row in rows or []:
-                ingest_request_id = str(row["ingest_request_id"])
-                dataset_id = str(row["dataset_id"])
-                db_name = str(row["db_name"])
-                lakefs_commit_id = str(row["lakefs_commit_id"])
-                artifact_key = row["artifact_key"]
-                sample_json = coerce_json_dataset(row["sample_json"]) or {}
-                schema_json = coerce_json_dataset(row["schema_json"]) or {}
-                row_count = row["row_count"]
-
-                try:
-                    dataset = await self.get_dataset(dataset_id=dataset_id)
-                    dataset_name = dataset.name if dataset else ""
-                    transaction = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
-                    transaction_id = transaction.transaction_id if transaction else None
-                    from shared.services.events.dataset_ingest_outbox import build_dataset_event_payload
-
-                    outbox_entries = [
-                        {
-                            "kind": "eventstore",
-                            "payload": build_dataset_event_payload(
-                                event_id=ingest_request_id,
-                                event_type="DATASET_VERSION_CREATED",
-                                aggregate_type="Dataset",
-                                aggregate_id=dataset_id,
-                                command_type="INGEST_DATASET_SNAPSHOT",
-                                actor=None,
-                                data={
-                                    "dataset_id": dataset_id,
-                                    "db_name": db_name,
-                                    "name": dataset_name,
-                                    "lakefs_commit_id": lakefs_commit_id,
-                                    "artifact_key": artifact_key,
-                                    "transaction_id": transaction_id,
-                                },
-                            ),
-                        }
-                    ]
-                    await self.publish_ingest_request(
-                        ingest_request_id=ingest_request_id,
-                        dataset_id=dataset_id,
-                        lakefs_commit_id=lakefs_commit_id,
-                        artifact_key=artifact_key,
-                        row_count=row_count,
-                        sample_json=sample_json,
-                        schema_json=schema_json,
-                        outbox_entries=outbox_entries,
-                    )
-                    results["published"] += 1
-                except Exception as exc:
-                    logger.warning("Failed to reconcile RAW_COMMITTED ingest %s: %s", ingest_request_id, exc)
-
-            # 1b) Repair published dataset versions missing outbox rows.
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(
-                    f"""
-                    SELECT v.version_id, v.dataset_id, v.lakefs_commit_id, v.artifact_key,
-                           r.ingest_request_id, r.db_name, r.branch, r.schema_json, r.sample_json, r.row_count,
-                           d.name AS dataset_name,
-                           t.transaction_id
-                    FROM {self._schema}.dataset_versions v
-                    JOIN {self._schema}.dataset_ingest_requests r
-                      ON r.ingest_request_id = v.ingest_request_id
-                    JOIN {self._schema}.datasets d
-                      ON d.dataset_id = v.dataset_id
-                    LEFT JOIN {self._schema}.dataset_ingest_transactions t
-                      ON t.ingest_request_id = r.ingest_request_id
-                    WHERE r.status = 'PUBLISHED'
-                      AND NOT EXISTS (
-                        SELECT 1
-                        FROM {self._schema}.dataset_ingest_outbox o
-                        WHERE o.ingest_request_id = r.ingest_request_id
-                          AND o.status <> 'dead'
-                      )
-                    ORDER BY v.created_at ASC
-                    LIMIT $1
-                    """,
-                    limit,
-                )
-
-            for row in rows or []:
-                ingest_request_id = str(row["ingest_request_id"])
-                dataset_id = str(row["dataset_id"])
-                db_name = str(row["db_name"])
-                dataset_name = str(row["dataset_name"] or "")
-                lakefs_commit_id = str(row["lakefs_commit_id"])
-                artifact_key = row["artifact_key"]
-                schema_json = coerce_json_dataset(row["schema_json"]) if row["schema_json"] is not None else None
-                sample_json = coerce_json_dataset(row["sample_json"]) if row["sample_json"] is not None else None
-                row_count = row["row_count"]
-                transaction_id = str(row["transaction_id"]) if row["transaction_id"] else None
-                from shared.services.events.dataset_ingest_outbox import build_dataset_event_payload
-
-                outbox_entries: list[dict[str, Any]] = [
-                    {
-                        "kind": "eventstore",
-                        "payload": build_dataset_event_payload(
-                            event_id=ingest_request_id,
-                            event_type="DATASET_VERSION_CREATED",
-                            aggregate_type="Dataset",
-                            aggregate_id=dataset_id,
-                            command_type="INGEST_DATASET_SNAPSHOT",
-                            actor=None,
-                            data={
-                                "dataset_id": dataset_id,
-                                "db_name": db_name,
-                                "name": dataset_name,
-                                "lakefs_commit_id": lakefs_commit_id,
-                                "artifact_key": artifact_key,
-                                "transaction_id": transaction_id,
-                            },
-                        ),
-                    }
-                ]
-                if artifact_key:
-                    parsed = parse_s3_uri(artifact_key)
-                    if parsed:
-                        bucket, key = parsed
-                        outbox_entries.append(
-                            {
-                                "kind": "lineage",
-                                "payload": {
-                                    "from_node_id": f"event:{ingest_request_id}",
-                                    "to_node_id": f"artifact:s3:{bucket}:{key}",
-                                    "edge_type": "dataset_artifact_stored",
-                                    "occurred_at": utcnow(),
-                                    "from_label": "ingest_reconciler",
-                                    "to_label": artifact_key,
-                                    "db_name": db_name,
-                                    "edge_metadata": {
-                                        "db_name": db_name,
-                                        "dataset_id": dataset_id,
-                                        "dataset_name": dataset_name,
-                                        "bucket": bucket,
-                                        "key": key,
-                                        "source": "ingest_reconciler",
-                                    },
-                                },
-                            }
-                        )
-
-                try:
-                    await self.publish_ingest_request(
-                        ingest_request_id=ingest_request_id,
-                        dataset_id=dataset_id,
-                        lakefs_commit_id=lakefs_commit_id,
-                        artifact_key=artifact_key,
-                        row_count=row_count,
-                        sample_json=sample_json,
-                        schema_json=schema_json,
-                        outbox_entries=outbox_entries,
-                    )
-                    results["outbox_repaired"] += 1
-                except Exception as exc:
-                    logger.warning("Failed to repair ingest outbox for %s: %s", ingest_request_id, exc)
-
-            # 2) Repair OPEN transactions for already-published requests.
-            async with self._pool.acquire() as conn:
-                repaired = await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.dataset_ingest_transactions t
-                    SET status = 'COMMITTED',
-                        committed_at = COALESCE(committed_at, NOW()),
-                        updated_at = NOW()
-                    FROM {self._schema}.dataset_ingest_requests r
-                    WHERE r.ingest_request_id = t.ingest_request_id
-                      AND r.status = 'PUBLISHED'
-                      AND t.status = 'OPEN'
-                    """
-                )
-            if isinstance(repaired, str) and repaired.startswith("UPDATE"):
-                try:
-                    results["committed_tx"] = int(repaired.split()[-1])
-                except (IndexError, ValueError) as parse_exc:
-                    logger.warning("Failed to parse committed transaction update count from '%s': %s", repaired, parse_exc)
-
-            # 3) Abort stale OPEN transactions.
-            async with self._pool.acquire() as conn:
-                stale_rows = await conn.fetch(
-                    f"""
-                    SELECT t.ingest_request_id
-                    FROM {self._schema}.dataset_ingest_transactions t
-                    JOIN {self._schema}.dataset_ingest_requests r
-                      ON r.ingest_request_id = t.ingest_request_id
-                    WHERE t.status = 'OPEN'
-                      AND t.created_at < $1
-                      AND r.status IN ('RECEIVED', 'RAW_COMMITTED')
-                    ORDER BY t.created_at ASC
-                    LIMIT $2
-                    """,
-                    cutoff,
-                    limit,
-                )
-            for row in stale_rows or []:
-                ingest_request_id = str(row["ingest_request_id"])
-                try:
-                    await self.mark_ingest_failed(
-                        ingest_request_id=ingest_request_id,
-                        error="reconciler_timeout",
-                    )
-                    results["aborted"] += 1
-                except Exception as exc:
-                    logger.warning("Failed to abort stale ingest %s: %s", ingest_request_id, exc)
-        finally:
-            if lock_conn is not None:
-                if resolved_lock_key is not None:
-                    try:
-                        await lock_conn.execute("SELECT pg_advisory_unlock($1)", resolved_lock_key)
-                    except Exception:
-                        logger.warning("Failed to release ingest reconciler lock", exc_info=True)
-                await self._pool.release(lock_conn)
-
-        return results
+        return await _ingest_registry.reconcile_ingest_state(
+            self,
+            stale_after_seconds=stale_after_seconds,
+            limit=limit,
+            use_lock=use_lock,
+            lock_key=lock_key,
+        )

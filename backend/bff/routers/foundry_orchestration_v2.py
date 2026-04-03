@@ -1052,16 +1052,32 @@ async def list_schedule_runs_v2(
                 parameters={"message": "pageToken is invalid"},
             )
 
-    # Load enough runs to materialize the requested page when using an offset token.
-    fetch_limit = min(max(pageSize + offset + 1, pageSize + 1), 5000)
     try:
-        runs = await pipeline_registry.list_runs(pipeline_id=pipeline_id, limit=fetch_limit)
-    except Exception:
-        runs = []
+        runs = await pipeline_registry.list_runs(
+            pipeline_id=pipeline_id,
+            limit=pageSize + 1,
+            offset=offset,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to list schedule runs (pipeline_id=%s, scheduleRid=%s, offset=%s, pageSize=%s): %s",
+            pipeline_id,
+            scheduleRid,
+            offset,
+            pageSize,
+            exc,
+            exc_info=True,
+        )
+        return _foundry_error(
+            500,
+            error_code="INTERNAL",
+            error_name="ScheduleRunListFailed",
+            parameters={"scheduleRid": scheduleRid},
+        )
 
-    page = runs[offset: offset + pageSize] if isinstance(runs, list) else []
+    page = runs[:pageSize] if isinstance(runs, list) else []
     next_offset = offset + len(page)
-    next_token = str(next_offset) if next_offset < len(runs) else None
+    next_token = str(next_offset) if len(runs) > pageSize else None
 
     data = []
     for run_item in page:

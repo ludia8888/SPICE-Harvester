@@ -7,6 +7,7 @@ Based on Context7 recommendations for API security
 import hmac
 import hashlib
 import ipaddress
+import inspect
 import time
 from typing import Optional, Dict, Any, Tuple, Mapping
 from functools import wraps
@@ -369,6 +370,14 @@ class RateLimiter:
                     if forwarded_ip:
                         ip = forwarded_ip
             return f"ip:{ip}"
+
+    @staticmethod
+    def get_request_scope_key(request: Request) -> str:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", None)
+        path = str(route_path or request.url.path or "").strip() or "/"
+        method = str(request.method or "GET").upper()
+        return f"{method}:{path}"
     
     async def check_rate_limit(
         self,
@@ -376,7 +385,8 @@ class RateLimiter:
         capacity: int = 60,
         refill_rate: float = 1.0,
         strategy: str = "ip",
-        tokens: int = 1
+        tokens: int = 1,
+        scope_key: Optional[str] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         """
         Check if request should be rate limited
@@ -391,6 +401,9 @@ class RateLimiter:
         Returns:
             Tuple of (allowed: bool, info: dict)
         """
+        client_id = self.get_client_id(request, strategy)
+        scoped_client_id = f"{scope_key}:{client_id}" if scope_key else client_id
+
         if not self.redis_client:
             await self.initialize()
         if not self.redis_client:
@@ -403,19 +416,17 @@ class RateLimiter:
                     "disabled": True,
                     "error": self._last_init_error,
                 }
-            client_id = self.get_client_id(request, strategy)
             bucket = self.get_local_bucket(strategy, capacity, refill_rate)
-            allowed, info = await bucket.consume(client_id, tokens)
+            allowed, info = await bucket.consume(scoped_client_id, tokens)
             info["error"] = self._last_init_error
             return allowed, info
-            
-        client_id = self.get_client_id(request, strategy)
+
         bucket = self.get_bucket(strategy, capacity, refill_rate)
 
-        allowed, info = await bucket.consume(client_id, tokens)
+        allowed, info = await bucket.consume(scoped_client_id, tokens)
         if info.get("disabled") and not self.fail_open:
             local_bucket = self.get_local_bucket(strategy, capacity, refill_rate)
-            allowed, local_info = await local_bucket.consume(client_id, tokens)
+            allowed, local_info = await local_bucket.consume(scoped_client_id, tokens)
             local_info["error"] = info.get("error")
             return allowed, local_info
 
@@ -480,14 +491,28 @@ def rate_limit(
             
             # Calculate refill rate
             refill_rate = requests / window
+            scope_key = RateLimiter.get_request_scope_key(request)
+            check_kwargs = {
+                "capacity": requests,
+                "refill_rate": refill_rate,
+                "strategy": strategy,
+                "tokens": cost,
+            }
+            try:
+                parameters = inspect.signature(limiter.check_rate_limit).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            accepts_scope_key = (
+                "scope_key" in parameters
+                or any(param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values())
+            )
+            if accepts_scope_key:
+                check_kwargs["scope_key"] = scope_key
             
             # Check rate limit
             allowed, info = await limiter.check_rate_limit(
                 request,
-                capacity=requests,
-                refill_rate=refill_rate,
-                strategy=strategy,
-                tokens=cost
+                **check_kwargs,
             )
 
             # Observability: record rate limit checks/rejections (best-effort).

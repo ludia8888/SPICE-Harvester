@@ -47,3 +47,16 @@ def test_compute_column_stats_numeric_min_max_mean_from_mixed_values():
     histogram = col["numeric"]["histogram"]
     assert isinstance(histogram, list)
     assert sum(bucket["count"] for bucket in histogram) == 3
+
+
+@pytest.mark.unit
+def test_compute_column_stats_handles_circular_values_when_stringifying() -> None:
+    circular: list[object] = []
+    circular.append(circular)
+    rows = [{"payload": circular}]
+    columns = [{"name": "payload", "type": "xsd:string"}]
+
+    stats = compute_column_stats(rows=rows, columns=columns, max_top_values=5)
+
+    assert stats["columns"]["payload"]["top_values"][0]["count"] == 1
+    assert "[...]" in stats["columns"]["payload"]["top_values"][0]["value"]

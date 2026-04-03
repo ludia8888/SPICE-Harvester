@@ -118,6 +118,7 @@ class OMSGatewayGrpcClient:
         self._channel = _build_grpc_channel(self._target)
         self._stub = oms_gateway_pb2_grpc.OmsGatewayServiceStub(self._channel)
         self._service_token = _infer_service_token()
+        self._timeout_seconds = float(settings.clients.oms_client_timeout_seconds)
 
     async def close(self) -> None:
         await self._channel.close()
@@ -140,14 +141,22 @@ class OMSGatewayGrpcClient:
         rpc = getattr(self._stub, rpc_name)
         metadata_obj = getattr(request, "metadata", None)
         metadata_headers = dict(getattr(metadata_obj, "headers", {}) or {})
-        return await rpc(request, metadata=self._call_metadata(headers=metadata_headers))
+        return await rpc(
+            request,
+            metadata=self._call_metadata(headers=metadata_headers),
+            timeout=self._timeout_seconds,
+        )
 
     async def call_stream(self, rpc_name: str, request: Any) -> list[oms_gateway_pb2.OmsStreamChunk]:
         rpc = getattr(self._stub, rpc_name)
         chunks: list[oms_gateway_pb2.OmsStreamChunk] = []
         metadata_obj = getattr(request, "metadata", None)
         metadata_headers = dict(getattr(metadata_obj, "headers", {}) or {})
-        async for item in rpc(request, metadata=self._call_metadata(headers=metadata_headers)):
+        async for item in rpc(
+            request,
+            metadata=self._call_metadata(headers=metadata_headers),
+            timeout=self._timeout_seconds,
+        ):
             chunks.append(item)
         return chunks
 

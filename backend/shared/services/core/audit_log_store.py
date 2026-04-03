@@ -111,7 +111,7 @@ class AuditLogStore(PostgresSchemaRegistry):
         if isinstance(value, Mapping):
             try:
                 return {str(key): item for key, item in value.items()}
-            except Exception:
+            except (TypeError, ValueError):
                 return {}
         if isinstance(value, str):
             raw = value.strip()

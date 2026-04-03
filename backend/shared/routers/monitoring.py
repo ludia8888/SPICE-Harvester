@@ -27,6 +27,13 @@ from shared.config.settings import get_settings as get_settings_ssot
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
+from shared.services.core.runtime_status import (
+    availability_surface,
+    build_runtime_issue,
+    get_runtime_status,
+    normalize_runtime_state,
+    normalize_runtime_status,
+)
 import logging
 
 router = APIRouter(tags=["Monitoring"])
@@ -62,37 +69,33 @@ async def _check_service_instance(instance: Any) -> Dict[str, Any]:
             method = "check_connection"
         else:
             return {
-                "status": "unknown",
+                "status": "degraded",
                 "checked_via": None,
                 "latency_ms": int((time.monotonic() - start) * 1000),
+                "probe_status": "unsupported",
             }
     except Exception as e:
         logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:69", exc_info=True)
         return {
-            "status": "unhealthy",
+            "status": "hard_down",
             "checked_via": None,
             "latency_ms": int((time.monotonic() - start) * 1000),
             "error": str(e),
+            "probe_status": "failed",
         }
 
     return {
-        "status": "healthy" if ok else "unhealthy",
+        "status": "ready" if ok else "hard_down",
         "checked_via": method,
         "latency_ms": int((time.monotonic() - start) * 1000),
+        "probe_status": "ok" if ok else "failed",
     }
 
 
 def _runtime_status_from_request(request: Optional[Request]) -> Optional[Dict[str, Any]]:
     if request is None:
         return None
-    runtime_status = getattr(request.app.state, "bff_runtime_status", None)
-    if not isinstance(runtime_status, dict):
-        return None
-    return {
-        "ready": bool(runtime_status.get("ready", True)),
-        "issues": list(runtime_status.get("issues") or []),
-        "background_tasks": dict(runtime_status.get("background_tasks") or {}),
-    }
+    return get_runtime_status(request.app, attr_names=("runtime_status", "bff_runtime_status"))
 
 
 async def _safe_get_container() -> Optional[ServiceContainer]:
@@ -100,6 +103,197 @@ async def _safe_get_container() -> Optional[ServiceContainer]:
         return await get_container()
     except RuntimeError:
         return None
+
+
+def _availability_surface(
+    *,
+    request: Optional[Request],
+    container: Optional[ServiceContainer],
+    runtime_status: Optional[Dict[str, Any]],
+    unhealthy_services: int = 0,
+) -> Dict[str, Any]:
+    return availability_surface(
+        service=_resolve_service_name(request),
+        container_ready=bool(container is not None and container.is_initialized),
+        runtime_status=runtime_status,
+        unhealthy_services=unhealthy_services,
+    )
+
+
+def _background_task_manager_state(issues: list[dict[str, Any]]) -> str:
+    states = [
+        normalize_runtime_state(issue.get("state"), default="degraded")
+        for issue in issues
+        if isinstance(issue, dict)
+    ]
+    if any(state == "hard_down" for state in states):
+        return "hard_down"
+    if any(state == "degraded" for state in states):
+        return "degraded"
+    return "ready"
+
+
+def _background_task_surface(
+    request: Request,
+    *,
+    issues: list[dict[str, Any]],
+    status_reason: str,
+    message: str,
+) -> dict[str, Any]:
+    manager_state = _background_task_manager_state(issues)
+    return availability_surface(
+        service=f"{_resolve_service_name(request)}.background_tasks",
+        container_ready=True,
+        runtime_status=normalize_runtime_status({"degraded": bool(issues), "issues": issues}),
+        dependency_status_overrides={"background_task_manager": manager_state},
+        status_reason_override=status_reason,
+        message=message,
+    )
+
+
+def _background_task_manager_unavailable_payload(request: Request) -> dict[str, Any]:
+    issues = [
+        build_runtime_issue(
+            component="background_tasks",
+            dependency="background_task_manager",
+            message="Background task manager not initialized",
+            state="hard_down",
+            classification="unavailable",
+            affected_features=("background_tasks", "background_task_metrics"),
+            affects_readiness=True,
+        )
+    ]
+    payload = _background_task_surface(
+        request,
+        issues=issues,
+        status_reason="Background task manager not initialized",
+        message="Background task manager not initialized",
+    )
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+    return payload
+
+
+async def _background_task_health_snapshot(task_manager: Any) -> dict[str, Any]:
+    metrics = await task_manager.get_task_metrics()
+    dead_tasks = await task_manager._get_dead_tasks()
+
+    issues: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    recommendations: list[str] = []
+    healthy = True
+
+    if metrics.success_rate < 80:
+        healthy = False
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"Low success rate: {metrics.success_rate:.1f}%",
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+        recommendations.append("Investigate failing tasks to identify common patterns")
+    elif metrics.success_rate < 90:
+        warning = f"Success rate below optimal: {metrics.success_rate:.1f}%"
+        warnings.append(warning)
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=warning,
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+
+    if metrics.processing_tasks > 50:
+        healthy = False
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"High number of processing tasks: {metrics.processing_tasks}",
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+        recommendations.append("Consider scaling up workers or optimizing task processing")
+    elif metrics.processing_tasks > 20:
+        warning = f"Many tasks in processing: {metrics.processing_tasks}"
+        warnings.append(warning)
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=warning,
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+        recommendations.append("Consider scaling up workers or optimizing task processing")
+
+    if metrics.retrying_tasks > 10:
+        warning = f"High retry queue: {metrics.retrying_tasks} tasks"
+        warnings.append(warning)
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=warning,
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+
+    if metrics.pending_tasks > 100:
+        warning = f"Large pending queue: {metrics.pending_tasks} tasks"
+        warnings.append(warning)
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=warning,
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+
+    if len(dead_tasks) > 0:
+        healthy = False
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"Found {len(dead_tasks)} potentially dead tasks",
+                state="degraded",
+                classification="retryable",
+                affected_features=("background_tasks",),
+                affects_readiness=False,
+            )
+        )
+        recommendations.append("Run cleanup process to mark dead tasks as failed")
+
+    return {
+        "metrics": metrics,
+        "dead_tasks": dead_tasks,
+        "issues": issues,
+        "warnings": warnings,
+        "recommendations": recommendations,
+        "healthy": healthy,
+    }
 
 
 def _service_registration_key(key: object) -> str:
@@ -118,6 +312,50 @@ def _service_registration_key(key: object) -> str:
     return repr(key)
 
 
+async def _collect_runtime_service_snapshots(container: ServiceContainer) -> dict[str, Any]:
+    services: Dict[str, Any] = {}
+    checked = 0
+    unhealthy = 0
+    instantiated_count = 0
+
+    registrations = getattr(container, "_services", {})  # noqa: SLF001
+    for name, registration in registrations.items():
+        registration_key = _service_registration_key(name)
+        instantiated = getattr(registration, "instance", None) is not None
+        if instantiated:
+            instantiated_count += 1
+        meta = {
+            "type": getattr(getattr(registration, "service_type", None), "__name__", None),
+            "singleton": bool(getattr(registration, "singleton", True)),
+            "instantiated": instantiated,
+            "created": instantiated,
+            "initialized": bool(getattr(registration, "initialized", False)),
+        }
+
+        instance = getattr(registration, "instance", None)
+        if instance is None:
+            services[registration_key] = {
+                **meta,
+                "status": "degraded",
+                "probe_status": "not_initialized",
+            }
+            continue
+
+        result = await _check_service_instance(instance)
+        checked += 1
+        if result.get("status") == "hard_down":
+            unhealthy += 1
+        services[registration_key] = {**meta, **result}
+
+    return {
+        "services": services,
+        "checked": checked,
+        "unhealthy": unhealthy,
+        "registered": len(registrations),
+        "instantiated": instantiated_count,
+    }
+
+
 @router.get("/health", 
            summary="Basic Health Check",
            description="Readiness/liveness signal for traffic routing")
@@ -132,21 +370,13 @@ async def basic_health_check(request: Request):
     """
     container = await _safe_get_container()
     runtime_status = _runtime_status_from_request(request)
-    runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
-    container_ready = bool(container is not None and container.is_initialized)
-    ready = container_ready if runtime_ready is None else bool(container_ready and runtime_ready)
-    status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
-    payload = {
-        "status": "ok" if ready else "unready",
-        "alive": True,
-        "ready": ready,
-        "accepting_traffic": ready,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "service": _resolve_service_name(request),
-    }
-    if runtime_status is not None:
-        payload["issues"] = runtime_status["issues"]
-        payload["background_tasks"] = runtime_status["background_tasks"]
+    payload = _availability_surface(
+        request=request,
+        container=container,
+        runtime_status=runtime_status,
+    )
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+    status_code = status.HTTP_200_OK if payload["ready"] else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
         content=payload,
@@ -171,8 +401,13 @@ async def detailed_health_check(
     runtime_status = _runtime_status_from_request(request)
 
     if container is None:
+        availability = _availability_surface(
+            request=request,
+            container=container,
+            runtime_status=runtime_status,
+        )
         health_data: Dict[str, Any] = {
-            "status": "unready",
+            **availability,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "environment": settings.environment.value,
             "version": "1.0.0",
@@ -184,62 +419,37 @@ async def detailed_health_check(
             "services": {},
             "note": "Service container is not initialized.",
         }
-        if runtime_status is not None:
-            health_data["issues"] = runtime_status["issues"]
-            health_data["background_tasks"] = runtime_status["background_tasks"]
         if include_metrics:
             health_data["metrics"] = {"container_initialized": False}
         return JSONResponse(content=health_data, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-    # Validate real runtime wiring: only services that are actually initialized can be checked.
-    # This avoids the old cargo-cult lifecycle manager dependency that was never wired.
-    services: Dict[str, Any] = {}
-    checked = 0
-    unhealthy = 0
+    snapshot = await _collect_runtime_service_snapshots(container)
+    services = snapshot["services"]
+    checked = int(snapshot["checked"])
+    unhealthy = int(snapshot["unhealthy"])
+    registered = int(snapshot["registered"])
 
-    # Container internals are used intentionally (monitoring-only) so we can access instantiated services.
-    registrations = getattr(container, "_services", {})  # noqa: SLF001
-    for name, registration in registrations.items():
-        registration_key = _service_registration_key(name)
-        instantiated = getattr(registration, "instance", None) is not None
-        meta = {
-            "type": getattr(getattr(registration, "service_type", None), "__name__", None),
-            "singleton": bool(getattr(registration, "singleton", True)),
-            "instantiated": instantiated,
-            "created": instantiated,
-            "initialized": bool(getattr(registration, "initialized", False)),
-        }
-
-        instance = getattr(registration, "instance", None)
-        if instance is None:
-            services[registration_key] = {**meta, "status": "not_initialized"}
-            continue
-
-        result = await _check_service_instance(instance)
-        checked += 1
-        if result.get("status") != "healthy":
-            unhealthy += 1
-        services[registration_key] = {**meta, **result}
-
-    overall = "ok" if unhealthy == 0 else "degraded"
-    status_code = status.HTTP_200_OK
+    availability = _availability_surface(
+        request=request,
+        container=container,
+        runtime_status=runtime_status,
+        unhealthy_services=unhealthy,
+    )
+    status_code = status.HTTP_200_OK if availability["ready"] else status.HTTP_503_SERVICE_UNAVAILABLE
 
     health_data: Dict[str, Any] = {
-        "status": overall,
+        **availability,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "environment": settings.environment.value,
         "version": "1.0.0",
         "summary": {
-            "registered_services": len(registrations),
+            "registered_services": registered,
             "checked_services": checked,
             "unhealthy_services": unhealthy,
         },
         "services": services,
         "note": "This endpoint checks only initialized services. Uninstantiated services are reported as not_initialized.",
     }
-    if runtime_status is not None:
-        health_data["issues"] = runtime_status["issues"]
-        health_data["background_tasks"] = runtime_status["background_tasks"]
 
     if include_metrics:
         health_data["metrics"] = {"container_initialized": bool(container.is_initialized)}
@@ -258,20 +468,17 @@ async def readiness_probe(request: Request):
     503 if not ready yet.
     """
     runtime_status = _runtime_status_from_request(request)
-    runtime_ready = None if runtime_status is None else bool(runtime_status["ready"])
     container = await _safe_get_container()
-    container_ready = bool(container is not None and container.is_initialized)
-    ready = container_ready if runtime_ready is None else bool(container_ready and runtime_ready)
-    payload = {
-        "ready": ready,
-        "reason": "Container initialized" if ready else "Container not ready",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    if runtime_status is not None:
-        payload["issues"] = runtime_status["issues"]
+    payload = _availability_surface(
+        request=request,
+        container=container,
+        runtime_status=runtime_status,
+    )
+    payload["reason"] = "Ready for traffic" if payload["ready"] else "Not ready for traffic"
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
     return JSONResponse(
         content=payload,
-        status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK if payload["ready"] else status.HTTP_503_SERVICE_UNAVAILABLE,
     )
 
 
@@ -289,25 +496,46 @@ async def liveness_probe(
     """
     try:
         container = await _safe_get_container()
-        # Basic liveness check - if we can respond, we're alive
-        alive = True
-        reason = "Service responsive"
-        
-        response_data = {
-            "alive": alive,
-            "reason": reason,
-            "container_initialized": bool(container is not None and container.is_initialized),
-            "service": _resolve_service_name(request),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        status_code = status.HTTP_200_OK if alive else status.HTTP_503_SERVICE_UNAVAILABLE
-        return JSONResponse(content=response_data, status_code=status_code)
-        
+        payload = availability_surface(
+            service=_resolve_service_name(request),
+            container_ready=True,
+            runtime_status={},
+        )
+        payload.update(
+            {
+                "alive": True,
+                "container_initialized": bool(container is not None and container.is_initialized),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return JSONResponse(content=payload, status_code=status.HTTP_200_OK)
     except Exception as e:
         logging.getLogger(__name__).warning("Exception fallback at shared/routers/monitoring.py:213", exc_info=True)
+        payload = _availability_surface(
+            request=request,
+            container=None,
+            runtime_status={
+                "issues": [
+                    {
+                        "component": "liveness",
+                        "dependency": "service_process",
+                        "message": str(e),
+                        "state": "hard_down",
+                        "classification": "internal",
+                        "affects_readiness": True,
+                        "affected_features": ["service_process"],
+                    }
+                ]
+            },
+        )
+        payload.update(
+            {
+                "alive": False,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         return JSONResponse(
-            content={"alive": False, "error": str(e)},
+            content=payload,
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
@@ -344,7 +572,7 @@ async def get_service_metrics(
            description="Current status of all services",
            include_in_schema=False)
 async def get_service_status(
-    container: ServiceContainer = Depends(get_container)
+    request: Request,
 ):
     """
     Get current status of all services
@@ -352,20 +580,60 @@ async def get_service_status(
     Returns the current state, configuration, and runtime information
     for all managed services.
     """
-    service_info = container.get_service_info()
-    instantiated = sum(1 for meta in service_info.values() if meta.get("instantiated"))
+    container = await _safe_get_container()
+    runtime_status = _runtime_status_from_request(request)
+    if container is None:
+        payload = _availability_surface(
+            request=request,
+            container=container,
+            runtime_status=runtime_status,
+        )
+        payload.update(
+            {
+                "container_initialized": False,
+                "summary": {
+                    "registered_services": 0,
+                    "instantiated_services": 0,
+                    "created_services": 0,
+                },
+                "services": {},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return JSONResponse(
+            content=payload,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
-    return {
-        "status": "ok" if container.is_initialized else "unhealthy",
-        "container_initialized": bool(container.is_initialized),
-        "summary": {
-            "registered_services": len(service_info),
-            "instantiated_services": instantiated,
-            "created_services": instantiated,
-        },
-        "services": service_info,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    snapshot = await _collect_runtime_service_snapshots(container)
+    service_info = snapshot["services"]
+    instantiated = int(snapshot["instantiated"])
+    unhealthy = int(snapshot["unhealthy"])
+    registered = int(snapshot["registered"])
+    payload = _availability_surface(
+        request=request,
+        container=container,
+        runtime_status=runtime_status,
+        unhealthy_services=unhealthy,
+    )
+    payload.update(
+        {
+            "container_initialized": bool(container.is_initialized),
+            "summary": {
+                "registered_services": registered,
+                "instantiated_services": instantiated,
+                "created_services": instantiated,
+                "unhealthy_services": unhealthy,
+            },
+            "services": service_info,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    return JSONResponse(
+        content=payload,
+        status_code=status.HTTP_200_OK if payload["ready"] else status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
 
 
 @router.get("/config",
@@ -492,16 +760,30 @@ async def get_background_task_metrics(
     """
     try:
         if task_manager is None:
-            return {
-                "status": "not_available",
-                "message": "Background task manager not initialized",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        
-        metrics = await task_manager.get_task_metrics()
-        
+            return JSONResponse(
+                content=_background_task_manager_unavailable_payload(request),
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        snapshot = await _background_task_health_snapshot(task_manager)
+        metrics = snapshot["metrics"]
+        surface = _background_task_surface(
+            request,
+            issues=list(snapshot["issues"]),
+            status_reason=(
+                "Background task metrics within thresholds"
+                if not snapshot["issues"]
+                else "Background task metrics exceeded thresholds"
+            ),
+            message=(
+                "Background task metrics within thresholds"
+                if not snapshot["issues"]
+                else "Background task metrics exceeded thresholds"
+            ),
+        )
+
         return {
-            "status": "ok",
+            **surface,
             "metrics": {
                 "total_tasks": metrics.total_tasks,
                 "active_tasks": metrics.active_tasks,
@@ -515,8 +797,10 @@ async def get_background_task_metrics(
                 "tasks_by_type": metrics.tasks_by_type
             },
             "health": {
-                "status": "healthy" if metrics.success_rate >= 90 else "degraded",
-                "issues": []
+                "status": surface["status"],
+                "issues": [issue["message"] for issue in snapshot["issues"]],
+                "warnings": list(snapshot["warnings"]),
+                "recommendations": list(snapshot["recommendations"]),
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -557,29 +841,33 @@ async def get_active_background_tasks(
     """
     try:
         from shared.models.background_task import TaskStatus
-        
+
         if task_manager is None:
-            return {
-                "status": "not_available",
-                "message": "Background task manager not initialized",
-                "tasks": [],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-        
+            payload = _background_task_manager_unavailable_payload(request)
+            payload["tasks"] = []
+            payload["count"] = 0
+            return JSONResponse(content=payload, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
         # Get all active tasks (pending, processing, retrying)
         active_statuses = [TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.RETRYING]
         active_tasks = []
-        
+
         for status in active_statuses:
             tasks = await task_manager.get_all_tasks(status=status, limit=limit)
             active_tasks.extend(tasks)
-        
+
         # Sort by created_at (most recent first)
         active_tasks.sort(key=lambda t: t.created_at, reverse=True)
         active_tasks = active_tasks[:limit]
-        
+        surface = _background_task_surface(
+            request,
+            issues=[],
+            status_reason="Background task manager operational",
+            message="Background task manager operational",
+        )
+
         return {
-            "status": "ok",
+            **surface,
             "count": len(active_tasks),
             "tasks": [
                 {
@@ -638,84 +926,43 @@ async def get_background_task_health(
     try:
         if task_manager is None:
             return JSONResponse(
-                content={
-                    "status": "unavailable",
-                    "healthy": False,
-                    "message": "Background task manager not initialized",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                },
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+                content=_background_task_manager_unavailable_payload(request),
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        metrics = await task_manager.get_task_metrics()
-        
-        # Health checks
-        issues = []
-        warnings = []
-        healthy = True
-        
-        # Check success rate
-        if metrics.success_rate < 80:
-            issues.append(f"Low success rate: {metrics.success_rate:.1f}%")
-            healthy = False
-        elif metrics.success_rate < 90:
-            warnings.append(f"Success rate below optimal: {metrics.success_rate:.1f}%")
-        
-        # Check for stuck tasks
-        if metrics.processing_tasks > 50:
-            issues.append(f"High number of processing tasks: {metrics.processing_tasks}")
-            healthy = False
-        elif metrics.processing_tasks > 20:
-            warnings.append(f"Many tasks in processing: {metrics.processing_tasks}")
-        
-        # Check retry queue
-        if metrics.retrying_tasks > 10:
-            warnings.append(f"High retry queue: {metrics.retrying_tasks} tasks")
-        
-        # Check pending queue
-        if metrics.pending_tasks > 100:
-            warnings.append(f"Large pending queue: {metrics.pending_tasks} tasks")
-        
-        # Check for dead tasks (tasks stuck in processing for too long)
-        dead_tasks = await task_manager._get_dead_tasks()
-        if len(dead_tasks) > 0:
-            issues.append(f"Found {len(dead_tasks)} potentially dead tasks")
-            healthy = False
-        
-        health_status = "healthy" if healthy and not warnings else "degraded" if healthy else "unhealthy"
-        
+        snapshot = await _background_task_health_snapshot(task_manager)
+        metrics = snapshot["metrics"]
+        surface = _background_task_surface(
+            request,
+            issues=list(snapshot["issues"]),
+            status_reason=(
+                "Background task metrics within thresholds"
+                if not snapshot["issues"]
+                else "Background task metrics exceeded thresholds"
+            ),
+            message=(
+                "Background task metrics within thresholds"
+                if not snapshot["issues"]
+                else "Background task metrics exceeded thresholds"
+            ),
+        )
+
         response_data = {
-            "status": health_status,
-            "healthy": healthy,
-            "issues": issues,
-            "warnings": warnings,
+            **surface,
+            "healthy": bool(snapshot["healthy"]),
+            "issues": [issue["message"] for issue in snapshot["issues"]],
+            "warnings": list(snapshot["warnings"]),
             "metrics_summary": {
                 "total_tasks": metrics.total_tasks,
                 "active_tasks": metrics.active_tasks,
                 "success_rate": metrics.success_rate,
                 "average_duration_seconds": metrics.average_duration
             },
-            "recommendations": []
+            "recommendations": list(snapshot["recommendations"]),
         }
-        
-        # Add recommendations based on issues
-        if metrics.success_rate < 80:
-            response_data["recommendations"].append(
-                "Investigate failing tasks to identify common patterns"
-            )
-        
-        if metrics.processing_tasks > 20:
-            response_data["recommendations"].append(
-                "Consider scaling up workers or optimizing task processing"
-            )
-        
-        if len(dead_tasks) > 0:
-            response_data["recommendations"].append(
-                "Run cleanup process to mark dead tasks as failed"
-            )
-        
+
         response_data["timestamp"] = datetime.now(timezone.utc).isoformat()
-        
-        status_code = status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+
+        status_code = status.HTTP_200_OK if snapshot["healthy"] else status.HTTP_503_SERVICE_UNAVAILABLE
         return JSONResponse(content=response_data, status_code=status_code)
         
     except Exception as e:

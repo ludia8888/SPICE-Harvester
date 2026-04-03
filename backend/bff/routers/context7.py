@@ -8,7 +8,7 @@ from shared.observability.tracing import trace_endpoint
 import logging
 from typing import Any, Dict, TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from bff.dependencies import OMSClientDep
 from bff.schemas.context7_requests import (
@@ -20,6 +20,7 @@ from bff.schemas.context7_requests import (
 from bff.services import context7_service
 from bff.services.oms_client import OMSClient
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.services.core.runtime_status import get_runtime_status
 
 if TYPE_CHECKING:  # pragma: no cover
     from shared.services.mcp_client import Context7Client as Context7Client  # noqa: F401
@@ -105,5 +106,8 @@ async def get_ontology_suggestions(
 
 @router.get("/health")
 @trace_endpoint("bff.context7.check_context7_health")
-async def check_context7_health(client: Context7Client = Depends(get_context7_client)) -> Dict[str, Any]:
-    return await context7_service.check_context7_health(client=client)
+async def check_context7_health(request: Request) -> Dict[str, Any]:
+    return await context7_service.check_context7_health(
+        client_resolver=get_context7_client,
+        runtime_status=get_runtime_status(request.app, attr_names=("bff_runtime_status", "runtime_status")),
+    )

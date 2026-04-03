@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import json
 
 import pytest
 
@@ -90,3 +91,114 @@ async def test_initialize_redis_and_command_status_degrades_when_redis_connect_f
     assert service_container._oms_services["redis_service"] is None
     assert service_container._oms_services["command_status_service"] is None
     assert fake_container.calls == []
+
+
+class _FakeInnerContainer:
+    async def health_check_all(self):  # noqa: ANN201
+        return {"status": "healthy"}
+
+
+class _FakeOMSContainer:
+    def __init__(
+        self,
+        *,
+        jsonld_ok: bool = True,
+        label_mapper_ok: bool = True,
+        redis_service: object | None = object(),
+        command_status_service: object | None = object(),
+        elasticsearch_service: object | None = object(),
+    ) -> None:
+        self.container = _FakeInnerContainer()
+        self._jsonld_ok = jsonld_ok
+        self._label_mapper_ok = label_mapper_ok
+        self._redis_service = redis_service
+        self._command_status_service = command_status_service
+        self._elasticsearch_service = elasticsearch_service
+
+    def get_jsonld_converter(self):  # noqa: ANN201
+        if not self._jsonld_ok:
+            raise RuntimeError("jsonld unavailable")
+        return object()
+
+    def get_label_mapper(self):  # noqa: ANN201
+        if not self._label_mapper_ok:
+            raise RuntimeError("label mapper unavailable")
+        return object()
+
+    def get_redis_service(self):  # noqa: ANN201
+        return self._redis_service
+
+    def get_command_status_service(self):  # noqa: ANN201
+        return self._command_status_service
+
+    def get_elasticsearch_service(self):  # noqa: ANN201
+        return self._elasticsearch_service
+
+
+@pytest.mark.asyncio
+async def test_container_health_check_returns_unified_hard_down_surface_when_container_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(oms_main, "_oms_container", None)
+
+    response = await oms_main.container_health_check()
+
+    assert response.status_code == 503
+    payload = response.body.decode()
+    assert "hard_down" in payload
+    assert "OMS container not initialized" in payload
+
+
+@pytest.mark.asyncio
+async def test_container_health_check_returns_degraded_surface_for_optional_dependency_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        oms_main,
+        "get_settings",
+        lambda: SimpleNamespace(environment=SimpleNamespace(value="test"), debug=False),
+    )
+    monkeypatch.setattr(
+        oms_main,
+        "_oms_container",
+        _FakeOMSContainer(redis_service=None, command_status_service=None, elasticsearch_service=None),
+    )
+
+    response = await oms_main.container_health_check()
+    payload = json.loads(response.body)
+
+    assert payload["status"] == "degraded"
+    assert payload["dependency_status"]["redis"] == "degraded"
+    assert payload["dependency_status"]["command_status"] == "degraded"
+    assert payload["dependency_status"]["elasticsearch"] == "degraded"
+    assert payload["oms_services"]["redis_service"]["status"] == "degraded"
+    assert payload["oms_services"]["redis_service"]["classification"] == "unavailable"
+    assert payload["oms_services"]["command_status_service"]["status"] == "degraded"
+    assert payload["oms_services"]["elasticsearch_service"]["status"] == "degraded"
+    assert "oms.command_status" in payload["affected_features"]
+
+
+@pytest.mark.asyncio
+async def test_container_health_check_returns_canonical_nested_status_for_required_services(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        oms_main,
+        "get_settings",
+        lambda: SimpleNamespace(environment=SimpleNamespace(value="test"), debug=False),
+    )
+    monkeypatch.setattr(
+        oms_main,
+        "_oms_container",
+        _FakeOMSContainer(jsonld_ok=False, label_mapper_ok=False),
+    )
+
+    response = await oms_main.container_health_check()
+    payload = json.loads(response.body)
+
+    assert response.status_code == 503
+    assert payload["status"] == "hard_down"
+    assert payload["oms_services"]["jsonld_converter"]["status"] == "hard_down"
+    assert payload["oms_services"]["jsonld_converter"]["classification"] == "internal"
+    assert payload["oms_services"]["label_mapper"]["status"] == "hard_down"
+    assert payload["oms_services"]["label_mapper"]["classification"] == "internal"

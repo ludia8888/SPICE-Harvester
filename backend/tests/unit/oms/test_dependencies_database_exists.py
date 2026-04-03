@@ -56,7 +56,13 @@ async def test_ensure_database_exists_raises_404_when_missing_in_postgres_regist
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_ensure_database_exists_raises_503_when_registry_is_unavailable_by_default() -> None:
+async def test_ensure_database_exists_raises_503_when_registry_is_unavailable_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _connect(_dsn: str) -> None:
+        raise ConnectionRefusedError("registry down")
+
+    monkeypatch.setattr("shared.security.database_access.asyncpg.connect", _connect)
     with pytest.raises(HTTPException) as exc_info:
         await ensure_database_exists(db_name="demo")
     assert exc_info.value.status_code == 503

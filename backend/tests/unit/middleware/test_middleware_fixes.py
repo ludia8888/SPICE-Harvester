@@ -254,6 +254,32 @@ def test_rate_limit_ignores_spoofed_x_forwarded_for_for_ip_buckets():
 
 
 @pytest.mark.unit
+def test_rate_limit_does_not_share_quota_across_endpoints_with_same_preset():
+    with _set_env(REDIS_URL="redis://127.0.0.1:6399", RATE_LIMIT_FAIL_OPEN="false"):
+        app = FastAPI()
+        install_rate_limit_headers_middleware(app)
+
+        @app.post("/limited-a")
+        @rate_limit(requests=2, window=60)
+        async def limited_a(request: Request):  # noqa: ARG001
+            return {"ok": "a"}
+
+        @app.post("/limited-b")
+        @rate_limit(requests=2, window=60)
+        async def limited_b(request: Request):  # noqa: ARG001
+            return {"ok": "b"}
+
+        client = TestClient(app)
+
+        assert client.post("/limited-a").status_code == 200
+        assert client.post("/limited-a").status_code == 200
+        assert client.post("/limited-b").status_code == 200
+        assert client.post("/limited-b").status_code == 200
+        assert client.post("/limited-a").status_code == 429
+        assert client.post("/limited-b").status_code == 429
+
+
+@pytest.mark.unit
 def test_rate_limit_fails_closed_when_request_parameter_is_missing():
     with _set_env(REDIS_URL="redis://127.0.0.1:6399", RATE_LIMIT_FAIL_OPEN="false"):
         app = FastAPI()

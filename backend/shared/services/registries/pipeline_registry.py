@@ -2545,10 +2545,12 @@ class PipelineRegistry(PostgresSchemaRegistry):
         *,
         pipeline_id: str,
         limit: int = 50,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")
         limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -2560,9 +2562,11 @@ class PipelineRegistry(PostgresSchemaRegistry):
                 WHERE pipeline_id = $1
                 ORDER BY started_at DESC
                 LIMIT $2
+                OFFSET $3
                 """,
                 pipeline_id,
                 limit,
+                offset,
             )
         output: List[Dict[str, Any]] = []
         for row in rows or []:

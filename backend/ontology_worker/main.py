@@ -33,6 +33,12 @@ from shared.models.lineage_edge_types import (
 from oms.services.event_store import EventStore
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatus, CommandStatusService
+from shared.services.core.write_path_contract import (
+    build_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
     CommandParseError,
@@ -276,6 +282,256 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
             },
         )
 
+    @staticmethod
+    def _ontology_graph_resource_id(*, db_name: str, branch: str, class_id: str) -> str:
+        return f"graph:{db_name}:{branch}:ontology:{class_id}"
+
+    @staticmethod
+    def _ontology_graph_audit_action(*, operation: str) -> str:
+        return "ONTOLOGY_GRAPH_DELETE" if operation == "delete" else "ONTOLOGY_GRAPH_WRITE"
+
+    async def _log_ontology_graph_audit(
+        self,
+        *,
+        status: str,
+        operation: str,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        command_id: Optional[str],
+        metadata: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        if not (command_id and class_id and self.audit_store):
+            return
+        audit_metadata: Dict[str, Any] = {
+            "db_name": db_name,
+            "branch": branch,
+            "class_id": class_id,
+            "operation": operation,
+        }
+        if isinstance(metadata, dict):
+            audit_metadata.update(metadata)
+        try:
+            await self.audit_store.log(
+                partition_key=f"db:{db_name}",
+                actor="ontology_worker",
+                action=self._ontology_graph_audit_action(operation=operation),
+                status=status,
+                resource_type="graph_schema",
+                resource_id=self._ontology_graph_resource_id(
+                    db_name=db_name,
+                    branch=branch,
+                    class_id=class_id,
+                ),
+                event_id=str(command_id),
+                command_id=str(command_id),
+                metadata=audit_metadata,
+                error=error,
+                occurred_at=datetime.now(timezone.utc),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Audit log write failed (operation=%s status=%s db=%s branch=%s class_id=%s): %s",
+                operation,
+                status,
+                db_name,
+                branch,
+                class_id,
+                exc,
+                exc_info=True,
+            )
+
+    async def _sync_ontology_key_spec(
+        self,
+        *,
+        operation: str,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not (db_name and class_id and self.key_spec_registry):
+            return followup_skipped(
+                "ontology_key_spec",
+                details={"reason": "registry_unavailable", "class_id": class_id},
+            )
+        try:
+            if operation == "delete":
+                await self.key_spec_registry.delete_key_spec(
+                    db_name=str(db_name),
+                    branch=str(branch),
+                    class_id=str(class_id),
+                )
+                return followup_completed(
+                    "ontology_key_spec",
+                    details={"operation": "delete", "class_id": class_id},
+                )
+
+            pk_fields, title_fields = self._extract_key_spec_from_payload(payload or {})
+            await self.key_spec_registry.upsert_key_spec(
+                db_name=str(db_name),
+                branch=str(branch),
+                class_id=str(class_id),
+                primary_key=pk_fields,
+                title_key=title_fields,
+            )
+            return followup_completed(
+                "ontology_key_spec",
+                details={
+                    "operation": "upsert",
+                    "class_id": class_id,
+                    "primary_key": pk_fields,
+                    "title_key": title_fields,
+                },
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to %s ontology key_spec after successful %s (db=%s branch=%s class_id=%s): %s",
+                "delete" if operation == "delete" else "upsert",
+                operation,
+                db_name,
+                branch,
+                class_id,
+                exc,
+                exc_info=True,
+            )
+            return followup_degraded(
+                "ontology_key_spec",
+                error=str(exc),
+                details={"operation": operation, "class_id": class_id},
+            )
+
+    async def _complete_ontology_command_best_effort(
+        self,
+        *,
+        command_id: Optional[str],
+        operation: str,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not (command_id and self.command_status_service):
+            return followup_skipped(
+                "ontology_command_status",
+                details={"reason": "service_unavailable", "operation": operation},
+            )
+        try:
+            await self.command_status_service.complete_command(
+                command_id=command_id,
+                result=result,
+            )
+            return followup_completed(
+                "ontology_command_status",
+                details={"operation": operation, "command_id": command_id},
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to mark ontology %s command completed (command_id=%s): %s",
+                operation,
+                command_id,
+                exc,
+                exc_info=True,
+            )
+            return followup_degraded(
+                "ontology_command_status",
+                error=str(exc),
+                details={"operation": operation, "command_id": command_id},
+            )
+
+    async def _finalize_ontology_graph_mutation(
+        self,
+        *,
+        operation: str,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        command_id: Optional[str],
+        ontology_version: Optional[str],
+        edge_type: str,
+        key_spec_payload: Optional[Dict[str, Any]] = None,
+        audit_metadata: Optional[Dict[str, Any]] = None,
+        completion_result: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        followups = [
+            await self._sync_ontology_key_spec(
+                operation=operation,
+                db_name=str(db_name),
+                branch=str(branch),
+                class_id=str(class_id),
+                payload=key_spec_payload,
+            )
+        ]
+        if command_id and class_id:
+            try:
+                await self._record_ontology_lineage(
+                    command_id=str(command_id),
+                    db_name=str(db_name),
+                    branch=str(branch),
+                    class_id=str(class_id),
+                    ontology_version=str(ontology_version),
+                    edge_type=edge_type,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to record ontology lineage after successful %s (db=%s branch=%s class_id=%s): %s",
+                    operation,
+                    db_name,
+                    branch,
+                    class_id,
+                    exc,
+                    exc_info=True,
+                )
+                followups.append(
+                    followup_degraded(
+                        "ontology_lineage",
+                        error=str(exc),
+                        details={"operation": operation, "class_id": class_id},
+                    )
+                )
+            else:
+                followups.append(
+                    followup_completed(
+                        "ontology_lineage",
+                        details={"operation": operation, "class_id": class_id},
+                    )
+                )
+        else:
+            followups.append(
+                followup_skipped(
+                    "ontology_lineage",
+                    details={"reason": "missing_command_or_class_id", "operation": operation},
+                )
+            )
+        success_metadata = dict(audit_metadata or {})
+        if ontology_version:
+            success_metadata["ontology"] = ontology_version
+        write_path_contract = build_write_path_contract(
+            authoritative_write="ontology_resource_mutation",
+            followups=followups,
+        )
+        followups.append(
+            await self._complete_ontology_command_best_effort(
+                command_id=command_id,
+                operation=operation,
+                result=completion_result
+                or {
+                    "class_id": class_id,
+                    "message": f"Successfully {operation}d ontology class: {class_id}",
+                },
+            )
+        )
+        write_path_contract["derived_side_effects"] = followups
+        success_metadata["write_path_contract"] = write_path_contract
+        await self._log_ontology_graph_audit(
+            operation=operation,
+            status="success",
+            db_name=str(db_name),
+            branch=str(branch),
+            class_id=str(class_id),
+            command_id=command_id,
+            metadata=success_metadata,
+        )
+        return write_path_contract
+
     async def initialize(self):
         """워커 초기화"""
         settings = get_settings()
@@ -465,30 +721,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 if existing:
                     logger.info("Ontology '%s' already exists; treating create as idempotent success", class_id)
                 else:
-                    if command_id and self.audit_store:
-                        try:
-                            await self.audit_store.log(
-                                partition_key=f"db:{db_name}",
-                                actor="ontology_worker",
-                                action="ONTOLOGY_GRAPH_WRITE",
-                                status="failure",
-                                resource_type="graph_schema",
-                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                                event_id=str(command_id),
-                                command_id=str(command_id),
-                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "create"},
-                                error=str(e),
-                                occurred_at=datetime.now(timezone.utc),
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Audit log write failed (operation=create status=failure db=%s branch=%s class_id=%s): %s",
-                                db_name,
-                                branch,
-                                class_id,
-                                exc,
-                                exc_info=True,
-                            )
+                    await self._log_ontology_graph_audit(
+                        status="failure",
+                        operation="create",
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                        command_id=command_id,
+                        error=str(e),
+                    )
                     raise
 
             ontology_version = None
@@ -527,81 +768,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 occurred_by=command_data.get('created_by', 'system')
             )
             await self.publish_event(event)
-
-            if db_name and class_id and self.key_spec_registry:
-                try:
-                    pk_fields, title_fields = self._extract_key_spec_from_payload(payload)
-                    await self.key_spec_registry.upsert_key_spec(
-                        db_name=str(db_name),
-                        branch=str(branch),
-                        class_id=str(class_id),
-                        primary_key=pk_fields,
-                        title_key=title_fields,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "Failed to upsert ontology key_spec after successful create (db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-            if command_id and class_id:
-                await self._record_ontology_lineage(
-                    command_id=str(command_id),
-                    db_name=str(db_name),
-                    branch=str(branch),
-                    class_id=str(class_id),
-                    ontology_version=str(ontology_version),
-                    edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
-                )
-            if command_id and class_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="ontology_worker",
-                        action="ONTOLOGY_GRAPH_WRITE",
-                        status="success",
-                        resource_type="graph_schema",
-                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "operation": "create",
-                            "ontology": ontology_version,
-                        },
-                        occurred_at=datetime.now(timezone.utc),
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Audit log write failed (operation=create status=success db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-
-            if command_id and self.command_status_service:
-                try:
-                    await self.command_status_service.complete_command(
-                        command_id=command_id,
-                        result={
-                            "class_id": class_id,
-                            "message": f"Successfully created ontology class: {class_id}"
-                            }
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to mark ontology create command completed (command_id=%s): %s",
-                        command_id,
-                        exc,
-                        exc_info=True,
-                    )
+            await self._finalize_ontology_graph_mutation(
+                operation="create",
+                db_name=str(db_name),
+                branch=str(branch),
+                class_id=str(class_id),
+                command_id=command_id,
+                ontology_version=ontology_version,
+                edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
+                key_spec_payload=payload,
+                audit_metadata={},
+                completion_result={
+                    "class_id": class_id,
+                    "message": f"Successfully created ontology class: {class_id}",
+                },
+            )
 
             logger.info(f"Successfully created ontology class: {class_id}")
             
@@ -678,30 +859,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 if already_applied:
                     logger.info(f"Ontology '{class_id}' update appears already applied; treating as idempotent success")
                 else:
-                    if command_id and self.audit_store:
-                        try:
-                            await self.audit_store.log(
-                                partition_key=f"db:{db_name}",
-                                actor="ontology_worker",
-                                action="ONTOLOGY_GRAPH_WRITE",
-                                status="failure",
-                                resource_type="graph_schema",
-                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                                event_id=str(command_id),
-                                command_id=str(command_id),
-                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "update"},
-                                error=str(e),
-                                occurred_at=datetime.now(timezone.utc),
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Audit log write failed (operation=update status=failure db=%s branch=%s class_id=%s): %s",
-                                db_name,
-                                branch,
-                                class_id,
-                                exc,
-                                exc_info=True,
-                            )
+                    await self._log_ontology_graph_audit(
+                        status="failure",
+                        operation="update",
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                        command_id=command_id,
+                        error=str(e),
+                    )
                     raise
 
             ontology_version = None
@@ -736,82 +902,22 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 occurred_by=command_data.get('created_by', 'system')
             )
             await self.publish_event(event)
-
-            if db_name and class_id and self.key_spec_registry:
-                try:
-                    pk_fields, title_fields = self._extract_key_spec_from_payload(merged_data)
-                    await self.key_spec_registry.upsert_key_spec(
-                        db_name=str(db_name),
-                        branch=str(branch),
-                        class_id=str(class_id),
-                        primary_key=pk_fields,
-                        title_key=title_fields,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "Failed to upsert ontology key_spec after successful update (db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-            if command_id and class_id:
-                await self._record_ontology_lineage(
-                    command_id=str(command_id),
-                    db_name=str(db_name),
-                    branch=str(branch),
-                    class_id=str(class_id),
-                    ontology_version=str(ontology_version),
-                    edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
-                )
-            if command_id and class_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="ontology_worker",
-                        action="ONTOLOGY_GRAPH_WRITE",
-                        status="success",
-                        resource_type="graph_schema",
-                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "operation": "update",
-                            "ontology": ontology_version,
-                        },
-                        occurred_at=datetime.now(timezone.utc),
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Audit log write failed (operation=update status=success db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-
-            if command_id and self.command_status_service:
-                try:
-                    await self.command_status_service.complete_command(
-                        command_id=command_id,
-                        result={
-                            "class_id": class_id,
-                            "message": f"Successfully updated ontology class: {class_id}",
-                            "updates": updates,
-                            }
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to mark ontology update command completed (command_id=%s): %s",
-                        command_id,
-                        exc,
-                        exc_info=True,
-                    )
+            await self._finalize_ontology_graph_mutation(
+                operation="update",
+                db_name=str(db_name),
+                branch=str(branch),
+                class_id=str(class_id),
+                command_id=command_id,
+                ontology_version=ontology_version,
+                edge_type=EDGE_EVENT_WROTE_GRAPH_DOCUMENT,
+                key_spec_payload=merged_data,
+                audit_metadata={},
+                completion_result={
+                    "class_id": class_id,
+                    "message": f"Successfully updated ontology class: {class_id}",
+                    "updates": updates,
+                },
+            )
 
             logger.info(f"Successfully updated ontology class: {class_id}")
             
@@ -875,30 +981,15 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                     resource_id=class_id,
                 )
                 if existing:
-                    if command_id and self.audit_store:
-                        try:
-                            await self.audit_store.log(
-                                partition_key=f"db:{db_name}",
-                                actor="ontology_worker",
-                                action="ONTOLOGY_GRAPH_DELETE",
-                                status="failure",
-                                resource_type="graph_schema",
-                                resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                                event_id=str(command_id),
-                                command_id=str(command_id),
-                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "delete"},
-                                error="delete_failed",
-                                occurred_at=datetime.now(timezone.utc),
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Audit log write failed (operation=delete status=failure db=%s branch=%s class_id=%s): %s",
-                                db_name,
-                                branch,
-                                class_id,
-                                exc,
-                                exc_info=True,
-                            )
+                    await self._log_ontology_graph_audit(
+                        status="failure",
+                        operation="delete",
+                        db_name=str(db_name),
+                        branch=str(branch),
+                        class_id=str(class_id),
+                        command_id=command_id,
+                        error="delete_failed",
+                    )
                     raise Exception(f"Failed to delete ontology class '{class_id}'")
                 logger.info(f"Ontology '{class_id}' already deleted; treating delete as idempotent success")
                 already_missing = True
@@ -933,80 +1024,21 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
                 occurred_by=command_data.get('created_by', 'system')
             )
             await self.publish_event(event)
-
-            if db_name and class_id and self.key_spec_registry:
-                try:
-                    await self.key_spec_registry.delete_key_spec(
-                        db_name=str(db_name),
-                        branch=str(branch),
-                        class_id=str(class_id),
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "Failed to delete ontology key_spec after successful delete (db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-
-            if command_id and class_id:
-                await self._record_ontology_lineage(
-                    command_id=str(command_id),
-                    db_name=str(db_name),
-                    branch=str(branch),
-                    class_id=str(class_id),
-                    ontology_version=str(ontology_version),
-                    edge_type=EDGE_EVENT_DELETED_GRAPH_DOCUMENT,
-                )
-            if command_id and class_id and self.audit_store:
-                try:
-                    await self.audit_store.log(
-                        partition_key=f"db:{db_name}",
-                        actor="ontology_worker",
-                        action="ONTOLOGY_GRAPH_DELETE",
-                        status="success",
-                        resource_type="graph_schema",
-                        resource_id=f"graph:{db_name}:{branch}:ontology:{class_id}",
-                        event_id=str(command_id),
-                        command_id=str(command_id),
-                        metadata={
-                            "db_name": db_name,
-                            "branch": branch,
-                            "class_id": class_id,
-                            "operation": "delete",
-                            "already_missing": already_missing,
-                            "ontology": ontology_version,
-                        },
-                        occurred_at=datetime.now(timezone.utc),
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Audit log write failed (operation=delete status=success db=%s branch=%s class_id=%s): %s",
-                        db_name,
-                        branch,
-                        class_id,
-                        exc,
-                        exc_info=True,
-                    )
-
-            if command_id and self.command_status_service:
-                try:
-                    await self.command_status_service.complete_command(
-                        command_id=command_id,
-                        result={
-                            "class_id": class_id,
-                            "message": f"Successfully deleted ontology class: {class_id}"
-                        }
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to mark ontology delete command completed (command_id=%s): %s",
-                        command_id,
-                        exc,
-                        exc_info=True,
-                    )
+            await self._finalize_ontology_graph_mutation(
+                operation="delete",
+                db_name=str(db_name),
+                branch=str(branch),
+                class_id=str(class_id),
+                command_id=command_id,
+                ontology_version=ontology_version,
+                edge_type=EDGE_EVENT_DELETED_GRAPH_DOCUMENT,
+                key_spec_payload=None,
+                audit_metadata={"already_missing": already_missing},
+                completion_result={
+                    "class_id": class_id,
+                    "message": f"Successfully deleted ontology class: {class_id}",
+                },
+            )
 
             logger.info(f"Successfully deleted ontology class: {class_id}")
             

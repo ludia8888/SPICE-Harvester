@@ -242,4 +242,9 @@ async def test_run_deploy_mode_keeps_deployed_status_when_watermark_persist_fail
     assert build_calls[0]["status"] == "DEPLOYED"
     assert run_calls[0]["status"] == "DEPLOYED"
     assert run_calls[0]["output_json"]["watermarks"]["status"] == "degraded"
+    contract = run_calls[0]["output_json"]["write_path_contract"]
+    assert contract["authoritative_state"] == "committed"
+    assert contract["authoritative_write"] == "dataset_version_publish"
+    assert contract["derived_side_effects"][0]["name"] == "deploy_watermarks"
+    assert contract["derived_side_effects"][0]["status"] == "degraded"
     assert event_calls[0]["status"] == "DEPLOYED"

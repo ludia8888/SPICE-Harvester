@@ -19,7 +19,7 @@ import asyncpg
 from shared.config.settings import get_settings
 from shared.services.registries.runtime_ddl import (
     RuntimeDDLDisabledError,
-    allow_runtime_ddl_bootstrap,
+    allow_runtime_ddl_bootstrap as runtime_ddl_bootstrap_allowed,
     find_missing_schema_objects,
     format_missing_schema_objects,
 )
@@ -65,6 +65,7 @@ class AggregateSequenceAllocator:
         dsn: Optional[str] = None,
         schema: str = "spice_event_registry",
         handler_prefix: str = "write_side",
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ):
         seq_settings = get_settings().event_sourcing
         self._dsn = dsn or get_settings().database.postgres_url
@@ -74,7 +75,11 @@ class AggregateSequenceAllocator:
             or str(seq_settings.event_store_sequence_handler_prefix or "write_side").strip()
             or "write_side"
         )
-        self._allow_runtime_ddl_bootstrap = bool(allow_runtime_ddl_bootstrap())
+        self._allow_runtime_ddl_bootstrap = (
+            bool(runtime_ddl_bootstrap_allowed())
+            if allow_runtime_ddl_bootstrap is None
+            else bool(allow_runtime_ddl_bootstrap)
+        )
         self._pool: Optional[asyncpg.Pool] = None
 
     async def connect(self) -> None:

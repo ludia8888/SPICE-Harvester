@@ -130,7 +130,7 @@
       "id": "oms",
       "label": "oms",
       "category": "api",
-      "port": null
+      "port": 8000
     },
     {
       "id": "ontology-worker",

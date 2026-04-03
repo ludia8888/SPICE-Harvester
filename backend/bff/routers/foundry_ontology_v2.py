@@ -6,7 +6,6 @@ existing OMS/BFF ontology resources.
 
 import asyncio
 import logging
-import time
 from typing import Any, Dict
 
 import httpx
@@ -16,7 +15,13 @@ from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep, get_redis_service
 from bff.services.database_role_guard import enforce_database_role_or_permission_error
+from bff.routers import foundry_ontology_v2_metadata as _metadata
+from bff.routers import foundry_ontology_v2_object_rows as _object_rows
+from bff.routers import foundry_ontology_v2_queries as _query_routes
 from bff.routers.foundry_ontology_v2_actions import (
+    get_action_type_by_rid_route,
+    get_action_type_route,
+    list_action_types_route,
     _normalize_apply_action_response_payload,
     _resolve_apply_action_mode,
 )
@@ -25,6 +30,68 @@ from bff.routers.foundry_ontology_v2_common import (
     _default_expected_head_commit,
     _encode_page_token,
     _extract_api_response_data,
+)
+from bff.routers import foundry_ontology_v2_media as _media
+from bff.routers.foundry_ontology_v2_object_sets import (
+    _collect_object_set_object_types,
+    _is_search_around_object_set,
+    _load_temporary_object_set,
+    _resolve_object_set_definition,
+    _resolve_object_set_definition_with_store,
+    _resolve_object_set_object_type,
+    _store_temporary_object_set,
+    _temporary_object_set_store,
+)
+from bff.routers.foundry_ontology_v2_object_rows import (
+    _build_backing_sources_from_v2_payload,
+    _build_object_set_search_payload,
+    _build_pk_spec_from_v2_payload,
+    _build_primary_key_where,
+    _collect_load_links_rows,
+    _coerce_primary_key_values,
+    _dedupe_rows_by_identity,
+    _extract_object_set_where,
+    _extract_linked_primary_keys,
+    _extract_linked_primary_keys_page,
+    _linked_primary_key_exists,
+    _load_rows_for_multi_object_types,
+    _load_rows_for_search_around_object_set,
+    _load_rows_for_single_object_type,
+    _normalize_link_type_values,
+    _normalize_primary_key_text,
+    _normalize_select_values,
+    _pagination_scope,
+    _parse_order_by,
+    _project_row_with_required_fields,
+    _resolve_object_primary_key_field,
+    _resolve_source_object_type_from_row,
+    _resolve_source_primary_key_from_row,
+    _sort_rows_by_order_by,
+    _strip_typed_ref,
+    _to_int_or_none,
+)
+from bff.routers.foundry_ontology_v2_serialization import (
+    _apply_query_execute_options,
+    _coerce_optional_bool,
+    _dict_or_none,
+    _extract_ontology_resource,
+    _extract_ontology_resource_rows,
+    _extract_project_policy_inheritance,
+    _extract_query_execution_plan,
+    _first_non_none,
+    _list_or_none,
+    _localized_text,
+    _materialize_query_execution_value,
+    _resolve_query_execution_object_type,
+    _resolve_query_placeholder_key,
+    _to_foundry_action_type,
+    _to_foundry_action_type_map,
+    _to_foundry_named_metadata,
+    _to_foundry_named_metadata_map,
+    _to_foundry_ontology,
+    _to_foundry_query_type,
+    _to_foundry_query_type_map_key,
+    _to_foundry_query_type_metadata_map,
 )
 from bff.routers.foundry_ontology_v2_errors import (
     ApiFeaturePreviewUsageOnlyError,
@@ -59,15 +126,8 @@ from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectT
 from bff.services.oms_client import OMSClient
 from bff.services import object_type_contract_service
 from shared.config.settings import get_settings
-from shared.errors.infra_errors import RegistryUnavailableError
-from shared.foundry.compute_routing import choose_search_around_backend
-from shared.foundry.temporary_object_set_store import FoundryTemporaryObjectSetStore
-from shared.foundry.spark_on_demand_dispatcher import get_spark_on_demand_dispatcher
 from shared.foundry.auth import require_scopes
-from shared.foundry.rids import build_rid
 from shared.observability.tracing import trace_endpoint
-from shared.utils.language import first_localized_text
-from shared.utils.payload_utils import extract_payload_object, extract_payload_rows
 from shared.security.database_access import DOMAIN_MODEL_ROLES, READ_ROLES, enforce_database_role, resolve_database_actor
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -76,24 +136,57 @@ from shared.security.input_sanitizer import (
 )
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
-from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.storage.redis_service import RedisService
-from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
-from shared.utils.ontology_fields import list_ontology_properties
-from shared.utils.object_type_backing import list_backing_sources
+from shared.utils.payload_utils import extract_payload_object
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/ontologies", tags=["Foundry Ontologies v2"])
 
-_DEFAULT_OBJECT_TYPE_ICON: Dict[str, str] = {
-    "type": "blueprint",
-    "name": "table",
-    "color": "#4C6A9A",
-}
-_SEARCH_ROUTING_AUDIT_STORE: AuditLogStore | None = None
-_SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = 0.0
-_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = 60.0
+_SEARCH_ROUTING_AUDIT_STORE = _object_rows._SEARCH_ROUTING_AUDIT_STORE
+_SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = _object_rows._SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
+_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = _object_rows._SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
+AuditLogStore = _object_rows.AuditLogStore
+time = _object_rows.time
+
+
+async def _audit_search_around_compute_routing(**kwargs: Any) -> None:
+    global _SEARCH_ROUTING_AUDIT_STORE, _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL, _SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
+    _object_rows._SEARCH_ROUTING_AUDIT_STORE = _SEARCH_ROUTING_AUDIT_STORE
+    _object_rows._SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
+    _object_rows._SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = _SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
+    _object_rows.AuditLogStore = AuditLogStore
+    _object_rows.time = time
+    try:
+        await _object_rows._audit_search_around_compute_routing(**kwargs)
+    finally:
+        _SEARCH_ROUTING_AUDIT_STORE = _object_rows._SEARCH_ROUTING_AUDIT_STORE
+        _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = _object_rows._SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
+        _SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS = _object_rows._SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
+
+
+async def _resolve_object_set_definition(object_set: Any) -> dict[str, Any]:
+    if isinstance(object_set, dict):
+        return dict(object_set)
+    if isinstance(object_set, str):
+        raise ValueError("Temporary objectSet RID resolution requires redis_service")
+    raise ValueError("objectSet is required")
+
+
+async def _resolve_object_set_definition_with_store(
+    object_set: Any,
+    *,
+    redis_service: RedisService,
+) -> dict[str, Any]:
+    if isinstance(object_set, dict):
+        return dict(object_set)
+    if isinstance(object_set, str):
+        return await _load_temporary_object_set(object_set, redis_service=redis_service)
+    raise ValueError("objectSet is required")
+
+
+_object_rows._SEARCH_ROUTING_AUDIT_CALLBACK = lambda **kwargs: _audit_search_around_compute_routing(**kwargs)
+
 _FORWARDED_ACTOR_HEADER_KEYS = (
     "X-User-ID",
     "X-User-Type",
@@ -101,26 +194,46 @@ _FORWARDED_ACTOR_HEADER_KEYS = (
     "X-Actor",
     "X-User-Roles",
 )
-_ACTION_TYPE_RESOURCE_TYPE_ALIASES = {
-    "action_type",
-    "action_types",
-    "action-type",
-    "action-types",
-    "action",
-    "actions",
-}
-_ACTION_TYPE_SPEC_HINT_FIELDS = {
-    "input_schema",
-    "writeback_target",
-    "implementation",
-    "validation_rules",
-    "target_object_type",
-}
 
 _ONTOLOGY_READ = require_scopes(["api:ontologies-read"])
 _ONTOLOGY_WRITE = require_scopes(["api:ontologies-write"])
 _QUERY_TYPE_PRIMARY_BRANCH = "main"
 _QUERY_TYPE_FALLBACK_BRANCH = "main"
+
+_rid_component = _metadata._rid_component
+_default_object_type_rid = _metadata._default_object_type_rid
+_default_property_rid = _metadata._default_property_rid
+_default_link_type_rid = _metadata._default_link_type_rid
+_default_property_contract = _metadata._default_property_contract
+_strictify_foundry_object_type = _metadata._strictify_foundry_object_type
+_strictify_outgoing_link_type = _metadata._strictify_outgoing_link_type
+_strictify_object_type_full_metadata = _metadata._strictify_object_type_full_metadata
+_log_strict_compat_summary = _metadata._log_strict_compat_summary
+_full_metadata_branch_contract = _metadata._full_metadata_branch_contract
+_extract_object_type_relationships = _metadata._extract_object_type_relationships
+_derive_outgoing_link_types_from_relationships = _metadata._derive_outgoing_link_types_from_relationships
+_extract_databases = _metadata._extract_databases
+_find_resource_by_rid = _metadata._find_resource_by_rid
+_group_outgoing_link_types_by_source = _metadata._group_outgoing_link_types_by_source
+_group_incoming_link_types_by_target = _metadata._group_incoming_link_types_by_target
+_strip_prefix = _metadata._strip_prefix
+_normalize_interface_ref = _metadata._normalize_interface_ref
+_normalize_shared_property_ref = _metadata._normalize_shared_property_ref
+_coerce_string_list = _metadata._coerce_string_list
+_ordered_unique = _metadata._ordered_unique
+_extract_interface_implementations = _metadata._extract_interface_implementations
+_extract_interface_names = _metadata._extract_interface_names
+_extract_ontology_properties_payload = _metadata._extract_ontology_properties_payload
+_extract_shared_property_type_mapping = _metadata._extract_shared_property_type_mapping
+_to_foundry_object_type_full_metadata = _metadata._to_foundry_object_type_full_metadata
+_list_all_resources_for_type = _metadata._list_all_resources_for_type
+_looks_like_action_type_resource = _metadata._looks_like_action_type_resource
+_list_action_type_resources_with_fallback = _metadata._list_action_type_resources_with_fallback
+_find_action_type_resource_by_id = _metadata._find_action_type_resource_by_id
+_find_action_type_resource_by_rid = _metadata._find_action_type_resource_by_rid
+_list_resources_best_effort = _metadata._list_resources_best_effort
+_list_action_type_resources_best_effort = _metadata._list_action_type_resources_best_effort
+_get_ontology_payload_best_effort = _metadata._get_ontology_payload_best_effort
 
 
 def _query_type_branch_candidates() -> tuple[str, ...]:
@@ -197,576 +310,6 @@ class ObjectTypeContractUpdateRequestV2(BaseModel):
     migration: Dict[str, Any] | None = None
 
 
-def _build_pk_spec_from_v2_payload(
-    *,
-    pk_spec: Dict[str, Any] | None,
-    primary_key: str | None,
-    title_property: str | None,
-) -> Dict[str, Any]:
-    if isinstance(pk_spec, dict) and pk_spec:
-        return pk_spec
-    normalized_primary = str(primary_key or "").strip()
-    normalized_title = str(title_property or "").strip()
-    if not normalized_primary and not normalized_title:
-        return {}
-    return {
-        "primary_key": [normalized_primary] if normalized_primary else [],
-        "title_key": [normalized_title] if normalized_title else [],
-    }
-
-
-def _build_backing_sources_from_v2_payload(
-    *,
-    backing_source: Dict[str, Any] | None,
-    backing_sources: list[Dict[str, Any]] | None,
-) -> list[Dict[str, Any]]:
-    return list_backing_sources(
-        {
-            "backing_source": backing_source if isinstance(backing_source, dict) else None,
-            "backing_sources": backing_sources if isinstance(backing_sources, list) else None,
-        }
-    )
-
-
-def _parse_order_by(order_by: str | None) -> Dict[str, Any] | None:
-    raw = str(order_by or "").strip()
-    if not raw:
-        return None
-
-    fields: list[Dict[str, str]] = []
-    for segment in raw.split(","):
-        token = segment.strip()
-        if not token:
-            continue
-
-        field_expr, sep, direction_expr = token.partition(":")
-        field_expr = field_expr.strip()
-        if field_expr.startswith("properties."):
-            field = field_expr[len("properties.") :].strip()
-        elif field_expr.startswith("p."):
-            field = field_expr[len("p.") :].strip()
-        else:
-            raise ValueError("orderBy fields must be prefixed by properties. or p.")
-        if not field:
-            raise ValueError("orderBy field is required")
-
-        direction = direction_expr.strip().lower() if sep else "asc"
-        if direction not in {"asc", "desc"}:
-            raise ValueError("orderBy sort direction must be asc or desc")
-
-        fields.append({"field": field, "direction": direction})
-
-    if not fields:
-        raise ValueError("orderBy must contain at least one field")
-    return {"orderType": "fields", "fields": fields}
-
-
-def _temporary_object_set_store(redis_service: RedisService) -> FoundryTemporaryObjectSetStore:
-    settings = get_settings()
-    return FoundryTemporaryObjectSetStore(
-        redis_service=redis_service,
-        ttl_seconds=int(settings.cache.foundry_temp_object_set_ttl_seconds),
-    )
-
-
-async def _store_temporary_object_set(
-    object_set: dict[str, Any],
-    *,
-    redis_service: RedisService,
-) -> str:
-    store = _temporary_object_set_store(redis_service)
-    return await store.create(object_set)
-
-
-async def _load_temporary_object_set(
-    rid: str,
-    *,
-    redis_service: RedisService,
-) -> dict[str, Any]:
-    store = _temporary_object_set_store(redis_service)
-    try:
-        return await store.get(rid)
-    except LookupError as exc:
-        raise ObjectSetNotFoundError(str(exc)) from exc
-    except RegistryUnavailableError:
-        raise
-
-
-def _collect_object_set_object_types(object_set: Any) -> list[str]:
-    stack: list[Any] = [object_set]
-    visited: set[int] = set()
-    out: list[str] = []
-    seen: set[str] = set()
-
-    while stack:
-        current = stack.pop()
-        if not isinstance(current, dict):
-            continue
-        marker = id(current)
-        if marker in visited:
-            continue
-        visited.add(marker)
-
-        for key in ("objectType", "objectTypeApiName"):
-            candidate = str(current.get(key) or "").strip()
-            if candidate and candidate not in seen:
-                seen.add(candidate)
-                out.append(candidate)
-
-        for value in current.values():
-            if isinstance(value, dict):
-                stack.append(value)
-            elif isinstance(value, list):
-                stack.extend(item for item in value if isinstance(item, dict))
-    return out
-
-
-def _resolve_object_set_object_type(object_set: Any) -> str | None:
-    object_types = _collect_object_set_object_types(object_set)
-    return object_types[0] if object_types else None
-
-
-async def _resolve_object_set_definition(object_set: Any) -> dict[str, Any]:
-    if isinstance(object_set, dict):
-        return dict(object_set)
-    if isinstance(object_set, str):
-        raise ValueError("Temporary objectSet RID resolution requires redis_service")
-    raise ValueError("objectSet is required")
-
-
-async def _resolve_object_set_definition_with_store(
-    object_set: Any,
-    *,
-    redis_service: RedisService,
-) -> dict[str, Any]:
-    if isinstance(object_set, dict):
-        return dict(object_set)
-    if isinstance(object_set, str):
-        return await _load_temporary_object_set(object_set, redis_service=redis_service)
-    raise ValueError("objectSet is required")
-
-
-def _is_search_around_object_set(object_set: Any) -> bool:
-    if not isinstance(object_set, dict):
-        return False
-    object_set_type = str(object_set.get("type") or "").strip().lower()
-    return object_set_type == "searcharound"
-
-
-def _extract_search_around_link_type(object_set: dict[str, Any]) -> str:
-    link = object_set.get("link")
-    if isinstance(link, str):
-        link_type = link.strip()
-    elif isinstance(link, dict):
-        link_type = str(link.get("apiName") or link.get("linkType") or "").strip()
-    else:
-        link_type = ""
-    if not link_type:
-        raise ValueError("searchAround objectSet requires link")
-    return link_type
-
-
-def _dedupe_rows_by_identity(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for row in rows:
-        object_type = str(
-            row.get("__apiName")
-            or row.get("objectTypeApiName")
-            or row.get("class_id")
-            or ""
-        ).strip()
-        primary_key = _resolve_source_primary_key_from_row(row) or ""
-        if not object_type or not primary_key:
-            deduped.append(row)
-            continue
-        marker = (object_type, primary_key)
-        if marker in seen:
-            continue
-        seen.add(marker)
-        deduped.append(row)
-    return deduped
-
-
-def _normalize_sort_value(value: Any) -> tuple[int, str]:
-    if value is None:
-        return (0, "")
-    if isinstance(value, bool):
-        return (1, "1" if value else "0")
-    if isinstance(value, (int, float)):
-        return (2, f"{float(value):020.6f}")
-    if isinstance(value, str):
-        return (3, value.casefold())
-    return (4, str(value))
-
-
-def _sort_rows_by_order_by(rows: list[dict[str, Any]], order_by: Any) -> list[dict[str, Any]]:
-    sorted_rows = list(rows)
-    if not isinstance(order_by, dict):
-        sorted_rows.sort(key=lambda row: (str(row.get("class_id") or ""), str(row.get("instance_id") or "")))
-        return sorted_rows
-
-    if str(order_by.get("orderType") or "fields").strip() != "fields":
-        return sorted_rows
-
-    raw_fields = order_by.get("fields")
-    if not isinstance(raw_fields, list) or not raw_fields:
-        return sorted_rows
-
-    # Deterministic tie-breaker first; stable sorts below keep field order precedence.
-    sorted_rows.sort(key=lambda row: str(row.get("instance_id") or ""))
-    for item in reversed(raw_fields):
-        if not isinstance(item, dict):
-            continue
-        field = str(item.get("field") or "").strip()
-        if not field:
-            continue
-        direction = str(item.get("direction") or "asc").strip().lower()
-        reverse = direction == "desc"
-        sorted_rows.sort(
-            key=lambda row: _normalize_sort_value(_value_by_field(row, field)),
-            reverse=reverse,
-        )
-
-    return sorted_rows
-
-
-async def _resolve_search_around_target_primary_keys(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_set: dict[str, Any],
-    redis_service: RedisService,
-) -> tuple[dict[str, list[str]], str]:
-    link_type = _extract_search_around_link_type(object_set)
-    source_object_set = await _resolve_object_set_definition_with_store(
-        object_set.get("objectSet"),
-        redis_service=redis_service,
-    )
-    source_object_types = _collect_object_set_object_types(source_object_set)
-    if not source_object_types:
-        raise ValueError("searchAround.objectSet.objectType is required")
-
-    try:
-        link_payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="link_type",
-            resource_id=link_type,
-            branch=branch,
-        )
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            raise ValueError(f"LinkType not found: {link_type}") from exc
-        raise
-    link_resource = _extract_ontology_resource(link_payload)
-    if not isinstance(link_resource, dict):
-        raise ValueError(f"LinkType not found: {link_type}")
-
-    link_sides_by_source_type: dict[str, dict[str, Any]] = {}
-    for source_object_type in source_object_types:
-        link_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=source_object_type)
-        if not isinstance(link_side, dict):
-            continue
-        target_object_type = str(link_side.get("objectTypeApiName") or "").strip()
-        if not target_object_type:
-            continue
-        link_sides_by_source_type[source_object_type] = link_side
-
-    if not link_sides_by_source_type:
-        raise ValueError(f"LinkType not found: {link_type}")
-
-    source_search_payload = _build_object_set_search_payload(
-        object_set=source_object_set,
-        payload={"pageSize": 1000},
-        require_select=False,
-    )
-
-    source_rows: list[dict[str, Any]] = []
-    for source_object_type in source_object_types:
-        source_rows.extend(
-            await _load_all_rows_for_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=source_object_type,
-                search_payload=source_search_payload,
-            )
-        )
-
-    target_primary_keys_by_type: dict[str, list[str]] = {}
-    seen_primary_keys_by_type: dict[str, set[str]] = {}
-    default_source_type = source_object_types[0] if len(source_object_types) == 1 else None
-
-    for source_row in source_rows:
-        source_object_type = _resolve_source_object_type_from_row(
-            source_row,
-            fallback_object_type=default_source_type,
-        )
-        if not source_object_type:
-            continue
-        link_side = link_sides_by_source_type.get(source_object_type)
-        if not isinstance(link_side, dict):
-            continue
-
-        target_object_type = str(link_side.get("objectTypeApiName") or "").strip()
-        if not target_object_type:
-            continue
-
-        foreign_key_property = str(link_side.get("foreignKeyPropertyApiName") or "").strip() or None
-        linked_primary_keys = _extract_linked_primary_keys(
-            source_row,
-            link_type=link_type,
-            foreign_key_property=foreign_key_property,
-        )
-        if not linked_primary_keys:
-            continue
-
-        target_primary_keys = target_primary_keys_by_type.setdefault(target_object_type, [])
-        seen_primary_keys = seen_primary_keys_by_type.setdefault(target_object_type, set())
-        for linked_primary_key in linked_primary_keys:
-            if linked_primary_key in seen_primary_keys:
-                continue
-            seen_primary_keys.add(linked_primary_key)
-            target_primary_keys.append(linked_primary_key)
-
-    return target_primary_keys_by_type, link_type
-
-
-def _estimate_search_around_candidate_count(target_primary_keys_by_type: dict[str, list[str]]) -> int:
-    total = 0
-    for values in target_primary_keys_by_type.values():
-        if isinstance(values, list):
-            total += len(values)
-    return max(0, total)
-
-
-async def _execute_search_around_index_pruning(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    payload: dict[str, Any],
-    endpoint_scope: str,
-    link_type: str,
-    target_object_types: list[str],
-    target_primary_keys_by_type: dict[str, list[str]],
-) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
-    if not target_object_types:
-        return [], "0", None, []
-
-    page_size = _to_int_or_none(payload.get("pageSize"))
-    if page_size is None:
-        page_size = 1000
-    if page_size < 1 or page_size > 1000:
-        raise ValueError("pageSize must be between 1 and 1000")
-
-    search_payload: dict[str, Any] = {"pageSize": 1000}
-    select_values = _normalize_select_values(payload)
-    if select_values:
-        search_payload["select"] = select_values
-
-    order_by = _normalize_object_set_order_by(payload.get("orderBy"))
-    if order_by is not None:
-        search_payload["orderBy"] = order_by
-
-    if "excludeRid" in payload:
-        search_payload["excludeRid"] = bool(payload.get("excludeRid"))
-    if "snapshot" in payload:
-        search_payload["snapshot"] = bool(payload.get("snapshot"))
-
-    all_rows: list[dict[str, Any]] = []
-    for target_object_type in target_object_types:
-        primary_key_values = target_primary_keys_by_type.get(target_object_type) or []
-        if not primary_key_values:
-            continue
-        target_primary_key_field = await _resolve_object_primary_key_field(
-            db_name=db_name,
-            object_type=target_object_type,
-            branch=branch,
-            oms_client=oms_client,
-        )
-        target_search_payload = dict(search_payload)
-        target_search_payload["where"] = _build_primary_key_where(target_primary_key_field, primary_key_values)
-        all_rows.extend(
-            await _load_all_rows_for_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=target_object_type,
-                search_payload=target_search_payload,
-            )
-        )
-
-    deduped_rows = _dedupe_rows_by_identity(all_rows)
-    sorted_rows = _sort_rows_by_order_by(deduped_rows, order_by)
-
-    exclude_rid = bool(payload.get("excludeRid")) if "excludeRid" in payload else False
-    projected_rows = [
-        _project_row_with_required_fields(
-            row,
-            select_fields=select_values if select_values else None,
-            exclude_rid=exclude_rid,
-        )
-        for row in sorted_rows
-    ]
-
-    page_scope = _pagination_scope(
-        endpoint_scope,
-        db_name,
-        branch,
-        link_type,
-        ",".join(sorted(target_object_types)),
-        str(payload.get("objectSet") or ""),
-        str(page_size),
-        ",".join(select_values),
-    )
-    offset = _decode_page_token(payload.get("pageToken"), scope=page_scope)
-    page_rows = projected_rows[offset : offset + page_size]
-    next_offset = offset + len(page_rows)
-    next_page_token = _encode_page_token(next_offset, scope=page_scope) if next_offset < len(projected_rows) else None
-    return page_rows, str(len(projected_rows)), next_page_token, target_object_types
-
-
-async def _audit_search_around_compute_routing(
-    *,
-    db_name: str,
-    branch: str,
-    endpoint_scope: str,
-    actor: str | None,
-    link_type: str,
-    target_object_types: list[str],
-    decision_metadata: dict[str, Any],
-) -> None:
-    logger.info(
-        "Search Around compute route (ontology=%s branch=%s endpoint=%s actor=%s decision=%s)",
-        db_name,
-        branch,
-        endpoint_scope,
-        actor or "system",
-        decision_metadata,
-    )
-
-    global _SEARCH_ROUTING_AUDIT_STORE, _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL
-    now = time.monotonic()
-    if _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL > now:
-        return
-
-    try:
-        if _SEARCH_ROUTING_AUDIT_STORE is None:
-            _SEARCH_ROUTING_AUDIT_STORE = AuditLogStore()
-        await _SEARCH_ROUTING_AUDIT_STORE.log(
-            partition_key=f"ontology_compute:{db_name}",
-            actor=actor or "system",
-            action="SEARCH_AROUND_COMPUTE_ROUTED",
-            status="success",
-            resource_type="ontology",
-            resource_id=db_name,
-            metadata={
-                "branch": branch,
-                "endpoint_scope": endpoint_scope,
-                "link_type": link_type,
-                "target_object_types": list(target_object_types),
-                **decision_metadata,
-            },
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        _SEARCH_ROUTING_AUDIT_STORE = None
-        _SEARCH_ROUTING_AUDIT_DISABLED_UNTIL = time.monotonic() + _SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS
-        logger.warning(
-            "Search Around compute routing audit temporarily disabled after persistence error (ontology=%s, retry_in=%ss): %s",
-            db_name,
-            int(_SEARCH_ROUTING_AUDIT_RETRY_COOLDOWN_SECONDS),
-            exc,
-            exc_info=True,
-        )
-
-
-async def _load_rows_for_search_around_object_set(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_set: dict[str, Any],
-    payload: dict[str, Any],
-    endpoint_scope: str,
-    actor: str | None = None,
-    redis_service: RedisService,
-) -> tuple[list[dict[str, Any]], str, str | None, list[str]]:
-    target_primary_keys_by_type, link_type = await _resolve_search_around_target_primary_keys(
-        oms_client=oms_client,
-        db_name=db_name,
-        branch=branch,
-        object_set=object_set,
-        redis_service=redis_service,
-    )
-
-    target_object_types = [object_type for object_type, values in target_primary_keys_by_type.items() if values]
-    settings = get_settings()
-    estimated_count = _estimate_search_around_candidate_count(target_primary_keys_by_type)
-    routing_decision = choose_search_around_backend(
-        estimated_count=estimated_count,
-        threshold=int(settings.ontology.search_around_spark_threshold),
-    )
-    execution_backend = "spark_on_demand" if routing_decision.spark_routed else "index_pruning"
-    decision_metadata = routing_decision.as_metadata(execution_backend=execution_backend)
-
-    if routing_decision.spark_routed:
-        dispatcher = get_spark_on_demand_dispatcher()
-        dispatch_result = await dispatcher.dispatch(
-            route="search_around",
-            payload={
-                "ontology": db_name,
-                "branch": branch,
-                "endpoint_scope": endpoint_scope,
-                "estimated_count": estimated_count,
-                "target_object_types": list(target_object_types),
-            },
-            execute=lambda _ctx: _execute_search_around_index_pruning(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                payload=payload,
-                endpoint_scope=endpoint_scope,
-                link_type=link_type,
-                target_object_types=target_object_types,
-                target_primary_keys_by_type=target_primary_keys_by_type,
-            ),
-            timeout_seconds=60.0,
-        )
-        decision_metadata.update(
-            {
-                "spark_job_id": dispatch_result.job_id,
-                "queue_wait_ms": dispatch_result.queue_wait_ms,
-                "execution_ms": dispatch_result.execution_ms,
-            }
-        )
-        rows, total_count, next_page_token, resolved_object_types = dispatch_result.result
-    else:
-        rows, total_count, next_page_token, resolved_object_types = await _execute_search_around_index_pruning(
-            oms_client=oms_client,
-            db_name=db_name,
-            branch=branch,
-            payload=payload,
-            endpoint_scope=endpoint_scope,
-            link_type=link_type,
-            target_object_types=target_object_types,
-            target_primary_keys_by_type=target_primary_keys_by_type,
-        )
-
-    await _audit_search_around_compute_routing(
-        db_name=db_name,
-        branch=branch,
-        endpoint_scope=endpoint_scope,
-        actor=actor,
-        link_type=link_type,
-        target_object_types=target_object_types,
-        decision_metadata=decision_metadata,
-    )
-    return rows, total_count, next_page_token, resolved_object_types
-
-
 def _object_set_runtime_value_error_response(
     *,
     exc: ValueError,
@@ -795,701 +338,9 @@ def _object_set_runtime_value_error_response(
         parameters={**parameters, "message": message or "Invalid argument"},
     )
 
-
-def _extract_object_set_where(object_set: Any) -> Dict[str, Any] | None:
-    if not isinstance(object_set, dict):
-        return None
-
-    direct_where = object_set.get("where")
-    if isinstance(direct_where, dict):
-        return direct_where
-
-    direct_filter = object_set.get("filter")
-    if isinstance(direct_filter, dict):
-        return direct_filter
-
-    query = object_set.get("query")
-    if isinstance(query, dict):
-        query_where = query.get("where")
-        if isinstance(query_where, dict):
-            return query_where
-    return None
-
-
-def _normalize_object_set_order_by(order_by: Any) -> Dict[str, Any] | None:
-    if order_by is None:
-        return None
-    if isinstance(order_by, dict):
-        return order_by
-    if isinstance(order_by, str):
-        return _parse_order_by(order_by)
-    raise ValueError("orderBy must be a string or object")
-
-
-def _normalize_select_values(payload: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    select = payload.get("select")
-    if isinstance(select, list):
-        values.extend(str(value).strip() for value in select if str(value).strip())
-    select_v2 = payload.get("selectV2")
-    if isinstance(select_v2, list):
-        for value in select_v2:
-            if isinstance(value, str):
-                text = value.strip()
-            elif isinstance(value, dict):
-                text = str(value.get("property") or value.get("apiName") or "").strip()
-            else:
-                text = ""
-            if text:
-                values.append(text)
-    return list(dict.fromkeys(values))
-
-
-def _to_int_or_none(value: Any) -> int | None:
-    if value is None:
-        return None
-    parsed = int(value)
-    return parsed
-
-
-def _build_object_set_search_payload(
-    *,
-    object_set: dict[str, Any],
-    payload: dict[str, Any],
-    default_page_size: int = 1000,
-    require_select: bool = False,
-) -> dict[str, Any]:
-    page_size = _to_int_or_none(payload.get("pageSize"))
-    if page_size is None:
-        page_size = default_page_size
-    if page_size < 1 or page_size > 1000:
-        raise ValueError("pageSize must be between 1 and 1000")
-
-    search_payload: dict[str, Any] = {"pageSize": page_size}
-
-    page_token = str(payload.get("pageToken") or "").strip()
-    if page_token:
-        search_payload["pageToken"] = page_token
-
-    where_clause = _extract_object_set_where(object_set)
-    if where_clause is not None:
-        search_payload["where"] = where_clause
-
-    select_values = _normalize_select_values(payload)
-    if select_values:
-        search_payload["select"] = select_values
-    elif require_select:
-        raise ValueError("select or selectV2 is required")
-
-    order_by = _normalize_object_set_order_by(payload.get("orderBy"))
-    if order_by is not None:
-        search_payload["orderBy"] = order_by
-
-    if "excludeRid" in payload:
-        search_payload["excludeRid"] = bool(payload.get("excludeRid"))
-    if "snapshot" in payload:
-        search_payload["snapshot"] = bool(payload.get("snapshot"))
-
-    return search_payload
-
-
-def _get_result_rows(result: Any) -> list[dict[str, Any]]:
-    data = result.get("data") if isinstance(result, dict) else None
-    if not isinstance(data, list):
-        return []
-    return [row for row in data if isinstance(row, dict)]
-
-
-def _get_total_count(result: Any) -> str:
-    if isinstance(result, dict):
-        total = result.get("totalCount")
-        if total is not None:
-            return str(total)
-    return "0"
-
-
-def _get_next_page_token(result: Any) -> str | None:
-    if not isinstance(result, dict):
-        return None
-    next_page_token = result.get("nextPageToken")
-    if next_page_token is None:
-        return None
-    token = str(next_page_token).strip()
-    return token or None
-
-
-async def _search_object_type_rows(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_type: str,
-    search_payload: dict[str, Any],
-) -> dict[str, Any]:
-    return await oms_client.post(
-        f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-        params={"branch": branch},
-        json=search_payload,
-    )
-
-
-def _derive_page_size(search_payload: dict[str, Any]) -> int:
-    page_size = _to_int_or_none(search_payload.get("pageSize"))
-    if page_size is None:
-        return 1000
-    return page_size
-
-
-def _project_row_with_required_fields(
-    row: dict[str, Any],
-    *,
-    select_fields: list[str] | None,
-    exclude_rid: bool,
-) -> dict[str, Any]:
-    if select_fields:
-        projected = {key: row.get(key) for key in select_fields if key in row}
-    else:
-        projected = dict(row)
-
-    for required_key in ("__apiName", "__primaryKey", "instance_id", "class_id"):
-        if required_key in row:
-            projected.setdefault(required_key, row.get(required_key))
-
-    if exclude_rid:
-        projected.pop("__rid", None)
-    elif "__rid" in row:
-        projected.setdefault("__rid", row.get("__rid"))
-
-    return projected
-
-
-_MAX_ROWS_LOAD_ALL = 50_000
-_PRIMARY_KEY_VALUE_KEYS = ("__primaryKey", "primaryKey", "instance_id", "id")
-
-
-async def _load_all_rows_for_object_type(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_type: str,
-    search_payload: dict[str, Any],
-) -> list[dict[str, Any]]:
-    payload = dict(search_payload)
-    payload["pageSize"] = max(1, min(1000, _derive_page_size(payload)))
-    payload.pop("pageToken", None)
-
-    rows: list[dict[str, Any]] = []
-    seen_page_tokens: set[str] = set()
-    next_page_token: str | None = None
-
-    while True:
-        if next_page_token:
-            payload["pageToken"] = next_page_token
-        else:
-            payload.pop("pageToken", None)
-
-        result = await _search_object_type_rows(
-            oms_client=oms_client,
-            db_name=db_name,
-            branch=branch,
-            object_type=object_type,
-            search_payload=payload,
-        )
-        rows.extend(_get_result_rows(result))
-
-        if len(rows) > _MAX_ROWS_LOAD_ALL:
-            logger.warning(
-                "_load_all_rows_for_object_type exceeded %d row limit for %s/%s, truncating",
-                _MAX_ROWS_LOAD_ALL, db_name, object_type,
-            )
-            break
-
-        candidate = _get_next_page_token(result)
-        if candidate is None:
-            break
-        if candidate in seen_page_tokens:
-            raise ValueError("object search pagination token loop detected")
-        seen_page_tokens.add(candidate)
-        next_page_token = candidate
-
-    return rows
-
-
-async def _load_rows_for_single_object_type(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_type: str,
-    search_payload: dict[str, Any],
-) -> tuple[list[dict[str, Any]], str, str | None]:
-    result = await _search_object_type_rows(
-        oms_client=oms_client,
-        db_name=db_name,
-        branch=branch,
-        object_type=object_type,
-        search_payload=search_payload,
-    )
-    rows = _get_result_rows(result)
-    total_count = _get_total_count(result)
-    next_page_token = _get_next_page_token(result)
-    return rows, total_count, next_page_token
-
-
-async def _load_rows_for_multi_object_types(
-    *,
-    oms_client: OMSClient,
-    db_name: str,
-    branch: str,
-    object_types: list[str],
-    search_payload: dict[str, Any],
-    page_token: str | None,
-    pagination_scope: str,
-) -> tuple[list[dict[str, Any]], str, str | None]:
-    page_size = _derive_page_size(search_payload)
-    offset = _decode_page_token(page_token, scope=pagination_scope)
-
-    combined: list[dict[str, Any]] = []
-    stripped_payload = dict(search_payload)
-    stripped_payload.pop("pageToken", None)
-    stripped_payload["pageSize"] = max(page_size, 1000)
-    for object_type in object_types:
-        result = await _search_object_type_rows(
-            oms_client=oms_client,
-            db_name=db_name,
-            branch=branch,
-            object_type=object_type,
-            search_payload=stripped_payload,
-        )
-        rows = _get_result_rows(result)
-        for row in rows:
-            combined.append(dict(row))
-
-    total = len(combined)
-    page_rows = combined[offset : offset + page_size]
-    next_offset = offset + len(page_rows)
-    next_page_token = _encode_page_token(next_offset, scope=pagination_scope) if next_offset < total else None
-    return page_rows, str(total), next_page_token
-
-
-def _normalize_link_type_values(payload: dict[str, Any]) -> list[str]:
-    links = payload.get("links")
-    if not isinstance(links, list) or not links:
-        raise ValueError("links is required")
-
-    normalized: list[str] = []
-    for raw in links:
-        if isinstance(raw, str):
-            link_type = raw.strip()
-        elif isinstance(raw, dict):
-            link_type = str(raw.get("apiName") or raw.get("linkType") or "").strip()
-        else:
-            link_type = ""
-        if not link_type:
-            raise ValueError("links must be an array of link type API names")
-        normalized.append(link_type)
-
-    deduped = list(dict.fromkeys(normalized))
-    if not deduped:
-        raise ValueError("links is required")
-    return deduped
-
-
-def _resolve_source_object_type_from_row(
-    row: dict[str, Any],
-    *,
-    fallback_object_type: str | None = None,
-) -> str | None:
-    for key in ("__apiName", "objectTypeApiName", "__objectType", "objectType", "class_id", "classId"):
-        value = str(row.get(key) or "").strip()
-        if value:
-            return value
-    if fallback_object_type:
-        return fallback_object_type
-    return None
-
-
-def _resolve_source_primary_key_from_row(
-    row: dict[str, Any],
-    *,
-    primary_key_field: str | None = None,
-) -> str | None:
-    for key in _PRIMARY_KEY_VALUE_KEYS:
-        value = _normalize_primary_key_text(row.get(key))
-        if value:
-            return value
-    if primary_key_field:
-        value = _normalize_primary_key_text(_value_by_field(row, primary_key_field))
-        if value:
-            return value
-    return None
-
-
-def _build_object_locator(*, object_type: str, primary_key: str) -> dict[str, str]:
-    return {"__apiName": object_type, "__primaryKey": primary_key}
-
-
-def _build_linked_object_locator(
-    *,
-    link_type: str,
-    target_object_type: str,
-    target_primary_key: str,
-) -> dict[str, Any]:
-    return {
-        "targetObject": _build_object_locator(object_type=target_object_type, primary_key=target_primary_key),
-        "linkType": link_type,
-    }
-
-
-def _collect_load_links_rows(
-    *,
-    rows: list[dict[str, Any]],
-    requested_links: list[str],
-    link_sides_by_source_type: dict[str, dict[str, dict[str, Any]]],
-    source_primary_key_fields: dict[str, str],
-    default_object_type: str | None = None,
-) -> list[dict[str, Any]]:
-    data: list[dict[str, Any]] = []
-    for row in rows:
-        source_object_type = _resolve_source_object_type_from_row(
-            row,
-            fallback_object_type=default_object_type,
-        )
-        if not source_object_type:
-            continue
-        source_primary_key = _resolve_source_primary_key_from_row(
-            row,
-            primary_key_field=source_primary_key_fields.get(source_object_type),
-        )
-        if not source_primary_key:
-            continue
-        source_link_sides = link_sides_by_source_type.get(source_object_type, {})
-        linked_objects: list[dict[str, Any]] = []
-        for link_type in requested_links:
-            link_side = source_link_sides.get(link_type)
-            if not isinstance(link_side, dict):
-                continue
-            target_object_type = str(link_side.get("objectTypeApiName") or "").strip()
-            if not target_object_type:
-                continue
-            foreign_key_property = str(link_side.get("foreignKeyPropertyApiName") or "").strip() or None
-            linked_primary_keys = _extract_linked_primary_keys(
-                row,
-                link_type=link_type,
-                foreign_key_property=foreign_key_property,
-            )
-            for linked_primary_key in linked_primary_keys:
-                linked_objects.append(
-                    _build_linked_object_locator(
-                        link_type=link_type,
-                        target_object_type=target_object_type,
-                        target_primary_key=linked_primary_key,
-                    )
-                )
-        if linked_objects:
-            data.append(
-                {
-                    "sourceObject": _build_object_locator(
-                        object_type=source_object_type,
-                        primary_key=source_primary_key,
-                    ),
-                    "linkedObjects": linked_objects,
-                }
-            )
-    return data
-
-
-def _value_by_field(row: dict[str, Any], field: str | None) -> Any:
-    if not field:
-        return None
-    text = str(field).strip()
-    if not text:
-        return None
-    if "." in text:
-        current: Any = row
-        for part in text.split("."):
-            if not isinstance(current, dict):
-                return None
-            current = current.get(part)
-        return current
-    if text.startswith("properties.") and isinstance(row.get("properties"), dict):
-        return row.get("properties", {}).get(text[len("properties.") :])
-    return row.get(text)
-
-
-# Legacy Python aggregate functions removed.
-# Aggregation is now delegated to OMS ES-native engine via oms_client.aggregate_objects_v2().
-
-
-def _pagination_scope(*parts: Any) -> str:
-    normalized = [str(part).strip() for part in parts if str(part).strip()]
-    return "|".join(normalized)
-
-
 def _is_foundry_v2_strict_compat_enabled(*, db_name: str | None) -> bool:
     _ = db_name
     return True
-
-
-def _rid_component(value: Any, *, fallback: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return fallback
-    normalized = "".join(ch if (ch.isalnum() or ch in {"_", "-", "."}) else "_" for ch in text)
-    normalized = normalized.strip("._-")
-    return normalized or fallback
-
-
-def _default_object_type_rid(*, db_name: str, object_type: str) -> str:
-    object_type_id = f"{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}"
-    return build_rid("object-type", object_type_id)
-
-
-def _default_property_rid(*, db_name: str, object_type: str, property_name: str) -> str:
-    prop_id = (
-        f"{_rid_component(db_name, fallback='db')}.{_rid_component(object_type, fallback='objectType')}.{_rid_component(property_name, fallback='property')}"
-    )
-    return build_rid("property", prop_id)
-
-
-def _default_link_type_rid(*, db_name: str, source_object_type: str, link_type: str) -> str:
-    link_id = (
-        f"{_rid_component(db_name, fallback='db')}.{_rid_component(source_object_type, fallback='objectType')}.{_rid_component(link_type, fallback='linkType')}"
-    )
-    return build_rid("link-type", link_id)
-
-
-def _default_property_contract(*, db_name: str, object_type: str, property_name: str) -> Dict[str, Any]:
-    return {
-        "dataType": {"type": "string"},
-        "rid": _default_property_rid(db_name=db_name, object_type=object_type, property_name=property_name),
-    }
-
-
-def _strictify_foundry_object_type(
-    object_type: Dict[str, Any],
-    *,
-    db_name: str,
-    object_type_hint: str | None = None,
-) -> tuple[Dict[str, Any], int]:
-    out = dict(object_type or {})
-    fixes = 0
-
-    api_name = str(out.get("apiName") or object_type_hint or "").strip()
-    if not api_name:
-        api_name = _rid_component(object_type_hint, fallback="ObjectType")
-        out["apiName"] = api_name
-        fixes += 1
-
-    display_name = str(out.get("displayName") or "").strip()
-    if not display_name:
-        out["displayName"] = api_name
-        display_name = api_name
-        fixes += 1
-
-    plural_display_name = str(out.get("pluralDisplayName") or "").strip()
-    if not plural_display_name:
-        out["pluralDisplayName"] = display_name
-        fixes += 1
-
-    icon = out.get("icon")
-    if not isinstance(icon, dict):
-        out["icon"] = dict(_DEFAULT_OBJECT_TYPE_ICON)
-        fixes += 1
-    else:
-        normalized_icon = dict(icon)
-        changed = False
-        if str(normalized_icon.get("type") or "").strip().lower() != "blueprint":
-            normalized_icon["type"] = "blueprint"
-            changed = True
-        if not str(normalized_icon.get("name") or "").strip():
-            normalized_icon["name"] = _DEFAULT_OBJECT_TYPE_ICON["name"]
-            changed = True
-        if not str(normalized_icon.get("color") or "").strip():
-            normalized_icon["color"] = _DEFAULT_OBJECT_TYPE_ICON["color"]
-            changed = True
-        if changed:
-            out["icon"] = normalized_icon
-            fixes += 1
-
-    rid = str(out.get("rid") or "").strip()
-    if not rid:
-        out["rid"] = _default_object_type_rid(db_name=db_name, object_type=api_name)
-        fixes += 1
-
-    properties = out.get("properties")
-    if not isinstance(properties, dict):
-        properties = {}
-        out["properties"] = properties
-        fixes += 1
-
-    normalized_properties: Dict[str, Dict[str, Any]] = {}
-    for prop_name, raw_prop in properties.items():
-        prop_api_name = str(prop_name or "").strip()
-        if not prop_api_name:
-            continue
-        prop = dict(raw_prop) if isinstance(raw_prop, dict) else {}
-        if not isinstance(prop.get("dataType"), dict) or not str((prop.get("dataType") or {}).get("type") or "").strip():
-            prop["dataType"] = {"type": "string"}
-            fixes += 1
-        prop_rid = str(prop.get("rid") or "").strip()
-        if not prop_rid:
-            prop["rid"] = _default_property_rid(
-                db_name=db_name,
-                object_type=api_name,
-                property_name=prop_api_name,
-            )
-            fixes += 1
-        normalized_properties[prop_api_name] = prop
-    out["properties"] = normalized_properties
-
-    primary_key = str(out.get("primaryKey") or "").strip()
-    if not primary_key:
-        if "id" in normalized_properties:
-            primary_key = "id"
-        elif normalized_properties:
-            primary_key = next(iter(normalized_properties))
-        else:
-            primary_key = "id"
-        out["primaryKey"] = primary_key
-        fixes += 1
-
-    if primary_key not in normalized_properties:
-        normalized_properties[primary_key] = _default_property_contract(
-            db_name=db_name,
-            object_type=api_name,
-            property_name=primary_key,
-        )
-        fixes += 1
-
-    title_property = str(out.get("titleProperty") or "").strip()
-    if not title_property:
-        if "name" in normalized_properties:
-            title_property = "name"
-        else:
-            title_property = primary_key
-        out["titleProperty"] = title_property
-        fixes += 1
-
-    if title_property not in normalized_properties:
-        normalized_properties[title_property] = _default_property_contract(
-            db_name=db_name,
-            object_type=api_name,
-            property_name=title_property,
-        )
-        fixes += 1
-
-    return out, fixes
-
-
-def _strictify_outgoing_link_type(
-    link_type_payload: Dict[str, Any],
-    *,
-    db_name: str,
-    source_object_type: str,
-) -> tuple[Dict[str, Any], int, bool]:
-    out = dict(link_type_payload or {})
-    fixes = 0
-
-    api_name = str(out.get("apiName") or "").strip()
-    if not api_name:
-        return out, fixes, False
-
-    display_name = str(out.get("displayName") or "").strip()
-    if not display_name:
-        out["displayName"] = api_name
-        fixes += 1
-
-    status_value = str(out.get("status") or "").strip().upper()
-    if not status_value:
-        out["status"] = "ACTIVE"
-        fixes += 1
-
-    cardinality = str(out.get("cardinality") or "").strip().upper()
-    if cardinality not in {"ONE", "MANY"}:
-        out["cardinality"] = "MANY"
-        fixes += 1
-
-    link_type_rid = str(out.get("linkTypeRid") or "").strip()
-    if not link_type_rid:
-        out["linkTypeRid"] = _default_link_type_rid(
-            db_name=db_name,
-            source_object_type=source_object_type,
-            link_type=api_name,
-        )
-        fixes += 1
-
-    object_type_api_name = str(out.get("objectTypeApiName") or "").strip()
-    is_resolved = bool(object_type_api_name)
-    return out, fixes, is_resolved
-
-
-def _strictify_object_type_full_metadata(
-    payload: Dict[str, Any],
-    *,
-    db_name: str,
-    object_type_hint: str,
-) -> tuple[Dict[str, Any], int, int]:
-    out = dict(payload or {})
-    fixes = 0
-    dropped = 0
-
-    object_type = out.get("objectType")
-    if isinstance(object_type, dict):
-        strict_object_type, object_type_fixes = _strictify_foundry_object_type(
-            object_type,
-            db_name=db_name,
-            object_type_hint=object_type_hint,
-        )
-        out["objectType"] = strict_object_type
-        fixes += object_type_fixes
-        source_object_type = str(strict_object_type.get("apiName") or object_type_hint).strip() or object_type_hint
-    else:
-        source_object_type = object_type_hint
-
-    strict_links: list[Dict[str, Any]] = []
-    for link_type in out.get("linkTypes") or []:
-        if not isinstance(link_type, dict):
-            continue
-        strict_link, link_fixes, is_resolved = _strictify_outgoing_link_type(
-            link_type,
-            db_name=db_name,
-            source_object_type=source_object_type,
-        )
-        fixes += link_fixes
-        if not is_resolved:
-            dropped += 1
-            continue
-        strict_links.append(strict_link)
-    out["linkTypes"] = strict_links
-    return out, fixes, dropped
-
-
-def _log_strict_compat_summary(
-    *,
-    route: str,
-    db_name: str,
-    branch: str | None,
-    fixes: int,
-    dropped: int = 0,
-) -> None:
-    if fixes <= 0 and dropped <= 0:
-        return
-    logger.info(
-        "Foundry v2 strict compat normalization: route=%s db=%s branch=%s fixes=%d dropped=%d",
-        route,
-        db_name,
-        branch or "",
-        fixes,
-        dropped,
-    )
-
-
-def _full_metadata_branch_contract(*, branch: str) -> Dict[str, str]:
-    return {"rid": branch}
-
-
 def _require_preview_true_for_strict_compat(
     *,
     preview: bool,
@@ -1515,232 +366,6 @@ def _linked_object_parameters(
         link_type=link_type,
         linked_primary_key=linked_primary_key,
     )
-
-
-def _strip_typed_ref(value: str) -> str:
-    """Convert typed refs like ``Customer/cust-1`` → ``cust-1``.
-
-    Our instance payloads store relationship refs as ``<TargetClass>/<instance_id>``.
-    Foundry v2 linked-object APIs operate on primary key values only, so we
-    normalize here before building search filters.
-    """
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    # Avoid stripping URLs or other multi-segment strings.
-    if text.count("/") == 1 and not text.startswith("http://") and not text.startswith("https://"):
-        _, right = text.split("/", 1)
-        right = right.strip()
-        if right:
-            return right
-    return text
-
-
-def _normalize_primary_key_text(value: Any) -> str:
-    return _strip_typed_ref(str(value or ""))
-
-
-def _iter_primary_key_values(value: Any):
-    if value is None:
-        return
-    if isinstance(value, list):
-        for item in value:
-            yield from _iter_primary_key_values(item)
-        return
-    if isinstance(value, dict):
-        for key in _PRIMARY_KEY_VALUE_KEYS:
-            candidate = value.get(key)
-            if candidate is None:
-                continue
-            text = _normalize_primary_key_text(candidate)
-            if text:
-                yield text
-        return
-    text = _normalize_primary_key_text(value)
-    if text:
-        yield text
-
-
-def _coerce_primary_key_values(value: Any) -> list[str]:
-    return list(_iter_primary_key_values(value))
-
-
-def _extract_object_type_relationships(resource: dict[str, Any]) -> list[dict[str, Any]]:
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    rels = spec.get("relationships") if isinstance(spec.get("relationships"), list) else resource.get("relationships")
-    if not isinstance(rels, list):
-        return []
-    return [entry for entry in rels if isinstance(entry, dict)]
-
-
-def _derive_outgoing_link_types_from_relationships(
-    relationships: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    derived: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for rel in relationships:
-        predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
-        target = str(rel.get("target") or rel.get("objectTypeApiName") or rel.get("target_object_type") or "").strip()
-        if not predicate or not target:
-            continue
-        key = (predicate, target)
-        if key in seen:
-            continue
-        seen.add(key)
-        derived.append({"apiName": predicate, "objectTypeApiName": target})
-    derived.sort(key=lambda item: str(item.get("apiName") or ""))
-    return derived
-
-
-def _extract_linked_primary_keys(
-    source_row: dict[str, Any],
-    *,
-    link_type: str,
-    foreign_key_property: str | None,
-) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in _iter_linked_primary_keys(
-        source_row,
-        link_type=link_type,
-        foreign_key_property=foreign_key_property,
-    ):
-        if value in seen:
-            continue
-        seen.add(value)
-        deduped.append(value)
-    return deduped
-
-
-def _iter_linked_primary_keys(
-    source_row: dict[str, Any],
-    *,
-    link_type: str,
-    foreign_key_property: str | None,
-):
-    if foreign_key_property:
-        yield from _iter_primary_key_values(source_row.get(foreign_key_property))
-
-    for key in (link_type, f"{link_type}Ids", f"{link_type}_ids"):
-        yield from _iter_primary_key_values(source_row.get(key))
-
-    links = source_row.get("links")
-    if isinstance(links, dict):
-        yield from _iter_primary_key_values(links.get(link_type))
-
-
-def _extract_linked_primary_keys_page(
-    source_row: dict[str, Any],
-    *,
-    link_type: str,
-    foreign_key_property: str | None,
-    offset: int,
-    page_size: int,
-) -> tuple[list[str], bool]:
-    """Extract a deduplicated page without materializing every linked PK."""
-    start = max(0, int(offset))
-    limit = max(1, int(page_size))
-    seen: set[str] = set()
-    page: list[str] = []
-    deduped_index = 0
-    has_more = False
-
-    for value in _iter_linked_primary_keys(
-        source_row,
-        link_type=link_type,
-        foreign_key_property=foreign_key_property,
-    ):
-        if value in seen:
-            continue
-        seen.add(value)
-
-        if deduped_index < start:
-            deduped_index += 1
-            continue
-
-        if len(page) < limit:
-            page.append(value)
-            deduped_index += 1
-            continue
-
-        has_more = True
-        break
-
-    return page, has_more
-
-
-def _linked_primary_key_exists(
-    source_row: dict[str, Any],
-    *,
-    link_type: str,
-    foreign_key_property: str | None,
-    linked_primary_key: str,
-) -> bool:
-    target = str(linked_primary_key or "").strip()
-    if not target:
-        return False
-    seen: set[str] = set()
-    for value in _iter_linked_primary_keys(
-        source_row,
-        link_type=link_type,
-        foreign_key_property=foreign_key_property,
-    ):
-        if value in seen:
-            continue
-        seen.add(value)
-        if value == target:
-            return True
-    return False
-
-
-def _build_primary_key_where(primary_key_field: str, primary_key_values: list[str]) -> dict[str, Any]:
-    if not primary_key_values:
-        return {"type": "not", "value": {"type": "isNull", "field": "instance_id"}}
-    if len(primary_key_values) == 1:
-        return {"type": "eq", "field": primary_key_field, "value": primary_key_values[0]}
-    return {
-        "type": "or",
-        "value": [
-            {"type": "eq", "field": primary_key_field, "value": value}
-            for value in primary_key_values
-        ],
-    }
-
-
-async def _resolve_object_primary_key_field(
-    *,
-    db_name: str,
-    object_type: str,
-    branch: str,
-    oms_client: OMSClient,
-) -> str:
-    payload = await oms_client.get_ontology_resource(
-        db_name,
-        resource_type="object_type",
-        resource_id=object_type,
-        branch=branch,
-    )
-    resource = _extract_object_resource(payload)
-    if not resource:
-        raise ValueError(f"Object type not found: {object_type}")
-
-    ontology_payload: Any = None
-    try:
-        ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "Failed to load object type metadata for primary key resolution (%s/%s): %s",
-            db_name,
-            object_type,
-            exc,
-        )
-        ontology_payload = None
-
-    object_type_contract = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
-    primary_key_field = str(object_type_contract.get("primaryKey") or "").strip()
-    if not primary_key_field:
-        raise ValueError(f"primaryKey not configured for object type: {object_type}")
-    return primary_key_field
 
 
 async def _require_domain_role(request: Request, *, db_name: str) -> None:
@@ -1824,990 +449,6 @@ async def _resolve_ontology_db_name(*, ontology: str, oms_client: OMSClient) -> 
             return _validate_ontology_db_name(candidate_name)
 
     raise OntologyNotFoundError(f"ontology not found: {raw}")
-
-
-def _extract_databases(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict):
-        return []
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    rows = data.get("databases") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        return []
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        if isinstance(row, dict):
-            out.append(row)
-        elif isinstance(row, str):
-            out.append({"name": row})
-    return out
-
-
-def _extract_ontology_resource_rows(payload: Any) -> list[dict[str, Any]]:
-    return extract_payload_rows(payload, key="resources")
-
-
-def _extract_ontology_resource(payload: Any) -> dict[str, Any] | None:
-    row = extract_payload_object(payload)
-    return row or None
-
-
-def _localized_text(value: Any) -> str | None:
-    return first_localized_text(value)
-
-
-def _to_foundry_named_metadata(resource: dict[str, Any]) -> dict[str, Any] | None:
-    api_name = str(resource.get("id") or "").strip()
-    if not api_name:
-        return None
-
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-
-    out: dict[str, Any] = {"apiName": api_name}
-
-    display_name = (
-        _localized_text(resource.get("label"))
-        or _localized_text(spec.get("display_name"))
-        or _localized_text(spec.get("displayName"))
-        or _localized_text(metadata.get("displayName"))
-    )
-    if display_name:
-        out["displayName"] = display_name
-
-    description = (
-        _localized_text(resource.get("description"))
-        or _localized_text(spec.get("description"))
-        or _localized_text(metadata.get("description"))
-    )
-    if description:
-        out["description"] = description
-
-    status_value = str(spec.get("status") or resource.get("status") or metadata.get("status") or "ACTIVE").strip()
-    if status_value:
-        out["status"] = status_value.upper()
-
-    rid = str(resource.get("rid") or "").strip()
-    if rid:
-        out["rid"] = rid
-
-    return out
-
-
-def _to_foundry_named_metadata_map(resources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for resource in resources:
-        api_name = str(resource.get("id") or "").strip()
-        if not api_name:
-            continue
-        mapped = _to_foundry_named_metadata(resource)
-        if isinstance(mapped, dict) and mapped:
-            out[api_name] = mapped
-    return out
-
-
-def _dict_or_none(value: Any) -> dict[str, Any] | None:
-    return dict(value) if isinstance(value, dict) else None
-
-
-def _list_or_none(value: Any) -> list[Any] | None:
-    return list(value) if isinstance(value, list) else None
-
-
-def _first_non_none(*values: Any) -> Any:
-    for value in values:
-        if value is not None:
-            return value
-    return None
-
-
-def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "off"}:
-            return False
-    return default
-
-
-def _extract_project_policy_inheritance(
-    *,
-    permission_policy: dict[str, Any] | None,
-    spec: dict[str, Any],
-) -> dict[str, Any] | None:
-    policy = permission_policy if isinstance(permission_policy, dict) else {}
-    inherit = _coerce_optional_bool(
-        _first_non_none(
-            policy.get("inherit_project_policy"),
-            policy.get("inheritProjectPolicy"),
-            spec.get("inherit_project_policy"),
-            spec.get("inheritProjectPolicy"),
-        ),
-        default=False,
-    )
-    if not inherit:
-        return None
-
-    scope = str(
-        _first_non_none(
-            policy.get("project_policy_scope"),
-            policy.get("projectPolicyScope"),
-            spec.get("project_policy_scope"),
-            spec.get("projectPolicyScope"),
-            "action_access",
-        )
-        or "action_access"
-    ).strip() or "action_access"
-    subject_type = str(
-        _first_non_none(
-            policy.get("project_policy_subject_type"),
-            policy.get("projectPolicySubjectType"),
-            spec.get("project_policy_subject_type"),
-            spec.get("projectPolicySubjectType"),
-            "project",
-        )
-        or "project"
-    ).strip() or "project"
-    subject_id = str(
-        _first_non_none(
-            policy.get("project_policy_subject_id"),
-            policy.get("projectPolicySubjectId"),
-            spec.get("project_policy_subject_id"),
-            spec.get("projectPolicySubjectId"),
-            "",
-        )
-        or ""
-    ).strip()
-    require_policy = _coerce_optional_bool(
-        _first_non_none(
-            policy.get("require_project_policy"),
-            policy.get("requireProjectPolicy"),
-            spec.get("require_project_policy"),
-            spec.get("requireProjectPolicy"),
-        ),
-        default=True,
-    )
-    out: dict[str, Any] = {
-        "enabled": True,
-        "scope": scope,
-        "subjectType": subject_type,
-        "requirePolicy": require_policy,
-    }
-    if subject_id:
-        out["subjectId"] = subject_id
-    return out
-
-
-def _to_foundry_action_type(resource: dict[str, Any]) -> dict[str, Any] | None:
-    mapped = _to_foundry_named_metadata(resource)
-    if mapped is None:
-        return None
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-    parameters = (
-        _dict_or_none(resource.get("parameters"))
-        or _dict_or_none(spec.get("parameters"))
-        or _dict_or_none(metadata.get("parameters"))
-    )
-    if parameters:
-        mapped["parameters"] = parameters
-    operations = (
-        _list_or_none(resource.get("operations"))
-        or _list_or_none(spec.get("operations"))
-        or _list_or_none(metadata.get("operations"))
-    )
-    if operations:
-        mapped["operations"] = operations
-    tool_description = (
-        str(resource.get("toolDescription") or "").strip()
-        or str(spec.get("toolDescription") or "").strip()
-        or str(metadata.get("toolDescription") or "").strip()
-    )
-    if tool_description:
-        mapped["toolDescription"] = tool_description
-
-    permission_policy = (
-        _dict_or_none(resource.get("permissionPolicy"))
-        or _dict_or_none(resource.get("permission_policy"))
-        or _dict_or_none(spec.get("permission_policy"))
-        or _dict_or_none(spec.get("permissionPolicy"))
-        or _dict_or_none(metadata.get("permission_policy"))
-        or _dict_or_none(metadata.get("permissionPolicy"))
-    )
-    if permission_policy:
-        mapped["permissionPolicy"] = permission_policy
-
-    writeback_target = (
-        _dict_or_none(resource.get("writebackTarget"))
-        or _dict_or_none(resource.get("writeback_target"))
-        or _dict_or_none(spec.get("writeback_target"))
-        or _dict_or_none(spec.get("writebackTarget"))
-        or _dict_or_none(metadata.get("writeback_target"))
-        or _dict_or_none(metadata.get("writebackTarget"))
-    )
-    if writeback_target:
-        mapped["writebackTarget"] = writeback_target
-
-    conflict_policy = str(
-        _first_non_none(
-            resource.get("conflictPolicy"),
-            resource.get("conflict_policy"),
-            spec.get("conflict_policy"),
-            spec.get("conflictPolicy"),
-            metadata.get("conflict_policy"),
-            metadata.get("conflictPolicy"),
-            "",
-        )
-        or ""
-    ).strip()
-    if conflict_policy:
-        mapped["conflictPolicy"] = conflict_policy
-
-    target_object_type = str(
-        _first_non_none(
-            resource.get("targetObjectType"),
-            resource.get("target_object_type"),
-            spec.get("target_object_type"),
-            spec.get("targetObjectType"),
-            metadata.get("target_object_type"),
-            metadata.get("targetObjectType"),
-            "",
-        )
-        or ""
-    ).strip()
-    if target_object_type:
-        mapped["targetObjectType"] = target_object_type
-
-    validation_rules = (
-        _list_or_none(resource.get("validationRules"))
-        or _list_or_none(resource.get("validation_rules"))
-        or _list_or_none(spec.get("validation_rules"))
-        or _list_or_none(spec.get("validationRules"))
-        or _list_or_none(metadata.get("validation_rules"))
-        or _list_or_none(metadata.get("validationRules"))
-    )
-    if validation_rules:
-        mapped["validationRules"] = validation_rules
-
-    project_policy_inheritance = _extract_project_policy_inheritance(
-        permission_policy=permission_policy,
-        spec=spec,
-    )
-    if project_policy_inheritance:
-        mapped["projectPolicyInheritance"] = project_policy_inheritance
-
-    permission_model = "ontology_roles"
-    edits_beyond_actions = False
-    try:
-        profile = resolve_action_permission_profile(spec)
-        permission_model = profile.permission_model
-        edits_beyond_actions = profile.edits_beyond_actions
-    except ActionPermissionProfileError:
-        raw_permission_model = str(
-            _first_non_none(
-                spec.get("permission_model"),
-                spec.get("permissionModel"),
-                metadata.get("permission_model"),
-                metadata.get("permissionModel"),
-                "",
-            )
-            or ""
-        ).strip()
-        if raw_permission_model:
-            permission_model = raw_permission_model
-        edits_beyond_actions = _coerce_optional_bool(
-            _first_non_none(
-                spec.get("edits_beyond_actions"),
-                spec.get("editsBeyondActions"),
-                metadata.get("edits_beyond_actions"),
-                metadata.get("editsBeyondActions"),
-            ),
-            default=False,
-        )
-
-    mapped["permissionModel"] = permission_model
-    mapped["editsBeyondActions"] = edits_beyond_actions
-    dynamic_security: dict[str, Any] = {
-        "permissionModel": permission_model,
-        "editsBeyondActions": edits_beyond_actions,
-    }
-    if permission_policy:
-        dynamic_security["permissionPolicy"] = permission_policy
-    if project_policy_inheritance:
-        dynamic_security["projectPolicyInheritance"] = project_policy_inheritance
-    mapped["dynamicSecurity"] = dynamic_security
-    return mapped
-
-
-def _to_foundry_action_type_map(resources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for resource in resources:
-        api_name = str(resource.get("id") or "").strip()
-        if not api_name:
-            continue
-        mapped = _to_foundry_action_type(resource)
-        if isinstance(mapped, dict) and mapped:
-            out[api_name] = mapped
-    return out
-
-
-def _to_foundry_query_type(resource: dict[str, Any]) -> dict[str, Any] | None:
-    mapped = _to_foundry_named_metadata(resource)
-    if mapped is None:
-        return None
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-    parameters = (
-        _dict_or_none(resource.get("parameters"))
-        or _dict_or_none(spec.get("parameters"))
-        or _dict_or_none(metadata.get("parameters"))
-    )
-    if parameters:
-        mapped["parameters"] = parameters
-    output = resource.get("output")
-    if output is None:
-        output = spec.get("output")
-    if output is None:
-        output = metadata.get("output")
-    if output is not None:
-        mapped["output"] = output
-    version = (
-        str(resource.get("version") or "").strip()
-        or str(spec.get("version") or "").strip()
-        or str(metadata.get("version") or "").strip()
-    )
-    if version:
-        mapped["version"] = version
-    return mapped
-
-
-def _to_foundry_query_type_map_key(resource: dict[str, Any]) -> str | None:
-    mapped = _to_foundry_query_type(resource)
-    if not mapped:
-        return None
-    api_name = str(mapped.get("apiName") or "").strip()
-    if not api_name:
-        return None
-    version = str(mapped.get("version") or "").strip()
-    if not version:
-        return api_name
-    return f"{api_name}:{version}"
-
-
-def _to_foundry_query_type_metadata_map(resources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for resource in resources:
-        key = _to_foundry_query_type_map_key(resource)
-        if not key:
-            continue
-        mapped = _to_foundry_query_type(resource)
-        if isinstance(mapped, dict) and mapped:
-            out[key] = mapped
-    return out
-
-
-def _resolve_query_placeholder_key(value: Any) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-
-    if text.startswith("${") and text.endswith("}") and len(text) > 3:
-        key = text[2:-1].strip()
-        return key or None
-
-    if text.startswith("{{") and text.endswith("}}") and len(text) > 4:
-        key = text[2:-2].strip()
-        return key or None
-
-    if text.startswith("$") and len(text) > 1:
-        key = text[1:].strip()
-        if key and all(ch.isalnum() or ch == "_" for ch in key):
-            return key
-
-    return None
-
-
-def _materialize_query_execution_value(value: Any, *, parameters: Dict[str, Any]) -> Any:
-    if isinstance(value, dict):
-        return {
-            str(key): _materialize_query_execution_value(inner, parameters=parameters)
-            for key, inner in value.items()
-        }
-    if isinstance(value, list):
-        return [_materialize_query_execution_value(item, parameters=parameters) for item in value]
-
-    placeholder = _resolve_query_placeholder_key(value)
-    if placeholder is None:
-        return value
-    if placeholder not in parameters:
-        raise ValueError(f"Missing required query parameter: {placeholder}")
-    return parameters[placeholder]
-
-
-_QUERY_OBJECT_TYPE_CANONICAL_FIELDS: tuple[str, ...] = ("objectTypeApiName",)
-_QUERY_OBJECT_TYPE_FALLBACK_FIELDS: tuple[str, ...] = (
-    "objectType",
-    "targetObjectType",
-    "target_object_type",
-)
-
-
-def _resolve_query_execution_object_type(
-    *,
-    execution: dict[str, Any],
-    search: dict[str, Any],
-    spec: dict[str, Any],
-    metadata: dict[str, Any],
-) -> str | None:
-    sources = (execution, search, spec, metadata)
-    for field in _QUERY_OBJECT_TYPE_CANONICAL_FIELDS:
-        for source in sources:
-            normalized = str(source.get(field) or "").strip()
-            if normalized:
-                return normalized
-
-    for field in _QUERY_OBJECT_TYPE_FALLBACK_FIELDS:
-        for source in sources:
-            normalized = str(source.get(field) or "").strip()
-            if normalized:
-                return normalized
-    return None
-
-
-def _extract_query_execution_plan(resource: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-
-    execution: dict[str, Any] = {}
-    for candidate in (
-        resource.get("execution"),
-        spec.get("execution"),
-        metadata.get("execution"),
-        resource.get("query"),
-        spec.get("query"),
-        metadata.get("query"),
-    ):
-        if isinstance(candidate, dict):
-            execution = candidate
-            break
-
-    search = execution.get("search") if isinstance(execution.get("search"), dict) else {}
-
-    object_type = _resolve_query_execution_object_type(
-        execution=execution,
-        search=search,
-        spec=spec,
-        metadata=metadata,
-    )
-
-    payload: dict[str, Any] = {}
-    for source in (search, execution):
-        if not isinstance(source, dict):
-            continue
-        where = source.get("where")
-        if isinstance(where, dict):
-            payload["where"] = where
-        elif "where" in source and where is not None:
-            payload["where"] = where
-
-        filter_clause = source.get("filter")
-        if "where" not in payload and isinstance(filter_clause, dict):
-            payload["where"] = filter_clause
-
-        for key in ("pageSize", "pageToken", "select", "selectV2", "orderBy", "excludeRid", "snapshot"):
-            if key in source and source.get(key) is not None:
-                payload[key] = source.get(key)
-
-    return object_type, payload
-
-
-def _apply_query_execute_options(
-    *,
-    base_payload: dict[str, Any],
-    options: dict[str, Any] | None,
-) -> dict[str, Any]:
-    payload = dict(base_payload)
-    if not isinstance(options, dict):
-        return payload
-
-    for key in ("where", "filter", "pageSize", "pageToken", "select", "selectV2", "orderBy", "excludeRid", "snapshot"):
-        if key not in options:
-            continue
-        value = options.get(key)
-        if key == "filter":
-            if "where" not in payload and value is not None:
-                payload["where"] = value
-            continue
-        if value is not None:
-            payload[key] = value
-
-    return payload
-
-
-async def _find_resource_by_rid(
-    *,
-    db_name: str,
-    branch: str,
-    resource_type: str,
-    rid: str,
-    oms_client: OMSClient,
-    page_size: int = 500,
-) -> dict[str, Any] | None:
-    normalized_rid = str(rid or "").strip()
-    if not normalized_rid:
-        return None
-    rows = await _list_all_resources_for_type(
-        db_name=db_name,
-        branch=branch,
-        resource_type=resource_type,
-        oms_client=oms_client,
-        page_size=page_size,
-    )
-    for row in rows:
-        candidate = str(row.get("rid") or "").strip()
-        if candidate and candidate == normalized_rid:
-            return row
-    return None
-
-
-def _group_outgoing_link_types_by_source(resources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for resource in resources:
-        spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-        source = _normalize_object_ref(spec.get("from"))
-        if not source:
-            source = _normalize_object_ref(resource.get("from"))
-        if not source:
-            continue
-        mapped = _to_foundry_outgoing_link_type(resource, source_object_type=source)
-        if mapped is None:
-            continue
-        grouped.setdefault(source, []).append(mapped)
-    return grouped
-
-
-def _group_incoming_link_types_by_target(resources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """Group incoming link types by their *target* object type.
-
-    This is the inverse of ``_group_outgoing_link_types_by_source``.  For each
-    link-type resource whose ``to`` (target) field is object type *T*, we
-    produce a ``LinkTypeSideV2`` entry and group it under *T*.
-    """
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for resource in resources:
-        spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-        target = _normalize_object_ref(spec.get("to"))
-        if not target:
-            target = _normalize_object_ref(resource.get("to"))
-        if not target:
-            relationship_spec = spec.get("relationship_spec") if isinstance(spec.get("relationship_spec"), dict) else {}
-            if isinstance(relationship_spec, dict):
-                target = _normalize_object_ref(relationship_spec.get("target_object_type"))
-        if not target:
-            continue
-        mapped = _to_foundry_incoming_link_type(resource, target_object_type=target)
-        if mapped is None:
-            continue
-        grouped.setdefault(target, []).append(mapped)
-    return grouped
-
-
-_INTERFACE_REF_KEYS = (
-    "implementsInterfaces",
-    "implements_interfaces",
-    "interfaceRefs",
-    "interface_refs",
-    "interfaceRef",
-    "interface_ref",
-    "interfaces",
-    "interface",
-)
-
-_INTERFACE_IMPLEMENTATION_KEYS = (
-    "implementsInterfaces2",
-    "implements_interfaces2",
-    "interfaceImplementations",
-    "interface_implementations",
-)
-
-_SHARED_PROPERTY_MAPPING_KEYS = (
-    "sharedPropertyTypeMapping",
-    "shared_property_type_mapping",
-    "sharedPropertyMapping",
-    "shared_property_mapping",
-)
-
-
-def _strip_prefix(text: str, *, prefixes: tuple[str, ...]) -> str:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return ""
-    lowered = normalized.lower()
-    for prefix in prefixes:
-        if lowered.startswith(prefix):
-            return normalized[len(prefix) :].strip()
-    return normalized
-
-
-def _normalize_interface_ref(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = _strip_prefix(value, prefixes=("interface:", "interfaces:"))
-    return normalized.strip()
-
-
-def _normalize_shared_property_ref(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = _strip_prefix(
-        value,
-        prefixes=(
-            "shared_property:",
-            "shared_properties:",
-            "shared-property:",
-            "shared-properties:",
-            "shared:",
-        ),
-    )
-    return normalized.strip()
-
-
-def _coerce_string_list(value: Any) -> list[str]:
-    values: list[str] = []
-    if isinstance(value, str):
-        candidate = value.strip()
-        if candidate:
-            values.append(candidate)
-        return values
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, str):
-                candidate = item.strip()
-                if candidate:
-                    values.append(candidate)
-                continue
-            if isinstance(item, dict):
-                candidate = (
-                    item.get("apiName")
-                    or item.get("interfaceType")
-                    or item.get("interface")
-                    or item.get("name")
-                    or item.get("id")
-                )
-                if isinstance(candidate, str) and candidate.strip():
-                    values.append(candidate.strip())
-    return values
-
-
-def _ordered_unique(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        normalized = str(value or "").strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        out.append(normalized)
-    return out
-
-
-def _extract_interface_implementations(resource: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-    for container in (resource, spec, metadata):
-        if not isinstance(container, dict):
-            continue
-        for key in _INTERFACE_IMPLEMENTATION_KEYS:
-            raw = container.get(key)
-            if not isinstance(raw, dict):
-                continue
-            for raw_name, implementation in raw.items():
-                interface_name = _normalize_interface_ref(raw_name)
-                if not interface_name:
-                    continue
-                out[interface_name] = dict(implementation) if isinstance(implementation, dict) else {}
-    return out
-
-
-def _extract_interface_names(resource: dict[str, Any]) -> list[str]:
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-    refs: list[str] = []
-    for container in (resource, spec, metadata):
-        if not isinstance(container, dict):
-            continue
-        for key in _INTERFACE_REF_KEYS:
-            refs.extend(_coerce_string_list(container.get(key)))
-    refs.extend(list(_extract_interface_implementations(resource).keys()))
-    normalized = [_normalize_interface_ref(ref) for ref in refs]
-    return _ordered_unique([ref for ref in normalized if ref])
-
-
-def _extract_ontology_properties_payload(payload: Any) -> list[dict[str, Any]]:
-    return list_ontology_properties(payload)
-
-
-def _extract_shared_property_type_mapping(resource: dict[str, Any], *, ontology_payload: Any) -> dict[str, str]:
-    mapping: dict[str, str] = {}
-
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
-    for container in (resource, spec, metadata):
-        if not isinstance(container, dict):
-            continue
-        for key in _SHARED_PROPERTY_MAPPING_KEYS:
-            raw_mapping = container.get(key)
-            if not isinstance(raw_mapping, dict):
-                continue
-            for raw_shared_ref, raw_local_property in raw_mapping.items():
-                shared_ref = _normalize_shared_property_ref(raw_shared_ref)
-                local_property = str(raw_local_property or "").strip()
-                if shared_ref and local_property:
-                    mapping[shared_ref] = local_property
-
-    for property_item in _extract_ontology_properties_payload(ontology_payload):
-        local_property = str(property_item.get("name") or property_item.get("id") or "").strip()
-        if not local_property:
-            continue
-        prop_metadata = property_item.get("metadata") if isinstance(property_item.get("metadata"), dict) else {}
-        raw_shared_ref = (
-            property_item.get("shared_property_ref")
-            or property_item.get("sharedPropertyRef")
-            or prop_metadata.get("shared_property_ref")
-            or prop_metadata.get("sharedPropertyRef")
-        )
-        shared_ref = _normalize_shared_property_ref(raw_shared_ref)
-        if shared_ref and shared_ref not in mapping:
-            mapping[shared_ref] = local_property
-
-    return mapping
-
-
-def _to_foundry_object_type_full_metadata(
-    resource: dict[str, Any],
-    *,
-    ontology_payload: Any,
-    link_types: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    object_type = _to_foundry_object_type(resource, ontology_payload=ontology_payload)
-    interface_names = _extract_interface_names(resource)
-    interface_implementations = _extract_interface_implementations(resource)
-    for interface_name in interface_names:
-        interface_implementations.setdefault(interface_name, {})
-    return {
-        "objectType": object_type,
-        "linkTypes": [dict(link_type) for link_type in (link_types or []) if isinstance(link_type, dict)],
-        "implementsInterfaces": interface_names,
-        "implementsInterfaces2": interface_implementations,
-        "sharedPropertyTypeMapping": _extract_shared_property_type_mapping(resource, ontology_payload=ontology_payload),
-    }
-
-
-async def _list_all_resources_for_type(
-    *,
-    db_name: str,
-    branch: str,
-    resource_type: str | None,
-    oms_client: OMSClient,
-    page_size: int = 500,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    offset = 0
-    limit = max(1, min(1000, int(page_size)))
-    while True:
-        payload = await oms_client.list_ontology_resources(
-            db_name,
-            resource_type=resource_type,
-            branch=branch,
-            limit=limit,
-            offset=offset,
-        )
-        page_rows = _extract_ontology_resource_rows(payload)
-        if not page_rows:
-            break
-        rows.extend(page_rows)
-        if len(page_rows) < limit:
-            break
-        offset += len(page_rows)
-    return rows
-
-
-def _looks_like_action_type_resource(resource: dict[str, Any]) -> bool:
-    if not isinstance(resource, dict):
-        return False
-    resource_type_raw = str(resource.get("resource_type") or resource.get("resourceType") or "").strip().lower()
-    if resource_type_raw in _ACTION_TYPE_RESOURCE_TYPE_ALIASES:
-        return True
-    spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
-    return any(field in spec for field in _ACTION_TYPE_SPEC_HINT_FIELDS)
-
-
-async def _list_action_type_resources_with_fallback(
-    *,
-    db_name: str,
-    branch: str,
-    oms_client: OMSClient,
-) -> list[dict[str, Any]]:
-    rows = await _list_all_resources_for_type(
-        db_name=db_name,
-        branch=branch,
-        resource_type="action_type",
-        oms_client=oms_client,
-    )
-    if rows:
-        return rows
-    all_rows = await _list_all_resources_for_type(
-        db_name=db_name,
-        branch=branch,
-        resource_type=None,
-        oms_client=oms_client,
-    )
-    filtered = [row for row in all_rows if _looks_like_action_type_resource(row)]
-    deduped: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for row in filtered:
-        resource_id = str(row.get("id") or "").strip()
-        if resource_id and resource_id in seen_ids:
-            continue
-        if resource_id:
-            seen_ids.add(resource_id)
-        deduped.append(row)
-    return deduped
-
-
-async def _find_action_type_resource_by_id(
-    *,
-    db_name: str,
-    branch: str,
-    action_type: str,
-    oms_client: OMSClient,
-) -> dict[str, Any] | None:
-    normalized_action_type = str(action_type or "").strip()
-    if not normalized_action_type:
-        return None
-    rows = await _list_action_type_resources_with_fallback(
-        db_name=db_name,
-        branch=branch,
-        oms_client=oms_client,
-    )
-    for row in rows:
-        if str(row.get("id") or "").strip() == normalized_action_type:
-            return row
-    return None
-
-
-async def _find_action_type_resource_by_rid(
-    *,
-    db_name: str,
-    branch: str,
-    action_type_rid: str,
-    oms_client: OMSClient,
-) -> dict[str, Any] | None:
-    normalized_rid = str(action_type_rid or "").strip()
-    if not normalized_rid:
-        return None
-    rows = await _list_action_type_resources_with_fallback(
-        db_name=db_name,
-        branch=branch,
-        oms_client=oms_client,
-    )
-    for row in rows:
-        if str(row.get("rid") or "").strip() == normalized_rid:
-            return row
-    return None
-
-
-async def _list_resources_best_effort(
-    *,
-    db_name: str,
-    branch: str,
-    resource_type: str,
-    oms_client: OMSClient,
-) -> list[dict[str, Any]]:
-    try:
-        return await _list_all_resources_for_type(
-            db_name=db_name,
-            branch=branch,
-            resource_type=resource_type,
-            oms_client=oms_client,
-        )
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "Failed to list ontology resources for full metadata (%s/%s/%s): %s",
-            db_name,
-            branch,
-            resource_type,
-            exc,
-        )
-        return []
-
-
-async def _list_action_type_resources_best_effort(
-    *,
-    db_name: str,
-    branch: str,
-    oms_client: OMSClient,
-) -> list[dict[str, Any]]:
-    try:
-        return await _list_action_type_resources_with_fallback(
-            db_name=db_name,
-            branch=branch,
-            oms_client=oms_client,
-        )
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "Failed to list action type resources for full metadata (%s/%s): %s",
-            db_name,
-            branch,
-            exc,
-        )
-        return []
-
-
-async def _get_ontology_payload_best_effort(
-    *,
-    db_name: str,
-    branch: str,
-    object_type: str,
-    oms_client: OMSClient,
-) -> Any:
-    try:
-        return await oms_client.get_ontology(db_name, object_type, branch=branch)
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "Failed to enrich full metadata object type (%s/%s/%s): %s",
-            db_name,
-            branch,
-            object_type,
-            exc,
-        )
-        return None
-
-
-def _to_foundry_ontology(row: dict[str, Any]) -> dict[str, Any]:
-    api_name = str(row.get("name") or row.get("db_name") or row.get("apiName") or "").strip()
-    display_name = (
-        str(row.get("displayName") or "").strip()
-        or str(row.get("label") or "").strip()
-        or api_name
-    )
-    out: dict[str, Any] = {
-        "apiName": api_name,
-        "displayName": display_name,
-    }
-    description = str(row.get("description") or "").strip()
-    if description:
-        out["description"] = description
-    rid = str(row.get("rid") or row.get("ontologyRid") or "").strip()
-    if rid:
-        out["rid"] = rid
-    return out
-
 
 @router.get("", dependencies=[_ONTOLOGY_READ])
 @trace_endpoint("bff.foundry_v2_ontology.list_ontologies")
@@ -2897,178 +538,37 @@ async def get_full_metadata_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="GET /api/v2/ontologies/{ontologyRid}/fullMetadata",
-        )
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-        )
-
-    try:
-        database_payload = await oms_client.get_database(db_name)
-        database_row = (
-            database_payload.get("data")
-            if isinstance(database_payload, dict) and isinstance(database_payload.get("data"), dict)
-            else database_payload
-        )
-        if not isinstance(database_row, dict):
-            database_row = {"name": db_name}
-
-        (
-            object_resources,
-            link_resources,
-            action_resources,
-            query_resources,
-            interface_resources,
-            shared_property_resources,
-            value_type_resources,
-        ) = await asyncio.gather(
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="object_type",
-                oms_client=oms_client,
-            ),
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="link_type",
-                oms_client=oms_client,
-            ),
-            _list_action_type_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                oms_client=oms_client,
-            ),
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="function",
-                oms_client=oms_client,
-            ),
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="interface",
-                oms_client=oms_client,
-            ),
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="shared_property",
-                oms_client=oms_client,
-            ),
-            _list_resources_best_effort(
-                db_name=db_name,
-                branch=branch,
-                resource_type="value_type",
-                oms_client=oms_client,
-            ),
-        )
-
-        link_types_by_source = _group_outgoing_link_types_by_source(link_resources)
-        link_types_by_target = _group_incoming_link_types_by_target(link_resources)
-
-        object_type_ids: list[str] = []
-        for resource in object_resources:
-            object_type_id = str(resource.get("id") or "").strip()
-            if object_type_id:
-                object_type_ids.append(object_type_id)
-
-        ontology_payloads = await asyncio.gather(
-            *[
-                _get_ontology_payload_best_effort(
-                    db_name=db_name,
-                    branch=branch,
-                    object_type=object_type_id,
-                    oms_client=oms_client,
-                )
-                for object_type_id in object_type_ids
-            ]
-        )
-        ontology_payload_by_object_type = dict(zip(object_type_ids, ontology_payloads))
-
-        object_types: dict[str, dict[str, Any]] = {}
-        strict_fix_count = 0
-        strict_dropped_count = 0
-        for resource in object_resources:
-            object_type_id = str(resource.get("id") or "").strip()
-            if not object_type_id:
-                continue
-            # Merge outgoing + incoming link types for fullMetadata.
-            outgoing_lt = link_types_by_source.get(object_type_id) or []
-            incoming_lt = link_types_by_target.get(object_type_id) or []
-            seen_lt: set[tuple[str, str]] = set()
-            merged_lt: list[dict[str, Any]] = []
-            for lt in outgoing_lt + incoming_lt:
-                key = (lt.get("apiName", ""), lt.get("objectTypeApiName", ""))
-                if key not in seen_lt:
-                    seen_lt.add(key)
-                    merged_lt.append(lt)
-            mapped = _to_foundry_object_type_full_metadata(
-                resource,
-                ontology_payload=ontology_payload_by_object_type.get(object_type_id),
-                link_types=merged_lt,
-            )
-            if strict_compat:
-                mapped, object_fixes, object_dropped = _strictify_object_type_full_metadata(
-                    mapped,
-                    db_name=db_name,
-                    object_type_hint=object_type_id,
-                )
-                strict_fix_count += object_fixes
-                strict_dropped_count += object_dropped
-            object_types[object_type_id] = mapped
-
-        ontology_contract = _to_foundry_ontology(database_row)
-        if not ontology_contract.get("apiName"):
-            ontology_contract["apiName"] = db_name
-        if not ontology_contract.get("displayName"):
-            ontology_contract["displayName"] = db_name
-
-        _log_strict_compat_summary(
-            route="get_full_metadata_v2",
-            db_name=db_name,
-            branch=branch,
-            fixes=strict_fix_count,
-            dropped=strict_dropped_count,
-        )
-
-        return {
-            "ontology": ontology_contract,
-            "branch": _full_metadata_branch_contract(branch=branch),
-            "objectTypes": object_types,
-            "actionTypes": _to_foundry_action_type_map(action_resources),
-            "queryTypes": _to_foundry_query_type_metadata_map(query_resources),
-            "interfaceTypes": _to_foundry_named_metadata_map(interface_resources),
-            "sharedPropertyTypes": _to_foundry_named_metadata_map(shared_property_resources),
-            "valueTypes": _to_foundry_named_metadata_map(value_type_resources),
-        }
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get full metadata (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await _metadata.get_full_metadata_route(
+        ontology=ontologyRid,
+        request=request,
+        preview=preview,
+        branch=branch,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        list_resources_best_effort=_list_resources_best_effort,
+        list_action_type_resources_best_effort=_list_action_type_resources_best_effort,
+        get_ontology_payload_best_effort=_get_ontology_payload_best_effort,
+        group_outgoing_link_types_by_source=_group_outgoing_link_types_by_source,
+        group_incoming_link_types_by_target=_group_incoming_link_types_by_target,
+        to_foundry_object_type_full_metadata=_to_foundry_object_type_full_metadata,
+        strictify_object_type_full_metadata=_strictify_object_type_full_metadata,
+        to_foundry_ontology=_to_foundry_ontology,
+        full_metadata_branch_contract=_full_metadata_branch_contract,
+        to_foundry_action_type_map=_to_foundry_action_type_map,
+        to_foundry_query_type_metadata_map=_to_foundry_query_type_metadata_map,
+        to_foundry_named_metadata_map=_to_foundry_named_metadata_map,
+        log_strict_compat_summary=_log_strict_compat_summary,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/actionTypes", dependencies=[_ONTOLOGY_READ])
@@ -3081,60 +581,29 @@ async def list_action_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        await _require_domain_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/actionTypes", db_name, branch, page_size)
-        offset = _decode_page_token(page_token, scope=page_scope)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(exc, ontology=str(ontology))
-
-    try:
-        payload = await oms_client.list_ontology_resources(
-            db_name,
-            resource_type="action_type",
-            branch=branch,
-            limit=page_size,
-            offset=offset,
-        )
-        raw_resources = _extract_ontology_resource_rows(payload)
-        resources = raw_resources
-        total_available: int | None = None
-        if not resources:
-            fallback_resources = await _list_action_type_resources_with_fallback(
-                db_name=db_name,
-                branch=branch,
-                oms_client=oms_client,
-            )
-            total_available = len(fallback_resources)
-            resources = fallback_resources[offset : offset + page_size]
-        data = [
-            mapped
-            for mapped in (_to_foundry_action_type(resource) for resource in resources)
-            if mapped is not None
-        ]
-        if total_available is not None:
-            consumed = offset + len(resources)
-            next_page_token = _encode_page_token(consumed, scope=page_scope) if consumed < total_available else None
-        else:
-            next_page_token = _encode_page_token(offset + len(raw_resources), scope=page_scope) if len(raw_resources) == page_size else None
-        return {"data": data, "nextPageToken": next_page_token}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list action types (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await list_action_types_route(
+        ontology=ontologyRid,
+        request=request,
+        page_size=page_size,
+        page_token=page_token,
+        branch=branch,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        pagination_scope=_pagination_scope,
+        decode_page_token=_decode_page_token,
+        encode_page_token=_encode_page_token,
+        extract_ontology_resource_rows=_extract_ontology_resource_rows,
+        list_action_type_resources_with_fallback=_list_action_type_resources_with_fallback,
+        to_foundry_action_type=_to_foundry_action_type,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/actionTypes/{actionTypeApiName}", dependencies=[_ONTOLOGY_READ])
@@ -3146,82 +615,25 @@ async def get_action_type_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    actionType = actionTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        action_type = str(actionType or "").strip()
-        if not action_type:
-            raise ValueError("actionType is required")
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"actionType": str(actionType)},
-        )
-
-    try:
-        resource: dict[str, Any] | None = None
-        try:
-            payload = await oms_client.get_ontology_resource(
-                db_name,
-                resource_type="action_type",
-                resource_id=action_type,
-                branch=branch,
-            )
-            resource = _extract_ontology_resource(payload)
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-            if status_code != status.HTTP_404_NOT_FOUND:
-                raise
-
-        if not resource:
-            resource = await _find_action_type_resource_by_id(
-                db_name=db_name,
-                branch=branch,
-                action_type=action_type,
-                oms_client=oms_client,
-            )
-
-        if not resource:
-            return _not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionType": action_type},
-            )
-        mapped = _to_foundry_action_type(resource)
-        if mapped is None:
-            return _not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionType": action_type},
-            )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"actionType": action_type},
-            not_found_response=_not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionType": action_type},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"actionType": action_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get action type (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"actionType": action_type},
-        )
+    return await get_action_type_route(
+        ontology=ontologyRid,
+        action_type_api_name=actionTypeApiName,
+        request=request,
+        branch=branch,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        extract_ontology_resource=_extract_ontology_resource,
+        find_action_type_resource_by_id=_find_action_type_resource_by_id,
+        to_foundry_action_type=_to_foundry_action_type,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/actionTypes/byRid/{actionTypeRid}", dependencies=[_ONTOLOGY_READ])
@@ -3233,73 +645,25 @@ async def get_action_type_by_rid_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        action_type_rid = str(actionTypeRid or "").strip()
-        if not action_type_rid:
-            raise ValueError("actionTypeRid is required")
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"actionTypeRid": str(actionTypeRid)},
-        )
-
-    try:
-        resource = await _find_resource_by_rid(
-            db_name=db_name,
-            branch=branch,
-            resource_type="action_type",
-            rid=action_type_rid,
-            oms_client=oms_client,
-        )
-        if not resource:
-            resource = await _find_action_type_resource_by_rid(
-                db_name=db_name,
-                branch=branch,
-                action_type_rid=action_type_rid,
-                oms_client=oms_client,
-            )
-        if not resource:
-            return _not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionTypeRid": action_type_rid},
-            )
-        mapped = _to_foundry_action_type(resource)
-        if mapped is None:
-            return _not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionTypeRid": action_type_rid},
-            )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"actionTypeRid": action_type_rid},
-            not_found_response=_not_found_error(
-                "ActionTypeNotFound",
-                ontology=db_name,
-                parameters={"actionTypeRid": action_type_rid},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"actionTypeRid": action_type_rid},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get action type by rid (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"actionTypeRid": action_type_rid},
-        )
+    return await get_action_type_by_rid_route(
+        ontology=ontologyRid,
+        action_type_rid=actionTypeRid,
+        request=request,
+        branch=branch,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        find_resource_by_rid=_find_resource_by_rid,
+        find_action_type_resource_by_rid=_find_action_type_resource_by_rid,
+        to_foundry_action_type=_to_foundry_action_type,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.post("/{ontologyRid}/actions/{actionApiName}/apply", dependencies=[_ONTOLOGY_WRITE])
@@ -3535,85 +899,25 @@ async def get_query_type_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        _ = sdk_package_rid, sdk_version, version
-        query_api_name = str(queryApiName or "").strip()
-        if not query_api_name:
-            raise ValueError("queryApiName is required")
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"queryApiName": str(queryApiName)},
-        )
-
-    try:
-        resource = None
-        for branch_name in _query_type_branch_candidates():
-            try:
-                payload = await oms_client.get_ontology_resource(
-                    db_name,
-                    resource_type="function",
-                    resource_id=query_api_name,
-                    branch=branch_name,
-                )
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                    continue
-                raise
-            candidate = _extract_ontology_resource(payload)
-            if candidate:
-                resource = candidate
-                break
-        if not resource:
-            return _not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            )
-        mapped = _to_foundry_query_type(resource)
-        if mapped is None:
-            return _not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            )
-        requested_version = str(version or "").strip()
-        if requested_version:
-            resolved_version = str(mapped.get("version") or "").strip()
-            if resolved_version and resolved_version != requested_version:
-                return _not_found_error(
-                    "QueryTypeNotFound",
-                    ontology=db_name,
-                    parameters={"queryApiName": query_api_name},
-                )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-            not_found_response=_not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get query type (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-        )
+    _ = sdk_package_rid, sdk_version
+    return await _metadata.get_query_type_route(
+        ontology=ontologyRid,
+        query_api_name=queryApiName,
+        request=request,
+        version=version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        query_type_branch_candidates=_query_type_branch_candidates,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_query_type=_to_foundry_query_type,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.post("/{ontologyRid}/queries/{queryApiName}/execute", dependencies=[_ONTOLOGY_READ])
@@ -3629,130 +933,32 @@ async def execute_query_v2(
     transaction_id: str | None = Query(default=None, alias="transactionId"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        _ = sdk_package_rid, sdk_version, transaction_id
-        query_api_name = str(queryApiName or "").strip()
-        if not query_api_name:
-            raise ValueError("queryApiName is required")
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"queryApiName": str(queryApiName)},
-        )
-
-    try:
-        resource = None
-        query_resource_branch = _query_type_branch_candidates()[0]
-        for branch_name in _query_type_branch_candidates():
-            try:
-                payload = await oms_client.get_ontology_resource(
-                    db_name,
-                    resource_type="function",
-                    resource_id=query_api_name,
-                    branch=branch_name,
-                )
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == status.HTTP_404_NOT_FOUND:
-                    continue
-                raise
-            candidate = _extract_ontology_resource(payload)
-            if candidate:
-                resource = candidate
-                query_resource_branch = branch_name
-                break
-        if not resource:
-            return _not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            )
-
-        query_type = _to_foundry_query_type(resource)
-        if query_type is None:
-            return _not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            )
-
-        requested_version = str(version or "").strip()
-        if requested_version:
-            resolved_version = str(query_type.get("version") or "").strip()
-            if resolved_version and resolved_version != requested_version:
-                return _not_found_error(
-                    "QueryTypeNotFound",
-                    ontology=db_name,
-                    parameters={"queryApiName": query_api_name},
-                )
-
-        object_type, execution_payload = _extract_query_execution_plan(resource)
-        if not object_type:
-            raise ValueError("query execution spec requires objectType")
-
-        execution_payload = _apply_query_execute_options(
-            base_payload=execution_payload,
-            options=body.options,
-        )
-        parameters_payload = dict(body.parameters or {})
-        resolved_object_type = _materialize_query_execution_value(
-            object_type,
-            parameters=parameters_payload,
-        )
-        normalized_object_type = str(resolved_object_type or "").strip()
-        if not normalized_object_type:
-            raise ValueError("query execution spec resolved an empty objectType")
-        resolved_payload = _materialize_query_execution_value(
-            execution_payload,
-            parameters=parameters_payload,
-        )
-        if not isinstance(resolved_payload, dict):
-            raise ValueError("query execution spec must resolve to an object payload")
-        if "pageSize" not in resolved_payload:
-            resolved_payload["pageSize"] = 100
-
-        result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{normalized_object_type}/search",
-            params={"branch": query_resource_branch},
-            json=resolved_payload,
-        )
-        if not isinstance(result, dict):
-            raise ValueError("query execution result must be a JSON object")
-        return {"value": result}
-    except ValueError as exc:
-        return _foundry_error(
-            status.HTTP_400_BAD_REQUEST,
-            error_code="INVALID_ARGUMENT",
-            error_name="InvalidArgument",
-            parameters={"ontology": db_name, "queryApiName": query_api_name, "message": str(exc)},
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-            not_found_response=_not_found_error(
-                "QueryTypeNotFound",
-                ontology=db_name,
-                parameters={"queryApiName": query_api_name},
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to execute query (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"queryApiName": query_api_name},
-        )
+    return await _query_routes.execute_query_route(
+        ontology=ontologyRid,
+        query_api_name=queryApiName,
+        body=body,
+        request=request,
+        version=version,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        transaction_id=transaction_id,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        not_found_error=_not_found_error,
+        foundry_error=_foundry_error,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        query_type_branch_candidates=_query_type_branch_candidates,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_query_type=_to_foundry_query_type,
+        extract_query_execution_plan=_extract_query_execution_plan,
+        apply_query_execute_options=_apply_query_execute_options,
+        materialize_query_execution_value=_materialize_query_execution_value,
+    )
 
 
 @router.get("/{ontologyRid}/interfaceTypes", dependencies=[_ONTOLOGY_READ])
@@ -5174,58 +2380,24 @@ async def search_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        object_type = str(objectType or "").strip()
-        if not object_type:
-            raise ValueError("objectType is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectType": str(objectType)},
-        )
-
-    try:
-        result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-            params={"branch": branch},
-            json=payload,
-        )
-        if not isinstance(result, dict):
-            return _foundry_error(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                error_code="INTERNAL",
-                error_name="Internal",
-                parameters={"ontology": db_name, "objectType": object_type},
-            )
-        return result
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error("ObjectTypeNotFound", ontology=db_name, object_type=object_type)
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to search objects (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type},
-        )
+    return await _query_routes.search_objects_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        payload=payload,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        foundry_error=_foundry_error,
+        passthrough_upstream_error_payload=_passthrough_upstream_error_payload,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.post("/{ontologyRid}/objects/{objectTypeApiName}/count", dependencies=[_ONTOLOGY_READ])
@@ -5239,56 +2411,23 @@ async def count_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        object_type = str(objectType or "").strip()
-        if not object_type:
-            raise ValueError("objectType is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectType": str(objectType)},
-        )
-
-    try:
-        result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{object_type}/count",
-            params={
-                "branch": branch,
-                "sdkPackageRid": sdk_package_rid,
-                "sdkVersion": sdk_version,
-            },
-        )
-        if not isinstance(result, dict):
-            return {"count": None}
-        return {"count": result.get("count")}
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error("ObjectTypeNotFound", ontology=db_name, object_type=object_type)
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to count objects (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type},
-        )
+    return await _query_routes.count_objects_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        foundry_error=_foundry_error,
+        passthrough_upstream_error_payload=_passthrough_upstream_error_payload,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.post("/{ontologyRid}/objects/{objectTypeApiName}/aggregate", dependencies=[_ONTOLOGY_READ])
@@ -5304,55 +2443,26 @@ async def aggregate_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    """Delegate aggregation to OMS ES-native aggregate engine."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        object_type = str(objectType or "").strip()
-        _ = transaction_id, sdk_package_rid, sdk_version
-        if not object_type:
-            raise ValueError("objectType is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectType": str(objectType)},
-        )
-
-    try:
-        return await oms_client.aggregate_objects_v2(
-            db_name,
-            object_type,
-            payload,
-            branch=branch,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"objectType": object_type},
-            not_found_response=_not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"objectType": object_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to aggregate objects (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectType": object_type},
-        )
+    return await _query_routes.aggregate_objects_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        payload=payload,
+        request=request,
+        branch=branch,
+        transaction_id=transaction_id,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.post("/{ontologyRid}/objectSets/loadObjects", dependencies=[_ONTOLOGY_READ])
@@ -5368,98 +2478,33 @@ async def load_object_set_objects_v2(
     oms_client: OMSClient = OMSClientDep,
     redis_service: RedisService = Depends(get_redis_service),
 ):
-    search_around = False
-    object_type: str | None = None
-    search_payload: dict[str, Any] = {}
-    actor: str | None = None
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = transaction_id, sdk_package_rid, sdk_version
-        object_set = await _resolve_object_set_definition_with_store(
-            payload.get("objectSet"),
-            redis_service=redis_service,
-        )
-        search_around = _is_search_around_object_set(object_set)
-        if not search_around:
-            object_type = _resolve_object_set_object_type(object_set)
-            if not object_type:
-                raise ValueError("objectSet.objectType is required")
-        await _require_read_role(request, db_name=db_name)
-        _, actor = resolve_database_actor(request.headers)
-        if not search_around:
-            search_payload = _build_object_set_search_payload(
-                object_set=object_set,
-                payload=payload,
-                require_select=True,
-            )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectSet": "loadObjects"},
-        )
-
-    try:
-        if search_around:
-            rows, total_count, next_page_token, _ = await _load_rows_for_search_around_object_set(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_set=object_set,
-                payload=payload,
-                endpoint_scope="v2/objectSets/loadObjects",
-                actor=actor,
-                redis_service=redis_service,
-            )
-        else:
-            rows, total_count, next_page_token = await _load_rows_for_single_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=object_type or "",
-                search_payload=search_payload,
-            )
-        response: dict[str, Any] = {
-            "data": rows,
-            "nextPageToken": next_page_token,
-            "totalCount": total_count,
-        }
-        if payload.get("includeComputeUsage"):
-            response["computeUsage"] = 0
-        return response
-    except ValueError as exc:
-        return _object_set_runtime_value_error_response(
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjects"},
-        )
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                parameters={"objectSet": "loadObjects"},
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectSet": "loadObjects"},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to load object set objects (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectSet": "loadObjects"},
-        )
+    return await _query_routes.load_object_set_objects_route(
+        ontology=ontologyRid,
+        payload=payload,
+        request=request,
+        branch=branch,
+        transaction_id=transaction_id,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        redis_service=redis_service,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        resolve_object_set_definition_with_store=_resolve_object_set_definition_with_store,
+        is_search_around_object_set=_is_search_around_object_set,
+        resolve_object_set_object_type=_resolve_object_set_object_type,
+        build_object_set_search_payload=_build_object_set_search_payload,
+        load_rows_for_search_around_object_set=_load_rows_for_search_around_object_set,
+        load_rows_for_single_object_type=_load_rows_for_single_object_type,
+        preflight_error_response=_preflight_error_response,
+        object_set_runtime_value_error_response=_object_set_runtime_value_error_response,
+        passthrough_upstream_error_payload=_passthrough_upstream_error_payload,
+        foundry_error=_foundry_error,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        resolve_database_actor=resolve_database_actor,
+    )
 
 
 @router.post("/{ontologyRid}/objectSets/loadLinks", dependencies=[_ONTOLOGY_READ])
@@ -5475,205 +2520,41 @@ async def load_object_set_links_v2(
     oms_client: OMSClient = OMSClientDep,
     redis_service: RedisService = Depends(get_redis_service),
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadLinks",
-        )
-        object_set = await _resolve_object_set_definition_with_store(
-            payload.get("objectSet"),
-            redis_service=redis_service,
-        )
-        requested_links = _normalize_link_type_values(payload)
-        object_types = _collect_object_set_object_types(object_set)
-        if not object_types:
-            raise ValueError("objectSet.objectType is required")
-        await _require_read_role(request, db_name=db_name)
-        search_payload = _build_object_set_search_payload(
-            object_set=object_set,
-            payload={
-                "pageToken": payload.get("pageToken"),
-                "pageSize": 1000,
-            },
-            require_select=False,
-        )
-        request_page_token = search_payload.get("pageToken")
-        if request_page_token is not None:
-            request_page_token = str(request_page_token)
-        pagination_scope = _pagination_scope(
-            "v2/objectSets/loadLinks",
-            db_name,
-            branch,
-            ",".join(sorted(object_types)),
-            ",".join(requested_links),
-            str(payload.get("objectSet") or ""),
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectSet": "loadLinks"},
-        )
-
-    try:
-        if len(object_types) == 1:
-            rows, _, next_page_token = await _load_rows_for_single_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=object_types[0],
-                search_payload=search_payload,
-            )
-        else:
-            rows, _, next_page_token = await _load_rows_for_multi_object_types(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_types=object_types,
-                search_payload=search_payload,
-                page_token=request_page_token,
-                pagination_scope=pagination_scope,
-            )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadLinks"},
-            not_found_response=_not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                parameters={"objectSet": "loadLinks"},
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"objectSet": "loadLinks"},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to load object set source rows (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadLinks"},
-        )
-
-    link_resources: dict[str, dict[str, Any]] = {}
-    for link_type in requested_links:
-        try:
-            link_payload = await oms_client.get_ontology_resource(
-                db_name,
-                resource_type="link_type",
-                resource_id=link_type,
-                branch=branch,
-            )
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-            if status_code == status.HTTP_404_NOT_FOUND:
-                return _not_found_error(
-                    "LinkTypeNotFound",
-                    ontology=db_name,
-                    link_type=link_type,
-                    parameters={"objectSet": "loadLinks"},
-                )
-            return _upstream_status_error_response(
-                exc,
-                ontology=db_name,
-                parameters={"objectSet": "loadLinks", "linkType": link_type},
-                passthrough_payload=True,
-            )
-        except httpx.HTTPError:
-            return _upstream_transport_error_response(
-                ontology=db_name,
-                parameters={"objectSet": "loadLinks", "linkType": link_type},
-            )
-
-        link_resource = _extract_ontology_resource(link_payload)
-        if not isinstance(link_resource, dict):
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                link_type=link_type,
-                parameters={"objectSet": "loadLinks"},
-            )
-        link_resources[link_type] = link_resource
-
-    default_object_type = object_types[0] if len(object_types) == 1 else None
-    source_object_types = list(
-        dict.fromkeys(
-            object_types
-            + [
-                object_type
-                for row in rows
-                if (
-                    object_type := _resolve_source_object_type_from_row(
-                        row,
-                        fallback_object_type=default_object_type,
-                    )
-                )
-            ]
-        )
+    return await _query_routes.load_object_set_links_route(
+        ontology=ontologyRid,
+        payload=payload,
+        request=request,
+        branch=branch,
+        preview=preview,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        redis_service=redis_service,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_foundry_v2_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        resolve_object_set_definition_with_store=_resolve_object_set_definition_with_store,
+        normalize_link_type_values=_normalize_link_type_values,
+        collect_object_set_object_types=_collect_object_set_object_types,
+        require_read_role=_require_read_role,
+        build_object_set_search_payload=_build_object_set_search_payload,
+        pagination_scope=_pagination_scope,
+        load_rows_for_single_object_type=_load_rows_for_single_object_type,
+        load_rows_for_multi_object_types=_load_rows_for_multi_object_types,
+        get_ontology_resource=oms_client.get_ontology_resource,
+        extract_ontology_resource=_extract_ontology_resource,
+        resolve_source_object_type_from_row=_resolve_source_object_type_from_row,
+        resolve_object_primary_key_field=_resolve_object_primary_key_field,
+        to_foundry_outgoing_link_type=_to_foundry_outgoing_link_type,
+        collect_load_links_rows=_collect_load_links_rows,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
     )
-
-    link_sides_by_source_type: dict[str, dict[str, dict[str, Any]]] = {}
-    for source_object_type in source_object_types:
-        source_link_sides: dict[str, dict[str, Any]] = {}
-        for link_type, link_resource in link_resources.items():
-            link_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=source_object_type)
-            if isinstance(link_side, dict):
-                source_link_sides[link_type] = link_side
-        link_sides_by_source_type[source_object_type] = source_link_sides
-
-    for link_type in requested_links:
-        if not any(link_type in source_link_sides for source_link_sides in link_sides_by_source_type.values()):
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                link_type=link_type,
-                parameters={"objectSet": "loadLinks"},
-            )
-
-    source_primary_key_fields: dict[str, str] = {}
-    for source_object_type in source_object_types:
-        try:
-            source_primary_key_fields[source_object_type] = await _resolve_object_primary_key_field(
-                db_name=db_name,
-                object_type=source_object_type,
-                branch=branch,
-                oms_client=oms_client,
-            )
-        except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-            logger.warning(
-                "Failed to resolve source object primary key for link expansion (ontology=%s sourceObjectType=%s branch=%s): %s",
-                db_name,
-                source_object_type,
-                branch,
-                exc,
-                exc_info=True,
-            )
-            continue
-
-    data = _collect_load_links_rows(
-        rows=rows,
-        requested_links=requested_links,
-        link_sides_by_source_type=link_sides_by_source_type,
-        source_primary_key_fields=source_primary_key_fields,
-        default_object_type=default_object_type,
-    )
-    response: dict[str, Any] = {
-        "data": data,
-        "nextPageToken": next_page_token,
-    }
-    if payload.get("includeComputeUsage"):
-        response["computeUsage"] = 0
-    return response
 
 
 @router.post("/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes", dependencies=[_ONTOLOGY_READ])
@@ -5690,130 +2571,40 @@ async def load_object_set_multiple_object_types_v2(
     oms_client: OMSClient = OMSClientDep,
     redis_service: RedisService = Depends(get_redis_service),
 ):
-    search_around = False
-    object_types: list[str] = []
-    search_payload: dict[str, Any] = {}
-    request_page_token: str | None = None
-    pagination_scope: str | None = None
-    actor: str | None = None
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = transaction_id, sdk_package_rid, sdk_version
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsMultipleObjectTypes",
-        )
-        object_set = await _resolve_object_set_definition_with_store(
-            payload.get("objectSet"),
-            redis_service=redis_service,
-        )
-        search_around = _is_search_around_object_set(object_set)
-        if not search_around:
-            object_types = _collect_object_set_object_types(object_set)
-            if not object_types:
-                raise ValueError("objectSet.objectType is required")
-        await _require_read_role(request, db_name=db_name)
-        _, actor = resolve_database_actor(request.headers)
-        if not search_around:
-            search_payload = _build_object_set_search_payload(
-                object_set=object_set,
-                payload=payload,
-                require_select=True,
-            )
-            request_page_token = search_payload.get("pageToken")
-            if request_page_token is not None:
-                request_page_token = str(request_page_token)
-            pagination_scope = _pagination_scope(
-                "v2/objectSets/loadObjectsMultipleObjectTypes",
-                db_name,
-                branch,
-                ",".join(sorted(object_types)),
-                str(payload.get("pageSize") or ""),
-                ",".join(_normalize_select_values(payload)),
-                str(payload.get("snapshot") if "snapshot" in payload else ""),
-            )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-        )
-
-    try:
-        if search_around:
-            rows, total_count, next_page_token, resolved_object_types = await _load_rows_for_search_around_object_set(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_set=object_set,
-                payload=payload,
-                endpoint_scope="v2/objectSets/loadObjectsMultipleObjectTypes",
-                actor=actor,
-                redis_service=redis_service,
-            )
-            object_types = resolved_object_types
-        elif len(object_types) == 1:
-            rows, total_count, next_page_token = await _load_rows_for_single_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=object_types[0],
-                search_payload=search_payload,
-            )
-        else:
-            rows, total_count, next_page_token = await _load_rows_for_multi_object_types(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_types=object_types,
-                search_payload=search_payload,
-                page_token=request_page_token,
-                pagination_scope=pagination_scope or "",
-            )
-        response: dict[str, Any] = {
-            "data": rows,
-            "nextPageToken": next_page_token,
-            "totalCount": total_count,
-            "interfaceToObjectTypeMappings": {},
-            "interfaceToObjectTypeMappingsV2": {},
-        }
-        if payload.get("includeComputeUsage"):
-            response["computeUsage"] = 0
-        return response
-    except ValueError as exc:
-        return _object_set_runtime_value_error_response(
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-            not_found_response=_not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to load object set multiple object types (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsMultipleObjectTypes"},
-        )
+    return await _query_routes.load_object_set_multiple_object_types_route(
+        ontology=ontologyRid,
+        payload=payload,
+        request=request,
+        branch=branch,
+        preview=preview,
+        transaction_id=transaction_id,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        redis_service=redis_service,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_foundry_v2_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        resolve_object_set_definition_with_store=_resolve_object_set_definition_with_store,
+        is_search_around_object_set=_is_search_around_object_set,
+        collect_object_set_object_types=_collect_object_set_object_types,
+        require_read_role=_require_read_role,
+        resolve_database_actor=resolve_database_actor,
+        build_object_set_search_payload=_build_object_set_search_payload,
+        pagination_scope=_pagination_scope,
+        normalize_select_values=_normalize_select_values,
+        load_rows_for_search_around_object_set=_load_rows_for_search_around_object_set,
+        load_rows_for_single_object_type=_load_rows_for_single_object_type,
+        load_rows_for_multi_object_types=_load_rows_for_multi_object_types,
+        preflight_error_response=_preflight_error_response,
+        object_set_runtime_value_error_response=_object_set_runtime_value_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.post("/{ontologyRid}/objectSets/loadObjectsOrInterfaces", dependencies=[_ONTOLOGY_READ])
@@ -5829,124 +2620,39 @@ async def load_object_set_objects_or_interfaces_v2(
     oms_client: OMSClient = OMSClientDep,
     redis_service: RedisService = Depends(get_redis_service),
 ):
-    search_around = False
-    object_types: list[str] = []
-    search_payload: dict[str, Any] = {}
-    request_page_token: str | None = None
-    pagination_scope: str | None = None
-    actor: str | None = None
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="POST /api/v2/ontologies/{ontologyRid}/objectSets/loadObjectsOrInterfaces",
-        )
-        object_set = await _resolve_object_set_definition_with_store(
-            payload.get("objectSet"),
-            redis_service=redis_service,
-        )
-        search_around = _is_search_around_object_set(object_set)
-        if not search_around:
-            object_types = _collect_object_set_object_types(object_set)
-            if not object_types:
-                raise ValueError("objectSet.objectType is required")
-        await _require_read_role(request, db_name=db_name)
-        _, actor = resolve_database_actor(request.headers)
-        if not search_around:
-            search_payload = _build_object_set_search_payload(
-                object_set=object_set,
-                payload=payload,
-                require_select=True,
-            )
-            request_page_token = search_payload.get("pageToken")
-            if request_page_token is not None:
-                request_page_token = str(request_page_token)
-            pagination_scope = _pagination_scope(
-                "v2/objectSets/loadObjectsOrInterfaces",
-                db_name,
-                branch,
-                ",".join(sorted(object_types)),
-                str(payload.get("pageSize") or ""),
-                ",".join(_normalize_select_values(payload)),
-                str(payload.get("snapshot") if "snapshot" in payload else ""),
-            )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectSet": "loadObjectsOrInterfaces"},
-        )
-
-    try:
-        if search_around:
-            rows, total_count, next_page_token, _ = await _load_rows_for_search_around_object_set(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_set=object_set,
-                payload=payload,
-                endpoint_scope="v2/objectSets/loadObjectsOrInterfaces",
-                actor=actor,
-                redis_service=redis_service,
-            )
-        elif len(object_types) == 1:
-            rows, total_count, next_page_token = await _load_rows_for_single_object_type(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_type=object_types[0],
-                search_payload=search_payload,
-            )
-        else:
-            rows, total_count, next_page_token = await _load_rows_for_multi_object_types(
-                oms_client=oms_client,
-                db_name=db_name,
-                branch=branch,
-                object_types=object_types,
-                search_payload=search_payload,
-                page_token=request_page_token,
-                pagination_scope=pagination_scope or "",
-            )
-        return {
-            "data": rows,
-            "nextPageToken": next_page_token,
-            "totalCount": total_count,
-        }
-    except ValueError as exc:
-        return _object_set_runtime_value_error_response(
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsOrInterfaces"},
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsOrInterfaces"},
-            not_found_response=_not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                parameters={"objectSet": "loadObjectsOrInterfaces"},
-            ),
-            passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsOrInterfaces"},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to load object set objects or interfaces (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"objectSet": "loadObjectsOrInterfaces"},
-        )
+    return await _query_routes.load_object_set_objects_or_interfaces_route(
+        ontology=ontologyRid,
+        payload=payload,
+        request=request,
+        branch=branch,
+        preview=preview,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        redis_service=redis_service,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_foundry_v2_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        resolve_object_set_definition_with_store=_resolve_object_set_definition_with_store,
+        is_search_around_object_set=_is_search_around_object_set,
+        collect_object_set_object_types=_collect_object_set_object_types,
+        require_read_role=_require_read_role,
+        resolve_database_actor=resolve_database_actor,
+        build_object_set_search_payload=_build_object_set_search_payload,
+        pagination_scope=_pagination_scope,
+        normalize_select_values=_normalize_select_values,
+        load_rows_for_search_around_object_set=_load_rows_for_search_around_object_set,
+        load_rows_for_single_object_type=_load_rows_for_single_object_type,
+        load_rows_for_multi_object_types=_load_rows_for_multi_object_types,
+        preflight_error_response=_preflight_error_response,
+        object_set_runtime_value_error_response=_object_set_runtime_value_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.post("/{ontologyRid}/objectSets/aggregate", dependencies=[_ONTOLOGY_READ])
@@ -6185,128 +2891,28 @@ async def get_object_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        object_type = str(objectType or "").strip()
-        primary_key_value = str(primaryKey or "").strip()
-        if not object_type:
-            raise ValueError("objectType is required")
-        if not primary_key_value:
-            raise ValueError("primaryKey is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectType": str(objectType), "primaryKey": str(primaryKey)},
-        )
-
-    try:
-        object_type_payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="object_type",
-            resource_id=object_type,
-            branch=branch,
-        )
-        object_type_resource = _extract_object_resource(object_type_payload)
-        if not object_type_resource:
-            return _not_found_error(
-                "ObjectTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                parameters={"primaryKey": primary_key_value},
-            )
-
-        ontology_payload: Any = None
-        try:
-            ontology_payload = await oms_client.get_ontology(db_name, object_type, branch=branch)
-        except httpx.HTTPError as exc:
-            logger.warning(
-                "Failed to load ontology metadata for object lookup (%s/%s): %s",
-                db_name,
-                object_type,
-                exc,
-            )
-            ontology_payload = None
-
-        object_type_contract = _to_foundry_object_type(object_type_resource, ontology_payload=ontology_payload)
-        primary_key_field = str(object_type_contract.get("primaryKey") or "").strip()
-        if not primary_key_field:
-            return _foundry_error(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                error_code="INTERNAL",
-                error_name="Internal",
-                parameters={"ontology": db_name, "objectType": object_type, "message": "primaryKey not configured"},
-            )
-
-        payload: Dict[str, Any] = {
-            "where": {"type": "eq", "field": primary_key_field, "value": primary_key_value},
-            "pageSize": 1,
-        }
-        if select:
-            payload["select"] = [str(value).strip() for value in select if str(value).strip()]
-        if exclude_rid is not None:
-            payload["excludeRid"] = bool(exclude_rid)
-
-        result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-            params={"branch": branch},
-            json=payload,
-        )
-        if not isinstance(result, dict):
-            return _foundry_error(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                error_code="INTERNAL",
-                error_name="Internal",
-                parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-            )
-        data = result.get("data")
-        if not isinstance(data, list) or not data:
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-            )
-        row = data[0]
-        if not isinstance(row, dict):
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-            )
-        return row
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to get object (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-        )
+    return await _query_routes.get_object_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        primary_key=primaryKey,
+        request=request,
+        select=select,
+        exclude_rid=exclude_rid,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        not_found_error=_not_found_error,
+        foundry_error=_foundry_error,
+        passthrough_upstream_error_payload=_passthrough_upstream_error_payload,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        extract_object_resource=_extract_object_resource,
+        to_foundry_object_type=_to_foundry_object_type,
+    )
 
 
 @router.get(
@@ -6331,267 +2937,41 @@ async def list_linked_objects_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    linkType = linkTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        object_type = str(objectType or "").strip()
-        primary_key_value = str(primaryKey or "").strip()
-        link_type = str(linkType or "").strip()
-        if not object_type:
-            raise ValueError("objectType is required")
-        if not primary_key_value:
-            raise ValueError("primaryKey is required")
-        if not link_type:
-            raise ValueError("linkType is required")
-        normalized_select = [str(value).strip() for value in (select or []) if str(value).strip()]
-        parsed_order_by = _parse_order_by(order_by)
-        page_scope = _pagination_scope(
-            "v2/linkedObjects",
-            db_name,
-            branch,
-            object_type,
-            primary_key_value,
-            link_type,
-            page_size,
-            ",".join(normalized_select),
-            str(order_by or "").strip(),
-            "" if exclude_rid is None else ("1" if exclude_rid else "0"),
-            "" if snapshot is None else ("1" if snapshot else "0"),
-        )
-        offset = _decode_page_token(page_token, scope=page_scope)
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"objectType": str(objectType), "primaryKey": str(primaryKey), "linkType": str(linkType)},
-        )
-
-    try:
-        source_primary_key_field = await _resolve_object_primary_key_field(
-            db_name=db_name,
-            object_type=object_type,
-            branch=branch,
-            oms_client=oms_client,
-        )
-    except ValueError:
-        return _not_found_error(
-            "ObjectTypeNotFound",
-            ontology=db_name,
-            object_type=object_type,
-            parameters={"primaryKey": primary_key_value},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve source primary key field (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-        )
-
-    try:
-        source_payload = {
-            "where": {"type": "eq", "field": source_primary_key_field, "value": primary_key_value},
-            "pageSize": 1,
-        }
-        source_result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-            params={"branch": branch},
-            json=source_payload,
-        )
-        source_rows = source_result.get("data") if isinstance(source_result, dict) else None
-        if not isinstance(source_rows, list) or not source_rows or not isinstance(source_rows[0], dict):
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-            )
-        source_row = source_rows[0]
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve source object (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value},
-        )
-
-    try:
-        link_type_side: dict[str, Any] | None = None
-        try:
-            link_payload = await oms_client.get_ontology_resource(
-                db_name,
-                resource_type="link_type",
-                resource_id=link_type,
-                branch=branch,
-            )
-            link_resource = _extract_ontology_resource(link_payload)
-            if isinstance(link_resource, dict):
-                link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-            if status_code != status.HTTP_404_NOT_FOUND:
-                raise
-
-        if not link_type_side:
-            try:
-                object_payload = await oms_client.get_ontology_resource(
-                    db_name,
-                    resource_type="object_type",
-                    resource_id=object_type,
-                    branch=branch,
-                )
-                object_resource = _extract_ontology_resource(object_payload)
-                if isinstance(object_resource, dict):
-                    for rel in _extract_object_type_relationships(object_resource):
-                        predicate = str(rel.get("predicate") or rel.get("apiName") or rel.get("id") or "").strip()
-                        if predicate != link_type:
-                            continue
-                        target = str(
-                            rel.get("target")
-                            or rel.get("objectTypeApiName")
-                            or rel.get("target_object_type")
-                            or ""
-                        ).strip()
-                        if not target:
-                            continue
-                        link_type_side = {"apiName": predicate, "objectTypeApiName": target}
-                        break
-            except httpx.HTTPStatusError:
-                link_type_side = None
-
-        linked_object_type = str((link_type_side or {}).get("objectTypeApiName") or "").strip()
-        if not linked_object_type:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                link_type=link_type,
-                parameters={"primaryKey": primary_key_value},
-            )
-        linked_primary_key_field = await _resolve_object_primary_key_field(
-            db_name=db_name,
-            object_type=linked_object_type,
-            branch=branch,
-            oms_client=oms_client,
-        )
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                link_type=link_type,
-                parameters={"primaryKey": primary_key_value},
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
-        )
-    except ValueError:
-        return _not_found_error(
-            "LinkTypeNotFound",
-            ontology=db_name,
-            object_type=object_type,
-            link_type=link_type,
-            parameters={"primaryKey": primary_key_value},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve link context (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
-        )
-
-    foreign_key_property = str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None
-    paged_primary_keys, has_more = _extract_linked_primary_keys_page(
-        source_row,
-        link_type=link_type,
-        foreign_key_property=foreign_key_property,
-        offset=offset,
+    return await _query_routes.list_linked_objects_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        primary_key=primaryKey,
+        link_type_api_name=linkTypeApiName,
+        request=request,
         page_size=page_size,
+        page_token=page_token,
+        select=select,
+        order_by=order_by,
+        exclude_rid=exclude_rid,
+        snapshot=snapshot,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        foundry_error=_foundry_error,
+        not_found_error=_not_found_error,
+        passthrough_upstream_error_payload=_passthrough_upstream_error_payload,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        parse_order_by=_parse_order_by,
+        pagination_scope=_pagination_scope,
+        decode_page_token=_decode_page_token,
+        encode_page_token=_encode_page_token,
+        resolve_object_primary_key_field=_resolve_object_primary_key_field,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_outgoing_link_type=_to_foundry_outgoing_link_type,
+        extract_object_type_relationships=_extract_object_type_relationships,
+        extract_linked_primary_keys_page=_extract_linked_primary_keys_page,
+        build_primary_key_where=_build_primary_key_where,
     )
-    if not paged_primary_keys:
-        return {"data": [], "nextPageToken": None}
-
-    search_payload: Dict[str, Any] = {
-        "where": _build_primary_key_where(linked_primary_key_field, paged_primary_keys),
-        "pageSize": max(1, len(paged_primary_keys)),
-    }
-    if normalized_select:
-        search_payload["select"] = normalized_select
-    if parsed_order_by is not None:
-        search_payload["orderBy"] = parsed_order_by
-    if exclude_rid is not None:
-        search_payload["excludeRid"] = bool(exclude_rid)
-    if snapshot is not None:
-        search_payload["snapshot"] = bool(snapshot)
-
-    try:
-        linked_result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{linked_object_type}/search",
-            params={"branch": branch},
-            json=search_payload,
-        )
-        data = linked_result.get("data") if isinstance(linked_result, dict) else []
-        if not isinstance(data, list):
-            data = []
-        next_offset = offset + len(paged_primary_keys)
-        next_page_token = _encode_page_token(next_offset, scope=page_scope) if has_more else None
-        return {"data": data, "nextPageToken": next_page_token}
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        passthrough = _passthrough_upstream_error_payload(exc)
-        if passthrough is not None:
-            return passthrough
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                link_type=link_type,
-                parameters={"primaryKey": primary_key_value},
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to list linked objects (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name, "objectType": object_type, "primaryKey": primary_key_value, "linkType": link_type},
-        )
 
 
 @router.get(
@@ -6613,280 +2993,33 @@ async def get_linked_object_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    linkType = linkTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        object_type = str(objectType or "").strip()
-        primary_key_value = str(primaryKey or "").strip()
-        link_type = str(linkType or "").strip()
-        linked_primary_key_value = str(linkedObjectPrimaryKey or "").strip()
-        if not object_type:
-            raise ValueError("objectType is required")
-        if not primary_key_value:
-            raise ValueError("primaryKey is required")
-        if not link_type:
-            raise ValueError("linkType is required")
-        if not linked_primary_key_value:
-            raise ValueError("linkedObjectPrimaryKey is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={
-                "objectType": str(objectType),
-                "primaryKey": str(primaryKey),
-                "linkType": str(linkType),
-                "linkedObjectPrimaryKey": str(linkedObjectPrimaryKey),
-            },
-        )
-
-    error_parameters = _linked_object_parameters(
-        ontology=db_name,
-        object_type=object_type,
-        primary_key=primary_key_value,
-        link_type=link_type,
-        linked_primary_key=linked_primary_key_value,
+    return await _query_routes.get_linked_object_route(
+        ontology=ontologyRid,
+        object_type_api_name=objectTypeApiName,
+        primary_key=primaryKey,
+        link_type_api_name=linkTypeApiName,
+        linked_object_primary_key=linkedObjectPrimaryKey,
+        request=request,
+        select=select,
+        exclude_rid=exclude_rid,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        foundry_error=_foundry_error,
+        not_found_error=_not_found_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        linked_object_parameters=_linked_object_parameters,
+        resolve_object_primary_key_field=_resolve_object_primary_key_field,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_outgoing_link_type=_to_foundry_outgoing_link_type,
+        linked_primary_key_exists=_linked_primary_key_exists,
+        project_row_with_required_fields=_project_row_with_required_fields,
     )
-
-    normalized_select = [str(value).strip() for value in (select or []) if str(value).strip()]
-
-    try:
-        source_primary_key_field = await _resolve_object_primary_key_field(
-            db_name=db_name,
-            object_type=object_type,
-            branch=branch,
-            oms_client=oms_client,
-        )
-    except ValueError:
-        return _not_found_error(
-            "ObjectTypeNotFound",
-            ontology=db_name,
-            object_type=object_type,
-            primary_key=primary_key_value,
-            link_type=link_type,
-            linked_primary_key=linked_primary_key_value,
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve source primary key field (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters=error_parameters,
-        )
-
-    try:
-        source_payload = {
-            "where": {"type": "eq", "field": source_primary_key_field, "value": primary_key_value},
-            "pageSize": 1,
-        }
-        source_result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{object_type}/search",
-            params={"branch": branch},
-            json=source_payload,
-        )
-        source_rows = source_result.get("data") if isinstance(source_result, dict) else None
-        if not isinstance(source_rows, list) or not source_rows or not isinstance(source_rows[0], dict):
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        source_row = source_rows[0]
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "ObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters=error_parameters,
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve source object (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters=error_parameters,
-        )
-
-    try:
-        link_payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="link_type",
-            resource_id=link_type,
-            branch=branch,
-        )
-        link_resource = _extract_ontology_resource(link_payload)
-        if not isinstance(link_resource, dict):
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        link_type_side = _to_foundry_outgoing_link_type(link_resource, source_object_type=object_type)
-        if not link_type_side:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        linked_object_type = str(link_type_side.get("objectTypeApiName") or "").strip()
-        if not linked_object_type:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        linked_primary_key_field = await _resolve_object_primary_key_field(
-            db_name=db_name,
-            object_type=linked_object_type,
-            branch=branch,
-            oms_client=oms_client,
-        )
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "LinkTypeNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters=error_parameters,
-        )
-    except ValueError:
-        return _not_found_error(
-            "LinkTypeNotFound",
-            ontology=db_name,
-            object_type=object_type,
-            primary_key=primary_key_value,
-            link_type=link_type,
-            linked_primary_key=linked_primary_key_value,
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to resolve link context (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters=error_parameters,
-        )
-
-    foreign_key_property = str(link_type_side.get("foreignKeyPropertyApiName") or "").strip() or None
-    if not _linked_primary_key_exists(
-        source_row,
-        link_type=link_type,
-        foreign_key_property=foreign_key_property,
-        linked_primary_key=linked_primary_key_value,
-    ):
-        return _not_found_error(
-            "LinkedObjectNotFound",
-            ontology=db_name,
-            object_type=object_type,
-            primary_key=primary_key_value,
-            link_type=link_type,
-            linked_primary_key=linked_primary_key_value,
-        )
-
-    payload: Dict[str, Any] = {
-        "where": {"type": "eq", "field": linked_primary_key_field, "value": linked_primary_key_value},
-        "pageSize": 1,
-    }
-    if normalized_select:
-        payload["select"] = normalized_select
-    if exclude_rid is not None:
-        payload["excludeRid"] = bool(exclude_rid)
-
-    try:
-        linked_result = await oms_client.post(
-            f"/api/v2/ontologies/{db_name}/objects/{linked_object_type}/search",
-            params={"branch": branch},
-            json=payload,
-        )
-        rows = linked_result.get("data") if isinstance(linked_result, dict) else None
-        if not isinstance(rows, list) or not rows:
-            return _not_found_error(
-                "LinkedObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        row = rows[0]
-        if not isinstance(row, dict):
-            return _not_found_error(
-                "LinkedObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        row = _project_row_with_required_fields(
-            row,
-            select_fields=normalized_select,
-            exclude_rid=bool(exclude_rid),
-        )
-        return row
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error(
-                "LinkedObjectNotFound",
-                ontology=db_name,
-                object_type=object_type,
-                primary_key=primary_key_value,
-                link_type=link_type,
-                linked_primary_key=linked_primary_key_value,
-            )
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters=error_parameters,
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to get linked object (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters=error_parameters,
-        )
 
 
 # =====================================================================
@@ -6910,46 +3043,27 @@ async def get_timeseries_first_point_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the first (earliest) point of a time series property."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        result = await oms_client.get_timeseries_first_point(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return JSONResponse(content=result)
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get timeseries firstPoint (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.get_timeseries_first_point_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get(
@@ -6968,46 +3082,27 @@ async def get_timeseries_last_point_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get the last (most recent) point of a time series property."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        result = await oms_client.get_timeseries_last_point(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return JSONResponse(content=result)
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get timeseries lastPoint (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.get_timeseries_last_point_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.post(
@@ -7027,51 +3122,27 @@ async def stream_timeseries_points_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> StreamingResponse | JSONResponse:
     """Stream all points of a time series property with optional range filter."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        body = await request.json() if await request.body() else {}
-        response = await oms_client.stream_timeseries_points(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            body,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return StreamingResponse(
-            content=iter([response.content]),
-            media_type=response.headers.get("content-type", "application/x-ndjson"),
-        )
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to stream timeseries points (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.stream_timeseries_points_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 # =====================================================================
@@ -7097,28 +3168,18 @@ async def upload_attachment_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Upload an attachment payload (Foundry v2 shape)."""
-    error_parameters: Dict[str, Any] = {"filename": filename}
-    try:
-        body = await request.body()
-        _ = sdk_package_rid, sdk_version
-        forward_headers = _extract_actor_forward_headers(request)
-        result = await oms_client.upload_attachment(
-            filename=filename,
-            data=body,
-            headers=forward_headers if forward_headers else None,
-        )
-        return JSONResponse(content=result)
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology="attachments", parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology="attachments", parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to upload attachment (v2)", exc=exc,
-            ontology="attachments", parameters=error_parameters,
-        )
+    return await _media.upload_attachment_response(
+        request=request,
+        filename=filename,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get(
@@ -7137,46 +3198,27 @@ async def list_attachment_property_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """List attachment metadata for a property (single or multiple)."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        result = await oms_client.list_property_attachments(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return JSONResponse(content=result)
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list attachment property (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.list_attachment_property_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get(
@@ -7196,48 +3238,28 @@ async def get_attachment_by_rid_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> JSONResponse:
     """Get metadata for a specific attachment by its RID."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-        "attachmentRid": attachmentRid,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        result = await oms_client.get_attachment_by_rid(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            attachmentRid,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return JSONResponse(content=result)
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get attachment by RID (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.get_attachment_by_rid_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        attachment_rid=attachmentRid,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get(
@@ -7257,49 +3279,27 @@ async def get_attachment_content_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of a single-valued attachment property."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        response = await oms_client.get_attachment_content(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return Response(
-            content=response.content,
-            media_type=response.headers.get("content-type", "application/octet-stream"),
-        )
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get attachment content (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.get_attachment_content_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get(
@@ -7320,48 +3320,25 @@ async def get_attachment_content_by_rid_v2(
     oms_client: OMSClient = OMSClientDep,
 ) -> Response | JSONResponse:
     """Get the content of an attachment by its RID."""
-    ontology = ontologyRid
-    objectType = objectTypeApiName
-    error_parameters: Dict[str, Any] = {
-        "ontology": ontology,
-        "objectType": objectType,
-        "primaryKey": primaryKey,
-        "property": property,
-        "attachmentRid": attachmentRid,
-    }
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        _ = sdk_package_rid, sdk_version
-        await _require_domain_role(request, db_name=db_name)
-        forward_headers = _extract_actor_forward_headers(request)
-        response = await oms_client.get_attachment_content_by_rid(
-            db_name,
-            objectType,
-            primaryKey,
-            property,
-            attachmentRid,
-            branch=branch,
-            headers=forward_headers if forward_headers else None,
-        )
-        return Response(
-            content=response.content,
-            media_type=response.headers.get("content-type", "application/octet-stream"),
-        )
-    except (OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError) as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters=error_parameters,
-        )
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc, ontology=ontology, parameters=error_parameters, passthrough_payload=True,
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=ontology, parameters=error_parameters)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get attachment content by RID (v2)", exc=exc,
-            ontology=ontology, parameters=error_parameters,
-        )
+    return await _media.get_attachment_content_by_rid_response(
+        ontology=ontologyRid,
+        object_type=objectTypeApiName,
+        primary_key=primaryKey,
+        property_name=property,
+        attachment_rid=attachmentRid,
+        request=request,
+        branch=branch,
+        sdk_package_rid=sdk_package_rid,
+        sdk_version=sdk_version,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        require_domain_role=_require_domain_role,
+        extract_actor_forward_headers=_extract_actor_forward_headers,
+        preflight_error_response=_preflight_error_response,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        preflight_exceptions=(OntologyNotFoundError, PermissionDeniedError, ValueError, SecurityViolationError),
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )

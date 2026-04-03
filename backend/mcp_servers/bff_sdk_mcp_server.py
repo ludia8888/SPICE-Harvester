@@ -42,6 +42,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.foundry.rids import build_rid, parse_rid
+from shared.services.core.runtime_status import availability_surface
 
 # ---------------------------------------------------------------------------
 # Path setup (repo / container)
@@ -107,6 +108,34 @@ def _coerce_pipeline_id(value: Any) -> str:
     except ValueError:
         return raw
     return rid_id if kind == "pipeline" else raw
+
+
+def _health_surface(*, transport: str) -> Dict[str, Any]:
+    surface = availability_surface(
+        service="bff-sdk-mcp-server",
+        container_ready=True,
+        runtime_status={"ready": True, "issues": []},
+        dependency_status_overrides={"transport": "ready"},
+        status_reason_override=f"{transport} transport ready",
+        message=f"{transport} transport ready",
+    )
+    surface["dependency_details"]["transport"] = {
+        "dependency": "transport",
+        "state": "ready",
+        "classification": "healthy",
+        "classifications": [],
+        "message": f"{transport} transport ready",
+        "messages": [f"{transport} transport ready"],
+        "components": [transport],
+        "affected_features": [f"mcp.{transport}"],
+        "affects_readiness": False,
+        "issue_count": 0,
+        "source": "derived",
+    }
+    surface["server"] = "bff-sdk-mcp-server"
+    surface["transport"] = transport
+    surface["tools"] = len(TOOL_SPECS)
+    return surface
 
 
 def _pipeline_target_rid(value: Any) -> str:
@@ -937,12 +966,7 @@ def main_sse(host: str = "0.0.0.0", port: int = 9090) -> None:
         await sse.handle_post_message(request.scope, request.receive, request._send)
 
     async def handle_health(request):
-        return JSONResponse({
-            "status": "ok",
-            "server": "bff-sdk-mcp-server",
-            "tools": len(TOOL_SPECS),
-            "transport": "sse",
-        })
+        return JSONResponse(_health_surface(transport="sse"))
 
     app = Starlette(
         routes=[
@@ -1003,12 +1027,7 @@ def main_streamable_http(host: str = "0.0.0.0", port: int = 9090) -> None:
                 await session_registry.close(state.session_id)
 
     async def handle_health(request):
-        return JSONResponse({
-            "status": "ok",
-            "server": "bff-sdk-mcp-server",
-            "tools": len(TOOL_SPECS),
-            "transport": "streamable-http",
-        })
+        return JSONResponse(_health_surface(transport="streamable-http"))
 
     app = Starlette(
         routes=[

@@ -63,6 +63,12 @@ from shared.services.registries.processed_event_registry import (
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
+from shared.services.core.write_path_contract import (
+    emit_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -106,6 +112,21 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     parse_error_publish_failure_message = "Failed to publish invalid instance payload to DLQ: %s"
     parse_error_invalid_payload_message = "Invalid instance payload; skipping: %s"
     parse_error_raise_on_publish_failure = False
+
+    def _emit_write_path_contract(
+        self,
+        *,
+        authoritative_write: str,
+        followups: List[Dict[str, Any]],
+        level: str = "info",
+    ) -> Dict[str, Any]:
+        return emit_write_path_contract(
+            logger,
+            authoritative_write=authoritative_write,
+            followups=followups,
+            level=level,
+            message_prefix="Instance worker write path contract",
+        )
 
     def __init__(self):
         settings = get_settings()
@@ -876,8 +897,32 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 },
                 error=str(e),
             )
+            self._emit_write_path_contract(
+                authoritative_write="instance_create_event",
+                followups=[
+                    followup_degraded(
+                        "instance_es_materialization",
+                        error=str(e),
+                        details={"index": index_name, "instance_id": instance_id},
+                    )
+                ],
+                level="warning",
+            )
             raise
 
+        self._emit_write_path_contract(
+            authoritative_write="instance_create_event",
+            followups=[
+                followup_completed(
+                    "instance_es_materialization",
+                    details={"index": index_name, "instance_id": instance_id},
+                ),
+                followup_completed(
+                    "instance_es_audit",
+                    details={"command_id": str(command_id) if command_id else None},
+                ),
+            ],
+        )
         return {
             "instance_id": instance_id,
             "es_index": index_name,
@@ -894,6 +939,10 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get("payload", {}) or {}
         is_objectify = self._is_objectify_command(command)
+        relationship_sync_status = followup_skipped(
+            "relationship_object_link_sync",
+            details={"reason": "objectify_command" if is_objectify else "not_attempted"},
+        )
 
         if not command_id:
             raise ValueError("command_id is required")
@@ -1737,6 +1786,17 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     },
                     error=str(e),
                 )
+            self._emit_write_path_contract(
+                authoritative_write="instance_update_event",
+                followups=[
+                    followup_degraded(
+                        "instance_es_materialization",
+                        error=str(e),
+                        details={"index": index_name, "instance_id": instance_id},
+                    )
+                ],
+                level="warning",
+            )
             raise
 
         if not skip_status:
@@ -1770,8 +1830,41 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     current_payload=merged_payload,
                     previous_payload=previous_payload,
                 )
+                relationship_sync_status = followup_completed(
+                    "relationship_object_link_sync",
+                    details={"instance_id": instance_id},
+                )
             except Exception as exc:
                 logger.debug("Relationship object link sync failed: %s", exc, exc_info=True)
+                relationship_sync_status = followup_degraded(
+                    "relationship_object_link_sync",
+                    error=str(exc),
+                    details={"instance_id": instance_id},
+                )
+
+        self._emit_write_path_contract(
+            authoritative_write="instance_update_event",
+            followups=[
+                followup_completed(
+                    "instance_es_materialization",
+                    details={"index": index_name, "instance_id": instance_id},
+                ),
+                followup_completed(
+                    "instance_status_update",
+                    details={"command_id": str(command_id)},
+                )
+                if not skip_status
+                else followup_skipped(
+                    "instance_status_update",
+                    details={"reason": "skip_status"},
+                ),
+                followup_completed(
+                    "instance_edit_log",
+                    details={"instance_id": instance_id},
+                ),
+                relationship_sync_status,
+            ],
+        )
 
     async def process_delete_instance(self, command: Dict[str, Any]) -> None:
         """Process DELETE_INSTANCE command (idempotent delete)."""
@@ -1860,6 +1953,17 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                 es_error = str(e)
 
         if not es_deleted:
+            self._emit_write_path_contract(
+                authoritative_write="instance_delete_event",
+                followups=[
+                    followup_degraded(
+                        "instance_es_delete",
+                        error=es_error or "delete_failed",
+                        details={"index": index_name, "instance_id": instance_id},
+                    )
+                ],
+                level="warning",
+            )
             raise RuntimeError(f"Failed to delete ES document {instance_id}: {es_error or 'unknown'}")
 
         if command_id and es_deleted:
@@ -1955,6 +2059,33 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     },
                     error=str(e),
                 )
+        self._emit_write_path_contract(
+            authoritative_write="instance_delete_event",
+            followups=[
+                followup_completed(
+                    "instance_es_delete",
+                    details={
+                        "index": index_name,
+                        "instance_id": instance_id,
+                        "already_missing": es_already_missing,
+                    },
+                ),
+                followup_completed(
+                    "instance_delete_audit",
+                    details={"command_id": str(command_id) if command_id else None},
+                ),
+                followup_completed(
+                    "instance_s3_tombstone",
+                    details={"key": s3_path},
+                )
+                if s3_written
+                else followup_degraded(
+                    "instance_s3_tombstone",
+                    error="tombstone_write_failed",
+                    details={"key": s3_path},
+                ),
+            ],
+        )
 
         if command_id and s3_written:
             etag = tombstone_resp.get("ETag") if isinstance(tombstone_resp, dict) else None

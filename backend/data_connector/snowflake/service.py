@@ -51,7 +51,7 @@ class SnowflakeConnectorService(ConnectorAdapter):
             import snowflake.connector  # type: ignore
 
             return snowflake.connector
-        except Exception as exc:  # pragma: no cover
+        except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "snowflake-connector-python is required for Snowflake runtime. "
                 "Install dependency before enabling snowflake connector."
@@ -69,8 +69,17 @@ class SnowflakeConnectorService(ConnectorAdapter):
         }
 
     async def test_connection(self, *, config: Dict[str, Any], secrets: Dict[str, Any]) -> ConnectorConnectionTestResult:
+        handled_errors: tuple[type[BaseException], ...] = (
+            RuntimeError,
+            ValueError,
+            OSError,
+            TimeoutError,
+        )
         try:
             connector = self._require_driver()
+            driver_error = getattr(connector, "Error", None)
+            if isinstance(driver_error, type) and issubclass(driver_error, BaseException):
+                handled_errors = handled_errors + (driver_error,)
 
             def _run() -> None:
                 conn = connector.connect(**self._connect_kwargs(config=config, secrets=secrets))
@@ -86,7 +95,7 @@ class SnowflakeConnectorService(ConnectorAdapter):
 
             await run_blocking_query(_run, adapter_name="Snowflake", operation="connection test")
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
-        except Exception as exc:
+        except handled_errors as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
 
     async def _fetch(

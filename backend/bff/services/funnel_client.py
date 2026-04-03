@@ -41,7 +41,7 @@ class FunnelClient(ManagedAsyncClient):
                 funnel_app = getattr(module, "app", None)
                 if funnel_app is not None:
                     break
-            except Exception as exc:
+            except ImportError as exc:
                 import_errors.append(f"{module_name}: {exc}")
 
         if funnel_app is None:
@@ -67,14 +67,20 @@ class FunnelClient(ManagedAsyncClient):
             response = await self.client.get("/health")
             response.raise_for_status()
             data = response.json()
-            # Support both formats: {"status":"healthy"} and {"status":"success","data":{"status":"healthy"}}
-            if data.get("status") == "healthy":
+            if not isinstance(data, dict):
+                return False
+            # Support canonical runtime payloads, legacy healthy payloads, and wrapped ApiResponse payloads.
+            if data.get("ready") is True:
+                return True
+            if data.get("status") in {"healthy", "ready"}:
                 return True
             if data.get("status") == "success":
                 inner = data.get("data") or {}
-                return inner.get("status") == "healthy"
+                if not isinstance(inner, dict):
+                    return False
+                return inner.get("ready") is True or inner.get("status") in {"healthy", "ready"}
             return False
-        except Exception as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.error(f"Funnel 헬스 체크 실패: {e}")
             return False
 
@@ -456,27 +462,30 @@ class FunnelClient(ManagedAsyncClient):
             if not all(k in bbox for k in keys):
                 return None
             return {k: int(bbox[k]) for k in keys}
-        except Exception:
+        except (TypeError, ValueError, KeyError):
             logging.getLogger(__name__).warning("Exception fallback at bff/services/funnel_client.py:660", exc_info=True)
             return None
 
     @staticmethod
     def _estimate_total_rows(table: Dict[str, Any]) -> int:
         """Estimate the total data rows from a table structure's bounding box."""
-        bbox = table.get("bbox") or {}
         mode = table.get("mode")
         header_rows = int(table.get("header_rows") or 0)
         header_cols = int(table.get("header_cols") or 0)
+        if mode == "property":
+            return len(table.get("key_values") or [])
+
+        bbox = FunnelClient._normalize_bbox_dict(table.get("bbox") or {})
+        if not bbox:
+            return 0
         try:
-            height = int(bbox.get("bottom") - bbox.get("top") + 1)
-            width = int(bbox.get("right") - bbox.get("left") + 1)
+            height = int(bbox["bottom"] - bbox["top"] + 1)
+            width = int(bbox["right"] - bbox["left"] + 1)
             if mode == "table":
                 return max(0, height - max(1, header_rows))
             elif mode == "transposed":
                 return max(0, width - max(1, header_cols))
-            elif mode == "property":
-                return len(table.get("key_values") or [])
-        except Exception:
+        except (TypeError, ValueError, KeyError):
             pass
         return 0
 

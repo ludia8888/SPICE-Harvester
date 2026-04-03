@@ -76,6 +76,15 @@ class EnvironmentValidator:
         print("  📋 Runtime mode:")
         self.check_result("Environment", True, cfg.environment.value)
         self.check_result("HTTPS Enabled", True, str(bool(services.use_https)).lower())
+        self.check_result(
+            "Runtime DDL Bootstrap",
+            not (cfg.environment.value in {"staging", "production"} and cfg.allow_runtime_ddl_bootstrap),
+            (
+                "disabled"
+                if not cfg.allow_runtime_ddl_bootstrap
+                else "enabled (dev/test compatibility fallback)"
+            ),
+        )
 
         print("\n  📋 Endpoints (redacted):")
         self.check_result("OMS Base URL", True, services.oms_base_url)
@@ -110,6 +119,17 @@ class EnvironmentValidator:
             self.check_result("spice_event_registry Schema", bool(schema_exists))
 
             if schema_exists:
+                schema_migrations_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'public'
+                          AND table_name = 'schema_migrations'
+                    )
+                    """
+                )
+                self.check_result("schema_migrations Table", bool(schema_migrations_exists))
+
                 processed_events_exists = await conn.fetchval(
                     """
                     SELECT EXISTS(

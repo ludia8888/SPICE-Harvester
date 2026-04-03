@@ -21471,7 +21471,6 @@
     },
     "/api/v2/ontologies/{ontologyRid}/objects/{objectTypeApiName}/aggregate": {
       "post": {
-        "description": "Delegate aggregation to OMS ES-native aggregate engine.",
         "operationId": "aggregate_objects_v2_api_v2_ontologies__ontologyRid__objects__objectTypeApiName__aggregate_post",
         "parameters": [
           {

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Mapping, TypeVar
 
 from fastapi import HTTPException
 from shared.errors.error_types import ErrorCode, classified_http_exception
+from shared.services.core.runtime_status import availability_surface, build_runtime_issue, normalize_runtime_status
 
 from bff.schemas.context7_requests import EntityLinkRequest, KnowledgeRequest, OntologyAnalysisRequest, SearchRequest
 from bff.services.oms_client import OMSClient
@@ -121,19 +122,65 @@ async def get_ontology_suggestions(*, db_name: str, class_id: str, client: Any) 
 
 
 @trace_external_call("bff.context7.check_context7_health")
-async def check_context7_health(*, client: Any) -> Dict[str, Any]:
-    _ = client
+async def check_context7_health(
+    *,
+    client: Any | None = None,
+    client_resolver: Callable[[], Awaitable[Any]] | None = None,
+    runtime_status: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
     try:
+        if client is None and client_resolver is not None:
+            client = await client_resolver()
+        _ = client
         from shared.services.mcp_client import get_mcp_manager
 
         mcp_manager = get_mcp_manager()
         tools = await mcp_manager.list_tools("context7")
-        return {
-            "status": "healthy",
-            "connected": True,
-            "available_tools": len(tools),
-            "tools": [tool.get("name") for tool in tools],
-        }
+        surface = availability_surface(
+            service="context7",
+            container_ready=True,
+            runtime_status=normalize_runtime_status(runtime_status or {}),
+            dependency_status_overrides={"context7": "ready"},
+            status_reason_override="Context7 MCP tools available",
+            message="Context7 MCP tools available",
+        )
+        surface["connected"] = True
+        surface["available_tools"] = len(tools)
+        surface["tools"] = [tool.get("name") for tool in tools if isinstance(tool, dict)]
+        return surface
     except Exception as exc:
         logger.error("Context7 health check failed: %s", exc)
-        return {"status": "unhealthy", "connected": False, "error": str(exc)}
+        issue = build_runtime_issue(
+            component="context7",
+            dependency="context7",
+            message=str(exc),
+            state="degraded",
+            classification="unavailable",
+            affected_features=[
+                "context7.search",
+                "context7.context",
+                "context7.knowledge",
+                "context7.ontology",
+            ],
+            affects_readiness=False,
+        )
+        normalized = normalize_runtime_status(
+            {
+                **dict(runtime_status or {}),
+                "degraded": True,
+                "issues": [*(list((runtime_status or {}).get("issues") or [])), issue],
+            }
+        )
+        surface = availability_surface(
+            service="context7",
+            container_ready=True,
+            runtime_status=normalized,
+            dependency_status_overrides={"context7": "degraded"},
+            status_reason_override=f"Context7 unavailable: {exc}",
+            message="Context7 unavailable",
+        )
+        surface["connected"] = False
+        surface["available_tools"] = 0
+        surface["tools"] = []
+        surface["error"] = str(exc)
+        return surface

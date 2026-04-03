@@ -1,0 +1,81 @@
+{
+  "executed_gates": [
+    {
+      "blocking": true,
+      "ci_job": "backend-runtime-ddl-audit",
+      "description": "Guard migration-first posture by rejecting new runtime DDL callsites.",
+      "duration_seconds": 1.056,
+      "make_target": "backend-runtime-ddl-audit",
+      "name": "runtime_ddl_audit",
+      "requires_stack": false,
+      "return_code": 0,
+      "stage": "guard",
+      "success": true
+    },
+    {
+      "blocking": true,
+      "ci_job": "backend-error-taxonomy",
+      "description": "Reject raw HTTP and error taxonomy regressions before release.",
+      "duration_seconds": 16.388,
+      "make_target": "backend-error-taxonomy",
+      "name": "error_taxonomy_audit",
+      "requires_stack": false,
+      "return_code": 0,
+      "stage": "guard",
+      "success": true
+    },
+    {
+      "blocking": true,
+      "ci_job": "backend-unit",
+      "description": "Fast non-infra backend regression suite.",
+      "duration_seconds": 158.102,
+      "make_target": "backend-unit",
+      "name": "backend_unit",
+      "requires_stack": false,
+      "return_code": 0,
+      "stage": "non_infra",
+      "success": true
+    },
+    {
+      "blocking": true,
+      "ci_job": "backend-boundary-smoke",
+      "description": "Explicit live boundary round-trips for Redis/Postgres/LakeFS/Kafka/S3.",
+      "duration_seconds": 8.531,
+      "make_target": "backend-boundary-smoke",
+      "name": "backend_boundary_smoke",
+      "requires_stack": true,
+      "return_code": 0,
+      "stage": "smoke",
+      "success": true
+    },
+    {
+      "blocking": true,
+      "ci_job": "backend-release-smoke",
+      "description": "Curated release smoke suite against a running stack.",
+      "duration_seconds": 83.182,
+      "make_target": "backend-release-smoke",
+      "name": "backend_release_smoke",
+      "requires_stack": true,
+      "return_code": 0,
+      "stage": "smoke",
+      "success": true
+    },
+    {
+      "blocking": true,
+      "ci_job": "backend-infra-tier",
+      "description": "All non-smoke requires_infra regressions.",
+      "duration_seconds": 61.971,
+      "make_target": "backend-infra-tier",
+      "name": "backend_infra_tier",
+      "requires_stack": true,
+      "return_code": 0,
+      "stage": "infra",
+      "success": true
+    }
+  ],
+  "finished_at": "2026-04-03T23:48:16.500483+00:00",
+  "repo_root": "/Users/isihyeon/Desktop/SPICE-Harvester",
+  "schema": "release_regression_gate_report.v1",
+  "started_at": "2026-04-03T23:42:47.273247+00:00",
+  "success": true
+}

@@ -870,7 +870,8 @@ async def test_foundry_schedule_create_get_pause_unpause_delete():
             if "status" in kwargs:
                 self._status = kwargs["status"]
 
-        async def list_runs(self, *, pipeline_id: str, limit: int = 25):  # noqa: ANN001
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25, offset: int = 0):  # noqa: ANN001
+            _ = offset
             return [
                 {
                     "job_id": f"build-{pipeline_id}-run1",
@@ -963,13 +964,13 @@ async def test_foundry_schedule_runs_pagination_and_invalid_token():
                 created_at=None,
             )
 
-        async def list_runs(self, *, pipeline_id: str, limit: int = 25):  # noqa: ANN001
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25, offset: int = 0):  # noqa: ANN001
             data = [
                 {"job_id": f"build-{pipeline_id}-run1", "status": "SUCCESS"},
                 {"job_id": f"build-{pipeline_id}-run2", "status": "RUNNING"},
                 {"job_id": f"build-{pipeline_id}-run3", "status": "FAILED"},
             ]
-            return data[:limit]
+            return data[offset: offset + limit]
 
     app = _build_test_app()
     app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
@@ -1001,6 +1002,81 @@ async def test_foundry_schedule_runs_pagination_and_invalid_token():
         )
         assert invalid.status_code == 400
         assert invalid.json()["errorCode"] == "INVALID_ARGUMENT"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_schedule_runs_support_large_offsets_without_cap():
+    pipeline_id = str(uuid.uuid4())
+    schedule_rid = f"ri.spice.main.schedule.{pipeline_id}"
+    total_runs = 6005
+
+    class _PipelineRegistry:
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                pipeline_id=pipeline_id,
+                branch="main",
+                status="active",
+                schedule_cron="0 0 * * *",
+                schedule_interval_seconds=None,
+                created_at=None,
+            )
+
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25, offset: int = 0):  # noqa: ANN001
+            end = min(offset + limit, total_runs)
+            return [
+                {"job_id": f"build-{pipeline_id}-run{idx}", "status": "SUCCESS"}
+                for idx in range(offset + 1, end + 1)
+            ]
+
+    app = _build_test_app()
+    app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            f"/api/v2/orchestration/schedules/{schedule_rid}/runs",
+            params={"pageSize": 2, "pageToken": "5000"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["data"]) == 2
+    assert body["data"][0]["buildRid"].endswith(f"build-{pipeline_id}-run5001")
+    assert body["data"][1]["buildRid"].endswith(f"build-{pipeline_id}-run5002")
+    assert body["nextPageToken"] == "5002"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_foundry_schedule_runs_returns_error_when_registry_query_fails():
+    pipeline_id = str(uuid.uuid4())
+    schedule_rid = f"ri.spice.main.schedule.{pipeline_id}"
+
+    class _PipelineRegistry:
+        async def get_pipeline(self, pipeline_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                pipeline_id=pipeline_id,
+                branch="main",
+                status="active",
+                schedule_cron="0 0 * * *",
+                schedule_interval_seconds=None,
+                created_at=None,
+            )
+
+        async def list_runs(self, *, pipeline_id: str, limit: int = 25, offset: int = 0):  # noqa: ANN001
+            _ = pipeline_id, limit, offset
+            raise RuntimeError("registry unavailable")
+
+    app = _build_test_app()
+    app.dependency_overrides[get_pipeline_registry] = lambda: _PipelineRegistry()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/v2/orchestration/schedules/{schedule_rid}/runs")
+
+    assert resp.status_code == 500
+    assert resp.json()["errorCode"] == "INTERNAL"
 
 
 # ---------------------------------------------------------------------------

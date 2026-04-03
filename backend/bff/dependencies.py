@@ -19,7 +19,7 @@ Key improvements:
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import status, Depends
+from fastapi import status, Depends, HTTPException
 
 # Modern dependency injection imports
 from shared.dependencies import get_container, ServiceContainer
@@ -34,6 +34,11 @@ from shared.config.settings import ApplicationSettings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
+from shared.services.core.runtime_status import (
+    availability_surface,
+    build_runtime_issue,
+    probe_service_runtime_state,
+)
 from shared.utils.foundry_page_token import encode_offset_page_token
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
@@ -56,11 +61,16 @@ def _service_unavailable(message: str, exc: Exception) -> Exception:
     )
 
 
+def _service_internal_error(message: str, exc: Exception) -> Exception:
+    return classified_http_exception(
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        f"{message}: {exc}",
+        code=ErrorCode.INTERNAL_ERROR,
+    )
+
+
 async def _health_status_for_service(service: object) -> str:
-    if hasattr(service, "health_check"):
-        is_healthy = await service.health_check()
-        return "healthy" if is_healthy else "unhealthy"
-    return "available"
+    return await probe_service_runtime_state(service)
 
 
 class BFFDependencyProvider:
@@ -89,8 +99,10 @@ class BFFDependencyProvider:
         
         try:
             return await container.get(OMSClient)
+        except HTTPException:
+            raise
         except Exception as exc:
-            raise _service_unavailable("OMS client not available", exc) from exc
+            raise _service_internal_error("OMS client wiring failed", exc) from exc
     
     @staticmethod
     async def get_action_log_registry(
@@ -109,8 +121,10 @@ class BFFDependencyProvider:
 
         try:
             return await container.get(ActionLogRegistry)
+        except HTTPException:
+            raise
         except Exception as exc:
-            raise _service_unavailable("ActionLogRegistry not available", exc) from exc
+            raise _service_internal_error("ActionLogRegistry wiring failed", exc) from exc
 
 
 # Type-safe dependency annotations for cleaner injection
@@ -144,7 +158,11 @@ class FoundryQueryService:
         elif isinstance(response, list):
             # 직접 리스트가 반환된 경우
             return [db.get("name") for db in response if isinstance(db, dict) and db.get("name")]
-        return []
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Unexpected OMS database list response shape: {response!r}",
+            code=ErrorCode.UPSTREAM_ERROR,
+        )
 
     async def create_database(self, db_name: str, description: Optional[str] = None):
         """데이터베이스 생성"""
@@ -164,10 +182,14 @@ class FoundryQueryService:
     async def list_classes(self, db_name: str, *, branch: str = "main"):
         """클래스 목록 조회"""
         response = await self.oms_client.list_ontologies(db_name, branch=branch)
-        if response.get("status") == "success":
+        if isinstance(response, dict) and response.get("status") == "success":
             ontologies = response.get("data", {}).get("ontologies", [])
             return ontologies
-        return []
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Unexpected OMS ontology list response shape for {db_name}: {response!r}",
+            code=ErrorCode.UPSTREAM_ERROR,
+        )
 
     async def create_class(
         self,
@@ -180,9 +202,13 @@ class FoundryQueryService:
         """클래스 생성"""
         response = await self.oms_client.create_ontology(db_name, class_data, branch=branch, headers=headers)
         # Return the created data
-        if response and response.get("status") == "success":
+        if isinstance(response, dict) and response.get("status") == "success":
             return response.get("data", {})
-        return response
+        raise classified_http_exception(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Unexpected OMS create ontology response shape for {db_name}: {response!r}",
+            code=ErrorCode.UPSTREAM_ERROR,
+        )
 
     async def get_class(self, db_name: str, class_id: str, *, branch: str = "main"):
         """클래스 조회"""
@@ -191,7 +217,14 @@ class FoundryQueryService:
             # Extract the data from the response
             if response and response.get("status") == "success":
                 return response.get("data", {})
-            return None
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                (
+                    "Unexpected OMS ontology response shape"
+                    f" for {db_name}.{class_id}: {response!r}"
+                ),
+                code=ErrorCode.UPSTREAM_ERROR,
+            )
         except httpx.HTTPStatusError as e:
             # If it's a 404, return None (not found)
             if e.response.status_code == 404:
@@ -256,7 +289,7 @@ class FoundryQueryService:
         try:
             limit = int(raw_limit)
             offset = int(raw_offset)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError("limit/offset must be integers") from exc
 
         if limit < 1:
@@ -291,20 +324,36 @@ class FoundryQueryService:
             branch=branch,
         )
 
-        data = response.get("data") if isinstance(response, dict) else None
-        rows: List[Dict[str, Any]] = list(data) if isinstance(data, list) else []
+        if not isinstance(response, dict):
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                f"Unexpected OMS search response shape for {db_name}.{class_id}: {response!r}",
+                code=ErrorCode.UPSTREAM_ERROR,
+            )
+
+        data = response.get("data")
+        if not isinstance(data, list):
+            raise classified_http_exception(
+                status.HTTP_502_BAD_GATEWAY,
+                (
+                    "Unexpected OMS search response data shape"
+                    f" for {db_name}.{class_id}: {response!r}"
+                ),
+                code=ErrorCode.UPSTREAM_ERROR,
+            )
+
+        rows: List[Dict[str, Any]] = list(data)
 
         total_count = 0
-        if isinstance(response, dict):
-            try:
-                total_count = int(response.get("totalCount") or 0)
-            except (TypeError, ValueError):
-                total_count = len(rows)
+        try:
+            total_count = int(response.get("totalCount") or 0)
+        except (TypeError, ValueError):
+            total_count = len(rows)
 
         return {
             "data": rows,
             "count": total_count,
-            "nextPageToken": response.get("nextPageToken") if isinstance(response, dict) else None,
+            "nextPageToken": response.get("nextPageToken"),
         }
 
     @staticmethod
@@ -402,6 +451,7 @@ async def check_bff_dependencies_health(
     initialized and accessible through the modern container system.
     """
     health_status = {}
+    issues = []
     
     try:
         # Check each service
@@ -419,26 +469,71 @@ async def check_bff_dependencies_health(
                     health_status[service_name] = await _health_status_for_service(service)
                 else:
                     health_status[service_name] = "not_registered"
+                    issues.append(
+                        build_runtime_issue(
+                            component=service_name,
+                            dependency=service_name,
+                            message=f"{service_name} not registered",
+                            state="degraded",
+                            classification="internal",
+                            affected_features=[f"bff.{service_name}"],
+                            affects_readiness=False,
+                        )
+                    )
             except Exception as exc:
                 logger.warning("BFF dependency health check failed for %s", service_name, exc_info=True)
                 health_status[service_name] = f"error: {str(exc)}"
-        
-        return {
-            "status": "ok",
-            "services": health_status,
-            "container_initialized": container.is_initialized
-        }
+                issues.append(
+                    build_runtime_issue(
+                        component=service_name,
+                        dependency=service_name,
+                        message=f"{service_name} health check failed: {exc}",
+                        state="degraded",
+                        classification="internal",
+                        affected_features=[f"bff.{service_name}"],
+                        affects_readiness=False,
+                    )
+                )
+        for service_name, service_status in health_status.items():
+            if str(service_status) == "hard_down":
+                issues.append(
+                    build_runtime_issue(
+                        component=service_name,
+                        dependency=service_name,
+                        message=f"{service_name} reported {service_status}",
+                        state="degraded",
+                        classification="unavailable",
+                        affected_features=[f"bff.{service_name}"],
+                        affects_readiness=False,
+                    )
+                )
+        surface = availability_surface(
+            service="bff-dependencies",
+            container_ready=bool(container.is_initialized),
+            runtime_status={"ready": True, "degraded": bool(issues), "issues": issues},
+        )
+        surface["services"] = health_status
+        surface["container_initialized"] = bool(container.is_initialized)
+        return surface
         
     except Exception as e:
         logger.warning("BFF dependency health check crashed", exc_info=True)
-        return build_error_envelope(
-            service_name=SERVICE_NAME,
-            message="BFF dependency health check failed",
-            detail=str(e),
-            code=ErrorCode.INTERNAL_ERROR,
-            category=ErrorCategory.INTERNAL,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            context={"services": health_status},
-            request_id=get_request_id(),
-            correlation_id=get_correlation_id(),
+        issues = [
+            build_runtime_issue(
+                component="bff_dependencies",
+                dependency="bff_dependencies",
+                message=f"BFF dependency health check failed: {e}",
+                state="hard_down",
+                classification="internal",
+                affected_features=["bff.dependencies"],
+                affects_readiness=True,
+            )
+        ]
+        surface = availability_surface(
+            service="bff-dependencies",
+            container_ready=False,
+            runtime_status={"ready": False, "degraded": True, "issues": issues},
         )
+        surface["services"] = health_status
+        surface["container_initialized"] = False
+        return surface

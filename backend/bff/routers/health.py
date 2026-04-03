@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from bff.dependencies import get_oms_client
 from bff.services.oms_client import OMSClient
+from shared.services.core.runtime_status import availability_surface, get_runtime_status
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +22,7 @@ router = APIRouter(tags=["Health"])
 
 
 def _bff_runtime_status_from_request(request: Request) -> dict[str, Any]:
-    runtime_status = getattr(request.app.state, "bff_runtime_status", None)
-    if not isinstance(runtime_status, dict):
-        return {
-            "ready": True,
-            "degraded": False,
-            "issues": [],
-            "background_tasks": {},
-        }
-    return {
-        "ready": bool(runtime_status.get("ready", True)),
-        "degraded": bool(runtime_status.get("degraded", False)),
-        "issues": list(runtime_status.get("issues") or []),
-        "background_tasks": dict(runtime_status.get("background_tasks") or {}),
-    }
+    return get_runtime_status(request.app, attr_names=("bff_runtime_status",))
 
 
 @router.get("/", include_in_schema=False)
@@ -81,23 +69,23 @@ async def health_check(request: Request, oms_client: OMSClient = Depends(get_oms
         health_response.data = {}
 
     runtime_status = _bff_runtime_status_from_request(request)
+    surface = availability_surface(
+        service="bff",
+        container_ready=True,
+        runtime_status=runtime_status,
+    )
 
     # OMS 연결 상태 추가 (degraded but still healthy for core paths)
     health_response.data["oms_connected"] = bool(oms_connected)
-    health_response.data["ready"] = runtime_status["ready"]
-    health_response.data["accepting_traffic"] = runtime_status["ready"]
-    health_response.data["startup_issues"] = runtime_status["issues"]
-    health_response.data["background_tasks"] = runtime_status["background_tasks"]
-    if runtime_status["degraded"]:
-        health_response.data["startup_status"] = "degraded"
-    if not oms_connected or runtime_status["degraded"] or not runtime_status["ready"]:
-        health_response.data["status"] = "degraded"
+    health_response.data.update(surface)
+    health_response.data["startup_issues"] = surface["issues"]
+    if not oms_connected or surface["status"] != "ready":
+        health_response.data["status"] = "degraded" if surface["status"] != "hard_down" else "hard_down"
         if oms_error:
             health_response.data["oms_error"] = oms_error
-        if not runtime_status["ready"]:
+        if surface["status"] == "hard_down":
             health_response.message = "Service is running but startup is degraded"
         elif not oms_connected:
             health_response.message = "Service is running (OMS unavailable)"
 
     return health_response.to_dict()
-

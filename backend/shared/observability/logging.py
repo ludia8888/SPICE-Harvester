@@ -63,7 +63,10 @@ def install_trace_context_record_factory() -> None:
         record.correlation_id = "-"  # type: ignore[attr-defined]
         record.db_name = "-"  # type: ignore[attr-defined]
         record.principal = "-"  # type: ignore[attr-defined]
-
+        record.event_name = "-"  # type: ignore[attr-defined]
+        record.event_family = "-"  # type: ignore[attr-defined]
+        record.failure_class = "-"  # type: ignore[attr-defined]
+        record.retryable_flag = "-"  # type: ignore[attr-defined]
         try:
             request_id = get_request_id()
             correlation_id = get_correlation_id()
@@ -124,6 +127,27 @@ class TraceContextFilter(logging.Filter):
         record.correlation_id = "-"  # type: ignore[attr-defined]
         record.db_name = "-"  # type: ignore[attr-defined]
         record.principal = "-"  # type: ignore[attr-defined]
+        if not hasattr(record, "event_name"):
+            record.event_name = "-"  # type: ignore[attr-defined]
+        if not hasattr(record, "event_family"):
+            record.event_family = "-"  # type: ignore[attr-defined]
+        if not hasattr(record, "failure_class"):
+            record.failure_class = "-"  # type: ignore[attr-defined]
+        if not hasattr(record, "retryable_flag"):
+            record.retryable_flag = "-"  # type: ignore[attr-defined]
+
+        taxonomy_event_name = getattr(record, "_taxonomy_event_name", None)
+        taxonomy_event_family = getattr(record, "_taxonomy_event_family", None)
+        taxonomy_failure_class = getattr(record, "_taxonomy_failure_class", None)
+        taxonomy_retryable_flag = getattr(record, "_taxonomy_retryable_flag", None)
+        if taxonomy_event_name is not None:
+            record.event_name = str(taxonomy_event_name or "-")  # type: ignore[attr-defined]
+        if taxonomy_event_family is not None:
+            record.event_family = str(taxonomy_event_family or "-")  # type: ignore[attr-defined]
+        if taxonomy_failure_class is not None:
+            record.failure_class = str(taxonomy_failure_class or "-")  # type: ignore[attr-defined]
+        if taxonomy_retryable_flag is not None:
+            record.retryable_flag = str(taxonomy_retryable_flag or "-")  # type: ignore[attr-defined]
 
         try:
             request_id = get_request_id()

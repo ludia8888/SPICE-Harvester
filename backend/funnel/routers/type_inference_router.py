@@ -10,10 +10,11 @@ default to xsd:string. Type coercion at objectify/write time via coerce_value().
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.core.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.core.runtime_status import availability_surface, get_runtime_status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest
 from shared.models.structure_patch import SheetStructurePatch
@@ -372,9 +373,22 @@ async def delete_structure_patch(sheet_signature: str) -> Dict[str, Any]:
 
 
 @router.get("/health")
-async def health_check() -> Dict[str, str]:
+async def health_check(request: Request) -> Dict[str, Any]:
     """Funnel 서비스 상태 확인"""
-    return {"status": "healthy", "service": "funnel", "version": "0.1.0"}
+    surface = availability_surface(
+        service="funnel",
+        container_ready=True,
+        runtime_status=get_runtime_status(request.app),
+    )
+    return {
+        "status": surface["status"],
+        "service": "funnel",
+        "version": "0.1.0",
+        "dependency_status": surface["dependency_status"],
+        "dependency_details": surface["dependency_details"],
+        "affected_features": surface["affected_features"],
+        "root_causes": surface["root_causes"],
+    }
 
 
 async def _resolve_optional_access_token(

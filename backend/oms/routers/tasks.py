@@ -16,6 +16,7 @@ from shared.dependencies.providers import BackgroundTaskManagerDep, RedisService
 from shared.models.background_task import TaskStatus
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.observability.tracing import trace_endpoint
+from shared.services.core.runtime_status import availability_surface, build_runtime_issue, normalize_runtime_status
 
 router = APIRouter(prefix="/tasks", tags=["Task Management"])
 
@@ -137,35 +138,61 @@ async def task_service_health(
     Provides health metrics for the background task system.
     """
     metrics = await task_manager.get_task_metrics()
-    
-    # Determine health status
-    health_status = "healthy"
     issues = []
-    
-    # Check for high failure rate
     if metrics.success_rate < 80:
-        health_status = "warning"
-        issues.append(f"High failure rate: {metrics.success_rate:.1f}%")
-    
-    # Check for stuck tasks
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"High failure rate: {metrics.success_rate:.1f}%",
+                state="degraded",
+                classification="retryable",
+                affected_features=("oms.background_tasks",),
+                affects_readiness=False,
+            )
+        )
     if metrics.processing_tasks > 10:
-        health_status = "warning"
-        issues.append(f"Many processing tasks: {metrics.processing_tasks}")
-    
-    # Check for many retrying tasks
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"Many processing tasks: {metrics.processing_tasks}",
+                state="degraded",
+                classification="retryable",
+                affected_features=("oms.background_tasks",),
+                affects_readiness=False,
+            )
+        )
     if metrics.retrying_tasks > 5:
-        health_status = "warning"
-        issues.append(f"Many retrying tasks: {metrics.retrying_tasks}")
-    
-    return {
-        "status": health_status,
-        "issues": issues,
-        "metrics": {
-            "total_tasks": metrics.total_tasks,
-            "active_tasks": metrics.active_tasks,
-            "completed_tasks": metrics.completed_tasks,
-            "failed_tasks": metrics.failed_tasks,
-            "success_rate": metrics.success_rate,
-            "average_duration_seconds": metrics.average_duration
-        }
+        issues.append(
+            build_runtime_issue(
+                component="background_tasks",
+                dependency="background_task_manager",
+                message=f"Many retrying tasks: {metrics.retrying_tasks}",
+                state="degraded",
+                classification="retryable",
+                affected_features=("oms.background_tasks",),
+                affects_readiness=False,
+            )
+        )
+
+    surface = availability_surface(
+        service="oms.tasks",
+        container_ready=True,
+        runtime_status=normalize_runtime_status({"degraded": bool(issues), "issues": issues}),
+        dependency_status_overrides={"background_task_manager": "degraded" if issues else "ready"},
+        status_reason_override=(
+            "Background task metrics within thresholds"
+            if not issues
+            else "Background task metrics exceeded thresholds"
+        ),
+    )
+    surface["metrics"] = {
+        "total_tasks": metrics.total_tasks,
+        "active_tasks": metrics.active_tasks,
+        "completed_tasks": metrics.completed_tasks,
+        "failed_tasks": metrics.failed_tasks,
+        "success_rate": metrics.success_rate,
+        "average_duration_seconds": metrics.average_duration,
     }
+    return surface

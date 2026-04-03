@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+import httpx
 
 from data_connector.adapters.base import ConnectorAdapter
 from data_connector.google_sheets.service import GoogleSheetsService
@@ -176,7 +177,7 @@ class _GoogleSheetsAdapter(ConnectorAdapter):
                 access_token=str(access_token) if access_token else None,
             )
             return type("ConnTest", (), {"ok": True, "message": "Connection is healthy", "details": {}})()
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             return type("ConnTest", (), {"ok": False, "message": str(exc), "details": {"error": str(exc)}})()
 
     async def snapshot_extract(self, *, config: Dict[str, Any], secrets: Dict[str, Any], import_config: Dict[str, Any]):

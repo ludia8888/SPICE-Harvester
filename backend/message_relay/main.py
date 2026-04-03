@@ -38,6 +38,12 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
+from shared.services.core.write_path_contract import (
+    emit_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.utils.app_logger import configure_logging
 
@@ -49,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 def _client_error_code(exc: ClientError) -> str:
     return str(exc.response.get("Error", {}).get("Code") or "")
+
+
+def _is_missing_bucket_error(exc: ClientError) -> bool:
+    return _client_error_code(exc) in {"404", "NoSuchBucket", "NotFound"}
 
 
 class _RecentPublishedEventIds:
@@ -172,7 +182,9 @@ class EventPublisher:
         ) as s3:
             try:
                 await s3.head_bucket(Bucket=self.bucket_name)
-            except ClientError:
+            except ClientError as exc:
+                if not _is_missing_bucket_error(exc):
+                    raise
                 await s3.create_bucket(Bucket=self.bucket_name)
                 await s3.put_bucket_versioning(
                     Bucket=self.bucket_name,
@@ -286,6 +298,21 @@ class EventPublisher:
                 Body=json.dumps(checkpoint).encode("utf-8"),
                 ContentType="application/json",
             )
+
+    def _emit_write_path_contract(
+        self,
+        *,
+        authoritative_write: str,
+        followups: List[Dict[str, Any]],
+        level: str = "info",
+    ) -> Dict[str, Any]:
+        return emit_write_path_contract(
+            logger,
+            authoritative_write=authoritative_write,
+            followups=followups,
+            level=level,
+            message_prefix="Relay write path contract",
+        )
 
     def _log_metrics_if_due(self) -> None:
         interval = int(self.metrics_log_interval_s or 0)
@@ -512,10 +539,33 @@ class EventPublisher:
                 published += 1
                 self._metrics_total["events_published"] += 1
 
+            checkpoint_followup: Dict[str, Any]
             if checkpoint_dirty:
-                await self._save_checkpoint(checkpoint)
-                checkpoint_dirty = False
-                self._metrics_total["checkpoint_saves"] += 1
+                try:
+                    await self._save_checkpoint(checkpoint)
+                    checkpoint_followup = followup_completed(
+                        "relay_checkpoint_persist",
+                        details={"reason": reason, "published_prefix": prefix_len},
+                    )
+                    checkpoint_dirty = False
+                    self._metrics_total["checkpoint_saves"] += 1
+                except Exception as exc:
+                    checkpoint_followup = followup_degraded(
+                        "relay_checkpoint_persist",
+                        error=str(exc),
+                        details={"reason": reason, "published_prefix": prefix_len},
+                    )
+                    self._emit_write_path_contract(
+                        authoritative_write="relay_kafka_publish",
+                        followups=[checkpoint_followup],
+                        level="warning",
+                    )
+                    raise
+            else:
+                checkpoint_followup = followup_skipped(
+                    "relay_checkpoint_persist",
+                    details={"reason": "unchanged", "flush_reason": reason},
+                )
 
             if prefix_len:
                 logger.info(f"Published batch size={prefix_len} reason={reason}")
@@ -523,6 +573,12 @@ class EventPublisher:
             # Clear batch state before raising (publisher is at-least-once; duplicates are safe).
             batch.clear()
             delivery_results.clear()
+
+            self._emit_write_path_contract(
+                authoritative_write="relay_kafka_publish",
+                followups=[checkpoint_followup],
+                level="warning" if (remaining or first_failure) else "info",
+            )
 
             if remaining or first_failure:
                 self._metrics_total["kafka_delivery_failures"] += 1
@@ -533,11 +589,38 @@ class EventPublisher:
             nonlocal checkpoint_dirty
             if batch:
                 await flush_batch(reason=reason)
+            checkpoint_followup: Dict[str, Any]
             if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
                 checkpoint_dirty = True
-                await self._save_checkpoint(checkpoint)
-                checkpoint_dirty = False
-                self._metrics_total["checkpoint_saves"] += 1
+                try:
+                    await self._save_checkpoint(checkpoint)
+                    checkpoint_followup = followup_completed(
+                        "relay_checkpoint_persist",
+                        details={"reason": reason, "idx_key": idx_key},
+                    )
+                    checkpoint_dirty = False
+                    self._metrics_total["checkpoint_saves"] += 1
+                except Exception as exc:
+                    checkpoint_followup = followup_degraded(
+                        "relay_checkpoint_persist",
+                        error=str(exc),
+                        details={"reason": reason, "idx_key": idx_key},
+                    )
+                    self._emit_write_path_contract(
+                        authoritative_write="relay_checkpoint_advance",
+                        followups=[checkpoint_followup],
+                        level="warning",
+                    )
+                    raise
+            else:
+                checkpoint_followup = followup_skipped(
+                    "relay_checkpoint_persist",
+                    details={"reason": "unchanged", "idx_key": idx_key},
+                )
+            self._emit_write_path_contract(
+                authoritative_write="relay_checkpoint_advance",
+                followups=[checkpoint_followup],
+            )
 
         async with self.session.client(
             "s3",

@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
+import grpc
 import httpx
 from shared.config.settings import get_settings
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
@@ -247,11 +248,48 @@ async def oms_json(
             "status_code": 504,
             "response": {},
         }
-    except Exception as exc:
+    except httpx.TimeoutException as exc:
         return {
-            "error": f"OMS {method.upper()} {path} transport failure: {exc}",
-            "status_code": 502,
+            "error": f"OMS {method.upper()} {path} timed out: {exc}",
+            "status_code": 504,
             "response": {},
+        }
+    except httpx.RequestError as exc:
+        return {
+            "error": f"OMS {method.upper()} {path} unavailable: {exc}",
+            "status_code": 503,
+            "response": {},
+        }
+    except grpc.RpcError as exc:
+        code_func = getattr(exc, "code", None)
+        status_code = code_func() if callable(code_func) else None
+        if status_code == grpc.StatusCode.DEADLINE_EXCEEDED:
+            return {
+                "error": f"OMS {method.upper()} {path} timed out",
+                "status_code": 504,
+                "response": {},
+            }
+        if status_code in {
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+        }:
+            return {
+                "error": f"OMS {method.upper()} {path} unavailable",
+                "status_code": 503,
+                "response": {},
+            }
+        logging.getLogger(__name__).error("OMS bridge internal error for %s %s", method.upper(), path, exc_info=True)
+        return {
+            "error": f"OMS {method.upper()} {path} internal bridge failure: {exc}",
+            "status_code": 500,
+            "response": {"detail": str(exc)},
+        }
+    except Exception as exc:
+        logging.getLogger(__name__).error("OMS bridge internal error for %s %s", method.upper(), path, exc_info=True)
+        return {
+            "error": f"OMS {method.upper()} {path} internal bridge failure: {exc}",
+            "status_code": 500,
+            "response": {"detail": str(exc)},
         }
 
     try:

@@ -13,6 +13,11 @@ from uuid import uuid4
 
 from fastapi import status
 
+from bff.routers.pipeline_ops import (
+    _normalize_dependencies_payload,
+    _pipeline_requires_proposal,
+    _validate_dependency_targets,
+)
 from bff.routers.pipeline_ops import _detect_breaking_schema_changes, _resolve_output_pk_columns
 from bff.routers.pipeline_shared import _resolve_principal
 from bff.services.pipeline_execution_requests import (
@@ -37,6 +42,9 @@ from shared.services.registries.dataset_registry_get_or_create import get_or_cre
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import LakeFSConflictError, LakeFSError
+from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
+from shared.security.input_sanitizer import validate_db_name
+from shared.utils.branch_utils import protected_branch_write_message
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
@@ -44,6 +52,200 @@ from shared.utils.time_utils import utcnow
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_deploy_dependencies_raw(
+    *,
+    sanitized: Dict[str, Any],
+    definition_json: Optional[Dict[str, Any]],
+) -> Any:
+    if "dependencies" in sanitized:
+        return sanitized.get("dependencies")
+    if isinstance(definition_json, dict) and "dependencies" in definition_json:
+        return definition_json.get("dependencies")
+    return None
+
+
+def _parse_deploy_schedule_fields(
+    *,
+    sanitized: Dict[str, Any],
+    output: Dict[str, Any],
+) -> tuple[Optional[int], Optional[str]]:
+    schedule_interval_seconds = None
+    schedule_cron = None
+    schedule = sanitized.get("schedule") or output.get("schedule")
+    if isinstance(schedule, dict):
+        schedule_interval_seconds = schedule.get("interval_seconds")
+        schedule_cron = schedule.get("cron")
+    elif isinstance(schedule, (int, float, str)):
+        try:
+            schedule_interval_seconds = int(schedule)
+        except (TypeError, ValueError):
+            schedule_interval_seconds = None
+    if schedule_cron:
+        schedule_cron = str(schedule_cron).strip()
+    if schedule_interval_seconds is not None:
+        try:
+            schedule_interval_seconds = int(schedule_interval_seconds)
+        except Exception:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "schedule_interval_seconds must be integer",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+        if schedule_interval_seconds <= 0:
+            raise classified_http_exception(
+                status.HTTP_400_BAD_REQUEST,
+                "schedule_interval_seconds must be > 0",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            )
+    if schedule_interval_seconds and schedule_cron:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "Provide either schedule_interval_seconds or schedule_cron (not both)",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    if schedule_cron and not _is_valid_cron_expression(str(schedule_cron)):
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "schedule_cron must be a supported 5-field cron expression",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    return schedule_interval_seconds, schedule_cron
+
+
+def parse_deploy_request_payload(*, sanitized: Dict[str, Any]) -> _DeployRequestPayload:
+    output = sanitized.get("output") if isinstance(sanitized.get("output"), dict) else {}
+    definition_json = (
+        sanitized.get("definition_json")
+        if isinstance(sanitized.get("definition_json"), dict)
+        else None
+    )
+    schedule_interval_seconds, schedule_cron = _parse_deploy_schedule_fields(
+        sanitized=sanitized,
+        output=output,
+    )
+    return _DeployRequestPayload(
+        definition_json=definition_json,
+        promote_build=bool(sanitized.get("promote_build") or sanitized.get("promoteBuild") or False),
+        build_job_id=str(sanitized.get("build_job_id") or sanitized.get("buildJobId") or "").strip() or None,
+        artifact_id=str(sanitized.get("artifact_id") or sanitized.get("artifactId") or "").strip() or None,
+        replay_on_deploy=bool(
+            sanitized.get("replay")
+            or sanitized.get("replay_on_deploy")
+            or sanitized.get("replayOnDeploy")
+            or sanitized.get("replay_on_deploy")
+        ),
+        dependencies_raw=_extract_deploy_dependencies_raw(
+            sanitized=sanitized,
+            definition_json=definition_json,
+        ),
+        node_id=str(sanitized.get("node_id") or "").strip() or None,
+        db_name=str(output.get("db_name") or "").strip(),
+        outputs=sanitized.get("outputs") if isinstance(sanitized.get("outputs"), list) else None,
+        expectations=sanitized.get("expectations") if isinstance(sanitized.get("expectations"), list) else None,
+        schema_contract=sanitized.get("schema_contract") if isinstance(sanitized.get("schema_contract"), list) else None,
+        schedule_interval_seconds=schedule_interval_seconds,
+        schedule_cron=schedule_cron,
+        branch=str(sanitized.get("branch") or "").strip() or None,
+        proposal_status=str(sanitized.get("proposal_status") or "").strip() or None,
+        proposal_title=str(sanitized.get("proposal_title") or "").strip() or None,
+        proposal_description=str(sanitized.get("proposal_description") or "").strip() or None,
+    )
+
+
+async def resolve_deploy_pipeline_context(
+    *,
+    pipeline_registry: PipelineRegistry,
+    pipeline_id: str,
+    db_name_hint: str,
+    branch: Optional[str],
+    dependencies_raw: Any,
+) -> _DeployPipelineContext:
+    pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
+    if not pipeline:
+        raise classified_http_exception(
+            status.HTTP_404_NOT_FOUND,
+            "Pipeline not found",
+            code=ErrorCode.PIPELINE_NOT_FOUND,
+        )
+    if branch and branch != pipeline.branch:
+        raise classified_http_exception(
+            status.HTTP_409_CONFLICT,
+            "branch does not match pipeline branch",
+            code=ErrorCode.CONFLICT,
+        )
+
+    dependencies: Optional[list[dict[str, str]]] = None
+    if dependencies_raw is not None:
+        dependencies = _normalize_dependencies_payload(dependencies_raw)
+        await _validate_dependency_targets(
+            pipeline_registry,
+            db_name=str(db_name_hint or pipeline.db_name),
+            pipeline_id=pipeline_id,
+            dependencies=dependencies,
+        )
+
+    resolved_branch = branch or (pipeline.branch if pipeline else None) or "main"
+    proposal_required = _pipeline_requires_proposal(resolved_branch)
+    proposal_bundle = getattr(pipeline, "proposal_bundle", {}) if pipeline else {}
+    if proposal_required:
+        if getattr(pipeline, "proposal_status", None) != "approved":
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                protected_branch_write_message(),
+                code=ErrorCode.CONFLICT,
+            )
+        if not proposal_bundle:
+            raise classified_http_exception(
+                status.HTTP_409_CONFLICT,
+                "Approved proposal is missing bundle metadata",
+                code=ErrorCode.CONFLICT,
+            )
+    latest = await pipeline_registry.get_latest_version(
+        pipeline_id=pipeline_id,
+        branch=resolved_branch,
+    )
+    return _DeployPipelineContext(
+        pipeline=pipeline,
+        resolved_branch=resolved_branch,
+        proposal_required=proposal_required,
+        proposal_bundle=proposal_bundle,
+        latest=latest,
+        dependencies=dependencies,
+    )
+
+
+def resolve_deploy_definition_and_db(
+    *,
+    definition_json: Optional[Dict[str, Any]],
+    latest: Any,
+    expectations: Optional[list[Any]],
+    schema_contract: Optional[list[Any]],
+    outputs: Optional[list[dict[str, Any]]],
+    db_name: str,
+    pipeline: Any,
+) -> tuple[Dict[str, Any], str]:
+    resolved_definition = definition_json
+    if not resolved_definition:
+        resolved_definition = latest.definition_json if latest else {}
+    if expectations is not None:
+        resolved_definition = {**(resolved_definition or {}), "expectations": expectations}
+    if schema_contract is not None:
+        resolved_definition = {**(resolved_definition or {}), "schemaContract": schema_contract}
+    if outputs:
+        resolved_definition = {**(resolved_definition or {}), "outputs": outputs}
+
+    resolved_db_name = str(db_name or "").strip()
+    if not resolved_db_name:
+        resolved_db_name = str(getattr(pipeline, "db_name", "") or "").strip()
+    if not resolved_db_name:
+        raise classified_http_exception(
+            status.HTTP_400_BAD_REQUEST,
+            "db_name is required",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+        )
+    return resolved_definition or {}, validate_db_name(resolved_db_name)
 
 
 def _parse_optional_bool(value: Any) -> Optional[bool]:

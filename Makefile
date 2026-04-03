@@ -24,6 +24,11 @@ help:
 	@echo "Targets:"
 	@echo "  backend-unit           Run fast backend unit tests (no docker required)"
 	@echo "  backend-coverage       Run unit tests + generate coverage.xml (for Codecov)"
+	@echo "  backend-runtime-ddl-audit  Guard runtime DDL callsites (migration-first)"
+	@echo "  backend-release-gate   Run the full backend release regression gate"
+	@echo "  backend-boundary-smoke  Run explicit Redis/Postgres/LakeFS/Kafka/S3 boundary smoke suite"
+	@echo "  backend-release-smoke  Run release smoke suite against a running local stack"
+	@echo "  backend-infra-tier     Run requires_infra regression tier against a running local stack"
 	@echo "  backend-error-taxonomy Run enterprise error taxonomy audit gate"
 	@echo "  backend-prod-quick     Run correctness layer tests (Postgres-backed)"
 	@echo "  backend-prod-full      Run full backend production gate (requires local stack)"
@@ -44,6 +49,7 @@ help:
 
 .PHONY: backend-unit
 backend-unit:
+	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
 	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests
@@ -51,12 +57,26 @@ backend-unit:
 .PHONY: backend-coverage
 backend-coverage:
 	rm -f coverage.xml || true
+	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
 	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests \
 		--cov=backend --cov-config=backend/.coveragerc \
 		--cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml \
 		--cov-fail-under=$(COVERAGE_MIN)
+
+.PHONY: backend-runtime-ddl-audit
+backend-runtime-ddl-audit:
+	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
+
+.PHONY: backend-release-gate
+backend-release-gate:
+	PYTHONPATH=backend $(PYTHON) backend/scripts/release_regression_gate.py --execute
+
+.PHONY: backend-boundary-smoke
+backend-boundary-smoke:
+	PYTHONPATH=backend ALLOW_RUNTIME_DDL_BOOTSTRAP=false $(PYTHON) -m pytest -q -c backend/pytest.ini \
+		backend/tests/test_infra_boundary_smoke.py
 
 .PHONY: backend-error-taxonomy
 backend-error-taxonomy:
@@ -65,6 +85,20 @@ backend-error-taxonomy:
 .PHONY: backend-prod-quick
 backend-prod-quick:
 	PYTHON_BIN="$(if $(findstring /,$(PYTHON)),$(abspath $(PYTHON)),$(PYTHON))" ./backend/run_production_tests.sh --quick
+
+.PHONY: backend-release-smoke
+backend-release-smoke:
+	PYTHONPATH=backend ALLOW_RUNTIME_DDL_BOOTSTRAP=false $(PYTHON) -m pytest -q -c backend/pytest.ini \
+		backend/tests/test_infra_boundary_smoke.py \
+		backend/tests/test_oms_smoke.py \
+		backend/tests/test_openapi_contract_smoke.py \
+		backend/tests/test_command_status_ttl_e2e.py \
+		backend/tests/test_worker_lease_safety_e2e.py \
+		backend/tests/integration/test_pipeline_branch_lifecycle.py
+
+.PHONY: backend-infra-tier
+backend-infra-tier:
+	PYTHONPATH=backend ALLOW_RUNTIME_DDL_BOOTSTRAP=false $(PYTHON) -m pytest -q -c backend/pytest.ini -m "requires_infra and not smoke" backend/tests
 
 .PHONY: backend-prod-full
 backend-prod-full:

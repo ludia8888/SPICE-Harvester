@@ -21,7 +21,7 @@ def _safe_stringify(value: Any) -> str:
         return str(value)
     try:
         return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
-    except Exception:
+    except (TypeError, ValueError):
         return str(value)
 
 

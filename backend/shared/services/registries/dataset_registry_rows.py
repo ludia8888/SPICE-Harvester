@@ -8,6 +8,10 @@ from shared.services.registries.dataset_registry_models import (
     AccessPolicyRecord,
     BackingDatasourceRecord,
     BackingDatasourceVersionRecord,
+    DatasetIngestRequestRecord,
+    DatasetIngestTransactionRecord,
+    DatasetRecord,
+    DatasetVersionRecord,
     GatePolicyRecord,
     GateResultRecord,
     InstanceEditRecord,
@@ -18,6 +22,77 @@ from shared.services.registries.dataset_registry_models import (
     SchemaMigrationPlanRecord,
 )
 from shared.utils.json_utils import coerce_json_dataset
+
+
+def row_to_dataset(row: asyncpg.Record) -> DatasetRecord:
+    return DatasetRecord(
+        dataset_id=str(row["dataset_id"]),
+        db_name=str(row["db_name"]),
+        name=str(row["name"]),
+        description=row["description"],
+        source_type=str(row["source_type"]),
+        source_ref=row["source_ref"],
+        branch=str(row["branch"]),
+        schema_json=coerce_json_dataset(row["schema_json"]) or {},
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def row_to_dataset_version(row: asyncpg.Record) -> DatasetVersionRecord:
+    return DatasetVersionRecord(
+        version_id=str(row["version_id"]),
+        dataset_id=str(row["dataset_id"]),
+        lakefs_commit_id=str(row["lakefs_commit_id"]),
+        artifact_key=row["artifact_key"],
+        row_count=row["row_count"],
+        sample_json=coerce_json_dataset(row["sample_json"]) or {},
+        ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+        promoted_from_artifact_id=(
+            str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+        ),
+        created_at=row["created_at"],
+    )
+
+
+def row_to_dataset_ingest_request(row: asyncpg.Record) -> DatasetIngestRequestRecord:
+    return DatasetIngestRequestRecord(
+        ingest_request_id=str(row["ingest_request_id"]),
+        dataset_id=str(row["dataset_id"]),
+        db_name=row["db_name"],
+        branch=row["branch"],
+        idempotency_key=row["idempotency_key"],
+        request_fingerprint=row["request_fingerprint"],
+        status=row["status"],
+        lakefs_commit_id=row["lakefs_commit_id"],
+        artifact_key=row["artifact_key"],
+        schema_json=coerce_json_dataset(row["schema_json"]) or {},
+        schema_status=str(row["schema_status"] or "PENDING"),
+        schema_approved_at=row["schema_approved_at"],
+        schema_approved_by=row["schema_approved_by"],
+        sample_json=coerce_json_dataset(row["sample_json"]) or {},
+        row_count=row["row_count"],
+        source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
+        error=row["error"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        published_at=row["published_at"],
+    )
+
+
+def row_to_dataset_ingest_transaction(row: asyncpg.Record) -> DatasetIngestTransactionRecord:
+    return DatasetIngestTransactionRecord(
+        transaction_id=str(row["transaction_id"]),
+        ingest_request_id=str(row["ingest_request_id"]),
+        status=row["status"],
+        lakefs_commit_id=row["lakefs_commit_id"],
+        artifact_key=row["artifact_key"],
+        error=row["error"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        committed_at=row["committed_at"],
+        aborted_at=row["aborted_at"],
+    )
 
 
 def row_to_backing(row: asyncpg.Record) -> BackingDatasourceRecord:

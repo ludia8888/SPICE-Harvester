@@ -4,6 +4,7 @@ import asyncio
 import json
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -264,7 +265,7 @@ async def test_sync_worker_process_connector_update_snapshot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sync_worker_process_connector_update_treats_post_ingest_sync_state_failure_as_non_retryable() -> None:
+async def test_sync_worker_process_connector_update_treats_post_ingest_sync_state_failure_as_degraded_success() -> None:
     worker = ConnectorSyncWorker()
     registry = _FailingSyncStateRegistry()
     ingest = _FakeIngestService()
@@ -307,14 +308,82 @@ async def test_sync_worker_process_connector_update_treats_post_ingest_sync_stat
         data={"source_type": "google_sheets", "source_id": "sheet-1"},
     )
 
-    with pytest.raises(connector_sync_module._SyncStatePersistenceError):
-        await worker._process_connector_update(envelope)
+    version_id = await worker._process_connector_update(envelope)
 
     assert ingest.calls
+    assert version_id == "version-1"
     assert worker._is_retryable_error(
         connector_sync_module._SyncStatePersistenceError("sync-state persistence failed"),
         payload=envelope,
     ) is False
+
+
+@pytest.mark.asyncio
+async def test_sync_worker_process_connector_update_logs_write_path_contract_for_degraded_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = ConnectorSyncWorker()
+    registry = _FailingSyncStateRegistry()
+    ingest = _FakeIngestService()
+    log_calls: list[tuple[Any, ...]] = []
+
+    registry.source = ConnectorSource(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        enabled=True,
+        config_json={
+            "sheet_url": "https://docs.google.com/spreadsheets/d/sheet-1/edit",
+            "import_mode": "SNAPSHOT",
+            "table_import_config": {"type": "jdbcImportConfig", "query": "SELECT * FROM external_sheet"},
+        },
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    registry.mapping = ConnectorMapping(
+        mapping_id="map-1",
+        source_type="google_sheets",
+        source_id="sheet-1",
+        status="active",
+        enabled=True,
+        target_db_name="demo",
+        target_branch="main",
+        target_class_label="User",
+        field_mappings=[],
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    worker.registry = registry
+    worker.adapter_factory = _FakeAdapterFactory()
+    worker.ingest_service = ingest
+    worker.tracing = _FakeTracing()
+    worker.lineage = None
+    worker.lineage_required = False
+
+    def _capture_info(*args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        _ = kwargs
+        log_calls.append(args)
+
+    monkeypatch.setattr(connector_sync_module.logger, "info", _capture_info)
+
+    envelope = EventEnvelope.from_connector_update(
+        source_type="google_sheets",
+        source_id="sheet-1",
+        cursor="cursor-2",
+        data={"source_type": "google_sheets", "source_id": "sheet-1"},
+    )
+
+    version_id = await worker._process_connector_update(envelope)
+
+    assert version_id == "version-1"
+    assert log_calls
+    contract = log_calls[-1][-1]
+    assert contract["authoritative_state"] == "committed"
+    assert contract["authoritative_write"] == "dataset_ingest_commit"
+    sync_state_followup = next(
+        item for item in contract["derived_side_effects"] if item["name"] == "connector_sync_state"
+    )
+    assert sync_state_followup["status"] == "degraded"
 
 
 @pytest.mark.asyncio

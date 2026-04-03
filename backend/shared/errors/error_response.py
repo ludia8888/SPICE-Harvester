@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.log_taxonomy import log_taxonomy_event
 from shared.errors.enterprise_catalog import is_external_code
 from shared.errors.error_envelope import build_error_envelope
 from shared.security.input_sanitizer import SecurityViolationError
@@ -210,6 +211,7 @@ def _build_error_headers(payload: Dict[str, Any]) -> Dict[str, str]:
     header_pairs = (
         ("X-Error-Code", payload.get("code")),
         ("X-Error-Category", payload.get("category")),
+        ("X-Error-Classification", (payload.get("classification") or {}).get("family") if isinstance(payload.get("classification"), dict) else None),
         ("X-Enterprise-Code", enterprise.get("code")),
         ("X-Runbook-Ref", enterprise.get("runbook_ref")),
         ("X-Error-Group", diagnostics.get("group_fingerprint")),
@@ -265,6 +267,9 @@ def _emit_error_log(payload: Dict[str, Any]) -> None:
         "origin_path": origin.get("path"),
         "origin_endpoint": origin.get("endpoint"),
     }
+    classification = payload.get("classification") if isinstance(payload.get("classification"), Mapping) else {}
+    failure_class = str(classification.get("family") or enterprise.get("class") or payload.get("category") or "-")
+    retryable = classification.get("retryable")
 
     status_raw = payload.get("http_status")
     try:
@@ -273,11 +278,38 @@ def _emit_error_log(payload: Dict[str, Any]) -> None:
         status_code = 500
 
     if status_code >= 500:
-        logger.error("API error response emitted", extra={"error_event": event})
+        log_taxonomy_event(
+            logger,
+            logging.ERROR,
+            "API error response emitted",
+            event_name="api.error",
+            event_family="error",
+            failure_class=failure_class,
+            retryable=bool(retryable) if isinstance(retryable, bool) else None,
+            extra={"error_event": event},
+        )
     elif status_code >= 400:
-        logger.warning("API error response emitted", extra={"error_event": event})
+        log_taxonomy_event(
+            logger,
+            logging.WARNING,
+            "API error response emitted",
+            event_name="api.error",
+            event_family="error",
+            failure_class=failure_class,
+            retryable=bool(retryable) if isinstance(retryable, bool) else None,
+            extra={"error_event": event},
+        )
     else:
-        logger.info("API error response emitted", extra={"error_event": event})
+        log_taxonomy_event(
+            logger,
+            logging.INFO,
+            "API error response emitted",
+            event_name="api.error",
+            event_family="error",
+            failure_class=failure_class,
+            retryable=bool(retryable) if isinstance(retryable, bool) else None,
+            extra={"error_event": event},
+        )
 
 
 def _build_response(

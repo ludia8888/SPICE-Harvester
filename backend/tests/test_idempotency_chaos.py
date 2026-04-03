@@ -64,6 +64,7 @@ async def _make_registry(*, dsn: str, schema: str, lease_timeout_seconds: int) -
             dsn=candidate,
             schema=schema,
             lease_timeout_seconds=lease_timeout_seconds,
+            allow_runtime_ddl_bootstrap=True,
         )
         try:
             await reg.connect()
@@ -314,18 +315,25 @@ async def test_registry_sequence_guard_is_monotonic():
             handler = "chaos:worker"
             aggregate_id = f"agg-{uuid4().hex}"
 
-            # Two events can be in-flight concurrently; the later mark_done must not regress the version.
+            # Higher sequence must wait behind an in-flight lower sequence.
             e10 = f"evt-{uuid4().hex}"
             e11 = f"evt-{uuid4().hex}"
 
             c10 = await reg.claim(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
             c11 = await reg.claim(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
             assert c10.decision == ClaimDecision.CLAIMED
-            assert c11.decision == ClaimDecision.CLAIMED
+            assert c11.decision == ClaimDecision.IN_PROGRESS
 
-            # Out-of-order completion: 11 completes before 10.
-            await reg.mark_done(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
             await reg.mark_done(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
+
+            claimed_after_progress = await reg.claim(
+                handler=handler,
+                event_id=e11,
+                aggregate_id=aggregate_id,
+                sequence_number=11,
+            )
+            assert claimed_after_progress.decision == ClaimDecision.CLAIMED
+            await reg.mark_done(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
 
             async with reg._pool.acquire() as conn:
                 last_seq = await conn.fetchval(

@@ -135,6 +135,19 @@ class _FailingCommandStatusService:
         raise RuntimeError("command status unavailable")
 
 
+class _RecordingKeySpecRegistry:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+
+    async def upsert_key_spec(self, **kwargs: Any) -> None:
+        _ = kwargs
+        self.order.append("key_spec")
+
+    async def delete_key_spec(self, **kwargs: Any) -> None:
+        _ = kwargs
+        self.order.append("key_spec_delete")
+
+
 def _build_worker_with_resource_store(
     service: _InMemoryOntologyResourceService,
 ) -> tuple[OntologyWorker, _ObservabilityStub, _AuditStoreStub]:
@@ -185,6 +198,44 @@ async def test_create_ontology_uses_object_type_resource_registry_in_postgres_pr
     assert isinstance(stored.get("spec"), dict)
     assert obs.links
     assert audit.rows
+    contract = audit.rows[-1]["metadata"]["write_path_contract"]
+    assert contract["authoritative_state"] == "committed"
+    assert contract["authoritative_write"] == "ontology_resource_mutation"
+    assert [item["name"] for item in contract["derived_side_effects"]] == [
+        "ontology_key_spec",
+        "ontology_lineage",
+        "ontology_command_status",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_ontology_records_degraded_key_spec_followup_in_write_path_contract() -> None:
+    store = _InMemoryOntologyResourceService()
+    worker, _, audit = _build_worker_with_resource_store(store)
+    worker.key_spec_registry = _FailingKeySpecRegistry()
+
+    await worker.handle_create_ontology(
+        {
+            "command_id": "00000000-0000-0000-0000-000000000311",
+            "created_by": "tester",
+            "payload": {
+                "db_name": "demo",
+                "branch": "main",
+                "class_id": "Ticket",
+                "label": "Ticket",
+                "description": "Ticket class",
+                "properties": [{"name": "title", "type": "string"}],
+                "relationships": [],
+                "metadata": {"source": "test"},
+            },
+        }
+    )
+
+    assert audit.rows
+    contract = audit.rows[-1]["metadata"]["write_path_contract"]
+    key_spec_followup = next(item for item in contract["derived_side_effects"] if item["name"] == "ontology_key_spec")
+    assert key_spec_followup["status"] == "degraded"
 
 
 @pytest.mark.unit
@@ -372,6 +423,38 @@ async def test_create_ontology_succeeds_when_post_write_side_effects_fail() -> N
     )
     assert stored is not None
     worker.publish_event.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_ontology_publishes_event_before_key_spec_followup() -> None:
+    store = _InMemoryOntologyResourceService()
+    worker, _, _ = _build_worker_with_resource_store(store)
+    order: list[str] = []
+
+    async def _publish_event(_event: Any) -> None:
+        order.append("publish")
+
+    worker.publish_event = AsyncMock(side_effect=_publish_event)
+    worker.key_spec_registry = _RecordingKeySpecRegistry(order)
+
+    await worker.handle_create_ontology(
+        {
+            "command_id": "00000000-0000-0000-0000-000000000314",
+            "created_by": "tester",
+            "payload": {
+                "db_name": "demo",
+                "branch": "main",
+                "class_id": "Ticket",
+                "label": "Ticket",
+                "description": "Ticket class",
+                "properties": [{"name": "title", "type": "string"}],
+                "relationships": [],
+            },
+        }
+    )
+
+    assert order[:2] == ["publish", "key_spec"]
 
 
 @pytest.mark.unit

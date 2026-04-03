@@ -33,7 +33,12 @@ TEST_SCHEMA = os.getenv("AGG_SEQ_ALLOCATOR_TEST_SCHEMA", "spice_event_registry_s
 async def _make_allocator(*, dsn: str, schema: str) -> AggregateSequenceAllocator:
     last_error = None
     for candidate in ([dsn] if (dsn or "").strip() else _get_postgres_url_candidates()):
-        alloc = AggregateSequenceAllocator(dsn=candidate, schema=schema, handler_prefix="write_side_test")
+        alloc = AggregateSequenceAllocator(
+            dsn=candidate,
+            schema=schema,
+            handler_prefix="write_side_test",
+            allow_runtime_ddl_bootstrap=True,
+        )
         try:
             await alloc.connect()
             return alloc

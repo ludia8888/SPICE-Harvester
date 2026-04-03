@@ -41,28 +41,28 @@ python scripts/check_docs.py
 ## Architecture Quality Checklist (Auto-Computed)
 
 - Scope: `backend/**/*.py` (excluding tests/scripts/examples/perf)
-- Population: files **688**, functions **6547**, classes **913**, internal cross-imports **1644**
+- Population: files **722**, functions **6816**, classes **916**, internal cross-imports **1725**
 
 | # | Check | Ratio | Target | Status | Metric Basis |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 계층 간 누수 | 0/1644 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
+| 1 | 계층 간 누수 | 0/1725 (0.00%) | <= 0.50% | **PASS** | `layer_leak_imports / internal_cross_imports` |
 | 2 | 의존성 튐(패키지 순환) | 0/22 (0.00%) | <= 0.00% | **PASS** | `packages_in_scc(>1) / packages` |
-| 3 | I/O와 Core 직접 연결 | 4/96 (4.17%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
+| 3 | I/O와 Core 직접 연결 | 4/98 (4.08%) | <= 5.00% | **PASS** | `io_importing_core_files / core_files` |
 | 4 | 모듈 결합도 과다 | 3/22 (13.64%) | <= 15.00% | **PASS** | `high_coupling_modules / modules` |
-| 5 | 파일 응집도 저하 | 52/688 (7.56%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
-| 6 | 파일 단일 책임 위반 | 65/688 (9.45%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
-| 7 | 함수 단일 책임 위반 | 328/6547 (5.01%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
-| 8 | 연속 상속 깊이(>=3) | 15/913 (1.64%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
-| 9 | 복잡도 과다(CC>=15) | 740/6547 (11.30%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
-| 10 | 롱메서드(len>=80) | 420/6547 (6.42%) | <= 8.00% | **PASS** | `len>=80 / functions` |
+| 5 | 파일 응집도 저하 | 61/722 (8.45%) | <= 20.00% | **PASS** | `cohesion_risk_files / files` |
+| 6 | 파일 단일 책임 위반 | 69/722 (9.56%) | <= 12.00% | **PASS** | `single_responsibility_risk_files / files` |
+| 7 | 함수 단일 책임 위반 | 335/6816 (4.91%) | <= 10.00% | **PASS** | `(cc>=25 or len>=120) / functions` |
+| 8 | 연속 상속 깊이(>=3) | 15/916 (1.64%) | <= 5.00% | **PASS** | `classes_depth>=3 / classes` |
+| 9 | 복잡도 과다(CC>=15) | 748/6816 (10.97%) | <= 15.00% | **PASS** | `cc>=15 / functions` |
+| 10 | 롱메서드(len>=80) | 431/6816 (6.32%) | <= 8.00% | **PASS** | `len>=80 / functions` |
 
 ### Top Risk Signals
 
 - Layer leaks: none detected
 - Dependency cycles: none detected
 - I/O-core direct links (sample): `shared/services/core/agent_internal_client.py`, `shared/services/core/consistency_token.py`, `shared/services/core/sequence_service.py`, `shared/services/core/watermark_monitor.py`
-- Longest functions: `mcp_servers/pipeline_mcp_server.py:203` (1321 lines), `mcp_servers/pipeline_mcp_server.py:205` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:685` (996 lines)
-- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:685` (CC=292), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `objectify_worker/main.py:1105` (CC=247)
+- Longest functions: `mcp_servers/pipeline_mcp_tool_specs.py:6` (1272 lines), `shared/services/pipeline/pipeline_preflight_utils.py:685` (996 lines), `bff/services/pipeline_agent_autonomous_loop.py:2325` (920 lines)
+- Most complex functions: `shared/services/pipeline/pipeline_preflight_utils.py:685` (CC=292), `shared/services/pipeline/pipeline_definition_validator.py:151` (CC=249), `bff/services/pipeline_agent_autonomous_loop.py:2325` (CC=247)
 
 ## External Interfaces (Published Ports)
 
@@ -77,6 +77,7 @@ python scripts/check_docs.py
 | `kafka-ui` | ${KAFKA_UI_PORT_HOST:-8080}:8080 |
 | `lakefs` | ${LAKEFS_PORT_HOST:-48080}:8000 |
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 |
+| `oms` | 8000:8000 |
 | `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 |
 | `postgres` | ${POSTGRES_PORT_HOST:-5433}:5432 |
 | `prometheus` | 19090:9090 |
@@ -110,7 +111,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
 | `minio-init` | - | minio |
 | `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
-| `oms` | - | db-migrations<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `oms` | 8000:8000 | db-migrations<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
 | `ontology-worker` | - | kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
 | `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 | jaeger |
 | `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |

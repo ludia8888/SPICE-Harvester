@@ -46,6 +46,7 @@ from shared.security.startup_guard import ensure_startup_security
 # Service factory import
 from shared.services.core.service_factory import create_fastapi_service, get_bff_service_info, run_service
 from shared.services.core.service_container_common import initialize_rate_limiter_service
+from shared.services.core.runtime_status import ensure_runtime_status, record_runtime_issue
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.dataset_profile_registry import DatasetProfileRegistry
@@ -129,17 +130,7 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_bff_runtime_status(app: FastAPI) -> dict[str, Any]:
-    state = getattr(app.state, "bff_runtime_status", None)
-    if isinstance(state, dict):
-        return state
-    state = {
-        "ready": True,
-        "degraded": False,
-        "issues": [],
-        "background_tasks": {},
-    }
-    app.state.bff_runtime_status = state
-    return state
+    return ensure_runtime_status(app, attr_names=("bff_runtime_status",))
 
 
 def _record_bff_runtime_issue(
@@ -149,16 +140,16 @@ def _record_bff_runtime_issue(
     message: str,
     affects_readiness: bool,
 ) -> None:
-    runtime_status = _ensure_bff_runtime_status(app)
-    runtime_status["degraded"] = True
-    if affects_readiness:
-        runtime_status["ready"] = False
-    runtime_status.setdefault("issues", []).append(
-        {
-            "component": component,
-            "message": message,
-            "affects_readiness": bool(affects_readiness),
-        }
+    record_runtime_issue(
+        app,
+        component=component,
+        dependency=component,
+        message=message,
+        state="hard_down" if affects_readiness else "degraded",
+        classification="unavailable",
+        affected_features=(component,),
+        affects_readiness=affects_readiness,
+        attr_names=("bff_runtime_status",),
     )
 
 

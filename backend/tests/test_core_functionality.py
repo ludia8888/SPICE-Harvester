@@ -955,7 +955,7 @@ class TestHealthEndpoints:
                 assert resp.status == 200
                 result = await resp.json()
                 assert result.get("status") == "success"
-                assert (result.get("data") or {}).get("status") == "healthy"
+                assert (result.get("data") or {}).get("status") == "ready"
                 
     @pytest.mark.asyncio
     async def test_bff_health(self):
@@ -965,7 +965,7 @@ class TestHealthEndpoints:
                 assert resp.status == 200
                 result = await resp.json()
                 assert result.get("status") == "success"
-                assert (result.get("data") or {}).get("status") == "healthy"
+                assert (result.get("data") or {}).get("status") == "ready"
                 
 
 if __name__ == "__main__":

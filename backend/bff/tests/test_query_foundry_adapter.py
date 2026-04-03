@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from bff.dependencies import FoundryQueryService
 from shared.utils.foundry_page_token import encode_offset_page_token
@@ -97,3 +98,81 @@ async def test_query_database_rejects_invalid_order_direction() -> None:
                 "order_direction": "up",
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_query_database_surfaces_non_dict_search_payload() -> None:
+    oms = AsyncMock()
+    oms.search_objects_v2 = AsyncMock(return_value=["broken"])
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.query_database("demo_db", {"class_id": "Customer"})
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS search response shape" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_query_database_surfaces_non_list_data_payload() -> None:
+    oms = AsyncMock()
+    oms.search_objects_v2 = AsyncMock(return_value={"data": {"rows": []}, "totalCount": "0"})
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.query_database("demo_db", {"class_id": "Customer"})
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS search response data shape" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_list_classes_surfaces_non_dict_payload() -> None:
+    oms = AsyncMock()
+    oms.list_ontologies = AsyncMock(return_value=["broken"])
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.list_classes("demo_db")
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS ontology list response shape" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_create_class_surfaces_unexpected_payload() -> None:
+    oms = AsyncMock()
+    oms.create_ontology = AsyncMock(return_value={"status": "error", "detail": "broken"})
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_class("demo_db", {"@id": "Customer"})
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS create ontology response shape" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_list_databases_surfaces_unexpected_payload() -> None:
+    oms = AsyncMock()
+    oms.list_databases = AsyncMock(return_value={"status": "error", "detail": "broken"})
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.list_databases()
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS database list response shape" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_get_class_surfaces_unexpected_ontology_payload() -> None:
+    oms = AsyncMock()
+    oms.get_ontology = AsyncMock(return_value={"status": "error", "detail": "broken"})
+    service = FoundryQueryService(oms)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.get_class("demo_db", "Customer")
+
+    assert exc_info.value.status_code == 502
+    assert "Unexpected OMS ontology response shape" in str(exc_info.value.detail)

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+from botocore.exceptions import ClientError
 
 from shared.services.storage import event_store as event_store_module
 from shared.services.storage.event_store import EventStore
@@ -284,3 +285,21 @@ async def test_snapshot_operations_initialize_session_lazily(monkeypatch: pytest
         "snapshots/Order/ord-1/v3.json",
         "snapshots/Order/ord-1/vlatest.json",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_snapshot_raises_for_non_missing_client_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _DeniedClient(_S3Client):
+        async def get_object(self, *, Bucket: str, Key: str):  # noqa: N803
+            _ = Bucket, Key
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+
+    client = _DeniedClient(pages_by_prefix={}, objects_by_key={})
+    monkeypatch.setattr(event_store_module.aioboto3, "Session", lambda: _Session(client))
+
+    store = EventStore()
+    store.bucket_name = "test-bucket"
+
+    with pytest.raises(ClientError):
+        await store.get_snapshot("Order", "ord-1")

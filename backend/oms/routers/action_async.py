@@ -25,6 +25,12 @@ from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.request_context import get_correlation_id
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
+from shared.services.core.write_path_contract import (
+    emit_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.registries.action_log_registry import ActionLogRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
@@ -55,6 +61,20 @@ from oms.services.action_submit_service import submit_action_request
 logger = logging.getLogger(__name__)
 
 foundry_router = APIRouter(prefix="/v2/ontologies/{ontology}/actions", tags=["Foundry Actions v2"])
+
+
+def _emit_batch_write_path_contract(
+    *,
+    followups: List[Dict[str, Any]],
+    level: str = "info",
+) -> Dict[str, Any]:
+    return emit_write_path_contract(
+        logger,
+        authoritative_write="action_batch_submission",
+        followups=followups,
+        level=level,
+        message_prefix="Action batch write path contract",
+    )
 
 
 class ActionSubmitRequest(BaseModel):
@@ -511,6 +531,23 @@ def _validate_batch_dependency_graph(
         _dfs(req_id)
 
 
+def _resolve_batch_cleanup_action_log_ids(
+    *,
+    normalized_items: List[tuple[str, ActionSubmitBatchItemRequest]],
+    submit_results: Dict[str, ActionSubmitResponse],
+    emitted_request_ids: Set[str],
+) -> List[str]:
+    cleanup_ids: List[str] = []
+    for request_id, _item in normalized_items:
+        if request_id in emitted_request_ids:
+            continue
+        submit_resp = submit_results.get(request_id)
+        if submit_resp is None:
+            continue
+        cleanup_ids.append(submit_resp.action_log_id)
+    return cleanup_ids
+
+
 async def submit_action_async(
     db_name: str,
     action_type_id: str,
@@ -596,6 +633,8 @@ async def submit_action_batch_async(
     noop_event_store = _NoopEventStore()
     submit_results: Dict[str, ActionSubmitResponse] = {}
     dependency_registry: Optional[ActionLogRegistry] = None
+    emitted_request_ids: Set[str] = set()
+    dependency_edges_registered = 0
 
     try:
         for request_id, item in normalized_items:
@@ -627,6 +666,13 @@ async def submit_action_batch_async(
             )
             submit_results[request_id] = submit_resp
 
+        write_path_followups: List[Dict[str, Any]] = [
+            followup_completed(
+                "batch_action_logs",
+                details={"count": len(submit_results)},
+            )
+        ]
+
         dependency_registry = ActionLogRegistry()
         await dependency_registry.connect()
         for child_request_id, deps in dependencies_by_request_id.items():
@@ -641,6 +687,22 @@ async def submit_action_batch_async(
                     parent_action_log_id=parent_log_id,
                     trigger_on=str(dep.trigger_on),
                 )
+                dependency_edges_registered += 1
+
+        if dependency_edges_registered:
+            write_path_followups.append(
+                followup_completed(
+                    "batch_dependencies",
+                    details={"count": dependency_edges_registered},
+                )
+            )
+        else:
+            write_path_followups.append(
+                followup_skipped(
+                    "batch_dependencies",
+                    details={"reason": "none_declared"},
+                )
+            )
 
         # Emit root commands only after dependencies are fully registered.
         for request_id, item in normalized_items:
@@ -675,6 +737,21 @@ async def submit_action_batch_async(
                 metadata={"service": "oms", "mode": "action_writeback_batch"},
             )
             await event_store.append_event(envelope)
+            emitted_request_ids.add(request_id)
+
+        write_path_followups.append(
+            followup_completed(
+                "batch_root_command_events",
+                details={"count": len(emitted_request_ids)},
+            )
+        )
+        write_path_followups.append(
+            followup_skipped(
+                "batch_cleanup",
+                details={"reason": "not_needed"},
+            )
+        )
+        _emit_batch_write_path_contract(followups=write_path_followups)
 
         response_items: List[ActionSubmitBatchItemResponse] = []
         for idx, (request_id, _item) in enumerate(normalized_items):
@@ -697,6 +774,7 @@ async def submit_action_batch_async(
             items=response_items,
         )
     except Exception as exc:
+        cleanup_count = 0
         if submit_results:
             registry_for_cleanup = dependency_registry
             cleanup_registry_created = False
@@ -717,10 +795,16 @@ async def submit_action_batch_async(
                     "message": str(exc),
                     "batch_id": batch_id,
                 }
-                for submit_resp in submit_results.values():
+                cleanup_action_log_ids = _resolve_batch_cleanup_action_log_ids(
+                    normalized_items=normalized_items,
+                    submit_results=submit_results,
+                    emitted_request_ids=emitted_request_ids,
+                )
+                cleanup_count = len(cleanup_action_log_ids)
+                for action_log_id in cleanup_action_log_ids:
                     try:
                         await registry_for_cleanup.mark_failed(
-                            action_log_id=submit_resp.action_log_id,
+                            action_log_id=action_log_id,
                             result=cleanup_payload,
                         )
                     except Exception:
@@ -736,6 +820,45 @@ async def submit_action_batch_async(
                             "Failed to close ActionLogRegistry after batch cleanup",
                             exc_info=True,
                         )
+        failure_followups: List[Dict[str, Any]] = [
+            followup_completed(
+                "batch_action_logs",
+                details={"count": len(submit_results)},
+            )
+        ]
+        if dependency_edges_registered:
+            failure_followups.append(
+                followup_completed(
+                    "batch_dependencies",
+                    details={"count": dependency_edges_registered},
+                )
+            )
+        else:
+            failure_followups.append(
+                followup_skipped(
+                    "batch_dependencies",
+                    details={"reason": "none_registered"},
+                )
+            )
+        failure_followups.append(
+            followup_degraded(
+                "batch_root_command_events",
+                error=str(exc),
+                details={"emitted_count": len(emitted_request_ids)},
+            )
+        )
+        failure_followups.append(
+            followup_completed(
+                "batch_cleanup",
+                details={"count": cleanup_count},
+            )
+            if cleanup_count
+            else followup_skipped(
+                "batch_cleanup",
+                details={"reason": "no_pending_action_logs"},
+            )
+        )
+        _emit_batch_write_path_contract(followups=failure_followups, level="warning")
         raise
     finally:
         if dependency_registry is not None:

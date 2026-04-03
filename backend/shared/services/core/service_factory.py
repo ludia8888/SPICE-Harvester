@@ -33,6 +33,13 @@ from shared.observability.request_context import (
     generate_request_id,
     request_context,
 )
+from shared.services.core.runtime_status import (
+    availability_surface,
+    build_runtime_issue,
+    get_runtime_status,
+    normalize_runtime_status,
+)
+from shared.observability.log_taxonomy import taxonomy_extra
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +279,10 @@ def _add_logging_middleware(app: FastAPI) -> None:
             request.url.path,
             getattr(response, "status_code", "?"),
             process_time,
+            extra=taxonomy_extra(
+                event_name="http.request",
+                event_family="access",
+            ),
         )
         return response
 
@@ -283,16 +294,8 @@ def _add_health_check(app: FastAPI, service_info: ServiceInfo) -> None:
         state = getattr(app, "state", None)
         if state is None:
             return None
-
-        explicit = getattr(state, "runtime_status", None)
-        if isinstance(explicit, dict):
-            return explicit
-
         service_key = re.sub(r"[^a-z0-9]+", "_", service_info.name.lower()).strip("_")
-        keyed = getattr(state, f"{service_key}_runtime_status", None)
-        if isinstance(keyed, dict):
-            return keyed
-        return None
+        return get_runtime_status(app, attr_names=(f"{service_key}_runtime_status",))
     
     @app.get("/", tags=["Health"])
     async def root():
@@ -315,29 +318,25 @@ def _add_health_check(app: FastAPI, service_info: ServiceInfo) -> None:
             description=service_info.description
         ).to_dict()
         runtime_status = _resolve_runtime_status()
-        if not runtime_status:
-            return response
-
-        ready = bool(runtime_status.get("ready", True))
-        degraded = bool(runtime_status.get("degraded", False))
-        issues = list(runtime_status.get("issues") or [])
-        background_tasks = dict(runtime_status.get("background_tasks") or {})
+        surface = availability_surface(
+            service=service_info.name,
+            container_ready=True,
+            runtime_status=runtime_status,
+        )
 
         if isinstance(response.get("data"), dict):
-            response["data"]["status"] = "healthy" if ready and not degraded else "degraded"
-            response["data"]["ready"] = ready
-            if issues:
-                response["data"]["issues"] = issues
-            if background_tasks:
-                response["data"]["background_tasks"] = background_tasks
-
-        if ready and not degraded:
+            response["data"].update(surface)
+        if surface["status"] == "ready":
             return response
 
-        response["status"] = "warning" if ready else "error"
-        response["message"] = "Service is degraded" if ready else "Service is not ready"
+        response["status"] = "warning" if surface["status"] == "degraded" else "error"
+        response["message"] = (
+            "Service is degraded"
+            if surface["status"] == "degraded"
+            else "Service is not ready"
+        )
         return JSONResponse(
-            status_code=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_200_OK if surface["status"] == "degraded" else status.HTTP_503_SERVICE_UNAVAILABLE,
             content=response,
         )
 
@@ -441,37 +440,86 @@ def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
     @app.get("/observability/status", include_in_schema=False)
     async def observability_status():
         dynamic_tracing_status = tracing_status
+        issues: List[Dict[str, Any]] = []
         try:
             tracing_service = getattr(app.state, "tracing_service", None)
             if tracing_service is not None and hasattr(tracing_service, "runtime_status"):
                 dynamic_tracing_status = tracing_service.runtime_status()
         except Exception as e:
             logger.warning("Failed to resolve tracing runtime status: %s", e, exc_info=True)
+            issues.append(
+                build_runtime_issue(
+                    component="observability",
+                    dependency="tracing_status",
+                    message=f"Failed to resolve tracing runtime status: {e}",
+                    state="degraded",
+                    classification="internal",
+                    affected_features=("tracing", "observability"),
+                    affects_readiness=False,
+                )
+            )
 
         dynamic_metrics_status = metrics_status
         try:
             dynamic_metrics_status = get_metrics_runtime_status(service_info.name)
         except Exception as e:
             logger.warning("Failed to resolve metrics runtime status: %s", e, exc_info=True)
+            issues.append(
+                build_runtime_issue(
+                    component="observability",
+                    dependency="metrics_status",
+                    message=f"Failed to resolve metrics runtime status: {e}",
+                    state="degraded",
+                    classification="internal",
+                    affected_features=("metrics", "observability"),
+                    affects_readiness=False,
+                )
+            )
 
         tracing_required = bool(dynamic_tracing_status.get("enabled"))
         metrics_required = bool(dynamic_metrics_status.get("enabled"))
         tracing_active = bool(dynamic_tracing_status.get("active"))
         metrics_active = bool(dynamic_metrics_status.get("active"))
-        status_text = "ok"
-        if (tracing_required and not tracing_active) or (metrics_required and not metrics_active):
-            status_text = "degraded"
+        if tracing_required and not tracing_active:
+            issues.append(
+                build_runtime_issue(
+                    component="observability",
+                    dependency="tracing",
+                    message="Tracing is enabled but not active",
+                    state="degraded",
+                    classification="unavailable",
+                    affected_features=("tracing", "observability"),
+                    affects_readiness=False,
+                )
+            )
+        if metrics_required and not metrics_active:
+            issues.append(
+                build_runtime_issue(
+                    component="observability",
+                    dependency="metrics",
+                    message="Metrics are enabled but not active",
+                    state="degraded",
+                    classification="unavailable",
+                    affected_features=("metrics", "observability"),
+                    affects_readiness=False,
+                )
+            )
+
+        surface = availability_surface(
+            service=service_info.name,
+            container_ready=True,
+            runtime_status=normalize_runtime_status({"issues": issues}),
+        )
 
         payload = {
-            "status": status_text,
-            "service": service_info.name,
+            **surface,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "tracing": dynamic_tracing_status,
             "metrics": dynamic_metrics_status,
         }
         return JSONResponse(
             content=payload,
-            status_code=200 if status_text == "ok" else 503,
+            status_code=200 if surface["ready"] else 503,
         )
 
 

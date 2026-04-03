@@ -6,6 +6,9 @@ on:
       python-version:
         type: string
         default: "3.11"
+      make-target:
+        type: string
+        default: ""
       script-args:
         type: string
         default: "--full"
@@ -27,6 +30,7 @@ jobs:
       SMOKE_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || 'ci_admin_token' }}
       TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
       OPENAPI_STRICT_REMOVED_V1_OPS: "true"
+      ALLOW_RUNTIME_DDL_BOOTSTRAP: "false"
 
     steps:
       - name: Checkout
@@ -59,9 +63,13 @@ jobs:
         run: |
           scripts/sdk/check_sdk_drift.sh
 
-      - name: Run production test suite
+      - name: Run stack verification target
         run: |
-          PYTHON_BIN=python ./backend/run_production_tests.sh ${{ inputs.script-args }}
+          if [ -n "${{ inputs.make-target }}" ]; then
+            make PYTHON=python ${{ inputs.make-target }}
+          else
+            PYTHON_BIN=python ./backend/run_production_tests.sh ${{ inputs.script-args }}
+          fi
 
       - name: Run API duplicate/legacy contract audit (strict)
         run: |

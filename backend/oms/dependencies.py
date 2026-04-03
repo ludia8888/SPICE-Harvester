@@ -18,6 +18,7 @@ Key improvements:
 
 import logging
 from typing import Annotated, Optional
+import asyncpg
 from fastapi import status, Path, Depends
 
 # Modern dependency injection imports
@@ -32,12 +33,20 @@ from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.observability.request_context import get_correlation_id, get_request_id
+from shared.services.core.runtime_status import (
+    availability_surface,
+    build_runtime_issue,
+    probe_service_runtime_state,
+)
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.storage.elasticsearch_service import ElasticsearchService
-from shared.services.storage.redis_service import RedisService
+from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatusService
-from shared.services.registries.processed_event_registry import ProcessedEventRegistry
+from shared.services.registries.processed_event_registry import (
+    MissingProcessedEventRegistrySchemaError,
+    ProcessedEventRegistry,
+)
 from shared.services.registries.processed_event_registry_factory import create_processed_event_registry
 
 # OMS specific imports
@@ -59,13 +68,7 @@ def _log_optional_dependency_failure(name: str, exc: Exception, *, error: bool =
 
 
 async def _health_status_for_service(service: object) -> str:
-    if hasattr(service, "health_check"):
-        is_healthy = await service.health_check()
-        return "healthy" if is_healthy else "unhealthy"
-    if hasattr(service, "check_connection"):
-        is_connected = await service.check_connection()
-        return "connected" if is_connected else "disconnected"
-    return "available"
+    return await probe_service_runtime_state(service)
 
 
 class OMSDependencyProvider:
@@ -89,80 +92,56 @@ class OMSDependencyProvider:
     @staticmethod
     async def get_command_status_service(
         container: ServiceContainer = Depends(get_container)
-    ) -> CommandStatusService:
+    ) -> Optional[CommandStatusService]:
         """
         Get command status service from container
         
         This replaces the global command_status_service variable and get_command_status_service() function.
         """
+        if container.has(CommandStatusService):
+            if not container.is_created(CommandStatusService):
+                raise RuntimeError("CommandStatusService is registered without a created instance")
+            return await container.get(CommandStatusService)
+
+        container.ensure_singleton(RedisService, create_redis_service)
         try:
-            # Check if already created
+            redis_service = await container.get(RedisService)
+        except RuntimeError as exc:
+            _log_optional_dependency_failure("Redis service", exc)
+            logger.warning("Redis service not available, command status tracking disabled")
+            return None
+
+        command_status_service = CommandStatusService(redis_service)
+        try:
+            container.register_instance(CommandStatusService, command_status_service)
+        except ValueError:
             if container.has(CommandStatusService) and container.is_created(CommandStatusService):
                 return await container.get(CommandStatusService)
-            
-            # Try to get Redis service directly from shared container
-            redis_service = None
-            try:
-                # First try from container
-                if container.has(RedisService):
-                    redis_service = await container.get(RedisService)
-            except Exception as exc:
-                _log_optional_dependency_failure("Redis container service", exc)
-            
-            # If Redis not available, try direct connection
-            if redis_service is None:
-                try:
-                    from shared.services.storage.redis_service import RedisService as RedisServiceClass
-                    settings = get_settings()
-
-                    redis_service = RedisServiceClass(
-                        host=settings.database.redis_host,
-                        port=settings.database.redis_port,
-                        password=settings.database.redis_password,
-                    )
-                    await redis_service.connect()
-                except Exception as exc:
-                    _log_optional_dependency_failure("Direct Redis connection", exc)
-                    redis_service = None
-            
-            if redis_service is None:
-                # If Redis is not available, return None
-                # This allows the system to continue without command status tracking
-                logger.warning("Redis service not available, command status tracking disabled")
-                return None
-            
-            # Create command status service
-            command_status_service = CommandStatusService(redis_service)
-            
-            # Register the created instance
-            container.register_instance(CommandStatusService, command_status_service)
-            
-            return command_status_service
-            
-        except Exception as exc:
-            _log_optional_dependency_failure("CommandStatusService", exc, error=True)
-            # Don't raise HTTPException, just return None to allow system to continue
-            return None
+            raise
+        return command_status_service
 
     @staticmethod
     async def get_processed_event_registry(
         container: ServiceContainer = Depends(get_container),
     ) -> Optional[ProcessedEventRegistry]:
+        if container.has(ProcessedEventRegistry):
+            if not container.is_created(ProcessedEventRegistry):
+                raise RuntimeError("ProcessedEventRegistry is registered without a created instance")
+            return await container.get(ProcessedEventRegistry)
+
         try:
+            registry = await create_processed_event_registry(validate=False)
+        except (OSError, TimeoutError, asyncpg.PostgresError, MissingProcessedEventRegistrySchemaError) as exc:
+            _log_optional_dependency_failure("ProcessedEventRegistry connection", exc)
+            return None
+
+        try:
+            container.register_instance(ProcessedEventRegistry, registry)
+        except ValueError:
             if container.has(ProcessedEventRegistry) and container.is_created(ProcessedEventRegistry):
                 return await container.get(ProcessedEventRegistry)
-
-            try:
-                registry = await create_processed_event_registry(validate=False)
-            except Exception as exc:
-                _log_optional_dependency_failure("ProcessedEventRegistry connection", exc)
-                return None
-
-            container.register_instance(ProcessedEventRegistry, registry)
-            return registry
-        except Exception as exc:
-            _log_optional_dependency_failure("ProcessedEventRegistry", exc)
-            return None
+            raise
+        return registry
 
 
 # Type-safe dependency annotations for cleaner injection
@@ -245,6 +224,7 @@ async def check_oms_dependencies_health(
     initialized and accessible through the modern container system.
     """
     health_status = {}
+    issues = []
     
     try:
         # Check each service
@@ -264,26 +244,71 @@ async def check_oms_dependencies_health(
                     health_status[service_name] = await _health_status_for_service(service)
                 else:
                     health_status[service_name] = "not_registered"
+                    issues.append(
+                        build_runtime_issue(
+                            component=service_name,
+                            dependency=service_name,
+                            message=f"{service_name} not registered",
+                            state="degraded",
+                            classification="internal",
+                            affected_features=[f"oms.{service_name}"],
+                            affects_readiness=False,
+                        )
+                    )
             except Exception as exc:
                 logger.warning("OMS dependency health check failed for %s", service_name, exc_info=True)
                 health_status[service_name] = f"error: {str(exc)}"
-        
-        return {
-            "status": "ok",
-            "services": health_status,
-            "container_initialized": container.is_initialized
-        }
+                issues.append(
+                    build_runtime_issue(
+                        component=service_name,
+                        dependency=service_name,
+                        message=f"{service_name} health check failed: {exc}",
+                        state="degraded",
+                        classification="internal",
+                        affected_features=[f"oms.{service_name}"],
+                        affects_readiness=False,
+                    )
+                )
+        for service_name, service_status in health_status.items():
+            if str(service_status) == "hard_down":
+                issues.append(
+                    build_runtime_issue(
+                        component=service_name,
+                        dependency=service_name,
+                        message=f"{service_name} reported {service_status}",
+                        state="degraded",
+                        classification="unavailable",
+                        affected_features=[f"oms.{service_name}"],
+                        affects_readiness=False,
+                    )
+                )
+        surface = availability_surface(
+            service="oms-dependencies",
+            container_ready=bool(container.is_initialized),
+            runtime_status={"ready": True, "degraded": bool(issues), "issues": issues},
+        )
+        surface["services"] = health_status
+        surface["container_initialized"] = bool(container.is_initialized)
+        return surface
         
     except Exception as e:
         logger.warning("OMS dependency health check crashed", exc_info=True)
-        return build_error_envelope(
-            service_name=SERVICE_NAME,
-            message="OMS dependency health check failed",
-            detail=str(e),
-            code=ErrorCode.INTERNAL_ERROR,
-            category=ErrorCategory.INTERNAL,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            context={"services": health_status},
-            request_id=get_request_id(),
-            correlation_id=get_correlation_id(),
+        issues = [
+            build_runtime_issue(
+                component="oms_dependencies",
+                dependency="oms_dependencies",
+                message=f"OMS dependency health check failed: {e}",
+                state="hard_down",
+                classification="internal",
+                affected_features=["oms.dependencies"],
+                affects_readiness=True,
+            )
+        ]
+        surface = availability_surface(
+            service="oms-dependencies",
+            container_ready=False,
+            runtime_status={"ready": False, "degraded": True, "issues": issues},
         )
+        surface["services"] = health_status
+        surface["container_initialized"] = False
+        return surface

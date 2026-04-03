@@ -85,7 +85,7 @@ class MySQLConnectorService(ConnectorAdapter):
             import pymysql  # type: ignore
 
             return pymysql
-        except Exception as exc:  # pragma: no cover
+        except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "pymysql is required for MySQL runtime. "
                 "Install dependency before enabling mysql connector."
@@ -100,8 +100,17 @@ class MySQLConnectorService(ConnectorAdapter):
         return out
 
     async def test_connection(self, *, config: Dict[str, Any], secrets: Dict[str, Any]) -> ConnectorConnectionTestResult:
+        handled_errors: tuple[type[BaseException], ...] = (
+            RuntimeError,
+            ValueError,
+            OSError,
+            TimeoutError,
+        )
         try:
             driver = self._require_driver()
+            driver_error = getattr(driver, "MySQLError", None)
+            if isinstance(driver_error, type) and issubclass(driver_error, BaseException):
+                handled_errors = handled_errors + (driver_error,)
 
             def _run() -> None:
                 conn = driver.connect(
@@ -121,7 +130,7 @@ class MySQLConnectorService(ConnectorAdapter):
 
             await run_blocking_query(_run, adapter_name="MySQL", operation="connection test")
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
-        except Exception as exc:
+        except handled_errors as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
 
     async def _fetch(

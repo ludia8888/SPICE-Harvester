@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError
 
 from shared.errors.runtime_exception_policy import LineageRecordError, LineageUnavailableError
 from shared.models.event_envelope import EventEnvelope
@@ -44,6 +45,11 @@ class _DummySession:
         return _DummyS3ClientContext(self._s3)
 
 
+class _HeadBucketDeniedS3(_DummyS3):
+    async def head_bucket(self, **_: Any) -> None:
+        raise ClientError({"Error": {"Code": "AccessDenied"}}, "HeadBucket")
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_event_store_connect_is_idempotent_under_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,6 +78,20 @@ async def test_event_store_connect_is_idempotent_under_concurrency(monkeypatch: 
 
     await store.connect()
     assert counters["head_bucket"] == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_store_connect_raises_for_non_missing_bucket_probe_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dummy_s3 = _HeadBucketDeniedS3({"head_bucket": 0, "create_bucket": 0, "put_bucket_versioning": 0})
+    monkeypatch.setattr(event_store_module.aioboto3, "Session", lambda: _DummySession(dummy_s3))
+
+    store = EventStore()
+
+    with pytest.raises(ClientError):
+        await store.connect()
 
 
 @pytest.mark.unit

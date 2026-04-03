@@ -211,3 +211,26 @@ def test_application_settings_populates_environment_by_field_name(monkeypatch: p
     settings = ApplicationSettings(environment="test")
 
     assert settings.environment == Environment.TEST
+
+
+def test_runtime_ddl_bootstrap_defaults_false_outside_dev_and_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.delenv("ALLOW_RUNTIME_DDL_BOOTSTRAP", raising=False)
+    monkeypatch.delenv("DATABASE_ALLOW_RUNTIME_DDL_BOOTSTRAP", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    staging = ApplicationSettings(environment="staging")
+    production = ApplicationSettings(environment="production")
+
+    assert staging.allow_runtime_ddl_bootstrap is False
+    assert production.allow_runtime_ddl_bootstrap is False
+
+
+def test_runtime_ddl_bootstrap_can_be_force_disabled_under_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
+    _disable_env_file(monkeypatch)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "backend/tests/unit/config/test_settings_ssot.py::test")
+    monkeypatch.setenv("ALLOW_RUNTIME_DDL_BOOTSTRAP", "false")
+
+    settings = ApplicationSettings(environment="test")
+
+    assert settings.allow_runtime_ddl_bootstrap is False

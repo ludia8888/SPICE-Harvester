@@ -33,6 +33,12 @@ from shared.services.pipeline.pipeline_dataset_utils import (
     resolve_fallback_branches,
 )
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
+from shared.services.core.write_path_contract import (
+    build_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.utils.event_utils import build_command_event
 from shared.observability.tracing import trace_db_operation
 
@@ -428,8 +434,32 @@ async def update_pipeline(
                 branch=branch or update.branch,
                 definition_json=definition_json,
             )
+        write_path_followups: list[dict[str, Any]] = [
+            followup_completed(
+                "pipeline_version_commit",
+                details={"commit_id": version.lakefs_commit_id if version else None},
+            )
+            if version is not None
+            else followup_skipped(
+                "pipeline_version_commit",
+                details={"reason": "definition_unchanged"},
+            )
+        ]
         if dependencies is not None:
             await pipeline_registry.replace_dependencies(pipeline_id=pipeline_id, dependencies=dependencies)
+            write_path_followups.append(
+                followup_completed(
+                    "pipeline_dependencies",
+                    details={"count": len(dependencies)},
+                )
+            )
+        else:
+            write_path_followups.append(
+                followup_skipped(
+                    "pipeline_dependencies",
+                    details={"reason": "not_provided"},
+                )
+            )
         dependencies_payload = await pipeline_registry.list_dependencies(pipeline_id=pipeline_id)
         dependencies_for_api = _format_dependencies_for_api(dependencies_payload)
         if definition_json is not None and dependencies_for_api:
@@ -455,11 +485,30 @@ async def update_pipeline(
             command_type="UPDATE_PIPELINE",
         )
         event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+        event_followup: dict[str, Any]
         try:
             await event_store.connect()
             await event_store.append_event(event)
+            event_followup = followup_completed(
+                "pipeline_updated_event",
+                details={"topic": AppConfig.PIPELINE_EVENTS_TOPIC},
+            )
         except Exception as exc:
             logger.warning("Failed to append pipeline update event: %s", exc)
+            event_followup = followup_degraded(
+                "pipeline_updated_event",
+                error=str(exc),
+                details={"topic": AppConfig.PIPELINE_EVENTS_TOPIC},
+            )
+        write_path_followups.append(event_followup)
+
+        contract = build_write_path_contract(
+            authoritative_write="pipeline_update",
+            followups=[
+                *write_path_followups,
+                followup_completed("pipeline_audit", details={"action": "PIPELINE_UPDATED"}),
+            ],
+        )
 
         await _log_pipeline_audit(
             audit_store,
@@ -471,6 +520,7 @@ async def update_pipeline(
                 "branch": branch or update.branch,
                 "commit_id": version.lakefs_commit_id if version else None,
                 "definition_diff": diff_payload,
+                "write_path_contract": contract,
             },
         )
 

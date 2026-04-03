@@ -8,7 +8,7 @@ from shared.errors.enterprise_catalog import (
     resolve_enterprise_error,
     resolve_objectify_error,
 )
-from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.error_types import ErrorCategory, ErrorCode, classify_error_family
 from shared.observability.tracing import get_tracing_service
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
@@ -181,6 +181,13 @@ def build_error_envelope(
         "detail": detail or message,
         "code": code.value,
         "category": category.value,
+        "classification": {
+            "family": classify_error_family(
+                category=category,
+                retryable=resolved_enterprise.retryable if resolved_enterprise else False,
+            ).value,
+            "retryable": resolved_enterprise.retryable if resolved_enterprise else False,
+        },
         "http_status": http_status,
         "retryable": resolved_enterprise.retryable if resolved_enterprise else False,
         "enterprise": enterprise_payload,

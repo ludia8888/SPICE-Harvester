@@ -1,0 +1,59 @@
+{
+  "schema": "release_regression_gate.v1",
+  "gates": [
+    {
+      "name": "runtime_ddl_audit",
+      "make_target": "backend-runtime-ddl-audit",
+      "ci_job": "backend-runtime-ddl-audit",
+      "stage": "guard",
+      "blocking": true,
+      "requires_stack": false,
+      "description": "Guard migration-first posture by rejecting new runtime DDL callsites."
+    },
+    {
+      "name": "error_taxonomy_audit",
+      "make_target": "backend-error-taxonomy",
+      "ci_job": "backend-error-taxonomy",
+      "stage": "guard",
+      "blocking": true,
+      "requires_stack": false,
+      "description": "Reject raw HTTP and error taxonomy regressions before release."
+    },
+    {
+      "name": "backend_unit",
+      "make_target": "backend-unit",
+      "ci_job": "backend-unit",
+      "stage": "non_infra",
+      "blocking": true,
+      "requires_stack": false,
+      "description": "Fast non-infra backend regression suite."
+    },
+    {
+      "name": "backend_boundary_smoke",
+      "make_target": "backend-boundary-smoke",
+      "ci_job": "backend-boundary-smoke",
+      "stage": "smoke",
+      "blocking": true,
+      "requires_stack": true,
+      "description": "Explicit live boundary round-trips for Redis/Postgres/LakeFS/Kafka/S3."
+    },
+    {
+      "name": "backend_release_smoke",
+      "make_target": "backend-release-smoke",
+      "ci_job": "backend-release-smoke",
+      "stage": "smoke",
+      "blocking": true,
+      "requires_stack": true,
+      "description": "Curated release smoke suite against a running stack."
+    },
+    {
+      "name": "backend_infra_tier",
+      "make_target": "backend-infra-tier",
+      "ci_job": "backend-infra-tier",
+      "stage": "infra",
+      "blocking": true,
+      "requires_stack": true,
+      "description": "All non-smoke requires_infra regressions."
+    }
+  ]
+}

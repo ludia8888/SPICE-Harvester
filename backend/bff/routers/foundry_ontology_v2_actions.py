@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
+
+import httpx
+from fastapi import status
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_apply_action_mode(*, explicit_mode: str | None) -> str:
@@ -126,3 +132,270 @@ def _normalize_apply_action_response_payload(
         data_payload.setdefault("writebackStatus", writeback_status)
         normalized["data"] = data_payload
     return normalized
+
+
+async def list_action_types_route(
+    *,
+    ontology: str,
+    request: Any,
+    page_size: int,
+    page_token: str | None,
+    branch: str,
+    oms_client: Any,
+    resolve_ontology_db_name: Any,
+    validate_branch: Any,
+    require_domain_role: Any,
+    preflight_error_response: Any,
+    handled_exceptions: Any,
+    pagination_scope: Any,
+    decode_page_token: Any,
+    encode_page_token: Any,
+    extract_ontology_resource_rows: Any,
+    list_action_type_resources_with_fallback: Any,
+    to_foundry_action_type: Any,
+    upstream_status_error_response: Any,
+    upstream_transport_error_response: Any,
+    internal_error_response: Any,
+    not_found_error: Any,
+) -> Any:
+    try:
+        db_name = await resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = validate_branch(branch)
+        await require_domain_role(request, db_name=db_name)
+        page_scope = pagination_scope("v2/actionTypes", db_name, branch, page_size)
+        offset = decode_page_token(page_token, scope=page_scope)
+    except handled_exceptions as exc:
+        return preflight_error_response(exc, ontology=str(ontology))
+
+    try:
+        payload = await oms_client.list_ontology_resources(
+            db_name,
+            resource_type="action_type",
+            branch=branch,
+            limit=page_size,
+            offset=offset,
+        )
+        raw_resources = extract_ontology_resource_rows(payload)
+        resources = raw_resources
+        total_available: int | None = None
+        if not resources:
+            fallback_resources = await list_action_type_resources_with_fallback(
+                db_name=db_name,
+                branch=branch,
+                oms_client=oms_client,
+            )
+            total_available = len(fallback_resources)
+            resources = fallback_resources[offset : offset + page_size]
+        data = [
+            mapped
+            for mapped in (to_foundry_action_type(resource) for resource in resources)
+            if mapped is not None
+        ]
+        if total_available is not None:
+            consumed = offset + len(resources)
+            next_page_token = encode_page_token(consumed, scope=page_scope) if consumed < total_available else None
+        else:
+            next_page_token = (
+                encode_page_token(offset + len(raw_resources), scope=page_scope)
+                if len(raw_resources) == page_size
+                else None
+            )
+        return {"data": data, "nextPageToken": next_page_token}
+    except httpx.HTTPStatusError as exc:
+        return upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            not_found_response=not_found_error("OntologyNotFound", ontology=db_name),
+        )
+    except httpx.HTTPError:
+        return upstream_transport_error_response(ontology=db_name)
+    except handled_exceptions as exc:
+        return internal_error_response(
+            log_message="Failed to list action types (v2)",
+            exc=exc,
+            ontology=db_name,
+        )
+
+
+async def get_action_type_route(
+    *,
+    ontology: str,
+    action_type_api_name: str,
+    request: Any,
+    branch: str,
+    oms_client: Any,
+    resolve_ontology_db_name: Any,
+    validate_branch: Any,
+    require_domain_role: Any,
+    preflight_error_response: Any,
+    handled_exceptions: Any,
+    extract_ontology_resource: Any,
+    find_action_type_resource_by_id: Any,
+    to_foundry_action_type: Any,
+    upstream_status_error_response: Any,
+    upstream_transport_error_response: Any,
+    internal_error_response: Any,
+    not_found_error: Any,
+) -> Any:
+    try:
+        db_name = await resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = validate_branch(branch)
+        action_type = str(action_type_api_name or "").strip()
+        if not action_type:
+            raise ValueError("actionType is required")
+        await require_domain_role(request, db_name=db_name)
+    except handled_exceptions as exc:
+        return preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"actionType": str(action_type_api_name)},
+        )
+
+    try:
+        resource: dict[str, Any] | None = None
+        try:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="action_type",
+                resource_id=action_type,
+                branch=branch,
+            )
+            resource = extract_ontology_resource(payload)
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
+            if status_code != status.HTTP_404_NOT_FOUND:
+                raise
+
+        if not resource:
+            resource = await find_action_type_resource_by_id(
+                db_name=db_name,
+                branch=branch,
+                action_type=action_type,
+                oms_client=oms_client,
+            )
+
+        if not resource:
+            return not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionType": action_type},
+            )
+        mapped = to_foundry_action_type(resource)
+        if mapped is None:
+            return not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionType": action_type},
+            )
+        return mapped
+    except httpx.HTTPStatusError as exc:
+        return upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"actionType": action_type},
+            not_found_response=not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionType": action_type},
+            ),
+        )
+    except httpx.HTTPError:
+        return upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"actionType": action_type},
+        )
+    except handled_exceptions as exc:
+        return internal_error_response(
+            log_message="Failed to get action type (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"actionType": action_type},
+        )
+
+
+async def get_action_type_by_rid_route(
+    *,
+    ontology: str,
+    action_type_rid: str,
+    request: Any,
+    branch: str,
+    oms_client: Any,
+    resolve_ontology_db_name: Any,
+    validate_branch: Any,
+    require_domain_role: Any,
+    preflight_error_response: Any,
+    handled_exceptions: Any,
+    find_resource_by_rid: Any,
+    find_action_type_resource_by_rid: Any,
+    to_foundry_action_type: Any,
+    upstream_status_error_response: Any,
+    upstream_transport_error_response: Any,
+    internal_error_response: Any,
+    not_found_error: Any,
+) -> Any:
+    try:
+        db_name = await resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
+        branch = validate_branch(branch)
+        normalized_rid = str(action_type_rid or "").strip()
+        if not normalized_rid:
+            raise ValueError("actionTypeRid is required")
+        await require_domain_role(request, db_name=db_name)
+    except handled_exceptions as exc:
+        return preflight_error_response(
+            exc,
+            ontology=str(ontology),
+            parameters={"actionTypeRid": str(action_type_rid)},
+        )
+
+    try:
+        resource = await find_resource_by_rid(
+            db_name=db_name,
+            branch=branch,
+            resource_type="action_type",
+            rid=normalized_rid,
+            oms_client=oms_client,
+        )
+        if not resource:
+            resource = await find_action_type_resource_by_rid(
+                db_name=db_name,
+                branch=branch,
+                action_type_rid=normalized_rid,
+                oms_client=oms_client,
+            )
+        if not resource:
+            return not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionTypeRid": normalized_rid},
+            )
+        mapped = to_foundry_action_type(resource)
+        if mapped is None:
+            return not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionTypeRid": normalized_rid},
+            )
+        return mapped
+    except httpx.HTTPStatusError as exc:
+        return upstream_status_error_response(
+            exc,
+            ontology=db_name,
+            parameters={"actionTypeRid": normalized_rid},
+            not_found_response=not_found_error(
+                "ActionTypeNotFound",
+                ontology=db_name,
+                parameters={"actionTypeRid": normalized_rid},
+            ),
+        )
+    except httpx.HTTPError:
+        return upstream_transport_error_response(
+            ontology=db_name,
+            parameters={"actionTypeRid": normalized_rid},
+        )
+    except handled_exceptions as exc:
+        return internal_error_response(
+            log_message="Failed to get action type by rid (v2)",
+            exc=exc,
+            ontology=db_name,
+            parameters={"actionTypeRid": normalized_rid},
+        )

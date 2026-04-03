@@ -20,7 +20,7 @@ Key improvements:
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 # Third party imports
 from fastapi import FastAPI, Request, status
@@ -39,6 +39,12 @@ from shared.services.core.service_factory import create_fastapi_service, get_oms
 from shared.services.core.service_container_common import (
     initialize_elasticsearch_service,
     initialize_rate_limiter_service,
+)
+from shared.services.core.runtime_status import (
+    availability_surface,
+    build_runtime_issue,
+    ensure_runtime_status,
+    record_runtime_issue,
 )
 from shared.security.startup_guard import ensure_startup_security
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
@@ -83,6 +89,24 @@ logger = logging.getLogger(__name__)
 
 def _resource_storage_backend() -> str:
     return "postgres"
+
+
+def _service_health_snapshot(
+    *,
+    service_name: str,
+    available: bool,
+    state: str | None = None,
+    message: str | None = None,
+    classification: str | None = None,
+) -> dict[str, Any]:
+    normalized_state = state or ("ready" if available else "degraded")
+    snapshot: dict[str, Any] = {"status": normalized_state}
+    if message:
+        snapshot["message"] = message
+    if classification:
+        snapshot["classification"] = classification
+    snapshot["dependency"] = service_name
+    return snapshot
 
 
 class OMSServiceContainer:
@@ -305,12 +329,35 @@ async def lifespan(app: FastAPI):
         # 4. Store container in app state for easy access
         app.state.container = container
         app.state.oms_container = _oms_container
+        ensure_runtime_status(app)
         
         # 5. Store rate limiter in app state for decorators
         if 'rate_limiter' in _oms_container._oms_services:
             app.state.rate_limiter = _oms_container._oms_services['rate_limiter']
 
         # 6. Middleware setup is handled during app creation (service_factory)
+        if _oms_container.get_command_status_service() is None:
+            record_runtime_issue(
+                app,
+                component="command_status",
+                dependency="redis",
+                message="Redis command-status service unavailable",
+                state="degraded",
+                classification="unavailable",
+                affected_features=("command_status",),
+                affects_readiness=False,
+            )
+        if _oms_container.get_elasticsearch_service() is None:
+            record_runtime_issue(
+                app,
+                component="query_index",
+                dependency="elasticsearch",
+                message="Elasticsearch query surface unavailable",
+                state="degraded",
+                classification="unavailable",
+                affected_features=("query", "search", "timeseries"),
+                affects_readiness=False,
+            )
         logger.info("OMS Service startup completed successfully")
 
         outbox_settings = settings.workers.ontology_deploy_outbox
@@ -478,6 +525,7 @@ async def health_check():
     """헬스 체크 - Modernized version"""
     try:
         settings = get_settings()
+        runtime_status = ensure_runtime_status(app)
         if _oms_container is None:
             error_payload = build_error_envelope(
                 service_name="oms",
@@ -507,6 +555,13 @@ async def health_check():
         health_response.data["environment"] = settings.environment.value
         health_response.data["resource_storage_backend"] = _resource_storage_backend()
         health_response.data["modernized"] = True
+        health_response.data.update(
+            availability_surface(
+                service="oms",
+                container_ready=True,
+                runtime_status=runtime_status,
+            )
+        )
         return health_response.to_dict()
 
     except Exception as e:
@@ -542,60 +597,193 @@ async def container_health_check():
     """
     try:
         settings = get_settings()
+        issues = []
         if _oms_container is None:
-            return {
-                "status": "unhealthy",
-                "message": "OMS container not initialized",
-                "container_status": None
-            }
+            surface = availability_surface(
+                service="oms-container",
+                container_ready=False,
+                runtime_status={
+                    "ready": False,
+                    "issues": [
+                        build_runtime_issue(
+                            component="oms_container",
+                            dependency="container",
+                            message="OMS container not initialized",
+                            state="hard_down",
+                            classification="internal",
+                            affected_features=["oms.container", "oms.dependencies"],
+                            affects_readiness=True,
+                        )
+                    ],
+                },
+            )
+            surface["container_health"] = None
+            return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=surface)
         
         # Get container health
         container_health = await _oms_container.container.health_check_all()
         
         # Check OMS-specific services
-        oms_services_status = {}
+        oms_services_status: dict[str, dict[str, Any]] = {}
         
         try:
             _oms_container.get_jsonld_converter()
-            oms_services_status["jsonld_converter"] = "healthy"
+            oms_services_status["jsonld_converter"] = _service_health_snapshot(
+                service_name="jsonld_converter",
+                available=True,
+            )
         except Exception as e:
             logging.getLogger(__name__).warning("Exception fallback at oms/main.py:640", exc_info=True)
-            oms_services_status["jsonld_converter"] = f"unhealthy: {str(e)}"
+            oms_services_status["jsonld_converter"] = _service_health_snapshot(
+                service_name="jsonld_converter",
+                available=False,
+                state="hard_down",
+                message=f"JSON-LD converter unavailable: {e}",
+                classification="internal",
+            )
+            issues.append(
+                build_runtime_issue(
+                    component="jsonld_converter",
+                    dependency="jsonld_converter",
+                    message=f"JSON-LD converter unavailable: {e}",
+                    state="hard_down",
+                    classification="internal",
+                    affected_features=["oms.jsonld_converter", "oms.ontology_reads"],
+                    affects_readiness=True,
+                )
+            )
         
         try:
             _oms_container.get_label_mapper()
-            oms_services_status["label_mapper"] = "healthy"
+            oms_services_status["label_mapper"] = _service_health_snapshot(
+                service_name="label_mapper",
+                available=True,
+            )
         except Exception as e:
             logging.getLogger(__name__).warning("Exception fallback at oms/main.py:646", exc_info=True)
-            oms_services_status["label_mapper"] = f"unhealthy: {str(e)}"
+            oms_services_status["label_mapper"] = _service_health_snapshot(
+                service_name="label_mapper",
+                available=False,
+                state="hard_down",
+                message=f"Label mapper unavailable: {e}",
+                classification="internal",
+            )
+            issues.append(
+                build_runtime_issue(
+                    component="label_mapper",
+                    dependency="label_mapper",
+                    message=f"Label mapper unavailable: {e}",
+                    state="hard_down",
+                    classification="internal",
+                    affected_features=["oms.label_mapper", "oms.ontology_reads"],
+                    affects_readiness=True,
+                )
+            )
         
         # Check optional services
         redis_service = _oms_container.get_redis_service()
-        oms_services_status["redis_service"] = "available" if redis_service else "not_available"
+        oms_services_status["redis_service"] = _service_health_snapshot(
+            service_name="redis",
+            available=redis_service is not None,
+            message=None if redis_service is not None else "Redis service unavailable",
+            classification=None if redis_service is not None else "unavailable",
+        )
+        if redis_service is None:
+            issues.append(
+                build_runtime_issue(
+                    component="redis_service",
+                    dependency="redis",
+                    message="Redis service unavailable",
+                    state="degraded",
+                    classification="unavailable",
+                    affected_features=["oms.command_status", "oms.realtime"],
+                    affects_readiness=False,
+                )
+            )
         
         command_status_service = _oms_container.get_command_status_service()
-        oms_services_status["command_status_service"] = "available" if command_status_service else "not_available"
+        oms_services_status["command_status_service"] = _service_health_snapshot(
+            service_name="command_status",
+            available=command_status_service is not None,
+            message=None if command_status_service is not None else "Command status service unavailable",
+            classification=None if command_status_service is not None else "unavailable",
+        )
+        if command_status_service is None:
+            issues.append(
+                build_runtime_issue(
+                    component="command_status_service",
+                    dependency="command_status",
+                    message="Command status service unavailable",
+                    state="degraded",
+                    classification="unavailable",
+                    affected_features=["oms.command_status"],
+                    affects_readiness=False,
+                )
+            )
         
         elasticsearch_service = _oms_container.get_elasticsearch_service()
-        oms_services_status["elasticsearch_service"] = "available" if elasticsearch_service else "not_available"
+        oms_services_status["elasticsearch_service"] = _service_health_snapshot(
+            service_name="elasticsearch",
+            available=elasticsearch_service is not None,
+            message=None if elasticsearch_service is not None else "Elasticsearch service unavailable",
+            classification=None if elasticsearch_service is not None else "unavailable",
+        )
+        if elasticsearch_service is None:
+            issues.append(
+                build_runtime_issue(
+                    component="elasticsearch_service",
+                    dependency="elasticsearch",
+                    message="Elasticsearch service unavailable",
+                    state="degraded",
+                    classification="unavailable",
+                    affected_features=["oms.search", "oms.query"],
+                    affects_readiness=False,
+                )
+            )
         
-        return {
-            "status": "healthy",
-            "message": "OMS container system operational",
-            "container_health": container_health,
-            "oms_services": oms_services_status,
-            "resource_storage_backend": _resource_storage_backend(),
-            "settings_environment": settings.environment.value,
-            "settings_debug": settings.debug
-        }
+        surface = availability_surface(
+            service="oms-container",
+            container_ready=True,
+            runtime_status={
+                "ready": True,
+                "degraded": any(issue["state"] == "degraded" for issue in issues),
+                "issues": issues,
+            },
+        )
+        surface["container_health"] = container_health
+        surface["oms_services"] = oms_services_status
+        surface["resource_storage_backend"] = _resource_storage_backend()
+        surface["settings_environment"] = settings.environment.value
+        surface["settings_debug"] = settings.debug
+        if surface["status"] == "ready":
+            return surface
+        return JSONResponse(
+            status_code=status.HTTP_200_OK if surface["status"] == "degraded" else status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=surface,
+        )
         
     except Exception as e:
         logger.error(f"Container health check failed: {e}")
-        return {
-            "status": "unhealthy", 
-            "message": f"Health check error: {str(e)}",
-            "container_health": None
-        }
+        surface = availability_surface(
+            service="oms-container",
+            container_ready=False,
+            runtime_status={
+                "ready": False,
+                "issues": [
+                    build_runtime_issue(
+                        component="container_health_check",
+                        dependency="container",
+                        message=f"Health check error: {e}",
+                        state="hard_down",
+                        classification="internal",
+                        affected_features=["oms.container", "oms.dependencies"],
+                        affects_readiness=True,
+                    )
+                ],
+            },
+        )
+        surface["container_health"] = None
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=surface)
 
 
 # Debug endpoint for development (using modern config system)

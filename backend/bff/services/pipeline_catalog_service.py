@@ -33,6 +33,12 @@ from shared.models.requests import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
+from shared.services.core.write_path_contract import (
+    build_write_path_contract,
+    followup_completed,
+    followup_degraded,
+    followup_skipped,
+)
 from shared.services.registries.pipeline_registry import PipelineAlreadyExistsError
 from shared.utils.event_utils import build_command_event
 from shared.observability.tracing import trace_db_operation
@@ -45,8 +51,13 @@ async def _grant_pipeline_admin_best_effort(
     pipeline_registry: Any,
     request: Any,
     pipeline_id: str,
-) -> None:
+) -> dict[str, Any]:
     principal_type, principal_id = _resolve_principal(request)
+    details = {
+        "pipeline_id": str(pipeline_id),
+        "principal_type": str(principal_type),
+        "principal_id": str(principal_id),
+    }
     try:
         await pipeline_registry.grant_permission(
             pipeline_id=pipeline_id,
@@ -54,11 +65,17 @@ async def _grant_pipeline_admin_best_effort(
             principal_id=principal_id,
             role="admin",
         )
+        return followup_completed("pipeline_admin_grant", details=details)
     except Exception as exc:
         logger.warning(
             "Pipeline create completed but admin grant failed (pipeline_id=%s): %s",
             pipeline_id,
             exc,
+        )
+        return followup_degraded(
+            "pipeline_admin_grant",
+            error=str(exc),
+            details=details,
         )
 
 
@@ -439,15 +456,32 @@ async def create_pipeline(
             branch=branch,
             definition_json=definition_json,
         )
+        write_path_followups: list[dict[str, Any]] = []
         if dependencies is not None:
             await pipeline_registry.replace_dependencies(pipeline_id=record.pipeline_id, dependencies=dependencies)
+            write_path_followups.append(
+                followup_completed(
+                    "pipeline_dependencies",
+                    details={"count": len(dependencies)},
+                )
+            )
+        else:
+            write_path_followups.append(
+                followup_skipped(
+                    "pipeline_dependencies",
+                    details={"reason": "not_provided"},
+                )
+            )
         dependencies_payload = await pipeline_registry.list_dependencies(pipeline_id=record.pipeline_id)
-        await _grant_pipeline_admin_best_effort(
-            pipeline_registry=pipeline_registry,
-            request=request,
-            pipeline_id=record.pipeline_id,
+        write_path_followups.append(
+            await _grant_pipeline_admin_best_effort(
+                pipeline_registry=pipeline_registry,
+                request=request,
+                pipeline_id=record.pipeline_id,
+            )
         )
 
+        event_followup: dict[str, Any]
         event = build_command_event(
             event_type="PIPELINE_CREATED",
             aggregate_type="Pipeline",
@@ -470,8 +504,29 @@ async def create_pipeline(
         try:
             await event_store.connect()
             await event_store.append_event(event)
+            event_followup = followup_completed(
+                "pipeline_created_event",
+                details={"topic": AppConfig.PIPELINE_EVENTS_TOPIC},
+            )
         except Exception as exc:
             logger.warning("Failed to append pipeline create event: %s", exc)
+            event_followup = followup_degraded(
+                "pipeline_created_event",
+                error=str(exc),
+                details={"topic": AppConfig.PIPELINE_EVENTS_TOPIC},
+            )
+        write_path_followups.append(event_followup)
+
+        contract = build_write_path_contract(
+            authoritative_write="pipeline_create",
+            followups=[
+                *write_path_followups,
+                followup_completed(
+                    "pipeline_audit",
+                    details={"action": "PIPELINE_CREATED"},
+                ),
+            ],
+        )
 
         try:
             await _log_pipeline_audit(
@@ -486,10 +541,26 @@ async def create_pipeline(
                     "pipeline_type": pipeline_type,
                     "branch": branch,
                     "commit_id": version.lakefs_commit_id if version else None,
+                    "write_path_contract": contract,
                 },
             )
         except Exception as exc:
-            logger.warning("Failed to record pipeline create audit log: %s", exc)
+            degraded_contract = build_write_path_contract(
+                authoritative_write="pipeline_create",
+                followups=[
+                    *write_path_followups,
+                    followup_degraded(
+                        "pipeline_audit",
+                        error=str(exc),
+                        details={"action": "PIPELINE_CREATED"},
+                    ),
+                ],
+            )
+            logger.warning(
+                "Failed to record pipeline create audit log: %s write_path_contract=%s",
+                exc,
+                degraded_contract,
+            )
 
         return _build_pipeline_create_response(
             record=record,

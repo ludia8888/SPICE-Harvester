@@ -26,6 +26,7 @@ from shared.observability.config_monitor import (
     ConfigurationMonitor, ConfigChange, ConfigSeverity, 
     ConfigChangeType
 )
+from shared.services.core.runtime_status import availability_surface
 
 router = APIRouter(tags=["Config Monitoring"])
 
@@ -573,6 +574,36 @@ async def get_monitoring_status(
     monitoring system itself.
     """
     try:
+        issues = []
+        if not monitor.monitoring_enabled:
+            issues.append(
+                {
+                    "component": "config_monitoring",
+                    "dependency": "config_monitoring",
+                    "message": "Configuration monitoring is disabled",
+                    "state": "degraded",
+                    "classification": "unavailable",
+                    "affects_readiness": False,
+                    "affected_features": ["config_monitoring"],
+                }
+            )
+        if len(monitor.validation_rules) == 0:
+            issues.append(
+                {
+                    "component": "config_monitoring",
+                    "dependency": "validation_rules",
+                    "message": "Configuration monitoring has no validation rules loaded",
+                    "state": "degraded",
+                    "classification": "internal",
+                    "affects_readiness": False,
+                    "affected_features": ["config_monitoring"],
+                }
+            )
+        surface = availability_surface(
+            service="config_monitoring",
+            container_ready=True,
+            runtime_status={"issues": issues},
+        )
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "monitoring_enabled": monitor.monitoring_enabled,
@@ -583,7 +614,7 @@ async def get_monitoring_status(
             "max_history_entries": monitor.max_history_entries,
             "environment": monitor.settings.environment.value,
             "settings_debug": monitor.settings.debug,
-            "system_status": "healthy"
+            **surface,
         }
         
     except Exception as e:

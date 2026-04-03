@@ -35,6 +35,7 @@ from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.storage.storage_service import create_storage_service
+from shared.services.core.runtime_status import availability_surface, build_runtime_issue, normalize_runtime_status
 from shared.observability.tracing import trace_external_call
 from shared.utils.access_policy import apply_access_policy
 
@@ -1061,15 +1062,66 @@ async def graph_service_health(*, graph_service: GraphFederationServiceES) -> Di
         health = await graph_service._es.get_cluster_health()
         es_status = health.get("status", "unknown")
         es_healthy = es_status in ("green", "yellow")
-        return {
-            "status": "healthy" if es_healthy else "degraded",
-            "services": {
-                "elasticsearch": es_status,
-            },
-            "message": "Graph federation service operational"
+        runtime_status = normalize_runtime_status(
+            {}
             if es_healthy
-            else "Elasticsearch cluster degraded",
-        }
+            else {
+                "degraded": True,
+                "issues": [
+                    build_runtime_issue(
+                        component="graph_federation",
+                        dependency="elasticsearch",
+                        message=f"Elasticsearch cluster degraded: {es_status}",
+                        state="degraded",
+                        classification="unavailable",
+                        affected_features=("graph.query", "graph.paths", "graph.projections"),
+                        affects_readiness=False,
+                    )
+                ],
+            }
+        )
+        surface = availability_surface(
+            service="graph_federation",
+            container_ready=True,
+            runtime_status=runtime_status,
+            dependency_status_overrides={"elasticsearch": "ready" if es_healthy else "degraded"},
+            status_reason_override=(
+                "Graph federation service operational"
+                if es_healthy
+                else f"Elasticsearch cluster degraded: {es_status}"
+            ),
+            message=(
+                "Graph federation service operational"
+                if es_healthy
+                else "Elasticsearch cluster degraded"
+            ),
+        )
+        surface["services"] = {"elasticsearch": es_status}
+        return surface
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
-        return {"status": "unhealthy", "error": str(exc)}
+        surface = availability_surface(
+            service="graph_federation",
+            container_ready=True,
+            runtime_status=normalize_runtime_status(
+                {
+                    "issues": [
+                        build_runtime_issue(
+                            component="graph_federation",
+                            dependency="elasticsearch",
+                            message=str(exc),
+                            state="hard_down",
+                            classification="unavailable",
+                            affected_features=("graph.query", "graph.paths", "graph.projections"),
+                            affects_readiness=True,
+                        )
+                    ]
+                }
+            ),
+            dependency_status_overrides={"elasticsearch": "hard_down"},
+            status_reason_override=f"Elasticsearch unavailable: {exc}",
+            message="Elasticsearch unavailable",
+        )
+        surface["services"] = {"elasticsearch": "unavailable"}
+        surface["error"] = str(exc)
+        return surface

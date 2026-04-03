@@ -73,7 +73,7 @@ class SqlServerConnectorService(ConnectorAdapter):
             import pyodbc  # type: ignore
 
             return pyodbc
-        except Exception as exc:  # pragma: no cover
+        except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "pyodbc is required for SQL Server runtime. "
                 "Install dependency before enabling sqlserver connector."
@@ -88,8 +88,17 @@ class SqlServerConnectorService(ConnectorAdapter):
         return out
 
     async def test_connection(self, *, config: Dict[str, Any], secrets: Dict[str, Any]) -> ConnectorConnectionTestResult:
+        handled_errors: tuple[type[BaseException], ...] = (
+            RuntimeError,
+            ValueError,
+            OSError,
+            TimeoutError,
+        )
         try:
             driver = self._require_driver()
+            driver_error = getattr(driver, "Error", None)
+            if isinstance(driver_error, type) and issubclass(driver_error, BaseException):
+                handled_errors = handled_errors + (driver_error,)
 
             def _run() -> None:
                 conn = driver.connect(self._connection_string(config=config, secrets=secrets), timeout=5)
@@ -105,7 +114,7 @@ class SqlServerConnectorService(ConnectorAdapter):
 
             await run_blocking_query(_run, adapter_name="SQL Server", operation="connection test")
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
-        except Exception as exc:
+        except handled_errors as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
 
     async def _fetch(

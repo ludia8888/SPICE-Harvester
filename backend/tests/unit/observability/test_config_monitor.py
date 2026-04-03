@@ -109,3 +109,55 @@ def test_config_monitoring_status_returns_500_on_internal_error() -> None:
     response = client.get("/api/v1/config/config/monitoring-status")
 
     assert response.status_code == 500
+
+
+@pytest.mark.unit
+def test_config_monitoring_status_uses_unified_runtime_surface() -> None:
+    app = FastAPI()
+    app.include_router(config_monitoring.router, prefix="/api/v1/config")
+
+    client = TestClient(app)
+    response = client.get("/api/v1/config/config/monitoring-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready"
+    assert payload["ready"] is True
+    assert payload["degraded"] is False
+    assert payload["hard_down"] is False
+    assert payload["dependency_status"]["container"] == "ready"
+    assert payload["dependency_status"]["runtime"] == "ready"
+    assert payload["impact_summary"]["affected_features"] == []
+
+
+@pytest.mark.unit
+def test_config_monitoring_status_degrades_when_monitoring_is_disabled() -> None:
+    class DisabledMonitor:
+        monitoring_enabled = False
+        last_config_hash = None
+        validation_rules = ["rule"]
+        change_callbacks = []
+        change_history = []
+        max_history_entries = 1000
+        settings = type(
+            "_Settings",
+            (),
+            {
+                "environment": type("_Env", (), {"value": "test"})(),
+                "debug": False,
+            },
+        )()
+
+    app = FastAPI()
+    app.include_router(config_monitoring.router, prefix="/api/v1/config")
+    app.dependency_overrides[config_monitoring.get_config_monitor] = lambda: DisabledMonitor()
+
+    client = TestClient(app)
+    response = client.get("/api/v1/config/config/monitoring-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "degraded"
+    assert payload["degraded"] is True
+    assert payload["dependency_status"]["config_monitoring"] == "degraded"
+    assert "config_monitoring" in payload["impact_summary"]["affected_features"]

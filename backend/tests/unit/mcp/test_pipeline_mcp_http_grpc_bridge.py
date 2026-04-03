@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import grpc
 import httpx
 import pytest
 
@@ -94,6 +95,52 @@ async def test_oms_json_timeout_maps_to_504(monkeypatch):
     payload = await target.oms_json("GET", "/api/v1/database/list", timeout_seconds=0.01)
     assert payload.get("status_code") == 504
     assert "timed out" in str(payload.get("error", "")).lower()
+    await target.close_oms_grpc_compat_client()
+
+
+@pytest.mark.asyncio
+async def test_oms_json_maps_grpc_unavailable_to_503(monkeypatch):
+    from mcp_servers import pipeline_mcp_http as target
+
+    class _UnavailableRpc(grpc.RpcError):
+        def code(self):  # noqa: ANN201
+            return grpc.StatusCode.UNAVAILABLE
+
+    class _BrokenCompat:
+        async def request(self, method: str, path: str, **kwargs):
+            _ = method, path, kwargs
+            raise _UnavailableRpc()
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(target, "OMSGrpcHttpCompatClient", _BrokenCompat)
+    monkeypatch.setattr(target, "_OMS_GRPC_COMPAT_CLIENT", None)
+
+    payload = await target.oms_json("GET", "/api/v1/database/list", timeout_seconds=0.1)
+    assert payload["status_code"] == 503
+    assert "unavailable" in payload["error"].lower()
+    await target.close_oms_grpc_compat_client()
+
+
+@pytest.mark.asyncio
+async def test_oms_json_maps_unexpected_bridge_errors_to_500(monkeypatch):
+    from mcp_servers import pipeline_mcp_http as target
+
+    class _BrokenCompat:
+        async def request(self, method: str, path: str, **kwargs):
+            _ = method, path, kwargs
+            raise ValueError("bad request shaping")
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(target, "OMSGrpcHttpCompatClient", _BrokenCompat)
+    monkeypatch.setattr(target, "_OMS_GRPC_COMPAT_CLIENT", None)
+
+    payload = await target.oms_json("GET", "/api/v1/database/list", timeout_seconds=0.1)
+    assert payload["status_code"] == 500
+    assert "internal bridge failure" in payload["error"].lower()
     await target.close_oms_grpc_compat_client()
 
 

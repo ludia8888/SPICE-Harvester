@@ -89,4 +89,7 @@ async def test_pipeline_update_writes_audit_log(monkeypatch: pytest.MonkeyPatch)
 
     assert response["status"] == "success"
 
-    assert any(entry.get("action") == "PIPELINE_UPDATED" for entry in audit_store.entries)
+    audit_entry = next(entry for entry in audit_store.entries if entry.get("action") == "PIPELINE_UPDATED")
+    contract = audit_entry["metadata"]["write_path_contract"]
+    assert contract["authoritative_write"] == "pipeline_update"
+    assert any(item["name"] == "pipeline_dependencies" for item in contract["derived_side_effects"])

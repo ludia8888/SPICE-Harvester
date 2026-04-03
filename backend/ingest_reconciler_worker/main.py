@@ -23,6 +23,7 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.core.service_factory import ServiceInfo, create_fastapi_service
+from shared.services.core.runtime_status import ensure_runtime_status, record_runtime_issue
 from shared.security.startup_guard import ensure_startup_security
 from shared.utils.app_logger import configure_logging
 from shared.utils.time_utils import utcnow
@@ -212,12 +213,8 @@ async def lifespan(app: FastAPI):
     await worker.initialize()
     stop_event = asyncio.Event()
     task = asyncio.create_task(worker.run(stop_event))
-    app.state.runtime_status = {
-        "ready": True,
-        "degraded": False,
-        "issues": [],
-        "background_tasks": {"ingest_reconciler": {"status": "running"}},
-    }
+    app.state.runtime_status = ensure_runtime_status(app)
+    app.state.runtime_status["background_tasks"] = {"ingest_reconciler": {"status": "running"}}
 
     def _mark_task_done(done_task: asyncio.Task[None]) -> None:
         runtime_status = getattr(app.state, "runtime_status", None)
@@ -233,11 +230,16 @@ async def lifespan(app: FastAPI):
             return
         task_status["status"] = "failed"
         task_status["error"] = str(exc)
-        runtime_status["ready"] = False
-        runtime_status["degraded"] = True
-        issues = runtime_status.setdefault("issues", [])
-        if "ingest_reconciler_task_failed" not in issues:
-            issues.append("ingest_reconciler_task_failed")
+        record_runtime_issue(
+            app,
+            component="ingest_reconciler",
+            dependency="ingest_reconciler",
+            message=f"Ingest reconciler task failed: {exc}",
+            state="hard_down",
+            classification="internal",
+            affected_features=("ingest_reconciliation",),
+            affects_readiness=True,
+        )
 
     task.add_done_callback(_mark_task_done)
     app.state.reconciler_worker = worker

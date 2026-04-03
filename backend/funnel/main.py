@@ -11,11 +11,13 @@ removed (Palantir Foundry style: all columns default to xsd:string).
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from funnel.routers.type_inference_router import router as structure_router
 from funnel.services.structure_patch_store import close_patch_store, initialize_patch_store
 from shared.config.settings import get_settings
+from shared.services.core.runtime_status import availability_surface, ensure_runtime_status, get_runtime_status, record_runtime_issue
 from shared.services.storage.redis_service import create_redis_service
 from shared.utils.app_logger import get_logger
 
@@ -29,6 +31,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifecycle."""
     logger.info("Funnel Service starting")
+    ensure_runtime_status(app)
 
     # Initialize Rate Limiter
     try:
@@ -38,6 +41,16 @@ async def lifespan(app: FastAPI):
         logger.info("Rate limiter initialized")
     except Exception as e:
         logger.error(f"Failed to initialize rate limiter: {e}")
+        record_runtime_issue(
+            app,
+            component="rate_limiter",
+            dependency="rate_limiter",
+            message=str(e),
+            state="degraded",
+            classification="unavailable",
+            affected_features=("rate_limit_enforcement",),
+            affects_readiness=False,
+        )
 
     try:
         redis_service = create_redis_service(get_settings())
@@ -49,6 +62,16 @@ async def lifespan(app: FastAPI):
         app.state.structure_patch_store_ready = False
         app.state.structure_patch_store_error = str(e)
         logger.error(f"Failed to initialize structure patch store: {e}")
+        record_runtime_issue(
+            app,
+            component="structure_patch_store",
+            dependency="redis",
+            message=f"Structure patch store unavailable: {e}",
+            state="degraded",
+            classification="unavailable",
+            affected_features=("structure_patch_store", "funnel_structure_patch"),
+            affects_readiness=False,
+        )
 
     yield
 
@@ -92,14 +115,22 @@ async def root() -> Dict[str, Any]:
     }
 
 
-@app.get("/health")
-async def health_check() -> Dict[str, Any]:
+@app.get("/health", response_model=None)
+async def health_check(request: Request = None) -> Any:
     """Service health check."""
-    from shared.models.requests import ApiResponse
-
-    return ApiResponse.health_check(
-        service_name="funnel", version="0.1.0", description="Sheet structure analysis service"
-    ).to_dict()
+    surface = availability_surface(
+        service="funnel",
+        container_ready=True,
+        runtime_status=get_runtime_status(request.app if request is not None else app),
+    )
+    surface["version"] = "0.1.0"
+    surface["description"] = "Sheet structure analysis service"
+    if surface["status"] == "ready":
+        return surface
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if surface["status"] == "degraded" else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=surface,
+    )
 
 
 if __name__ == "__main__":

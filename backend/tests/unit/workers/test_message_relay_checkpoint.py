@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import logging
 
 import pytest
 from botocore.exceptions import ClientError
@@ -130,6 +131,28 @@ async def test_load_checkpoint_raises_for_non_missing_client_error() -> None:
 
     with pytest.raises(ClientError):
         await EventPublisher._load_checkpoint(publisher)
+
+
+@pytest.mark.asyncio
+async def test_initialize_raises_for_non_missing_bucket_probe_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Client:
+        async def head_bucket(self, **kwargs):  # noqa: ANN003, ANN201
+            _ = kwargs
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "HeadBucket")
+
+    publisher = EventPublisher.__new__(EventPublisher)
+    publisher.session = _Session(_Client())
+    publisher.bucket_name = "bucket"
+    publisher._s3_client_kwargs = lambda: {}
+    publisher.kafka_servers = "kafka:9092"
+    async def _ensure_kafka_topics():  # noqa: ANN202
+        return None
+    publisher.ensure_kafka_topics = _ensure_kafka_topics  # type: ignore[assignment]
+
+    monkeypatch.setattr("message_relay.main.create_kafka_producer", lambda **kwargs: object())
+
+    with pytest.raises(ClientError):
+        await EventPublisher.initialize(publisher)
 
 
 @pytest.mark.asyncio
@@ -317,7 +340,7 @@ async def test_process_events_does_not_advance_checkpoint_on_missing_event_paylo
 
 
 @pytest.mark.asyncio
-async def test_process_events_advances_checkpoint_past_malformed_index_entry() -> None:
+async def test_process_events_advances_checkpoint_past_malformed_index_entry(caplog: pytest.LogCaptureFixture) -> None:
     bad_key = "indexes/by-date/2025/01/01/100_evt.json"
 
     class _Client:
@@ -364,11 +387,14 @@ async def test_process_events_advances_checkpoint_past_malformed_index_entry() -
     publisher._save_checkpoint = _save_checkpoint  # type: ignore[assignment]
     publisher._list_next_index_keys = _list_next_index_keys  # type: ignore[assignment]
 
-    published = await EventPublisher.process_events(publisher)
+    with caplog.at_level(logging.INFO):
+        published = await EventPublisher.process_events(publisher)
 
     assert published == 0
     assert saved
     assert saved[-1]["last_index_key"] == bad_key
+    assert "Relay write path contract:" in caplog.text
+    assert "relay_checkpoint_advance" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -427,7 +453,7 @@ async def test_process_events_advances_checkpoint_past_invalid_json_index_entry(
 
 
 @pytest.mark.asyncio
-async def test_process_events_flushes_pending_batch_before_skipping_malformed_index_entry() -> None:
+async def test_process_events_flushes_pending_batch_before_skipping_malformed_index_entry(caplog: pytest.LogCaptureFixture) -> None:
     good_key = "indexes/by-date/2025/01/01/100_evt-good.json"
     bad_key = "indexes/by-date/2025/01/01/101_evt-bad.json"
     payload_key = "events/evt-good.json"
@@ -494,9 +520,12 @@ async def test_process_events_flushes_pending_batch_before_skipping_malformed_in
     publisher._save_checkpoint = _save_checkpoint  # type: ignore[assignment]
     publisher._list_next_index_keys = _list_next_index_keys  # type: ignore[assignment]
 
-    published = await EventPublisher.process_events(publisher)
+    with caplog.at_level(logging.INFO):
+        published = await EventPublisher.process_events(publisher)
 
     assert published == 1
     assert publisher._metrics_total["events_published"] == 1
     assert saved
     assert saved[-1]["last_index_key"] == bad_key
+    assert "Relay write path contract:" in caplog.text
+    assert "relay_kafka_publish" in caplog.text

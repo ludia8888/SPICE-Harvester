@@ -24,6 +24,20 @@ jobs:
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  backend-runtime-ddl-audit:
+    name: Backend Runtime DDL Audit
+    uses: ./.github/workflows/backend-coverage.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-runtime-ddl-audit
+
+  backend-error-taxonomy:
+    name: Backend Error Taxonomy
+    uses: ./.github/workflows/backend-coverage.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-error-taxonomy
+
   docs-check:
     name: Docs Auto-Generated Check
     runs-on: ubuntu-latest
@@ -102,6 +116,73 @@ jobs:
       python-version: "3.11"
       script-args: "--full"
       timeout-seconds: 300
+
+  backend-boundary-smoke:
+    name: Backend Boundary Smoke
+    uses: ./.github/workflows/backend-stack-tests.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-boundary-smoke
+      timeout-seconds: 240
+
+  backend-release-smoke:
+    name: Backend Release Smoke
+    uses: ./.github/workflows/backend-stack-tests.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-release-smoke
+      timeout-seconds: 240
+
+  backend-infra-tier:
+    name: Backend Infra Tier
+    uses: ./.github/workflows/backend-stack-tests.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-infra-tier
+      timeout-seconds: 300
+
+  backend-release-gate:
+    name: Backend Release Gate
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs:
+      - backend-runtime-ddl-audit
+      - backend-error-taxonomy
+      - backend-unit
+      - backend-boundary-smoke
+      - backend-release-smoke
+      - backend-infra-tier
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Write CI gate results
+        run: |
+          mkdir -p backend/.artifacts
+          cat > backend/.artifacts/release_gate_ci_results.json <<'JSON'
+          {
+            "backend-runtime-ddl-audit": "${{ needs.backend-runtime-ddl-audit.result }}",
+            "backend-error-taxonomy": "${{ needs.backend-error-taxonomy.result }}",
+            "backend-unit": "${{ needs.backend-unit.result }}",
+            "backend-boundary-smoke": "${{ needs.backend-boundary-smoke.result }}",
+            "backend-release-smoke": "${{ needs.backend-release-smoke.result }}",
+            "backend-infra-tier": "${{ needs.backend-infra-tier.result }}"
+          }
+          JSON
+
+      - name: Evaluate release gate
+        run: python backend/scripts/release_regression_gate.py --ci-results-json backend/.artifacts/release_gate_ci_results.json
+
+      - name: Publish release gate summary
+        if: ${{ always() }}
+        run: |
+          echo "## Backend Release Gate" >> "$GITHUB_STEP_SUMMARY"
+          cat backend/.artifacts/release_regression_gate_report.json >> "$GITHUB_STEP_SUMMARY"
 
   docs-portal-build:
     name: Docs Portal Build

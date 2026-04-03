@@ -60,6 +60,7 @@ class ProcessedEventRegistry:
         dsn: Optional[str] = None,
         schema: str = "spice_event_registry",
         lease_timeout_seconds: Optional[int] = None,
+        allow_runtime_ddl_bootstrap: Optional[bool] = None,
     ):
         settings = get_settings()
         self._settings = settings
@@ -72,6 +73,7 @@ class ProcessedEventRegistry:
             else int(settings.event_sourcing.processed_event_lease_timeout_seconds)
         )
         self._lease_timeout = timedelta(seconds=lease_timeout)
+        self._allow_runtime_ddl_bootstrap = allow_runtime_ddl_bootstrap
 
         owner_override = (settings.event_sourcing.processed_event_owner or "").strip()
         obs = settings.observability
@@ -114,7 +116,11 @@ class ProcessedEventRegistry:
             )
             if not missing_objects:
                 return
-            bootstrap_allowed = allow_runtime_ddl_bootstrap()
+            bootstrap_allowed = (
+                allow_runtime_ddl_bootstrap()
+                if self._allow_runtime_ddl_bootstrap is None
+                else bool(self._allow_runtime_ddl_bootstrap)
+            )
             if not bootstrap_allowed:
                 raise MissingProcessedEventRegistrySchemaError(
                     format_missing_schema_objects(

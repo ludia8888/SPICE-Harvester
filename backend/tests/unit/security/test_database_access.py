@@ -70,7 +70,7 @@ class _FakeConn:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_get_database_access_role_returns_none_when_table_missing(monkeypatch):
+async def test_get_database_access_role_raises_unavailable_when_table_missing(monkeypatch):
     conn = _FakeConn(fetchrow_exception=asyncpg.UndefinedTableError("missing table"))
 
     async def _connect(_dsn):
@@ -80,8 +80,8 @@ async def test_get_database_access_role_returns_none_when_table_missing(monkeypa
 
     monkeypatch.setattr(module.asyncpg, "connect", _connect)
 
-    role = await get_database_access_role(db_name="demo", principal_type="user", principal_id="u1")
-    assert role is None
+    with pytest.raises(DatabaseAccessRegistryUnavailableError):
+        await get_database_access_role(db_name="demo", principal_type="user", principal_id="u1")
     assert conn.closed is True
 
 
@@ -132,7 +132,7 @@ async def test_inspect_database_access_reports_unavailable_when_registry_unreach
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_has_database_access_config_returns_false_when_table_missing(monkeypatch):
+async def test_has_database_access_config_raises_unavailable_when_table_missing(monkeypatch):
     conn = _FakeConn(fetchrow_exception=asyncpg.UndefinedTableError("missing table"))
 
     async def _connect(_dsn):
@@ -142,8 +142,8 @@ async def test_has_database_access_config_returns_false_when_table_missing(monke
 
     monkeypatch.setattr(module.asyncpg, "connect", _connect)
 
-    configured = await has_database_access_config(db_name="demo")
-    assert configured is False
+    with pytest.raises(DatabaseAccessRegistryUnavailableError):
+        await has_database_access_config(db_name="demo")
     assert conn.closed is True
 
 

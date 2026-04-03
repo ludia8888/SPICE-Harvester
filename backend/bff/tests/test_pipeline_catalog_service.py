@@ -396,3 +396,64 @@ async def test_create_pipeline_returns_success_when_admin_grant_keeps_failing(mo
     assert registry.create_calls == 1
     assert registry.add_version_calls == 1
     assert registry.grant_permission_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_records_write_path_contract_in_audit_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+
+    registry = _PipelineRegistry()
+    audit_store = _AuditStore()
+    request = _Request(headers={"Idempotency-Key": "idem-8", "X-Principal-Id": "user-1"})
+
+    await pipeline_catalog_service.create_pipeline(
+        payload={
+            "db_name": "test_db",
+            "name": "Orders Pipeline",
+            "location": "warehouse/orders",
+        },
+        audit_store=audit_store,
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    contract = audit_store.logged[-1]["metadata"]["write_path_contract"]
+    assert contract["authoritative_state"] == "committed"
+    assert contract["authoritative_write"] == "pipeline_create"
+    derived = {item["name"]: item for item in contract["derived_side_effects"]}
+    assert derived["pipeline_dependencies"]["status"] == "skipped"
+    assert derived["pipeline_admin_grant"]["status"] == "completed"
+    assert derived["pipeline_created_event"]["status"] == "completed"
+    assert derived["pipeline_audit"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_records_degraded_admin_followup_in_write_path_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_db_scope_or_403", _noop_sync)
+    monkeypatch.setattr(pipeline_catalog_service, "enforce_database_role_or_http_error", _noop_async)
+
+    registry = _PipelineRegistry()
+    registry.fail_after_create_on_grant = True
+    audit_store = _AuditStore()
+    request = _Request(headers={"Idempotency-Key": "idem-9", "X-Principal-Id": "user-1"})
+
+    response = await pipeline_catalog_service.create_pipeline(
+        payload={
+            "db_name": "test_db",
+            "name": "Orders Pipeline",
+            "location": "warehouse/orders",
+        },
+        audit_store=audit_store,
+        pipeline_registry=registry,
+        dataset_registry=object(),
+        event_store=_EventStore(),
+        request=request,
+    )
+
+    assert response["status"] == "success"
+    contract = audit_store.logged[-1]["metadata"]["write_path_contract"]
+    derived = {item["name"]: item for item in contract["derived_side_effects"]}
+    assert derived["pipeline_admin_grant"]["status"] == "degraded"

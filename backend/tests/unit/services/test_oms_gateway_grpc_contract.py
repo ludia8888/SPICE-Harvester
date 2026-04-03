@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import grpc
 import pytest
@@ -131,6 +132,55 @@ def test_gateway_call_metadata_includes_service_and_delegated_auth():
     metadata = client._call_metadata(headers={"X-Delegated-Authorization": "Bearer user-jwt"})  # type: ignore[attr-defined]
     assert ("x-service-token", "svc-token") in metadata
     assert ("x-delegated-authorization", "Bearer user-jwt") in metadata
+
+
+@pytest.mark.asyncio
+async def test_gateway_call_unary_passes_timeout_to_stub() -> None:
+    captured: dict[str, object] = {}
+
+    async def _rpc(request, *, metadata=None, timeout=None):  # noqa: ANN001
+        captured["request"] = request
+        captured["metadata"] = metadata
+        captured["timeout"] = timeout
+        return oms_gateway_pb2.OmsResponse(status_code=200, json_body="{}")
+
+    client = OMSGatewayGrpcClient.__new__(OMSGatewayGrpcClient)
+    client._service_token = "svc-token"  # type: ignore[attr-defined]
+    client._timeout_seconds = 12.5  # type: ignore[attr-defined]
+    client._stub = SimpleNamespace(GenericGet=_rpc)  # type: ignore[attr-defined]
+
+    request = OMSGatewayGrpcClient.build_request(headers={"X-Delegated-Authorization": "Bearer token"})
+    await client.call_unary("GenericGet", request)  # type: ignore[attr-defined]
+
+    assert captured["timeout"] == 12.5
+    assert ("x-service-token", "svc-token") in captured["metadata"]
+    assert ("x-delegated-authorization", "Bearer token") in captured["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_call_stream_passes_timeout_to_stub() -> None:
+    captured: dict[str, object] = {}
+
+    async def _generator():  # noqa: ANN202
+        yield oms_gateway_pb2.OmsStreamChunk(chunk=b"one")
+        yield oms_gateway_pb2.OmsStreamChunk(chunk=b"two")
+
+    def _rpc(request, *, metadata=None, timeout=None):  # noqa: ANN001
+        captured["request"] = request
+        captured["metadata"] = metadata
+        captured["timeout"] = timeout
+        return _generator()
+
+    client = OMSGatewayGrpcClient.__new__(OMSGatewayGrpcClient)
+    client._service_token = "svc-token"  # type: ignore[attr-defined]
+    client._timeout_seconds = 7.0  # type: ignore[attr-defined]
+    client._stub = SimpleNamespace(GenericStream=_rpc)  # type: ignore[attr-defined]
+
+    request = OMSGatewayGrpcClient.build_request()
+    chunks = await client.call_stream("GenericStream", request)  # type: ignore[attr-defined]
+
+    assert [chunk.chunk for chunk in chunks] == [b"one", b"two"]
+    assert captured["timeout"] == 7.0
 
 
 @pytest.mark.asyncio

@@ -68,7 +68,11 @@ async def test_udf_can_be_created_reused_and_version_upgraded() -> None:
     - UDF supports version upgrades
     """
 
-    registry = PipelineRegistry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA)
+    registry = PipelineRegistry(
+        dsn=DEFAULT_POSTGRES_URL,
+        schema=TEST_SCHEMA,
+        allow_runtime_ddl_bootstrap=True,
+    )
     await registry.connect()
     try:
         db_name = "demo"

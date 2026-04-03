@@ -35,6 +35,8 @@ services:
       - postgres
       - minio
       - otel-collector
+    ports:
+      - "8000:8000"
       
   bff:
     extends:

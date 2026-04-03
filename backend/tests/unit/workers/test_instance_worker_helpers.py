@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -164,6 +165,48 @@ async def test_create_side_effects_append_event_before_es_and_use_event_sequence
     assert call_order == ["event_store", "elasticsearch"]
     assert captured_build["event_sequence"] == 42
     assert result["domain_event_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_side_effects_logs_write_path_contract(caplog: pytest.LogCaptureFixture) -> None:
+    worker = StrictInstanceWorker()
+    caplog.set_level(logging.INFO, logger=instance_worker_main.logger.name)
+
+    class _FakeEventStore:
+        async def append_event(self, envelope) -> None:  # noqa: ANN001
+            envelope.sequence_number = 7
+
+    class _FakeElasticsearchService:
+        async def index_document(self, *, index: str, document, doc_id: str) -> None:  # noqa: ANN001
+            _ = index, document, doc_id
+
+    async def _fake_s3_call(*args, **kwargs):  # noqa: ANN002, ANN003
+        return {}
+
+    worker.s3_client = SimpleNamespace(put_object=object())
+    worker.elasticsearch_service = _FakeElasticsearchService()
+    worker.event_store = _FakeEventStore()
+    worker.observability = SimpleNamespace(record_link=AsyncMock(), audit_log=AsyncMock())
+    worker._s3_call = _fake_s3_call  # type: ignore[assignment]
+    worker.extract_relationships = AsyncMock(return_value={})  # type: ignore[assignment]
+    worker._ensure_instances_index = AsyncMock(return_value="instances_demo_main")  # type: ignore[assignment]
+    worker._build_es_document = lambda **kwargs: {"instance_id": kwargs["instance_id"]}  # type: ignore[assignment]
+
+    await worker._apply_create_instance_side_effects(
+        command_id="cmd-2",
+        db_name="demo",
+        class_id="Account",
+        branch="main",
+        payload={"account_id": "acc-2", "name": "Bob"},
+        instance_id="acc-2",
+        command_log={"command_type": "CREATE_INSTANCE"},
+        ontology_version={"ref": "branch:main"},
+        created_by="tester",
+    )
+
+    assert "Instance worker write path contract" in caplog.text
+    assert "instance_create_event" in caplog.text
+    assert "instance_es_materialization" in caplog.text
 
 
 @pytest.mark.asyncio

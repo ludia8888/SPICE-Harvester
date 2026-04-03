@@ -139,3 +139,14 @@ async def test_streamable_session_registry_evicts_idle_sessions(monkeypatch: pyt
     assert registry._sessions["fresh-session"] is fresh
 
     await registry.shutdown()
+
+
+def test_bff_sdk_mcp_health_surface_uses_unified_runtime_vocabulary(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = _import_target_with_mcp_stubs(monkeypatch)
+
+    payload = target._health_surface(transport="streamable-http")
+
+    assert payload["status"] == "ready"
+    assert payload["service"] == "bff-sdk-mcp-server"
+    assert payload["dependency_status"]["transport"] == "ready"
+    assert payload["transport"] == "streamable-http"

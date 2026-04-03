@@ -324,12 +324,30 @@ class SafeKafkaConsumer:
         should call this before producing signals they want to observe.
         """
         deadline = time.monotonic() + float(timeout_seconds)
+        last_poll_signature: Optional[tuple[type[BaseException], str]] = None
+        consecutive_poll_failures = 0
         while time.monotonic() < deadline:
+            if self._state == ConsumerState.CLOSED:
+                raise RuntimeError("Kafka consumer closed while waiting for partition assignment")
             try:
                 self._consumer.poll(0.1)
-            except Exception:
-                # Keep trying; transient broker/DNS issues can resolve shortly after startup.
-                logging.getLogger(__name__).warning("Exception fallback at shared/services/kafka/safe_consumer.py:330", exc_info=True)
+            except Exception as exc:
+                signature = (type(exc), str(exc))
+                if signature == last_poll_signature:
+                    consecutive_poll_failures += 1
+                else:
+                    last_poll_signature = signature
+                    consecutive_poll_failures = 1
+                logger.warning(
+                    "Kafka poll failed while waiting for partition assignment (attempt=%d): %s",
+                    consecutive_poll_failures,
+                    exc,
+                    exc_info=True,
+                )
+                if consecutive_poll_failures >= 3:
+                    raise RuntimeError(
+                        "Kafka consumer poll failed repeatedly while waiting for partition assignment"
+                    ) from exc
                 time.sleep(0.1)
                 continue
             try:

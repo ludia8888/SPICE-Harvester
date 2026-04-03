@@ -18,32 +18,27 @@ from shared.services.registries.agent_registry import AgentRegistry
 from shared.services.registries.agent_session_registry import AgentSessionRegistry
 from shared.services.storage.event_store import event_store
 from shared.services.core.service_factory import create_fastapi_service, get_agent_service_info, run_service
+from shared.services.core.runtime_status import ensure_runtime_status, record_runtime_issue
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def _ensure_runtime_status(app: FastAPI) -> dict[str, object]:
-    state = getattr(app.state, "runtime_status", None)
-    if isinstance(state, dict):
-        return state
-    state = {
-        "ready": True,
-        "degraded": False,
-        "issues": [],
-        "background_tasks": {},
-    }
-    app.state.runtime_status = state
-    return state
+    return ensure_runtime_status(app)
 
 
 def _mark_runtime_issue(app: FastAPI, *, message: str, ready: bool) -> None:
-    status = _ensure_runtime_status(app)
-    status["degraded"] = True
-    status["ready"] = bool(status.get("ready", True) and ready)
-    issues = status.setdefault("issues", [])
-    if isinstance(issues, list) and message not in issues:
-        issues.append(message)
+    record_runtime_issue(
+        app,
+        component=message,
+        dependency=message,
+        message=message,
+        state="degraded" if ready else "hard_down",
+        classification="unavailable",
+        affected_features=("agent_runtime",),
+        affects_readiness=not ready,
+    )
 
 
 @asynccontextmanager

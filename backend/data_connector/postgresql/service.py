@@ -75,7 +75,7 @@ class PostgreSQLConnectorService(ConnectorAdapter):
             finally:
                 await conn.close()
             return ConnectorConnectionTestResult(ok=True, message="Connection is healthy", details={})
-        except Exception as exc:
+        except (ValueError, OSError, TimeoutError, asyncpg.PostgresError) as exc:
             return ConnectorConnectionTestResult(ok=False, message=str(exc), details={"error": str(exc)})
 
     async def _fetch(self, *, query: str, config: Dict[str, Any], secrets: Dict[str, Any], params: list[Any] | None = None) -> ConnectorExtractResult:
