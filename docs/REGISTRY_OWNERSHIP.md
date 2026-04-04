@@ -18,7 +18,7 @@ This table answers a common maintenance question:
 | `DatasetProfileRegistry` | `spice_datasets` | BFF profile/stat generation flows, MCP/reporting helpers | BFF/MCP profile readers | Derived dataset profile state; not the source of truth for dataset versions |
 | `PipelineRegistry` | `spice_pipelines` | BFF pipeline catalog/execution/proposal flows, pipeline deploy/update control-plane writes | BFF pipeline/detail/history routers, pipeline/objectify/connector workers | Durable pipeline definitions, versions, dependencies, permissions, schedule metadata |
 | `PipelinePlanRegistry` | `spice_pipelines` | BFF plan preview/compiler/autonomous plan flows | Agent proxy, plan preview, MCP helpers | Stores draft/plan-stage control-plane state, not executed outputs |
-| `ObjectifyRegistry` | `spice_objectify` | BFF mapping-spec CRUD, connector/pipeline enqueue paths, objectify worker lifecycle updates | BFF objectify services, objectify worker, instance/pipeline workers | Owns mapping specs, objectify jobs, outbox, and objectify watermarks |
+| `ObjectifyRegistry` | `spice_objectify` | BFF mapping-spec CRUD, connector/pipeline enqueue paths, objectify worker lifecycle updates | BFF objectify services, objectify worker, instance/pipeline workers | Owns mapping specs, objectify jobs, outbox, and objectify watermarks. Elasticsearch instance documents are derived from this flow, not the source of truth. |
 | `ConnectorRegistry` | `spice_connectors` | BFF connector registration/connectivity flows, connector trigger/sync services | BFF Foundry connectivity and ops routers, Funnel Google Sheets resolution, connector workers | Owns connector sources, mappings, sync state, and connector update outbox |
 | `ActionLogRegistry` | `spice_action_logs` | OMS action ingress/services, action worker, action outbox worker | BFF action/instance views, tests and admin tooling | Durable action lifecycle and result state |
 | `ProcessedEventRegistry` | `spice_event_registry` | Kafka workers via `ProcessedEventKafkaWorker` claim/done/fail flow | OMS command-status fallback, worker monitoring, lease smoke tests | Owns idempotency + ordering guard for at-least-once consumers |
@@ -39,6 +39,7 @@ This table answers a common maintenance question:
 2. Readers may cache or derive from registry data, but they do not redefine its meaning.
 3. Cross-registry orchestration belongs in service/worker layers, not inside a registry unless it is purely persistence glue.
 4. Schema ownership lives in `backend/database/migrations`, not in runtime bootstrap code.
+5. Elasticsearch and other projections may be operationally important, but they do not become authoritative just because they are faster to read.
 
 ## Safe Change Rules
 

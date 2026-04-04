@@ -106,6 +106,12 @@ class PipelineMCPServer:
         self._rate_limiter = ToolCallRateLimiter()
         self._setup_handlers()
 
+    def _current_request_context(self) -> Any:
+        try:
+            return self.server.request_context
+        except Exception:
+            return None
+
     async def _ensure_registries(self) -> tuple[DatasetRegistry, DatasetProfileRegistry]:
         if self._dataset_registry is None:
             self._dataset_registry = DatasetRegistry()
@@ -160,7 +166,10 @@ class PipelineMCPServer:
             # Enterprise Enhancement (2026-01): Rate limiting to prevent runaway loops
             rate_limit_error = self._rate_limiter.check_and_record(
                 name,
-                scope=resolve_tool_call_scope(arguments),
+                scope=resolve_tool_call_scope(
+                    arguments,
+                    request_context=self._current_request_context(),
+                ),
             )
             if rate_limit_error:
                 logger.warning("MCP tool rate limited: %s", rate_limit_error)

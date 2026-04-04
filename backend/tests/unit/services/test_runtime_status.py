@@ -104,6 +104,19 @@ def test_availability_surface_accepts_dependency_overrides_and_message() -> None
     assert surface["status_reason"] == "Redis warming up"
     assert surface["message"] == "Redis warming up"
     assert surface["root_causes"][0]["dependency"] == "redis"
+    assert surface["root_causes"][0]["classification"] == "unavailable"
+
+
+@pytest.mark.unit
+def test_availability_surface_does_not_emit_legacy_healthy_or_unknown_classifications() -> None:
+    surface = availability_surface(
+        service="unit-runtime",
+        container_ready=True,
+        runtime_status={"ready": True, "degraded": False, "issues": [], "background_tasks": {}},
+    )
+
+    assert surface["dependency_details"]["container"]["classification"] is None
+    assert surface["dependency_details"]["runtime"]["classification"] is None
 
 
 @pytest.mark.asyncio

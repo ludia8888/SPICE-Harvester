@@ -20,6 +20,15 @@
       "description": "Reject raw HTTP and error taxonomy regressions before release."
     },
     {
+      "name": "platform_contract_audit",
+      "make_target": "backend-platform-contract-audit",
+      "ci_job": "backend-platform-contract-audit",
+      "stage": "guard",
+      "blocking": true,
+      "requires_stack": false,
+      "description": "Guard shared write-path contracts, runtime vocabulary, and facade size ratchets."
+    },
+    {
       "name": "backend_unit",
       "make_target": "backend-unit",
       "ci_job": "backend-unit",

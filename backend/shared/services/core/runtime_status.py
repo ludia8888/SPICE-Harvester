@@ -4,6 +4,7 @@ import inspect
 import logging
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from shared.errors.error_types import ErrorClassification
 from shared.observability.log_taxonomy import log_taxonomy_event
 
 RUNTIME_STATE_READY = "ready"
@@ -14,6 +15,7 @@ _RUNTIME_STATES = {
     RUNTIME_STATE_DEGRADED,
     RUNTIME_STATE_HARD_DOWN,
 }
+_RUNTIME_FAILURE_CLASSIFICATIONS = {item.value for item in ErrorClassification}
 
 _DEFAULT_RUNTIME_STATUS_ATTRS = (
     "runtime_status",
@@ -73,6 +75,19 @@ def _ordered_unique_strings(values: Iterable[Any]) -> List[str]:
     return items
 
 
+def _normalize_failure_classification(
+    value: Any,
+    *,
+    default: Optional[str] = ErrorClassification.UNAVAILABLE.value,
+) -> Optional[str]:
+    token = str(value or "").strip().lower()
+    if not token:
+        return default
+    if token in _RUNTIME_FAILURE_CLASSIFICATIONS:
+        return token
+    return default
+
+
 def build_runtime_issue(
     *,
     component: str,
@@ -96,7 +111,7 @@ def build_runtime_issue(
         "component": issue_component,
         "dependency": dependency_name,
         "state": resolved_state,
-        "classification": str(classification or "unavailable").strip().lower() or "unavailable",
+        "classification": _normalize_failure_classification(classification) or ErrorClassification.UNAVAILABLE.value,
         "message": str(message or "").strip() or issue_component,
         "affects_readiness": bool(affects_readiness if affects_readiness is not None else resolved_state == RUNTIME_STATE_HARD_DOWN),
         "affected_features": features,
@@ -302,7 +317,7 @@ def _dependency_details(
             payload = {
                 "dependency": dependency_name,
                 "state": state,
-                "classification": "healthy" if state == RUNTIME_STATE_READY else "unknown",
+                "classification": None if state == RUNTIME_STATE_READY else ErrorClassification.UNAVAILABLE.value,
                 "classifications": [],
                 "message": "" if state == RUNTIME_STATE_READY else f"{dependency_name} is {state}",
                 "messages": [],
@@ -330,7 +345,8 @@ def _dependency_details(
         if _state_rank(issue_state) >= _state_rank(str(detail.get("state") or RUNTIME_STATE_READY)):
             detail["state"] = issue_state
         classifications = _ordered_unique_strings(
-            list(detail.get("classifications") or []) + [issue.get("classification")]
+            list(detail.get("classifications") or [])
+            + [_normalize_failure_classification(issue.get("classification"), default=None)]
         )
         messages = _ordered_unique_strings(list(detail.get("messages") or []) + [issue.get("message")])
         components = _ordered_unique_strings(list(detail.get("components") or []) + [issue.get("component")])
@@ -338,7 +354,10 @@ def _dependency_details(
             list(detail.get("affected_features") or []) + list(issue.get("affected_features") or [])
         )
         detail["classifications"] = classifications
-        detail["classification"] = classifications[0] if classifications else detail.get("classification") or "unknown"
+        detail["classification"] = _normalize_failure_classification(
+            classifications[0] if classifications else detail.get("classification"),
+            default=None if detail["state"] == RUNTIME_STATE_READY else ErrorClassification.UNAVAILABLE.value,
+        )
         detail["messages"] = messages
         detail["message"] = messages[0] if messages else detail.get("message") or f"{dependency_name} is {detail['state']}"
         detail["components"] = components
@@ -375,7 +394,10 @@ def _root_cause_summary(details: Mapping[str, Mapping[str, Any]]) -> List[Dict[s
             {
                 "dependency": dependency_name,
                 "state": state,
-                "classification": str(detail.get("classification") or "unknown"),
+                "classification": _normalize_failure_classification(
+                    detail.get("classification"),
+                    default=None if state == RUNTIME_STATE_READY else ErrorClassification.UNAVAILABLE.value,
+                ),
                 "message": str(detail.get("message") or f"{dependency_name} is {state}"),
                 "affected_features": list(detail.get("affected_features") or []),
                 "components": list(detail.get("components") or []),
@@ -406,7 +428,7 @@ def _service_name_from_holder(holder: Any) -> str:
 
 def _emit_runtime_issue_log(holder: Any, *, issue: Mapping[str, Any]) -> None:
     state = normalize_runtime_state(issue.get("state"), default=RUNTIME_STATE_DEGRADED)
-    classification = str(issue.get("classification") or "unavailable").strip().lower() or "unavailable"
+    classification = _normalize_failure_classification(issue.get("classification")) or ErrorClassification.UNAVAILABLE.value
     level = logging.ERROR if state == RUNTIME_STATE_HARD_DOWN else logging.WARNING
     retryable = classification in {"unavailable", "retryable"}
     log_taxonomy_event(
@@ -514,10 +536,10 @@ def availability_surface(
         status_reason = f"Service is {state}"
     classifications: Dict[str, int] = {}
     for item in root_causes:
-        classification = str(item.get("classification") or "unknown")
+        classification = _normalize_failure_classification(item.get("classification"), default=None)
         if str(item.get("source") or "derived") != "issue":
             continue
-        if classification in {"unknown", "healthy"}:
+        if not classification:
             continue
         classifications[classification] = int(classifications.get(classification, 0)) + 1
     payload = {

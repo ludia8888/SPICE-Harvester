@@ -122,7 +122,7 @@ def _health_surface(*, transport: str) -> Dict[str, Any]:
     surface["dependency_details"]["transport"] = {
         "dependency": "transport",
         "state": "ready",
-        "classification": "healthy",
+        "classification": None,
         "classifications": [],
         "message": f"{transport} transport ready",
         "messages": [f"{transport} transport ready"],

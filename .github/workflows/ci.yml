@@ -38,6 +38,13 @@ jobs:
       python-version: "3.11"
       make-target: backend-error-taxonomy
 
+  backend-platform-contract-audit:
+    name: Backend Platform Contract Audit
+    uses: ./.github/workflows/backend-coverage.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-platform-contract-audit
+
   docs-check:
     name: Docs Auto-Generated Check
     runs-on: ubuntu-latest
@@ -148,6 +155,7 @@ jobs:
     needs:
       - backend-runtime-ddl-audit
       - backend-error-taxonomy
+      - backend-platform-contract-audit
       - backend-unit
       - backend-boundary-smoke
       - backend-release-smoke
@@ -168,6 +176,7 @@ jobs:
           {
             "backend-runtime-ddl-audit": "${{ needs.backend-runtime-ddl-audit.result }}",
             "backend-error-taxonomy": "${{ needs.backend-error-taxonomy.result }}",
+            "backend-platform-contract-audit": "${{ needs.backend-platform-contract-audit.result }}",
             "backend-unit": "${{ needs.backend-unit.result }}",
             "backend-boundary-smoke": "${{ needs.backend-boundary-smoke.result }}",
             "backend-release-smoke": "${{ needs.backend-release-smoke.result }}",

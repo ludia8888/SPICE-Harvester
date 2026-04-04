@@ -149,4 +149,5 @@ def test_bff_sdk_mcp_health_surface_uses_unified_runtime_vocabulary(monkeypatch:
     assert payload["status"] == "ready"
     assert payload["service"] == "bff-sdk-mcp-server"
     assert payload["dependency_status"]["transport"] == "ready"
+    assert payload["dependency_details"]["transport"]["classification"] is None
     assert payload["transport"] == "streamable-http"

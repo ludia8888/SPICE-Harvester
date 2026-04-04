@@ -597,7 +597,7 @@ class TestBFFHealth:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["status"] == "success"
-                assert data["data"]["status"] == "healthy"
+                assert data["data"]["status"] == "ready"
 
     @pytest.mark.asyncio
     @pytest.mark.requires_infra
@@ -1183,7 +1183,7 @@ class TestProcessedEventRegistryIdempotency:
         )
 
         schema = f"spice_event_registry_smoke_{uuid.uuid4().hex[:8]}"
-        registry = ProcessedEventRegistry(schema=schema)
+        registry = ProcessedEventRegistry(schema=schema, allow_runtime_ddl_bootstrap=True)
         try:
             await registry.connect()
 
@@ -1217,7 +1217,7 @@ class TestProcessedEventRegistryIdempotency:
         )
 
         schema = f"spice_event_registry_smoke_{uuid.uuid4().hex[:8]}"
-        registry = ProcessedEventRegistry(schema=schema)
+        registry = ProcessedEventRegistry(schema=schema, allow_runtime_ddl_bootstrap=True)
         try:
             await registry.connect()
 

@@ -11,13 +11,13 @@ from typing import Any, Dict
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
 
 from bff.dependencies import OMSClientDep, get_redis_service
 from bff.services.database_role_guard import enforce_database_role_or_permission_error
 from bff.routers import foundry_ontology_v2_metadata as _metadata
 from bff.routers import foundry_ontology_v2_object_rows as _object_rows
 from bff.routers import foundry_ontology_v2_queries as _query_routes
+from bff.routers import foundry_ontology_v2_read_routes as _read_routes
 from bff.routers.foundry_ontology_v2_actions import (
     get_action_type_by_rid_route,
     get_action_type_route,
@@ -121,6 +121,16 @@ from bff.routers.object_types import (
     _extract_resource as _extract_object_resource,
     _extract_resources as _extract_object_resources,
     _to_foundry_object_type,
+)
+from bff.routers.foundry_ontology_v2_models import (
+    ApplyActionRequestOptionsV2,
+    ApplyActionRequestV2,
+    BatchApplyActionRequestItemV2,
+    BatchApplyActionRequestOptionsV2,
+    BatchApplyActionRequestV2,
+    ExecuteQueryRequestV2,
+    ObjectTypeContractCreateRequestV2,
+    ObjectTypeContractUpdateRequestV2,
 )
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.oms_client import OMSClient
@@ -243,71 +253,6 @@ def _query_type_branch_candidates() -> tuple[str, ...]:
         if normalized and normalized not in branches:
             branches.append(normalized)
     return tuple(branches)
-
-
-class ApplyActionRequestOptionsV2(BaseModel):
-    mode: str | None = None
-    return_edits: str | None = Field(default=None, alias="returnEdits")
-
-
-class ApplyActionRequestV2(BaseModel):
-    options: ApplyActionRequestOptionsV2 | None = None
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-
-
-class BatchApplyActionRequestItemV2(BaseModel):
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-
-
-class BatchApplyActionRequestOptionsV2(BaseModel):
-    return_edits: str | None = Field(default=None, alias="returnEdits")
-
-
-class BatchApplyActionRequestV2(BaseModel):
-    options: BatchApplyActionRequestOptionsV2 | None = None
-    requests: list[BatchApplyActionRequestItemV2] = Field(default_factory=list, min_length=1, max_length=20)
-
-
-class ExecuteQueryRequestV2(BaseModel):
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-    options: Dict[str, Any] | None = None
-
-
-class ObjectTypeContractCreateRequestV2(BaseModel):
-    apiName: str = Field(..., min_length=1)
-    status: str | None = None
-    primaryKey: str | None = None
-    titleProperty: str | None = None
-    pkSpec: Dict[str, Any] | None = None
-    backingSource: Dict[str, Any] | None = None
-    backingSources: list[Dict[str, Any]] | None = None
-    backingDatasetId: str | None = None
-    backingDatasourceId: str | None = None
-    backingDatasourceVersionId: str | None = None
-    datasetVersionId: str | None = None
-    schemaHash: str | None = None
-    mappingSpecId: str | None = None
-    mappingSpecVersion: int | None = None
-    autoGenerateMapping: bool | None = None
-    metadata: Dict[str, Any] | None = None
-
-
-class ObjectTypeContractUpdateRequestV2(BaseModel):
-    status: str | None = None
-    primaryKey: str | None = None
-    titleProperty: str | None = None
-    pkSpec: Dict[str, Any] | None = None
-    backingSource: Dict[str, Any] | None = None
-    backingSources: list[Dict[str, Any]] | None = None
-    backingDatasetId: str | None = None
-    backingDatasourceId: str | None = None
-    backingDatasourceVersionId: str | None = None
-    datasetVersionId: str | None = None
-    schemaHash: str | None = None
-    mappingSpecId: str | None = None
-    mappingSpecVersion: int | None = None
-    metadata: Dict[str, Any] | None = None
-    migration: Dict[str, Any] | None = None
 
 
 def _object_set_runtime_value_error_response(
@@ -456,32 +401,14 @@ async def list_ontologies_v2(
     request: Request,
     oms_client: OMSClient = OMSClientDep,
 ):
-    try:
-        _ = request
-        payload = await oms_client.list_databases()
-        rows = _extract_databases(payload)
-        data = [
-            _to_foundry_ontology(row)
-            for row in rows
-            if str(row.get("name") or row.get("db_name") or row.get("apiName") or "").strip()
-        ]
-        return {"data": data}
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to list ontologies (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={},
-        )
+    return await _read_routes.list_ontologies_route(
+        request=request,
+        oms_client=oms_client,
+        extract_databases=_extract_databases,
+        to_foundry_ontology=_to_foundry_ontology,
+        foundry_error=_foundry_error,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+    )
 
 
 @router.get("/{ontologyRid}", dependencies=[_ONTOLOGY_READ])
@@ -491,42 +418,18 @@ async def get_ontology_v2(
     request: Request,
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(exc, ontology=str(ontology))
-
-    try:
-        payload = await oms_client.get_database(db_name)
-        row = extract_payload_object(payload)
-        if not isinstance(row, dict):
-            row = {"name": db_name}
-        out = _to_foundry_ontology(row)
-        if not out.get("apiName"):
-            out["apiName"] = db_name
-        if not out.get("displayName"):
-            out["displayName"] = db_name
-        return out
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code if exc.response is not None else status.HTTP_502_BAD_GATEWAY
-        if status_code == status.HTTP_404_NOT_FOUND:
-            return _not_found_error("OntologyNotFound", ontology=db_name)
-        return _foundry_error(
-            status_code,
-            error_code="UPSTREAM_ERROR",
-            error_name="UpstreamError",
-            parameters={"ontology": db_name},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        logger.error("Failed to get ontology (v2): %s", exc)
-        return _foundry_error(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            error_code="INTERNAL",
-            error_name="Internal",
-            parameters={"ontology": db_name},
-        )
+    return await _read_routes.get_ontology_route(
+        ontology=ontologyRid,
+        request=request,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        to_foundry_ontology=_to_foundry_ontology,
+        not_found_error=_not_found_error,
+        foundry_error=_foundry_error,
+    )
 
 
 @router.get("/{ontologyRid}/fullMetadata", dependencies=[_ONTOLOGY_READ])
@@ -840,52 +743,27 @@ async def list_query_types_v2(
     page_token: str | None = Query(default=None, alias="pageToken"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        await _require_domain_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/queryTypes", db_name, page_size)
-        offset = _decode_page_token(page_token, scope=page_scope)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(exc, ontology=str(ontology))
-
-    try:
-        resources: list[dict[str, Any]] = []
-        for branch_name in _query_type_branch_candidates():
-            payload = await oms_client.list_ontology_resources(
-                db_name,
-                resource_type="function",
-                branch=branch_name,
-                limit=page_size,
-                offset=offset,
-            )
-            branch_resources = _extract_ontology_resource_rows(payload)
-            if branch_resources:
-                resources = branch_resources
-                break
-            if not resources:
-                resources = branch_resources
-        data = [
-            mapped
-            for mapped in (_to_foundry_query_type(resource) for resource in resources)
-            if mapped is not None
-        ]
-        next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
-        return {"data": data, "nextPageToken": next_page_token}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list query types (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await _read_routes.list_query_types_route(
+        ontology=ontologyRid,
+        request=request,
+        page_size=page_size,
+        page_token=page_token,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        require_domain_role=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        pagination_scope=_pagination_scope,
+        decode_page_token=_decode_page_token,
+        encode_page_token=_encode_page_token,
+        query_type_branch_candidates=_query_type_branch_candidates,
+        extract_ontology_resource_rows=_extract_ontology_resource_rows,
+        to_foundry_query_type=_to_foundry_query_type,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/queryTypes/{queryApiName}", dependencies=[_ONTOLOGY_READ])
@@ -972,57 +850,34 @@ async def list_interface_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/interfaceTypes",
-        )
-        await _require_domain_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/interfaceTypes", db_name, branch, page_size, "1" if preview else "0")
-        offset = _decode_page_token(page_token, scope=page_scope)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview},
-        )
-
-    try:
-        payload = await oms_client.list_ontology_resources(
-            db_name,
-            resource_type="interface",
-            branch=branch,
-            limit=page_size,
-            offset=offset,
-        )
-        resources = _extract_ontology_resource_rows(payload)
-        data = [
-            mapped
-            for mapped in (_to_foundry_named_metadata(resource) for resource in resources)
-            if mapped is not None
-        ]
-        next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
-        return {"data": data, "nextPageToken": next_page_token}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list interface types (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await _read_routes.list_named_ontology_resources_route(
+        ontology=ontologyRid,
+        request=request,
+        preview=preview,
+        page_size=page_size,
+        page_token=page_token,
+        branch=branch,
+        oms_client=oms_client,
+        resource_type="interface",
+        collection_scope="v2/interfaceTypes",
+        endpoint="ontologies/{ontologyRid}/interfaceTypes",
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_access=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        pagination_scope=_pagination_scope,
+        decode_page_token=_decode_page_token,
+        encode_page_token=_encode_page_token,
+        extract_ontology_resource_rows=_extract_ontology_resource_rows,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}", dependencies=[_ONTOLOGY_READ])
@@ -1037,75 +892,32 @@ async def get_interface_type_v2(
     sdk_version: str | None = Query(default=None, alias="sdkVersion"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    interfaceType = interfaceTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}",
-        )
-        _ = sdk_package_rid, sdk_version
-        interface_type = str(interfaceType or "").strip()
-        if not interface_type:
-            raise ValueError("interfaceType is required")
-        await _require_domain_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview, "interfaceType": str(interfaceType)},
-        )
-
-    try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="interface",
-            resource_id=interface_type,
-            branch=branch,
-        )
-        resource = _extract_ontology_resource(payload)
-        if not resource:
-            return _not_found_error(
-                "InterfaceTypeNotFound",
-                ontology=db_name,
-                parameters={"interfaceType": interface_type},
-            )
-        mapped = _to_foundry_named_metadata(resource)
-        if mapped is None:
-            return _not_found_error(
-                "InterfaceTypeNotFound",
-                ontology=db_name,
-                parameters={"interfaceType": interface_type},
-            )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"interfaceType": interface_type},
-            not_found_response=_not_found_error(
-                "InterfaceTypeNotFound",
-                ontology=db_name,
-                parameters={"interfaceType": interface_type},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"interfaceType": interface_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get interface type (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"interfaceType": interface_type},
-        )
+    _ = sdk_package_rid, sdk_version
+    return await _read_routes.get_named_ontology_resource_route(
+        ontology=ontologyRid,
+        resource_api_name=interfaceTypeApiName,
+        request=request,
+        preview=preview,
+        branch=branch,
+        oms_client=oms_client,
+        resource_type="interface",
+        resource_parameter="interfaceType",
+        not_found_name="InterfaceTypeNotFound",
+        endpoint="ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}",
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_access=_require_domain_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/sharedPropertyTypes", dependencies=[_ONTOLOGY_READ])
@@ -1119,57 +931,34 @@ async def list_shared_property_types_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/sharedPropertyTypes",
-        )
-        await _require_read_role(request, db_name=db_name)
-        page_scope = _pagination_scope("v2/sharedPropertyTypes", db_name, branch, page_size, "1" if preview else "0")
-        offset = _decode_page_token(page_token, scope=page_scope)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview},
-        )
-
-    try:
-        payload = await oms_client.list_ontology_resources(
-            db_name,
-            resource_type="shared_property",
-            branch=branch,
-            limit=page_size,
-            offset=offset,
-        )
-        resources = _extract_ontology_resource_rows(payload)
-        data = [
-            mapped
-            for mapped in (_to_foundry_named_metadata(resource) for resource in resources)
-            if mapped is not None
-        ]
-        next_page_token = _encode_page_token(offset + len(resources), scope=page_scope) if len(resources) == page_size else None
-        return {"data": data, "nextPageToken": next_page_token}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list shared property types (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await _read_routes.list_named_ontology_resources_route(
+        ontology=ontologyRid,
+        request=request,
+        preview=preview,
+        page_size=page_size,
+        page_token=page_token,
+        branch=branch,
+        oms_client=oms_client,
+        resource_type="shared_property",
+        collection_scope="v2/sharedPropertyTypes",
+        endpoint="ontologies/{ontologyRid}/sharedPropertyTypes",
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_access=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        pagination_scope=_pagination_scope,
+        decode_page_token=_decode_page_token,
+        encode_page_token=_encode_page_token,
+        extract_ontology_resource_rows=_extract_ontology_resource_rows,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}", dependencies=[_ONTOLOGY_READ])
@@ -1182,74 +971,31 @@ async def get_shared_property_type_v2(
     branch: str = Query("main", description="Ontology branch name or branch RID"),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    sharedPropertyType = sharedPropertyTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        branch = _validate_branch(branch)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}",
-        )
-        shared_property_type = str(sharedPropertyType or "").strip()
-        if not shared_property_type:
-            raise ValueError("sharedPropertyType is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview, "sharedPropertyType": str(sharedPropertyType)},
-        )
-
-    try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="shared_property",
-            resource_id=shared_property_type,
-            branch=branch,
-        )
-        resource = _extract_ontology_resource(payload)
-        if not resource:
-            return _not_found_error(
-                "SharedPropertyTypeNotFound",
-                ontology=db_name,
-                parameters={"sharedPropertyType": shared_property_type},
-            )
-        mapped = _to_foundry_named_metadata(resource)
-        if mapped is None:
-            return _not_found_error(
-                "SharedPropertyTypeNotFound",
-                ontology=db_name,
-                parameters={"sharedPropertyType": shared_property_type},
-            )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"sharedPropertyType": shared_property_type},
-            not_found_response=_not_found_error(
-                "SharedPropertyTypeNotFound",
-                ontology=db_name,
-                parameters={"sharedPropertyType": shared_property_type},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"sharedPropertyType": shared_property_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get shared property type (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"sharedPropertyType": shared_property_type},
-        )
+    return await _read_routes.get_named_ontology_resource_route(
+        ontology=ontologyRid,
+        resource_api_name=sharedPropertyTypeApiName,
+        request=request,
+        preview=preview,
+        branch=branch,
+        oms_client=oms_client,
+        resource_type="shared_property",
+        resource_parameter="sharedPropertyType",
+        not_found_name="SharedPropertyTypeNotFound",
+        endpoint="ontologies/{ontologyRid}/sharedPropertyTypes/{sharedPropertyTypeApiName}",
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=_validate_branch,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_access=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/valueTypes", dependencies=[_ONTOLOGY_READ])
@@ -1260,51 +1006,24 @@ async def list_value_types_v2(
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/valueTypes",
-        )
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview},
-        )
-
-    try:
-        resources = await _list_all_resources_for_type(
-            db_name=db_name,
-            branch="main",
-            resource_type="value_type",
-            oms_client=oms_client,
-        )
-        data = [
-            mapped
-            for mapped in (_to_foundry_named_metadata(resource) for resource in resources)
-            if mapped is not None
-        ]
-        return {"data": data}
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            not_found_response=_not_found_error("OntologyNotFound", ontology=db_name),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(ontology=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to list value types (v2)",
-            exc=exc,
-            ontology=db_name,
-        )
+    return await _read_routes.list_value_types_route(
+        ontology=ontologyRid,
+        request=request,
+        preview=preview,
+        oms_client=oms_client,
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_read_role=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        list_all_resources_for_type=_list_all_resources_for_type,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/valueTypes/{valueTypeApiName}", dependencies=[_ONTOLOGY_READ])
@@ -1316,73 +1035,31 @@ async def get_value_type_v2(
     preview: bool = Query(False),
     oms_client: OMSClient = OMSClientDep,
 ):
-    strict_compat = False
-    ontology = ontologyRid
-    valueType = valueTypeApiName
-    try:
-        db_name = await _resolve_ontology_db_name(ontology=ontology, oms_client=oms_client)
-        strict_compat = _is_foundry_v2_strict_compat_enabled(db_name=db_name)
-        _require_preview_true_for_strict_compat(
-            preview=preview,
-            strict_compat=strict_compat,
-            endpoint="ontologies/{ontologyRid}/valueTypes/{valueTypeApiName}",
-        )
-        value_type = str(valueType or "").strip()
-        if not value_type:
-            raise ValueError("valueType is required")
-        await _require_read_role(request, db_name=db_name)
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _preflight_error_response(
-            exc,
-            ontology=str(ontology),
-            parameters={"preview": preview, "valueType": str(valueType)},
-        )
-
-    try:
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="value_type",
-            resource_id=value_type,
-            branch="main",
-        )
-        resource = _extract_ontology_resource(payload)
-        if not resource:
-            return _not_found_error(
-                "ValueTypeNotFound",
-                ontology=db_name,
-                parameters={"valueType": value_type},
-            )
-        mapped = _to_foundry_named_metadata(resource)
-        if mapped is None:
-            return _not_found_error(
-                "ValueTypeNotFound",
-                ontology=db_name,
-                parameters={"valueType": value_type},
-            )
-        return mapped
-    except httpx.HTTPStatusError as exc:
-        return _upstream_status_error_response(
-            exc,
-            ontology=db_name,
-            parameters={"valueType": value_type},
-            not_found_response=_not_found_error(
-                "ValueTypeNotFound",
-                ontology=db_name,
-                parameters={"valueType": value_type},
-            ),
-        )
-    except httpx.HTTPError:
-        return _upstream_transport_error_response(
-            ontology=db_name,
-            parameters={"valueType": value_type},
-        )
-    except _ONTOLOGY_HANDLED_EXCEPTIONS as exc:
-        return _internal_error_response(
-            log_message="Failed to get value type (v2)",
-            exc=exc,
-            ontology=db_name,
-            parameters={"valueType": value_type},
-        )
+    return await _read_routes.get_named_ontology_resource_route(
+        ontology=ontologyRid,
+        resource_api_name=valueTypeApiName,
+        request=request,
+        preview=preview,
+        branch="main",
+        oms_client=oms_client,
+        resource_type="value_type",
+        resource_parameter="valueType",
+        not_found_name="ValueTypeNotFound",
+        endpoint="ontologies/{ontologyRid}/valueTypes/{valueTypeApiName}",
+        resolve_ontology_db_name=_resolve_ontology_db_name,
+        validate_branch=None,
+        is_strict_compat_enabled=_is_foundry_v2_strict_compat_enabled,
+        require_preview_true_for_strict_compat=_require_preview_true_for_strict_compat,
+        require_access=_require_read_role,
+        preflight_error_response=_preflight_error_response,
+        handled_exceptions=_ONTOLOGY_HANDLED_EXCEPTIONS,
+        extract_ontology_resource=_extract_ontology_resource,
+        to_foundry_named_metadata=_to_foundry_named_metadata,
+        upstream_status_error_response=_upstream_status_error_response,
+        upstream_transport_error_response=_upstream_transport_error_response,
+        internal_error_response=_internal_error_response,
+        not_found_error=_not_found_error,
+    )
 
 
 @router.get("/{ontologyRid}/objectTypes", dependencies=[_ONTOLOGY_READ])

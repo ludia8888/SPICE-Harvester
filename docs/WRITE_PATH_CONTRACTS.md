@@ -98,6 +98,7 @@ Code, logs, and tests should use the same post-commit write contract vocabulary.
 ```json
 {
   "authoritative_state": "committed",
+  "authoritative_store": "postgres.pipeline_registry",
   "authoritative_write": "domain_specific_commit_name",
   "derived_side_effects": [
     {
@@ -116,14 +117,27 @@ Code, logs, and tests should use the same post-commit write contract vocabulary.
         "reason": "feature_disabled"
       }
     }
-  ]
+  ],
+  "recovery_path": {
+    "strategy": "reconcile",
+    "owner": "owning_runtime",
+    "reference": "aggregate-or-job-id"
+  }
 }
 ```
 
 Allowed vocabulary:
 
 - authoritative state: `committed`
+- authoritative store: `event_store`, `postgres.<registry_name>`, `lakefs`
 - derived side effect status: `completed`, `degraded`, `skipped`
+- recovery strategy: `retry`, `reconcile`, `noop`
+
+Rules:
+
+- `elasticsearch` is always derived. It may appear in `derived_side_effects`, but never in `authoritative_store`.
+- code, logs, and tests should all expose the same key name: `write_path_contract`
+- post-commit degradation must still leave a named recovery owner/reference
 
 Every write path that crosses an authoritative commit boundary should expose this same shape in the
 most natural surface for that path:
@@ -247,6 +261,22 @@ Contract:
 Implication:
 
 - if ingest succeeded but sync-state persistence fails, retry must be idempotent against the existing durable ingest result
+
+### Objectify
+
+Primary files:
+
+- `backend/objectify_worker/job_processing.py`
+- `backend/objectify_worker/write_paths.py`
+- `backend/shared/services/registries/objectify_registry.py`
+
+Contract:
+
+1. validate ontology, mapping, and key-spec rules before durable success is recorded
+2. materialize instances and related read models
+3. commit authoritative completion in `postgres.objectify_registry`
+4. record `elasticsearch_index`, `instance_event_files`, `lineage`, and `watermark_update` inside the same canonical `write_path_contract`
+5. reconcile forward if post-commit status/event follow-ups degrade
 
 ### Worker Projection / Objectify / Pipeline Runtime
 

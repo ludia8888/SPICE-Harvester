@@ -25,6 +25,7 @@ help:
 	@echo "  backend-unit           Run fast backend unit tests (no docker required)"
 	@echo "  backend-coverage       Run unit tests + generate coverage.xml (for Codecov)"
 	@echo "  backend-runtime-ddl-audit  Guard runtime DDL callsites (migration-first)"
+	@echo "  backend-platform-contract-audit  Guard shared write-path, health vocabulary, and facade ratchets"
 	@echo "  backend-release-gate   Run the full backend release regression gate"
 	@echo "  backend-boundary-smoke  Run explicit Redis/Postgres/LakeFS/Kafka/S3 boundary smoke suite"
 	@echo "  backend-release-smoke  Run release smoke suite against a running local stack"
@@ -51,6 +52,7 @@ help:
 backend-unit:
 	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
 	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
+	PYTHONPATH=backend $(PYTHON) backend/scripts/platform_contract_audit.py --repo-root .
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests
 
@@ -59,6 +61,7 @@ backend-coverage:
 	rm -f coverage.xml || true
 	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
 	PYTHONPATH=backend $(PYTHON) backend/shared/tools/error_taxonomy_audit.py --backend-root backend --fail-on-raw-http-without-code --fail-on-raw-code
+	PYTHONPATH=backend $(PYTHON) backend/scripts/platform_contract_audit.py --repo-root .
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests \
 		--cov=backend --cov-config=backend/.coveragerc \
@@ -68,6 +71,10 @@ backend-coverage:
 .PHONY: backend-runtime-ddl-audit
 backend-runtime-ddl-audit:
 	PYTHONPATH=backend $(PYTHON) backend/scripts/runtime_ddl_audit.py
+
+.PHONY: backend-platform-contract-audit
+backend-platform-contract-audit:
+	PYTHONPATH=backend $(PYTHON) backend/scripts/platform_contract_audit.py --repo-root .
 
 .PHONY: backend-release-gate
 backend-release-gate:
@@ -90,6 +97,7 @@ backend-prod-quick:
 backend-release-smoke:
 	PYTHONPATH=backend ALLOW_RUNTIME_DDL_BOOTSTRAP=false $(PYTHON) -m pytest -q -c backend/pytest.ini \
 		backend/tests/test_infra_boundary_smoke.py \
+		backend/tests/test_mcp_isolation_release_smoke.py \
 		backend/tests/test_oms_smoke.py \
 		backend/tests/test_openapi_contract_smoke.py \
 		backend/tests/test_command_status_ttl_e2e.py \

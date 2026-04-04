@@ -34,6 +34,8 @@ class ObjectifyWriteBatchResult:
 
     command_ids: List[str]
     indexed_instance_ids: List[str]
+    instance_event_files_written: int = 0
+    instance_event_file_failures: int = 0
 
 
 class ObjectifyWritePath(Protocol):
@@ -103,7 +105,12 @@ class DatasetPrimaryIndexWritePath:
     ) -> ObjectifyWriteBatchResult:
         _ = (objectify_pk_fields, objectify_instance_id_field)
         if not instances:
-            return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=[])
+            return ObjectifyWriteBatchResult(
+                command_ids=[],
+                indexed_instance_ids=[],
+                instance_event_files_written=0,
+                instance_event_file_failures=0,
+            )
 
         branch = job.ontology_branch or job.dataset_branch or "main"
         index_name = await self._ensure_instances_index(db_name=job.db_name, branch=branch)
@@ -156,8 +163,11 @@ class DatasetPrimaryIndexWritePath:
         # Write BULK_CREATE_INSTANCES command files to instance-events S3 bucket.
         # These files are consumed by action_worker to reconstruct base instance state
         # via list_command_files() → replay_instance_state().
+        command_ids: List[str] = []
+        instance_event_files_written = 0
+        instance_event_file_failures = 0
         if self._storage and indexed_instance_ids:
-            await self._write_instance_commands_to_s3(
+            command_write_result = await self._write_instance_commands_to_s3(
                 job=job,
                 instances=instances,
                 indexed_instance_ids=indexed_instance_ids,
@@ -165,8 +175,16 @@ class DatasetPrimaryIndexWritePath:
                 now_iso=now,
                 batch_sequence=batch_sequence,
             )
+            command_ids = list(command_write_result.get("command_ids") or [])
+            instance_event_files_written = int(command_write_result.get("written") or 0)
+            instance_event_file_failures = int(command_write_result.get("failed") or 0)
 
-        return ObjectifyWriteBatchResult(command_ids=[], indexed_instance_ids=indexed_instance_ids)
+        return ObjectifyWriteBatchResult(
+            command_ids=command_ids,
+            indexed_instance_ids=indexed_instance_ids,
+            instance_event_files_written=instance_event_files_written,
+            instance_event_file_failures=instance_event_file_failures,
+        )
 
     async def _write_instance_commands_to_s3(
         self,
@@ -177,7 +195,7 @@ class DatasetPrimaryIndexWritePath:
         branch: str,
         now_iso: str,
         batch_sequence: int,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback."""
         assert self._storage is not None  # caller checks
         timestamp = now_iso.replace(":", "").replace("-", "").replace("+", "")
@@ -191,6 +209,7 @@ class DatasetPrimaryIndexWritePath:
 
         written = 0
         failed_count = 0
+        command_ids: List[str] = []
         for instance_id in indexed_instance_ids:
             inst_data = instance_map.get(instance_id, {})
             command_id = deterministic_uuid5_str(f"objectify:{job.job_id}:{instance_id}:{batch_sequence}")
@@ -225,6 +244,8 @@ class DatasetPrimaryIndexWritePath:
                     command_file,
                 )
                 written += 1
+                if len(command_ids) < 25:
+                    command_ids.append(command_id)
             except Exception as exc:
                 failed_count += 1
                 if failed_count <= 3:
@@ -238,6 +259,11 @@ class DatasetPrimaryIndexWritePath:
                 "Wrote %d instance command files to s3://%s (class=%s, job=%s, failed=%d)",
                 written, self._instance_bucket, job.target_class_id, job.job_id, failed_count,
             )
+        return {
+            "written": written,
+            "failed": failed_count,
+            "command_ids": command_ids,
+        }
 
     async def finalize_job(
         self,

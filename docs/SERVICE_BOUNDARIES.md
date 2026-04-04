@@ -136,21 +136,38 @@ Expected pattern:
 - keep route/entrypoint/facade signatures stable
 - move domain logic into sibling helper modules
 - leave thin delegation in the original facade file
+- treat current file length as a ratchet ceiling; if a facade grows, move logic out before merging
+
+Current ratchet ceilings:
+
+- `backend/bff/routers/foundry_ontology_v2.py`: `3021` lines
+- `backend/pipeline_worker/main.py`: `3071` lines
+- `backend/objectify_worker/main.py`: `774` lines
+- `backend/shared/services/registries/dataset_registry.py`: `121` lines
 
 Examples already in place:
 
 - `backend/bff/routers/foundry_ontology_v2_object_sets.py`
 - `backend/bff/routers/foundry_ontology_v2_object_rows.py`
+- `backend/bff/routers/foundry_ontology_v2_read_routes.py`
+- `backend/bff/routers/foundry_ontology_v2_models.py`
 - `backend/bff/services/pipeline_execution_deploy.py`
 - `backend/bff/services/pipeline_execution_preview_build.py`
 - `backend/shared/services/registries/dataset_registry_catalog.py`
 - `backend/shared/services/registries/dataset_registry_ingest.py`
 - `backend/shared/services/registries/dataset_registry_governance.py`
 - `backend/shared/services/registries/dataset_registry_relationships.py`
+- `backend/shared/services/registries/dataset_registry_catalog_mixin.py`
+- `backend/shared/services/registries/dataset_registry_governance_mixin.py`
+- `backend/shared/services/registries/dataset_registry_edits_mixin.py`
+- `backend/shared/services/registries/dataset_registry_ingest_mixin.py`
 - `backend/pipeline_worker/input_loading.py`
 - `backend/pipeline_worker/output_preparation.py`
+- `backend/pipeline_worker/runtime_mixin.py`
 - `backend/objectify_worker/ontology_contracts.py`
 - `backend/objectify_worker/lineage_helpers.py`
+- `backend/objectify_worker/runtime_helpers.py`
+- `backend/objectify_worker/runtime_mixin.py`
 
 ## Boundary Decision Guide
 
