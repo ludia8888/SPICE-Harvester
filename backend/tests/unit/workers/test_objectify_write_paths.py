@@ -78,6 +78,14 @@ class _FakeElasticsearchService:
         return {"hits": {"hits": []}}
 
 
+class _FakeStorageService:
+    def __init__(self) -> None:
+        self.saved: List[Dict[str, Any]] = []
+
+    async def save_json(self, bucket: str, key: str, payload: Dict[str, Any]) -> None:
+        self.saved.append({"bucket": bucket, "key": key, "payload": payload})
+
+
 @pytest.mark.asyncio
 async def test_dataset_primary_write_path_indexes_instances_directly() -> None:
     job = _build_job()
@@ -248,3 +256,34 @@ async def test_dataset_primary_finalize_prunes_stale_docs_on_full() -> None:
     assert summary["stale_prune"]["deleted"] == 1
     assert fake_es.deleted_docs
     assert fake_es.deleted_docs[0][1] == "order-2"
+
+
+@pytest.mark.asyncio
+async def test_dataset_primary_write_path_samples_command_ids_but_tracks_total_files() -> None:
+    job = _build_job()
+    fake_es = _FakeElasticsearchService()
+    fake_storage = _FakeStorageService()
+    writer = DatasetPrimaryIndexWritePath(
+        elasticsearch_service=fake_es,  # type: ignore[arg-type]
+        storage_service=fake_storage,  # type: ignore[arg-type]
+        chunk_size=100,
+        refresh=False,
+    )
+
+    instances = [
+        {"instance_id": f"order-{idx}", "order_id": f"order-{idx}", "status": "NEW"}
+        for idx in range(30)
+    ]
+
+    result = await writer.write_instances(
+        job=job,
+        instances=instances,
+        ontology_version={"ref": "branch:main", "commit": "abc123"},
+        objectify_pk_fields=["order_id"],
+        objectify_instance_id_field="order_id",
+    )
+
+    assert result.instance_event_files_written == 30
+    assert result.instance_event_file_failures == 0
+    assert len(result.command_ids) == 25
+    assert len(fake_storage.saved) == 30

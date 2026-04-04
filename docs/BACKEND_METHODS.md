@@ -2119,41 +2119,41 @@
   - `_resolve_ref_path(value, path)` (line 158): no docstring
   - `_drop_none_values(value)` (line 168): MCP tools validate inputs via JSON schema where `null` is frequently invalid for optional
   - `_resolve_batch_placeholders(value, last, last_by_alias)` (line 182): Resolve lightweight placeholders inside a *single batch* of tool calls.
-  - `_build_agent_context_snapshot(state)` (line 264): Serialize key agent state for persistence across sessions (clarification resume).
-  - `_extract_knowledge(tool_name, observation, ledger)` (line 314): Extract key structural facts from tool results into the knowledge ledger.
-  - `_summarize_tool_output(tool_name, observation)` (line 388): Summarize large tool outputs before appending to prompt_items.
-  - `_deduplicate_tool_call(state, tool_name, args, step_idx)` (line 465): Return the step index of a previous identical call, or None if unique.
-  - `_dedup_evict_on_failure(state, tool_name, args)` (line 484): Remove a tool call from the dedup cache so the LLM can retry it.
-  - `_check_knowledge_cache(ledger, tool_name, args)` (line 509): Return a synthetic cached observation if the knowledge ledger already has
-  - `_calculate_trim_limit(total_count, default_limit, min_limit)` (line 667): Dynamically calculate trim limit based on data size.
-  - `_trim_null_report(report)` (line 681): no docstring
-  - `_trim_key_inference(value)` (line 712): no docstring
-  - `_trim_type_inference(value)` (line 749): no docstring
-  - `_trim_join_plan(value)` (line 787): no docstring
-  - `_summarize_plan(plan_obj)` (line 799): no docstring
-  - `_summarize_pipeline_progress(state)` (line 893): no docstring
-  - `_record_pipeline_event(state, tool_name, args, observation)` (line 927): no docstring
-  - `_pipeline_has_unresolved_status(state)` (line 1001): If pipeline execution was attempted, ensure we don't incorrectly report success while
-  - `_plan_status(plan_obj)` (line 1024): no docstring
-  - `_build_system_prompt(allowed_tools)` (line 1047): no docstring
-  - `_prompt_text(items)` (line 1323): no docstring
-  - `_build_prompt_header(state, answers, planner_hints, task_spec)` (line 1330): no docstring
-  - `_summarize_ontology(ontology)` (line 1359): Create a summary of the working ontology for compaction.
-  - `_build_compaction_snapshot(state, answers, planner_hints, task_spec)` (line 1381): no docstring
-  - `_get_item_type(item_json)` (line 1418): Fast extraction of item type from serialized JSON without full parse.
-  - `_reshrink_tool_output(item_json, max_chars)` (line 1429): Re-summarize a tool_output item to fit within max_chars.
-  - `_progressive_compress_prompt_items(state, answers, planner_hints, task_spec, target_chars, preserve_recent_n)` (line 1452): Five-level graduated compression with importance scoring.
-  - `_compute_prompt_hash(text)` (line 1564): Compute a short hash of prompt text for identification.
-  - `async _log_pre_compression_state(run_id, prompt_items, compression_reason, audit_store, event_store)` (line 1570): Save pre-compression state for debugging.
-  - `async _maybe_compact_prompt_items(state, answers, planner_hints, task_spec, max_chars, run_id, audit_store, event_store)` (line 1667): Improved compaction with progressive compression and pre-compression logging.
-  - `_mask_tool_observation(payload)` (line 1724): no docstring
-  - `_is_internal_budget_clarification(questions)` (line 1729): no docstring
-  - `async _call_mcp_tool(mcp_manager, server, tool, arguments)` (line 1741): Call an MCP tool on *server* ("pipeline" or "ontology") and normalise the response.
-  - `_build_llm_meta_dict(llm_meta)` (line 1809): Convert an LLMCallMeta to a plain dict (or None). Used in every return block.
-  - `async _execute_tool_call(tool_name, args, state, mcp_manager, allowed_tools, planner_hints, tool_errors, tool_warnings, step_idx)` (line 1825): Execute a single MCP tool call and mutate *state*.
-  - `async _run_agent_core(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry, streaming)` (line 2325): Single autonomous loop that serves both streaming and non-streaming callers.
-  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3248): Non-streaming wrapper: collects the terminal event from the unified core loop.
-  - `async run_pipeline_agent_streaming(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3291): SSE streaming wrapper: yields all events from the unified core loop.
+  - `_build_agent_context_snapshot(state)` (line 267): Serialize key agent state for persistence across sessions (clarification resume).
+  - `_extract_knowledge(tool_name, observation, ledger)` (line 319): Extract key structural facts from tool results into the knowledge ledger.
+  - `_summarize_tool_output(tool_name, observation)` (line 393): Summarize large tool outputs before appending to prompt_items.
+  - `_deduplicate_tool_call(state, tool_name, args, step_idx)` (line 470): Return the step index of a previous identical call, or None if unique.
+  - `_dedup_evict_on_failure(state, tool_name, args)` (line 489): Remove a tool call from the dedup cache so the LLM can retry it.
+  - `_check_knowledge_cache(ledger, tool_name, args)` (line 514): Return a synthetic cached observation if the knowledge ledger already has
+  - `_calculate_trim_limit(total_count, default_limit, min_limit)` (line 672): Dynamically calculate trim limit based on data size.
+  - `_trim_null_report(report)` (line 686): no docstring
+  - `_trim_key_inference(value)` (line 717): no docstring
+  - `_trim_type_inference(value)` (line 754): no docstring
+  - `_trim_join_plan(value)` (line 792): no docstring
+  - `_summarize_plan(plan_obj)` (line 804): no docstring
+  - `_summarize_pipeline_progress(state)` (line 898): no docstring
+  - `_record_pipeline_event(state, tool_name, args, observation)` (line 932): no docstring
+  - `_pipeline_has_unresolved_status(state)` (line 1006): If pipeline execution was attempted, ensure we don't incorrectly report success while
+  - `_plan_status(plan_obj)` (line 1029): no docstring
+  - `_build_system_prompt(allowed_tools)` (line 1052): no docstring
+  - `_prompt_text(items)` (line 1328): no docstring
+  - `_build_prompt_header(state, answers, planner_hints, task_spec)` (line 1335): no docstring
+  - `_summarize_ontology(ontology)` (line 1364): Create a summary of the working ontology for compaction.
+  - `_build_compaction_snapshot(state, answers, planner_hints, task_spec)` (line 1386): no docstring
+  - `_get_item_type(item_json)` (line 1423): Fast extraction of item type from serialized JSON without full parse.
+  - `_reshrink_tool_output(item_json, max_chars)` (line 1434): Re-summarize a tool_output item to fit within max_chars.
+  - `_progressive_compress_prompt_items(state, answers, planner_hints, task_spec, target_chars, preserve_recent_n)` (line 1457): Five-level graduated compression with importance scoring.
+  - `_compute_prompt_hash(text)` (line 1569): Compute a short hash of prompt text for identification.
+  - `async _log_pre_compression_state(run_id, prompt_items, compression_reason, audit_store, event_store)` (line 1575): Save pre-compression state for debugging.
+  - `async _maybe_compact_prompt_items(state, answers, planner_hints, task_spec, max_chars, run_id, audit_store, event_store)` (line 1672): Improved compaction with progressive compression and pre-compression logging.
+  - `_mask_tool_observation(payload)` (line 1729): no docstring
+  - `_is_internal_budget_clarification(questions)` (line 1734): no docstring
+  - `async _call_mcp_tool(mcp_manager, server, tool, arguments)` (line 1746): Call an MCP tool on *server* ("pipeline" or "ontology") and normalise the response.
+  - `_build_llm_meta_dict(llm_meta)` (line 1814): Convert an LLMCallMeta to a plain dict (or None). Used in every return block.
+  - `async _execute_tool_call(tool_name, args, state, mcp_manager, allowed_tools, planner_hints, tool_errors, tool_warnings, step_idx)` (line 1830): Execute a single MCP tool call and mutate *state*.
+  - `async _run_agent_core(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry, streaming)` (line 2334): Single autonomous loop that serves both streaming and non-streaming callers.
+  - `async run_pipeline_agent_mcp_autonomous(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3261): Non-streaming wrapper: collects the terminal event from the unified core loop.
+  - `async run_pipeline_agent_streaming(goal, data_scope, answers, planner_hints, task_spec, resume_plan_id, persist_plan, actor, tenant_id, user_id, data_policies, selected_model, allowed_models, llm_gateway, redis_service, audit_store, event_store, dataset_registry, pipeline_registry, plan_registry)` (line 3304): SSE streaming wrapper: yields all events from the unified core loop.
 - **Classes**
   - `AutonomousPipelineAgentToolCall` (line 49): no docstring
     - `_coerce_args(cls, v)` (line 55): no docstring
@@ -2164,7 +2164,7 @@
     - `_coerce_lists(cls, v)` (line 119): no docstring
     - `_validate_action(self)` (line 124): no docstring
   - `_AgentState` (line 227): no docstring
-  - `StreamEvent` (line 2306): SSE event container. ``event_type`` maps to the SSE ``event:`` field.
+  - `StreamEvent` (line 2315): SSE event container. ``event_type`` maps to the SSE ``event:`` field.
 
 ### `backend/bff/services/pipeline_catalog_service.py`
 - **Functions**
@@ -3976,16 +3976,16 @@
 
 ### `backend/mcp_servers/pipeline_mcp_rate_limit.py`
 - **Functions**
-  - `_coerce_non_empty_token(value)` (line 85): no docstring
-  - `_value_from_mapping(mapping, *keys)` (line 92): no docstring
-  - `_value_from_object(obj, *keys)` (line 102): no docstring
-  - `_resolve_transport_scope(request_context)` (line 110): no docstring
-  - `resolve_tool_call_scope(arguments, request_context)` (line 143): no docstring
+  - `_coerce_non_empty_token(value)` (line 87): no docstring
+  - `_value_from_mapping(mapping, *keys)` (line 94): no docstring
+  - `_value_from_object(obj, *keys)` (line 104): no docstring
+  - `_resolve_transport_scope(request_context)` (line 112): no docstring
+  - `resolve_tool_call_scope(arguments, request_context)` (line 145): no docstring
 - **Classes**
   - `ToolCallRateLimiter` (line 7): Rate limit MCP tool calls by logical caller scope.
-    - `__init__(self, max_calls_per_minute, max_calls_per_tool_per_minute, idle_ttl_seconds)` (line 10): no docstring
-    - `check_and_record(self, tool_name, scope)` (line 25): no docstring
-    - `_evict_idle_scopes(self, now, minute_ago)` (line 56): no docstring
+    - `__init__(self, max_calls_per_minute, max_calls_per_tool_per_minute, idle_ttl_seconds, fallback_scope_key)` (line 10): no docstring
+    - `check_and_record(self, tool_name, scope)` (line 27): no docstring
+    - `_evict_idle_scopes(self, now, minute_ago)` (line 58): no docstring
 
 ### `backend/mcp_servers/pipeline_mcp_server.py`
 - **Functions**
@@ -4208,8 +4208,9 @@
 
 ### `backend/objectify_worker/job_processing.py`
 - **Functions**
-  - `_build_objectify_write_path_contract(job_id, execution_mode, indexed_instances, write_path_report, command_ids, instance_event_files_written, instance_event_file_failures, lineage_limit, lineage_remaining, lineage_enabled, watermark_followup)` (line 30): no docstring
-  - `async process_job(worker, job, fail_exception_cls, compute_lakefs_delta, extract_instance_relationships, auto_detect_watermark_column)` (line 128): no docstring
+  - `_build_objectify_write_path_contract(job_id, execution_mode, indexed_instances, write_path_report, command_ids_sample, instance_event_files_written, instance_event_file_failures, lineage_limit, lineage_remaining, lineage_enabled, watermark_followup)` (line 33): no docstring
+  - `_build_objectify_completion_report(total_rows, prepared_instances, warnings, errors, error_rows, command_ids_sample, instance_ids_sample, indexed_instances, write_path_report, write_path_contract, ontology_version, instance_event_files_written, instance_event_file_failures)` (line 131): no docstring
+  - `async process_job(worker, job, fail_exception_cls, compute_lakefs_delta, extract_instance_relationships, auto_detect_watermark_column)` (line 174): no docstring
 
 ### `backend/objectify_worker/key_constraint_scanning.py`
 - **Functions**
@@ -4340,18 +4341,18 @@
 
 ### `backend/objectify_worker/write_paths.py`
 - **Classes**
-  - `ObjectifyWriteBatchResult` (line 32): Result for a single write batch.
-  - `ObjectifyWritePath` (line 41): Port for objectify write-side strategies.
-    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 44): no docstring
-    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 58): no docstring
-  - `DatasetPrimaryIndexWritePath` (line 68): Foundry-style path: dataset rows are indexed directly into Elasticsearch.
-    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 77): no docstring
-    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 95): no docstring
-    - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 189): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
-    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 268): no docstring
-    - `async _ensure_instances_index(self, db_name, branch)` (line 321): no docstring
-    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 352): no docstring
-    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 409): no docstring
+  - `ObjectifyWriteBatchResult` (line 33): Result for a single write batch.
+  - `ObjectifyWritePath` (line 46): Port for objectify write-side strategies.
+    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 49): no docstring
+    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 63): no docstring
+  - `DatasetPrimaryIndexWritePath` (line 73): Foundry-style path: dataset rows are indexed directly into Elasticsearch.
+    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 82): no docstring
+    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 100): no docstring
+    - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 194): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
+    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 274): no docstring
+    - `async _ensure_instances_index(self, db_name, branch)` (line 327): no docstring
+    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 358): no docstring
+    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 415): no docstring
 
 ## oms
 
@@ -12042,11 +12043,13 @@
   - `test_resolve_tool_call_scope_uses_transport_context_before_request_id()` (line 38): no docstring
   - `test_resolve_tool_call_scope_falls_back_to_request_id_when_session_is_missing()` (line 49): no docstring
   - `test_tool_call_rate_limiter_evicts_idle_scopes()` (line 60): no docstring
-  - `test_rate_limit_isolation_does_not_share_missing_explicit_session_arguments()` (line 86): no docstring
+  - `test_tool_call_rate_limiter_uses_stable_fallback_scope_when_none_provided()` (line 86): no docstring
+  - `test_rate_limit_isolation_does_not_share_missing_explicit_session_arguments()` (line 97): no docstring
 
 ### `backend/tests/unit/mcp/test_pipeline_mcp_tool_specs.py`
 - **Functions**
   - `test_pipeline_mcp_tool_specs_include_core_tools()` (line 9): no docstring
+  - `test_pipeline_execution_tool_specs_allow_optional_session_id()` (line 19): no docstring
 
 ### `backend/tests/unit/mcp/test_pipeline_plan_add_output_contract.py`
 - **Functions**
@@ -15991,18 +15994,20 @@
 
 ### `backend/tests/unit/workers/test_objectify_write_path_contract.py`
 - **Functions**
-  - `test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_store()` (line 10): no docstring
-  - `test_objectify_write_path_contract_marks_degraded_instance_event_files()` (line 39): no docstring
+  - `test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_store()` (line 13): no docstring
+  - `test_objectify_write_path_contract_marks_degraded_instance_event_files()` (line 42): no docstring
+  - `test_objectify_completion_report_keeps_sample_count_consistent_with_reported_ids()` (line 67): no docstring
 
 ### `backend/tests/unit/workers/test_objectify_write_paths.py`
 - **Functions**
   - `_build_job()` (line 11): no docstring
-  - `async test_dataset_primary_write_path_indexes_instances_directly()` (line 82): no docstring
-  - `async test_build_document_populates_properties_from_flat_instance()` (line 114): Properties nested array should be auto-built from flat instance fields.
-  - `async test_build_document_preserves_existing_properties()` (line 152): If properties list is already populated, it should not be overwritten.
-  - `async test_build_document_skips_none_values()` (line 174): Properties with None values should not be included.
-  - `async test_write_instances_passes_target_field_types()` (line 193): write_instances() should forward target_field_types to _build_document().
-  - `async test_dataset_primary_finalize_prunes_stale_docs_on_full()` (line 220): no docstring
+  - `async test_dataset_primary_write_path_indexes_instances_directly()` (line 90): no docstring
+  - `async test_build_document_populates_properties_from_flat_instance()` (line 122): Properties nested array should be auto-built from flat instance fields.
+  - `async test_build_document_preserves_existing_properties()` (line 160): If properties list is already populated, it should not be overwritten.
+  - `async test_build_document_skips_none_values()` (line 182): Properties with None values should not be included.
+  - `async test_write_instances_passes_target_field_types()` (line 201): write_instances() should forward target_field_types to _build_document().
+  - `async test_dataset_primary_finalize_prunes_stale_docs_on_full()` (line 228): no docstring
+  - `async test_dataset_primary_write_path_samples_command_ids_but_tracks_total_files()` (line 262): no docstring
 - **Classes**
   - `_FakeElasticsearchService` (line 26): no docstring
     - `__init__(self)` (line 27): no docstring
@@ -16013,6 +16018,9 @@
     - `async delete_document(self, index, doc_id, refresh)` (line 66): no docstring
     - `async refresh_index(self, index)` (line 70): no docstring
     - `async search(self, index, body)` (line 74): no docstring
+  - `_FakeStorageService` (line 81): no docstring
+    - `__init__(self)` (line 82): no docstring
+    - `async save_json(self, bucket, key, payload)` (line 85): no docstring
 
 ### `backend/tests/unit/workers/test_ontology_worker_graph_lineage_naming.py`
 - **Functions**

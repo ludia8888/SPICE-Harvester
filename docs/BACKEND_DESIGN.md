@@ -11,7 +11,7 @@
 - Modules with broad `except Exception`: **306**
 - Modules with bare `except:`: **0**
 - Modules with `return` inside `finally`: **0**
-- Total code lines (non-empty, non-comment): **282627**
+- Total code lines (non-empty, non-comment): **282785**
 
 ## Package Scoreboard
 
@@ -21,7 +21,7 @@
 | `action_worker` | 3 | 2/3 (66%) | 2 | 8 | 42 | 3 | 2468 |
 | `agent` | 12 | 4/12 (33%) | 3 | 19 | 18 | 18 | 2964 |
 | `analysis` | 1 | 1/1 (100%) | 0 | 0 | 3 | 2 | 334 |
-| `bff` | 245 | 169/245 (68%) | 81 | 338 | 1222 | 873 | 63633 |
+| `bff` | 245 | 169/245 (68%) | 81 | 338 | 1222 | 873 | 63643 |
 | `conftest.py` | 1 | 0/1 (0%) | 0 | 0 | 0 | 0 | 65 |
 | `connector_sync_worker` | 2 | 2/2 (100%) | 1 | 5 | 11 | 1 | 474 |
 | `connector_trigger_service` | 2 | 2/2 (100%) | 1 | 10 | 8 | 1 | 335 |
@@ -30,10 +30,10 @@
 | `funnel` | 15 | 12/15 (80%) | 5 | 35 | 29 | 28 | 3772 |
 | `ingest_reconciler_worker` | 2 | 2/2 (100%) | 1 | 3 | 5 | 3 | 249 |
 | `instance_worker` | 2 | 2/2 (100%) | 1 | 38 | 28 | 2 | 2525 |
-| `mcp_servers` | 22 | 7/22 (31%) | 11 | 52 | 142 | 47 | 7990 |
+| `mcp_servers` | 22 | 7/22 (31%) | 11 | 52 | 142 | 47 | 8012 |
 | `message_relay` | 2 | 1/2 (50%) | 1 | 13 | 11 | 2 | 782 |
 | `monitoring` | 1 | 1/1 (100%) | 1 | 5 | 9 | 2 | 305 |
-| `objectify_worker` | 16 | 4/16 (25%) | 10 | 38 | 73 | 42 | 5453 |
+| `objectify_worker` | 16 | 4/16 (25%) | 10 | 38 | 73 | 42 | 5504 |
 | `oms` | 55 | 38/55 (69%) | 21 | 100 | 208 | 203 | 17385 |
 | `ontology_worker` | 2 | 1/2 (50%) | 1 | 28 | 22 | 1 | 1323 |
 | `perf` | 1 | 1/1 (100%) | 1 | 1 | 3 | 1 | 106 |
@@ -42,7 +42,7 @@
 | `projection_worker` | 2 | 1/2 (50%) | 1 | 27 | 27 | 1 | 1880 |
 | `scripts` | 24 | 19/24 (79%) | 12 | 24 | 29 | 60 | 3394 |
 | `shared` | 352 | 215/352 (61%) | 109 | 384 | 1004 | 1324 | 87563 |
-| `tests` | 409 | 54/409 (13%) | 26 | 169 | 2449 | 1947 | 66729 |
+| `tests` | 409 | 54/409 (13%) | 26 | 169 | 2451 | 1951 | 66804 |
 | `writeback_materializer_worker` | 2 | 2/2 (100%) | 1 | 4 | 8 | 2 | 325 |
 
 ## Engineering Hotspots
@@ -2869,7 +2869,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=685 | code_lines=616 | risk_score=10
+- Source footprint: total_lines=685 | code_lines=615 | risk_score=10
 - API surface: public=1 | top-level functions=1 | classes=2 | methods=18
 - Runtime signals: async_functions=13 | try=5 | raise=20 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=1/1 (100%) | classes=0/2 (0%) | methods=0/18 (0%)
@@ -3061,7 +3061,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: service/domain orchestration
-- Source footprint: total_lines=3327 | code_lines=2874 | risk_score=67
+- Source footprint: total_lines=3340 | code_lines=2885 | risk_score=67
 - API surface: public=5 | top-level functions=39 | classes=4 | methods=6
 - Runtime signals: async_functions=7 | try=14 | raise=7 | broad_except=12 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=24/39 (61%) | classes=1/4 (25%) | methods=0/6 (0%)
@@ -5287,7 +5287,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=150 | code_lines=123 | risk_score=0
+- Source footprint: total_lines=152 | code_lines=125 | risk_score=0
 - API surface: public=2 | top-level functions=5 | classes=1 | methods=3
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/5 (0%) | classes=1/1 (100%) | methods=0/3 (0%)
@@ -5319,7 +5319,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=1277 | code_lines=1263 | risk_score=0
+- Source footprint: total_lines=1297 | code_lines=1283 | risk_score=0
 - API surface: public=1 | top-level functions=1 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
 - Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
@@ -5613,10 +5613,10 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: asynchronous background processing
-- Source footprint: total_lines=1083 | code_lines=1014 | risk_score=22
-- API surface: public=1 | top-level functions=2 | classes=0 | methods=0
+- Source footprint: total_lines=1133 | code_lines=1060 | risk_score=22
+- API surface: public=1 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=2 | try=5 | raise=3 | broad_except=4 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (9): objectify_worker; objectify_worker.validation_codes; objectify_worker.write_paths; shared.models.objectify_job; shared.services.core.sheet_import_service; shared.services.core.write_path_contract; shared.services.pipeline.objectify_delta_utils; shared.utils.import_type_normalization (+1 more)
 - External imports (4): __future__; datetime; logging; typing
 - Public API names: process_job
@@ -5773,7 +5773,7 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: asynchronous background processing
-- Source footprint: total_lines=485 | code_lines=420 | risk_score=10
+- Source footprint: total_lines=491 | code_lines=425 | risk_score=10
 - API surface: public=3 | top-level functions=0 | classes=3 | methods=9
 - Runtime signals: async_functions=7 | try=2 | raise=4 | broad_except=2 | bare_except=0 | finally_return=0
 - Doc coverage: module=yes | top-level functions=0/0 (n/a) | classes=3/3 (100%) | methods=1/9 (11%)
@@ -14335,13 +14335,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=97 | code_lines=68 | risk_score=0
-- API surface: public=7 | top-level functions=7 | classes=0 | methods=0
+- Source footprint: total_lines=108 | code_lines=75 | risk_score=0
+- API surface: public=8 | top-level functions=8 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/7 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/8 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): mcp_servers.pipeline_mcp_rate_limit
 - External imports (3): __future__; pytest; types
-- Public API names: test_rate_limit_isolation_does_not_share_missing_explicit_session_arguments; test_resolve_tool_call_scope_falls_back_to_request_id_when_session_is_missing; test_resolve_tool_call_scope_prefers_known_session_keys; test_resolve_tool_call_scope_uses_transport_context_before_request_id; test_tool_call_rate_limiter_evicts_idle_scopes; test_tool_call_rate_limiter_isolates_scopes; test_tool_call_rate_limiter_limits_same_scope
+- Public API names: test_rate_limit_isolation_does_not_share_missing_explicit_session_arguments; test_resolve_tool_call_scope_falls_back_to_request_id_when_session_is_missing; test_resolve_tool_call_scope_prefers_known_session_keys; test_resolve_tool_call_scope_uses_transport_context_before_request_id; test_tool_call_rate_limiter_evicts_idle_scopes; test_tool_call_rate_limiter_isolates_scopes; test_tool_call_rate_limiter_limits_same_scope; test_tool_call_rate_limiter_uses_stable_fallback_scope_when_none_provided
 
 ### `backend/tests/unit/mcp/test_pipeline_mcp_tool_specs.py`
 - Module summary: no docstring
@@ -14351,13 +14351,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: general backend module
-- Source footprint: total_lines=15 | code_lines=10 | risk_score=0
-- API surface: public=1 | top-level functions=1 | classes=0 | methods=0
+- Source footprint: total_lines=30 | code_lines=22 | risk_score=0
+- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/1 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (1): mcp_servers.pipeline_mcp_tool_specs
 - External imports (2): __future__; pytest
-- Public API names: test_pipeline_mcp_tool_specs_include_core_tools
+- Public API names: test_pipeline_execution_tool_specs_allow_optional_session_id; test_pipeline_mcp_tool_specs_include_core_tools
 
 ### `backend/tests/unit/mcp/test_pipeline_plan_add_output_contract.py`
 - Module summary: no docstring
@@ -19327,13 +19327,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: asynchronous background processing
-- Source footprint: total_lines=60 | code_lines=52 | risk_score=0
-- API surface: public=2 | top-level functions=2 | classes=0 | methods=0
+- Source footprint: total_lines=88 | code_lines=77 | risk_score=0
+- API surface: public=3 | top-level functions=3 | classes=0 | methods=0
 - Runtime signals: async_functions=0 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=0/2 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
+- Doc coverage: module=no | top-level functions=0/3 (0%) | classes=0/0 (n/a) | methods=0/0 (n/a)
 - Internal imports (2): objectify_worker.job_processing; shared.services.core.write_path_contract
 - External imports (2): __future__; pytest
-- Public API names: test_objectify_write_path_contract_marks_degraded_instance_event_files; test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_store
+- Public API names: test_objectify_completion_report_keeps_sample_count_consistent_with_reported_ids; test_objectify_write_path_contract_marks_degraded_instance_event_files; test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_store
 
 ### `backend/tests/unit/workers/test_objectify_write_paths.py`
 - Module summary: no docstring
@@ -19343,13 +19343,13 @@
 - Extension points: not documented
 - Dependencies (doc): not documented
 - Inferred role: asynchronous background processing
-- Source footprint: total_lines=250 | code_lines=212 | risk_score=0
-- API surface: public=6 | top-level functions=7 | classes=1 | methods=8
-- Runtime signals: async_functions=13 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
-- Doc coverage: module=no | top-level functions=4/7 (57%) | classes=0/1 (0%) | methods=0/8 (0%)
+- Source footprint: total_lines=289 | code_lines=243 | risk_score=0
+- API surface: public=7 | top-level functions=8 | classes=2 | methods=10
+- Runtime signals: async_functions=15 | try=0 | raise=0 | broad_except=0 | bare_except=0 | finally_return=0
+- Doc coverage: module=no | top-level functions=4/8 (50%) | classes=0/2 (0%) | methods=0/10 (0%)
 - Internal imports (2): objectify_worker.write_paths; shared.models.objectify_job
 - External imports (3): __future__; pytest; typing
-- Public API names: test_build_document_populates_properties_from_flat_instance; test_build_document_preserves_existing_properties; test_build_document_skips_none_values; test_dataset_primary_finalize_prunes_stale_docs_on_full; test_dataset_primary_write_path_indexes_instances_directly; test_write_instances_passes_target_field_types
+- Public API names: test_build_document_populates_properties_from_flat_instance; test_build_document_preserves_existing_properties; test_build_document_skips_none_values; test_dataset_primary_finalize_prunes_stale_docs_on_full; test_dataset_primary_write_path_indexes_instances_directly; test_dataset_primary_write_path_samples_command_ids_but_tracks_total_files; test_write_instances_passes_target_field_types
 
 ### `backend/tests/unit/workers/test_ontology_worker_graph_lineage_naming.py`
 - Module summary: no docstring

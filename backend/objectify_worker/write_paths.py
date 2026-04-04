@@ -26,11 +26,16 @@ logger = logging.getLogger(__name__)
 
 
 WRITE_PATH_MODE_DATASET_PRIMARY_INDEX = "dataset_primary_index"
+OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT = 25
 
 
 @dataclass(frozen=True)
 class ObjectifyWriteBatchResult:
-    """Result for a single write batch."""
+    """Result for a single write batch.
+
+    command_ids is intentionally a small sample for reporting/debugging.
+    It is not the authoritative fan-out count.
+    """
 
     command_ids: List[str]
     indexed_instance_ids: List[str]
@@ -209,7 +214,7 @@ class DatasetPrimaryIndexWritePath:
 
         written = 0
         failed_count = 0
-        command_ids: List[str] = []
+        command_ids_sample: List[str] = []
         for instance_id in indexed_instance_ids:
             inst_data = instance_map.get(instance_id, {})
             command_id = deterministic_uuid5_str(f"objectify:{job.job_id}:{instance_id}:{batch_sequence}")
@@ -244,8 +249,8 @@ class DatasetPrimaryIndexWritePath:
                     command_file,
                 )
                 written += 1
-                if len(command_ids) < 25:
-                    command_ids.append(command_id)
+                if len(command_ids_sample) < OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT:
+                    command_ids_sample.append(command_id)
             except Exception as exc:
                 failed_count += 1
                 if failed_count <= 3:
@@ -262,7 +267,8 @@ class DatasetPrimaryIndexWritePath:
         return {
             "written": written,
             "failed": failed_count,
-            "command_ids": command_ids,
+            "command_ids": command_ids_sample,
+            "command_ids_truncated": written > len(command_ids_sample),
         }
 
     async def finalize_job(

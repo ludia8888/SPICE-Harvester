@@ -22,7 +22,10 @@ from shared.utils.key_spec import normalize_key_spec
 
 from objectify_worker import delta_processing as _delta_processing
 from objectify_worker.validation_codes import ObjectifyValidationCode as VC
-from objectify_worker.write_paths import WRITE_PATH_MODE_DATASET_PRIMARY_INDEX
+from objectify_worker.write_paths import (
+    OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT,
+    WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +36,7 @@ def _build_objectify_write_path_contract(
     execution_mode: str,
     indexed_instances: int,
     write_path_report: Dict[str, Any],
-    command_ids: List[str],
+    command_ids_sample: List[str],
     instance_event_files_written: int,
     instance_event_file_failures: int,
     lineage_limit: int,
@@ -74,7 +77,7 @@ def _build_objectify_write_path_contract(
             details={
                 "written": int(instance_event_files_written),
                 "failed": int(instance_event_file_failures),
-                "command_ids_sample": list(command_ids[:10]),
+                "command_ids_sample": list(command_ids_sample[:10]),
             },
         )
     elif instance_event_files_written > 0:
@@ -82,7 +85,7 @@ def _build_objectify_write_path_contract(
             "instance_event_files",
             details={
                 "written": int(instance_event_files_written),
-                "command_ids_sample": list(command_ids[:10]),
+                "command_ids_sample": list(command_ids_sample[:10]),
             },
         )
     else:
@@ -123,6 +126,49 @@ def _build_objectify_write_path_contract(
         ],
         recovery_path={"reference": f"objectify_job:{job_id}"},
     )
+
+
+def _build_objectify_completion_report(
+    *,
+    total_rows: int,
+    prepared_instances: int,
+    warnings: List[Dict[str, Any]],
+    errors: List[Dict[str, Any]],
+    error_rows: List[int],
+    command_ids_sample: List[str],
+    instance_ids_sample: List[str],
+    indexed_instances: int,
+    write_path_report: Dict[str, Any],
+    write_path_contract: Dict[str, Any],
+    ontology_version: Optional[Dict[str, str]],
+    instance_event_files_written: int,
+    instance_event_file_failures: int,
+) -> Dict[str, Any]:
+    sampled_command_ids = [
+        str(command_id).strip()
+        for command_id in command_ids_sample[:OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT]
+        if str(command_id).strip()
+    ]
+    return {
+        "total_rows": total_rows,
+        "prepared_instances": prepared_instances,
+        "warnings": warnings[:200],
+        "validation": {"warnings": warnings[:200]},
+        "errors": errors[:200],
+        "error_row_indices": error_rows[:200],
+        # Legacy key kept for compatibility. This list is intentionally only a sample.
+        "command_ids": sampled_command_ids,
+        "command_id_count": len(sampled_command_ids),
+        "command_ids_truncated": int(instance_event_files_written) > len(sampled_command_ids),
+        "instance_event_files_written": int(instance_event_files_written),
+        "instance_event_file_failures": int(instance_event_file_failures),
+        "instance_ids_sample": instance_ids_sample[:10],
+        "indexed_instances": indexed_instances,
+        "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+        "write_path": write_path_report,
+        "write_path_contract": write_path_contract,
+        "ontology_version": ontology_version or {},
+    }
 
 
 async def process_job(
@@ -642,7 +688,7 @@ async def process_job(
                 },
             )
 
-    command_ids: List[str] = []
+    command_ids_sample: List[str] = []
     indexed_instance_ids: set[str] = set()
     instance_event_files_written = 0
     instance_event_file_failures = 0
@@ -736,7 +782,7 @@ async def process_job(
             field_raw_types=field_raw_types,
             seen_row_keys=seen_row_keys,
             stable_seed=stable_seed,
-            command_ids=command_ids,
+            command_ids=command_ids_sample,
             indexed_instance_ids=indexed_instance_ids,
             instance_ids_sample=instance_ids_sample,
             fail_job=_fail_job,
@@ -907,7 +953,7 @@ async def process_job(
                 target_field_types=target_field_types,
             )
             if write_result.command_ids:
-                command_ids.extend([str(v) for v in write_result.command_ids if str(v).strip()])
+                command_ids_sample.extend([str(v) for v in write_result.command_ids if str(v).strip()])
             if write_result.indexed_instance_ids:
                 indexed_instance_ids.update(str(v).strip() for v in write_result.indexed_instance_ids if str(v).strip())
             instance_event_files_written += int(getattr(write_result, "instance_event_files_written", 0) or 0)
@@ -994,7 +1040,7 @@ async def process_job(
         execution_mode=execution_mode,
         indexed_instances=len(indexed_instance_ids),
         write_path_report=write_path_report,
-        command_ids=command_ids,
+        command_ids_sample=command_ids_sample,
         instance_event_files_written=instance_event_files_written,
         instance_event_file_failures=instance_event_file_failures,
         lineage_limit=self.lineage_max_links,
@@ -1009,26 +1055,27 @@ async def process_job(
         write_path_contract,
     )
 
+    completion_report = _build_objectify_completion_report(
+        total_rows=total_rows,
+        prepared_instances=prepared_instances,
+        warnings=warnings,
+        errors=(errors or validation_errors),
+        error_rows=(error_rows or validation_error_rows),
+        command_ids_sample=command_ids_sample,
+        instance_ids_sample=instance_ids_sample,
+        indexed_instances=len(indexed_instance_ids),
+        write_path_report=write_path_report,
+        write_path_contract=write_path_contract,
+        ontology_version=ontology_version,
+        instance_event_files_written=instance_event_files_written,
+        instance_event_file_failures=instance_event_file_failures,
+    )
+
     await self.objectify_registry.update_objectify_job_status(
         job_id=job.job_id,
         status="COMPLETED",
         command_id=None,
-        report={
-            "total_rows": total_rows,
-            "prepared_instances": prepared_instances,
-            "warnings": warnings[:200],
-            "validation": {"warnings": warnings[:200]},
-            "errors": (errors or validation_errors)[:200],
-            "error_row_indices": (error_rows or validation_error_rows)[:200],
-            "command_ids": command_ids[:25],
-            "command_id_count": instance_event_files_written,
-            "instance_ids_sample": instance_ids_sample[:10],
-            "indexed_instances": len(indexed_instance_ids),
-            "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
-            "write_path": write_path_report,
-            "write_path_contract": write_path_contract,
-            "ontology_version": ontology_version or {},
-        },
+        report=completion_report,
         completed_at=datetime.now(timezone.utc),
     )
 
@@ -1039,8 +1086,11 @@ async def process_job(
             details={
                 "total_rows": total_rows,
                 "prepared_instances": prepared_instances,
-                "command_ids": command_ids[:25],
-                "command_id_count": instance_event_files_written,
+                "command_ids": completion_report.get("command_ids") or [],
+                "command_id_count": completion_report.get("command_id_count") or 0,
+                "command_ids_truncated": bool(completion_report.get("command_ids_truncated")),
+                "instance_event_files_written": instance_event_files_written,
+                "instance_event_file_failures": instance_event_file_failures,
                 "indexed_instances": len(indexed_instance_ids),
                 "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
                 "warning_count": len(warnings),

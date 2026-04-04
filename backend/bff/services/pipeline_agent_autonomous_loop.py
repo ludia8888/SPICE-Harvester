@@ -250,6 +250,9 @@ class _AgentState:
     # Append-only JSONL prompt log to enable provider-side prefix caching.
     prompt_items: List[str] = field(default_factory=list)
 
+    # Stable MCP session for pipeline tools so rate limiting applies per agent run.
+    pipeline_session_id: Optional[str] = None
+
     # Ontology state (integrated from ontology agent)
     ontology_session_id: Optional[str] = None
     working_ontology: Optional[Dict[str, Any]] = None
@@ -274,6 +277,8 @@ def _build_agent_context_snapshot(state: _AgentState) -> Dict[str, Any]:
         ctx["type_inference"] = state.type_inference
     if isinstance(state.join_plan, list):
         ctx["join_plan"] = state.join_plan
+    if state.pipeline_session_id:
+        ctx["pipeline_session_id"] = state.pipeline_session_id
     if state.ontology_session_id:
         ctx["ontology_session_id"] = state.ontology_session_id
     if state.working_ontology:
@@ -1932,6 +1937,8 @@ async def _execute_tool_call(
                     state.last_observation = {"error": "plan is not initialized; call plan_new first"}
                     return state.last_observation
                 args.pop("plan", None)
+                if "session_id" not in args and state.pipeline_session_id:
+                    args["session_id"] = state.pipeline_session_id
                 payload = await _call_mcp_tool(
                     mcp_manager, "pipeline", tool_name,
                     {
@@ -1943,6 +1950,8 @@ async def _execute_tool_call(
                 )
             else:
                 args.pop("plan", None)
+                if "session_id" not in args and state.pipeline_session_id:
+                    args["session_id"] = state.pipeline_session_id
                 pipeline_id_arg = str(args.get("pipeline_id") or "").strip()
                 if not pipeline_id_arg and state.pipeline_id:
                     args["pipeline_id"] = state.pipeline_id
@@ -2441,6 +2450,7 @@ async def _run_agent_core(
     # ── State init (non-streaming baseline + streaming extras) ──
     principal_id = str(user_id or actor or "system").strip() or "system"
     principal_type = "user" if user_id else "system"
+    pipeline_session_id = f"pipeline_{run_id}"
     ontology_session_id = f"ontology_{run_id}"
     state = _AgentState(
         db_name=db_name,
@@ -2449,6 +2459,7 @@ async def _run_agent_core(
         goal=str(goal or "").strip(),
         principal_id=principal_id,
         principal_type=principal_type,
+        pipeline_session_id=pipeline_session_id,
         ontology_session_id=ontology_session_id,
     )
 
@@ -2466,6 +2477,8 @@ async def _run_agent_core(
                     state.key_inference = agent_ctx.get("key_inference")
                     state.type_inference = agent_ctx.get("type_inference")
                     state.join_plan = agent_ctx.get("join_plan")
+                    if agent_ctx.get("pipeline_session_id"):
+                        state.pipeline_session_id = agent_ctx["pipeline_session_id"]
                     if agent_ctx.get("ontology_session_id"):
                         state.ontology_session_id = agent_ctx["ontology_session_id"]
                     state.working_ontology = agent_ctx.get("working_ontology")

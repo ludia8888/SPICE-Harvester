@@ -83,6 +83,17 @@ def test_tool_call_rate_limiter_evicts_idle_scopes() -> None:
 
 
 @pytest.mark.unit
+def test_tool_call_rate_limiter_uses_stable_fallback_scope_when_none_provided() -> None:
+    limiter = ToolCallRateLimiter(max_calls_per_minute=1, max_calls_per_tool_per_minute=1)
+
+    assert limiter.check_and_record("tool-a", scope=None) is None
+    error = limiter.check_and_record("tool-a", scope=None)
+
+    assert error is not None
+    assert "process:pipeline-mcp" in error
+
+
+@pytest.mark.unit
 def test_rate_limit_isolation_does_not_share_missing_explicit_session_arguments() -> None:
     limiter = ToolCallRateLimiter(max_calls_per_minute=1, max_calls_per_tool_per_minute=1)
     request_context_a = SimpleNamespace(session=SimpleNamespace(), request=SimpleNamespace(headers={}), request_id="req-a")

@@ -81,7 +81,7 @@ def _make_orchestrator(record: Any) -> _ObjectifyDagOrchestrator:
 async def test_wait_for_objectify_submitted_allows_dataset_primary_completed_without_commands() -> None:
     record = SimpleNamespace(
         status="COMPLETED",
-        report={"write_path_mode": "dataset_primary_index", "command_ids": []},
+        report={"write_path_mode": "dataset_primary_index", "command_ids": ["cmd-1", "cmd-2"]},
         command_id=None,
         error=None,
     )

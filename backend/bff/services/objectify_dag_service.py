@@ -452,6 +452,10 @@ class _ObjectifyDagOrchestrator:
             last_status = status_value
             if status_value in {"SUBMITTED", "COMPLETED"}:
                 report = record.report or {}
+                if status_value == "COMPLETED" and self._is_dataset_primary_mode(report):
+                    # Dataset-primary objectify commits its authoritative state in-worker.
+                    # Reported command_ids are only a debug sample of instance-event files.
+                    return []
                 command_ids = report.get("command_ids") if isinstance(report, dict) else None
                 if not isinstance(command_ids, list):
                     command_ids = []
@@ -459,10 +463,6 @@ class _ObjectifyDagOrchestrator:
                 if not normalized and getattr(record, "command_id", None):
                     normalized = [str(record.command_id).strip()]
                 if not normalized:
-                    if status_value == "COMPLETED":
-                        if self._is_dataset_primary_mode(report):
-                            # Dataset-primary mode can complete in-worker without downstream command fan-out.
-                            return []
                     raise RuntimeError(
                         f"Objectify job submitted without command_ids (job_id={job_id} status={status_value})"
                     )

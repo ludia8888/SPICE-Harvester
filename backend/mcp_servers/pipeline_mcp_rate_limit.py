@@ -13,10 +13,12 @@ class ToolCallRateLimiter:
         max_calls_per_minute: int = 60,
         max_calls_per_tool_per_minute: int = 30,
         idle_ttl_seconds: int = 300,
+        fallback_scope_key: str = "process:pipeline-mcp",
     ) -> None:
         self._max_total = max_calls_per_minute
         self._max_per_tool = max_calls_per_tool_per_minute
         self._idle_ttl_seconds = max(60, int(idle_ttl_seconds))
+        self._fallback_scope_key = str(fallback_scope_key or "process:pipeline-mcp").strip() or "process:pipeline-mcp"
         self._scoped_call_times: Dict[str, List[float]] = {}
         self._scoped_tool_call_times: Dict[str, Dict[str, List[float]]] = {}
         self._scope_last_seen: Dict[str, float] = {}
@@ -25,7 +27,7 @@ class ToolCallRateLimiter:
     def check_and_record(self, tool_name: str, *, scope: Optional[str] = None) -> Optional[str]:
         now = self._time.time()
         minute_ago = now - 60
-        scope_key = str(scope or "").strip() or f"request:{int(now * 1_000_000)}"
+        scope_key = str(scope or "").strip() or self._fallback_scope_key
         self._evict_idle_scopes(now=now, minute_ago=minute_ago)
         self._scope_last_seen[scope_key] = now
 
