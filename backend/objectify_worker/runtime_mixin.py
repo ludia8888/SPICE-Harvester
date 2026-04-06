@@ -80,6 +80,7 @@ class ObjectifyWorkerRuntimeMixin:
     )
     json_model_span_name = "objectify_worker.process_message"
     json_model_metric_event_name = "OBJECTIFY_JOB"
+    json_model_dlq_default_stage = "process_message"
     json_model_span_attribute_fields = (
         ("job_id", "objectify.job_id"),
         ("db_name", "objectify.db_name"),
@@ -89,6 +90,9 @@ class ObjectifyWorkerRuntimeMixin:
         ("mapping_spec_version", "objectify.mapping_spec_version"),
         ("target_class_id", "objectify.target_class_id"),
     )
+
+    def _json_model_dlq_extra(self, payload: ObjectifyJob) -> Optional[Dict[str, Any]]:
+        return {"job": payload.model_dump(mode="json")}
 
     def _build_error_report(
         self,

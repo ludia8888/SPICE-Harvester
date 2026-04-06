@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
+from shared.services.registries.agent_catalog_registry_schema import ensure_agent_tool_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dict, coerce_json_list, normalize_json_payload
 
@@ -43,64 +44,7 @@ class AgentToolRegistry(PostgresSchemaRegistry):
     _REQUIRED_TABLES = ("agent_tool_policies",)
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.agent_tool_policies (
-                tool_id TEXT PRIMARY KEY,
-                method TEXT NOT NULL,
-                path TEXT NOT NULL,
-                risk_level TEXT NOT NULL DEFAULT 'read',
-                requires_approval BOOLEAN NOT NULL DEFAULT false,
-                requires_idempotency_key BOOLEAN NOT NULL DEFAULT false,
-                status TEXT NOT NULL DEFAULT 'ACTIVE',
-                roles JSONB NOT NULL DEFAULT '[]'::jsonb,
-                max_payload_bytes INTEGER,
-                version TEXT NOT NULL DEFAULT 'v1',
-                tool_type TEXT NOT NULL DEFAULT 'unknown',
-                input_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                output_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                timeout_seconds DOUBLE PRECISION,
-                retry_policy JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                resource_scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
-                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS version TEXT NOT NULL DEFAULT 'v1'"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS tool_type TEXT NOT NULL DEFAULT 'unknown'"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS input_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS output_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS timeout_seconds DOUBLE PRECISION"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS retry_policy JSONB NOT NULL DEFAULT '{{}}'::jsonb"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS resource_scopes JSONB NOT NULL DEFAULT '[]'::jsonb"
-        )
-        await conn.execute(
-            f"ALTER TABLE {self._schema}.agent_tool_policies ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb"
-        )
-        await conn.execute(
-            f"""
-            CREATE INDEX IF NOT EXISTS idx_agent_tool_policies_status
-            ON {self._schema}.agent_tool_policies(status)
-            """
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_agent_tool_policies_type ON {self._schema}.agent_tool_policies(tool_type)"
-        )
+        await ensure_agent_tool_registry_schema(conn, schema=self._schema)
 
     def _row_to_policy(self, row: asyncpg.Record) -> AgentToolPolicyRecord:
         return AgentToolPolicyRecord(

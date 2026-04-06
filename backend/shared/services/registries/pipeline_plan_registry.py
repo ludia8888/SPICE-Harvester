@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.pipeline_plan_registry_schema import ensure_pipeline_plan_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -58,32 +59,7 @@ class PipelinePlanRegistry(PostgresSchemaRegistry):
         )
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.pipeline_plans (
-                plan_id UUID PRIMARY KEY,
-                tenant_id TEXT NOT NULL DEFAULT 'default',
-                status TEXT NOT NULL DEFAULT 'COMPILED',
-                goal TEXT NOT NULL DEFAULT '',
-                db_name TEXT,
-                branch TEXT,
-                plan JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                plan_digest TEXT NOT NULL DEFAULT '',
-                created_by TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_status ON {self._schema}.pipeline_plans(status)"
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_tenant ON {self._schema}.pipeline_plans(tenant_id)"
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_pipeline_plans_db ON {self._schema}.pipeline_plans(db_name)"
-        )
+        await ensure_pipeline_plan_registry_schema(conn, schema=self._schema)
 
     def _row_to_plan(self, row: asyncpg.Record) -> PipelinePlanRecord:
         return PipelinePlanRecord(

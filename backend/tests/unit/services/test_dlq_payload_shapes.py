@@ -203,3 +203,173 @@ async def test_instance_worker_send_to_dlq_payload_shape() -> None:
     assert payload["stage"] == "process_command"
     assert payload["attempt_count"] == 5
     assert payload["worker"] == "instance-worker"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_worker_send_to_dlq_payload_shape() -> None:
+    from pipeline_worker.main import PipelineWorker
+
+    worker = PipelineWorker()
+    producer = _CaptureProducer()
+    worker.dlq_producer = producer  # type: ignore[assignment]
+
+    msg = _DummyMsg(
+        topic="pipeline_jobs",
+        partition=3,
+        offset=12,
+        key=b"pipeline-key",
+        value=b'{"job_id":"job-1","pipeline_id":"pipe-1","db_name":"demo","output_dataset_name":"orders"}',
+        timestamp_ms=1700000000999,
+    )
+    payload = worker._parse_payload(msg.value())
+
+    await worker._send_to_dlq(  # type: ignore[attr-defined]
+        msg=msg,
+        payload=payload,
+        raw_payload=msg.value().decode("utf-8"),
+        error="failed",
+        attempt_count=4,
+    )
+
+    assert producer.calls, "expected a DLQ produce call"
+    call = producer.calls[-1]
+    payload_json = json.loads(call["value"].decode("utf-8"))
+    assert payload_json["stage"] == "execute"
+    assert payload_json["attempt_count"] == 4
+    assert payload_json["worker"] == worker._pipeline_worker_name
+    assert payload_json["job"]["job_id"] == "job-1"
+    assert payload_json["job"]["pipeline_id"] == "pipe-1"
+
+
+@pytest.mark.asyncio
+async def test_objectify_worker_send_to_dlq_payload_shape() -> None:
+    from objectify_worker.main import ObjectifyWorker
+
+    worker = ObjectifyWorker()
+    producer = _CaptureProducer()
+    worker.dlq_producer = producer  # type: ignore[assignment]
+
+    msg = _DummyMsg(
+        topic="objectify_jobs",
+        partition=1,
+        offset=22,
+        key=b"objectify-key",
+        value=(
+            b'{"job_id":"job-7","db_name":"demo","dataset_id":"dataset-1","dataset_version_id":"ver-1",'
+            b'"target_class_id":"Order"}'
+        ),
+        timestamp_ms=1700000001111,
+    )
+    payload = worker._parse_payload(msg.value())
+
+    await worker._send_to_dlq(  # type: ignore[attr-defined]
+        msg=msg,
+        payload=payload,
+        raw_payload=msg.value().decode("utf-8"),
+        error="failed",
+        attempt_count=6,
+    )
+
+    assert producer.calls, "expected a DLQ produce call"
+    call = producer.calls[-1]
+    payload_json = json.loads(call["value"].decode("utf-8"))
+    assert payload_json["stage"] == "process_message"
+    assert payload_json["attempt_count"] == 6
+    assert payload_json["worker"] == "objectify-worker"
+    assert payload_json["job"]["job_id"] == "job-7"
+    assert payload_json["job"]["dataset_id"] == "dataset-1"
+
+
+class _EnvelopeProducerOps:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.flushes: list[float] = []
+
+    async def produce(self, **kwargs: Any) -> None:
+        self.calls.append(dict(kwargs))
+
+    async def flush(self, timeout_s: float) -> int:
+        self.flushes.append(float(timeout_s))
+        return 0
+
+
+@pytest.mark.asyncio
+async def test_projection_worker_send_to_dlq_uses_envelope_shape() -> None:
+    from projection_worker.main import ProjectionWorker
+    from shared.models.event_envelope import EventEnvelope
+
+    worker = ProjectionWorker()
+    producer_ops = _EnvelopeProducerOps()
+    worker.dlq_producer_ops = producer_ops
+
+    envelope = EventEnvelope(
+        event_id="evt-9",
+        event_type="INSTANCE_UPDATED",
+        aggregate_type="instance",
+        aggregate_id="inst-9",
+        metadata={"kind": "domain"},
+        data={"name": "Alice"},
+    )
+    msg = _DummyMsg(
+        topic="instance_events",
+        partition=0,
+        offset=11,
+        value=envelope.model_dump_json().encode("utf-8"),
+    )
+
+    await worker._send_to_dlq(  # type: ignore[attr-defined]
+        msg=msg,
+        payload=envelope,
+        raw_payload=msg.value().decode("utf-8"),
+        error="projection failed",
+        attempt_count=2,
+    )
+
+    assert producer_ops.calls, "expected an envelope DLQ produce call"
+    call = producer_ops.calls[-1]
+    payload_json = json.loads(call["value"].decode("utf-8"))
+    assert call["topic"] == worker.dlq_topic
+    assert payload_json["event_type"] == "PROJECTION_FAILED"
+    assert payload_json["metadata"]["kind"] == "projection_dlq"
+    assert payload_json["metadata"]["dlq_attempt_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_connector_sync_worker_send_to_dlq_uses_envelope_shape() -> None:
+    from connector_sync_worker.main import ConnectorSyncWorker
+    from shared.models.event_envelope import EventEnvelope
+
+    worker = ConnectorSyncWorker()
+    producer_ops = _EnvelopeProducerOps()
+    worker.dlq_producer_ops = producer_ops
+
+    envelope = EventEnvelope(
+        event_id="",
+        event_type="CONNECTOR_SYNC_REQUESTED",
+        aggregate_type="connector",
+        aggregate_id="",
+        metadata={"kind": "domain"},
+        data={"connector_id": "conn-1"},
+    )
+    msg = _DummyMsg(
+        topic="connector_sync",
+        partition=0,
+        offset=3,
+        value=envelope.model_dump_json().encode("utf-8"),
+    )
+
+    await worker._send_to_dlq(  # type: ignore[attr-defined]
+        msg=msg,
+        payload=envelope,
+        raw_payload=msg.value().decode("utf-8"),
+        error="connector failed",
+        attempt_count=3,
+    )
+
+    assert producer_ops.calls, "expected an envelope DLQ produce call"
+    call = producer_ops.calls[-1]
+    payload_json = json.loads(call["value"].decode("utf-8"))
+    assert call["topic"] == worker.dlq_topic
+    assert call["key"] == b"connector_sync"
+    assert payload_json["metadata"]["kind"] == "connector_update_dlq"
+    assert payload_json["metadata"]["dlq_attempt_count"] == 3

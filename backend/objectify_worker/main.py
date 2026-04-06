@@ -15,18 +15,13 @@ import os
 import queue as queue_module
 import tempfile
 import threading
-from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
 from confluent_kafka import Producer
 
-from shared.services.kafka.dlq_publisher import DlqPublishSpec, publish_contextual_dlq_json
-from shared.services.kafka.processed_event_worker import (
-    HeartbeatOptions,
-    JsonModelKafkaWorker,
-    RegistryKey,
-)
+from shared.services.kafka.dlq_publisher import DlqPublishSpec
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, JsonModelKafkaWorker, RegistryKey
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.kafka.retry_classifier import (
@@ -34,7 +29,6 @@ from shared.services.kafka.retry_classifier import (
     classify_retryable_with_profile,
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
-
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.lineage_edge_types import EDGE_DATASET_VERSION_OBJECTIFIED
@@ -110,7 +104,6 @@ from objectify_worker.runtime_helpers import (
 from objectify_worker.runtime_mixin import ObjectifyWorkerRuntimeMixin
 
 logger = logging.getLogger(__name__)
-
 
 class ObjectifyWorker(ObjectifyWorkerRuntimeMixin, JsonModelKafkaWorker[ObjectifyJob, None]):
     P0_ERROR_CODES = {
@@ -716,39 +709,43 @@ class ObjectifyWorker(ObjectifyWorkerRuntimeMixin, JsonModelKafkaWorker[Objectif
             artifact_output_name=artifact_output_name,
         )
 
-    async def _send_to_dlq(  # type: ignore[override]
+    async def _publish_to_dlq(
         self,
         *,
         msg: Any,
-        payload: ObjectifyJob,
-        raw_payload: Optional[str],
+        stage: str,
         error: str,
-        attempt_count: int,
+        attempt_count: Optional[int],
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
-        if not self.dlq_producer:
-            logger.error("DLQ producer not configured; dropping objectify DLQ payload: %s", error)
-            return
-        dlq_payload = {
-            "kind": "objectify_job_dlq",
-            "job": payload.model_dump(mode="json"),
-            "error": error,
-            "attempt_count": int(attempt_count),
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-            "raw_payload": raw_payload,
-        }
-        key = str(payload.job_id or "objectify-job").encode("utf-8")
         try:
-            await publish_contextual_dlq_json(
+            sent = await self._publish_standard_dlq_record(
                 producer=self.dlq_producer,
-                spec=self._dlq_spec,
-                payload=dlq_payload,
-                message_key=key,
                 msg=msg,
+                worker=self.service_name,
+                dlq_spec=self._dlq_spec,
+                error=error,
+                attempt_count=int(attempt_count) if attempt_count is not None else None,
+                stage=stage,
+                payload_text=payload_text,
+                payload_obj=payload_obj,
+                extra=extra,
                 tracing=self.tracing,
                 metrics=self.metrics,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+                raise_on_missing_producer=False,
+                missing_producer_message="DLQ producer not configured",
             )
+            if not sent:
+                return
+            logger.info("Sent message to objectify DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
-            logger.warning("Failed to publish objectify DLQ payload (job_id=%s): %s", payload.job_id, exc, exc_info=True)
+            logger.warning("Failed to publish objectify DLQ payload (stage=%s): %s", stage, exc, exc_info=True)
 
     @staticmethod
     def _is_retryable_error_impl(exc: Exception) -> bool:

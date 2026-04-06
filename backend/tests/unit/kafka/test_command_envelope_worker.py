@@ -30,23 +30,14 @@ class _StubCommandWorker(CommandEnvelopeKafkaWorker[_StubPayload, None]):
         self.max_retries = 3
         self.backoff_base = 1
         self.backoff_max = 10
+        self.published_calls: list[dict[str, Any]] = []
 
     async def _process_payload(self, payload: _StubPayload) -> None:  # type: ignore[override]
         _ = payload
         return None
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: Optional[_StubPayload] = None,
-        raw_payload: Optional[str] = None,
-        error: str,
-        attempt_count: int,
-        **_kwargs: Any,
-    ) -> None:
-        _ = msg, payload, raw_payload, error, attempt_count
-        return None
+    async def _publish_to_dlq(self, **kwargs: Any) -> None:
+        self.published_calls.append(dict(kwargs))
 
 
 def test_command_envelope_worker_unwraps_registry_command() -> None:
@@ -104,3 +95,39 @@ async def test_action_worker_keeps_non_command_envelope_for_process_time_skip() 
     assert payload.envelope is not None
     assert payload.envelope.event_id == envelope.event_id
     await worker._process_payload(payload)
+
+
+@pytest.mark.asyncio
+async def test_command_envelope_worker_default_send_to_dlq_uses_shared_contract() -> None:
+    worker = _StubCommandWorker()
+    envelope = EventEnvelope(
+        event_type="CREATE_INSTANCE_REQUESTED",
+        aggregate_type="instance",
+        aggregate_id="agg-2",
+        metadata={"kind": "command", "traceparent": "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"},
+        data={"command_id": "cmd-2", "payload": {"name": "Bob"}},
+        sequence_number=3,
+    )
+    raw_payload = envelope.model_dump_json()
+    payload = worker._parse_payload(raw_payload.encode("utf-8"))
+
+    class _Msg:
+        def headers(self):
+            return [("traceparent", b"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")]
+
+    await worker._send_to_dlq(
+        msg=_Msg(),
+        payload=payload,
+        raw_payload=raw_payload,
+        error="boom",
+        attempt_count=2,
+    )
+
+    assert len(worker.published_calls) == 1
+    published = worker.published_calls[0]
+    assert published["stage"] == "process_command"
+    assert published["attempt_count"] == 2
+    assert published["payload_text"] == raw_payload
+    assert published["payload_obj"]["event_id"] == envelope.event_id
+    assert published["payload_obj"]["aggregate_id"] == "agg-2"
+    assert published["fallback_metadata"]["kind"] == "command"

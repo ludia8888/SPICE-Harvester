@@ -45,8 +45,8 @@ from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
 from shared.services.core.audit_log_store import AuditLogStore
 from shared.services.core.worker_stores import WorkerObservability, initialize_worker_stores
-from shared.services.kafka.dlq_publisher import DlqPublishSpec
-from shared.services.kafka.producer_ops import close_kafka_producer
+from shared.services.kafka.dlq_publisher import DlqPublishSpec, EnvelopeDlqSpec
+from shared.services.kafka.producer_ops import ExecutorKafkaProducerOps, KafkaProducerOps, close_kafka_producer
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
@@ -89,6 +89,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[SafeKafkaConsumer] = None
         self.producer: Optional[Producer] = None
+        self.dlq_producer_ops: Optional[KafkaProducerOps] = None
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
         self.projection_manager = None  # removed (ProjectionManager dead code)
@@ -120,9 +121,17 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         # DLQ 토픽
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
-        self._dlq_spec = DlqPublishSpec(
+        self._parse_error_dlq_spec = DlqPublishSpec(
             dlq_topic=self.dlq_topic,
             service_name=self.service_name,
+            span_name="projection_worker.dlq_produce",
+            flush_timeout_seconds=self.dlq_flush_timeout_seconds,
+        )
+        self._dlq_spec = EnvelopeDlqSpec(
+            dlq_topic=self.dlq_topic,
+            service_name=self.service_name,
+            kind="projection_dlq",
+            failed_event_type="PROJECTION_FAILED",
             span_name="projection_worker.dlq_produce",
             flush_timeout_seconds=self.dlq_flush_timeout_seconds,
         )
@@ -478,6 +487,10 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             bootstrap_servers=self.kafka_servers,
             client_id="projection-worker",
         )
+        self.dlq_producer_ops = ExecutorKafkaProducerOps(
+            self.producer,
+            thread_name_prefix="projection-worker-kafka-producer",
+        )
         
         # Redis 연결 설정 (온톨로지 캐싱용)
         self.redis_service = create_redis_service(settings)
@@ -800,7 +813,7 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             producer=self.producer,
             msg=msg,
             worker=self.service_name,
-            dlq_spec=self._dlq_spec,
+            dlq_spec=self._parse_error_dlq_spec,
             error=error,
             attempt_count=int(attempt_count),
             stage=None,
@@ -820,36 +833,6 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             msg.topic(),
             msg.partition(),
             msg.offset(),
-        )
-
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: EventEnvelope,
-        raw_payload: Optional[str],
-        error: str,
-        attempt_count: int,
-    ) -> None:
-        _, payload_text, _, kafka_headers, fallback_metadata = self._normalize_dlq_publish_inputs(
-            msg=msg,
-            stage="projection",
-            default_stage="projection",
-            raw_payload=raw_payload,
-            payload_text=None,
-            payload_obj=None,
-            kafka_headers=None,
-            fallback_metadata=None,
-            inferred_metadata=payload.metadata if isinstance(payload.metadata, dict) else None,
-        )
-
-        await self._publish_to_dlq(
-            msg=msg,
-            error=error,
-            attempt_count=attempt_count,
-            payload_text=payload_text,
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata,
         )
 
     async def _process_payload(self, payload: EventEnvelope) -> None:  # type: ignore[override]
@@ -2137,11 +2120,12 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
         
         await self._close_consumer_runtime()
         await close_kafka_producer(
-            producer=self.producer,
+            producer_ops=self.dlq_producer_ops,
             timeout_s=5.0,
             warning_logger=logger,
             warning_message="Kafka producer flush failed during shutdown: %s",
         )
+        self.dlq_producer_ops = None
         self.producer = None
             
         if self.elasticsearch_service:

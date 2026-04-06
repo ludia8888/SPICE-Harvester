@@ -57,20 +57,21 @@ class _StubEnvelopeWorker(EventEnvelopeKafkaWorker[None]):
         self.service_name = "stub-envelope-worker"
         self.tracing = _FakeTracing()
         self.metrics = _FakeMetrics()
+        self.dlq_producer_ops: Optional[Any] = None
+        self._dlq_spec = EnvelopeDlqSpec(
+            dlq_topic="projection_failures_dlq",
+            service_name="stub-envelope-worker",
+            kind="projection_dlq",
+            failed_event_type="PROJECTION_FAILED",
+            span_name="projection.dlq_produce",
+        )
 
     async def _process_payload(self, payload: EventEnvelope) -> None:  # type: ignore[override]
         return None
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: EventEnvelope,
-        raw_payload: Optional[str],
-        error: str,
-        attempt_count: int,
-    ) -> None:
-        return None
+    def _envelope_dlq_key_fallback(self, payload: EventEnvelope) -> Optional[str]:
+        _ = payload
+        return "fallback-key"
 
 
 @pytest.mark.asyncio
@@ -174,3 +175,34 @@ async def test_send_envelope_failure_to_dlq_builds_key_with_fallback() -> None:
     assert len(producer_ops.produce_calls) == 1
     call = producer_ops.produce_calls[0]
     assert call["key"] == b"fallback-key"
+
+
+@pytest.mark.asyncio
+async def test_event_envelope_worker_default_send_to_dlq_uses_envelope_spec() -> None:
+    worker = _StubEnvelopeWorker()
+    producer_ops = _FakeProducerOps()
+    worker.dlq_producer_ops = producer_ops
+    envelope = EventEnvelope(
+        event_id="",
+        event_type="INSTANCE_UPDATED",
+        aggregate_type="instance",
+        aggregate_id="",
+        metadata={"kind": "domain"},
+        data={"name": "Example"},
+    )
+
+    await worker._send_to_dlq(
+        msg=_Msg(),
+        payload=envelope,
+        raw_payload=envelope.model_dump_json(),
+        error="projection failed",
+        attempt_count=5,
+    )
+
+    assert len(producer_ops.produce_calls) == 1
+    call = producer_ops.produce_calls[0]
+    assert call["topic"] == "projection_failures_dlq"
+    assert call["key"] == b"fallback-key"
+    payload = json.loads(call["value"].decode("utf-8"))
+    assert payload["metadata"]["kind"] == "projection_dlq"
+    assert payload["metadata"]["dlq_attempt_count"] == 5

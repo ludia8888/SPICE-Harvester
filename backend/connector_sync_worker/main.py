@@ -216,25 +216,12 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         self.dlq_producer_ops = None
         self.dlq_producer = None
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: EventEnvelope,
-        raw_payload: Optional[str],
-        error: str,
-        attempt_count: int,
-    ) -> None:
-        await self._send_envelope_failure_to_dlq(
-            msg=msg,
-            payload=payload,
-            error=error,
-            attempt_count=attempt_count,
-            producer_ops=self.dlq_producer_ops,
-            spec=self._dlq_spec,
-            key_fallback="connector_sync",
-            missing_producer_message="DLQ producer not configured; dropping connector sync DLQ payload: %s",
-        )
+    def _envelope_dlq_key_fallback(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
+        _ = payload
+        return "connector_sync"
+
+    def _envelope_dlq_missing_producer_message(self) -> str:  # type: ignore[override]
+        return "DLQ producer not configured; dropping connector sync DLQ payload: %s"
 
     async def _process_payload(self, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         return await self._handle_envelope(payload)

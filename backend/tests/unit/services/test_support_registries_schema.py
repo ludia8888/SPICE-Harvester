@@ -116,3 +116,18 @@ async def test_objectify_registry_bootstrap_creates_watermarks_table() -> None:
         "CREATE TABLE IF NOT EXISTS spice_objectify.objectify_watermarks" in sql
         for sql in conn.executed
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_plan_registry_bootstrap_executes_representative_schema_sql() -> None:
+    registry = PipelinePlanRegistry(
+        dsn="postgres://unused",
+        allow_runtime_ddl_bootstrap=True,
+    )
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    assert any("CREATE TABLE IF NOT EXISTS spice_pipelines.pipeline_plans" in sql for sql in conn.executed)
+    assert any("idx_pipeline_plans_db" in sql for sql in conn.executed)

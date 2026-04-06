@@ -370,6 +370,7 @@ class ActionWorker(StrictCommandEnvelopeKafkaWorker[_ActionCommandPayload, None]
         payload_obj: Optional[dict[str, Any]],
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         await self._publish_standard_dlq_record(
             producer=self.dlq_producer,
@@ -381,41 +382,11 @@ class ActionWorker(StrictCommandEnvelopeKafkaWorker[_ActionCommandPayload, None]
             stage=stage,
             payload_text=payload_text,
             payload_obj=payload_obj,
+            extra=extra,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata,
             tracing=self.tracing,
             metrics=self.metrics,
-        )
-
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        error: str,
-        attempt_count: int,
-        payload: Optional[_ActionCommandPayload] = None,
-        raw_payload: Optional[str] = None,
-        stage: str = "execute_action",
-        payload_text: Optional[str] = None,
-        payload_obj: Optional[dict[str, Any]] = None,
-        kafka_headers: Optional[Any] = None,
-        fallback_metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        await self._send_standard_dlq_record(
-            msg=msg,
-            error=error,
-            attempt_count=int(attempt_count),
-            stage=stage,
-            default_stage="execute_action",
-            raw_payload=raw_payload,
-            payload_text=payload_text,
-            payload_obj=payload_obj,
-            kafka_headers=kafka_headers,
-            fallback_metadata=fallback_metadata,
-            publisher=self._publish_to_dlq,
-            inferred_payload_obj=payload.envelope.model_dump(mode="json") if payload is not None else None,
-            inferred_metadata=payload.envelope_metadata if payload is not None else None,
-            inferred_stage=payload.stage if payload is not None else None,
         )
 
     async def run(self) -> None:

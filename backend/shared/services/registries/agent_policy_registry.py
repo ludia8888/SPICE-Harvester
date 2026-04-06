@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
+from shared.services.registries.agent_catalog_registry_schema import ensure_agent_policy_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_list, normalize_json_payload
 
@@ -35,23 +36,7 @@ class AgentPolicyRegistry(PostgresSchemaRegistry):
     _REQUIRED_TABLES = ("agent_tenant_policies",)
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.agent_tenant_policies (
-                tenant_id TEXT PRIMARY KEY,
-                allowed_models JSONB NOT NULL DEFAULT '[]'::jsonb,
-                allowed_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
-                default_model TEXT,
-                auto_approve_rules JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                data_policies JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_agent_tenant_policies_updated_at ON {self._schema}.agent_tenant_policies(updated_at)"
-        )
+        await ensure_agent_policy_registry_schema(conn, schema=self._schema)
 
     def _row_to_policy(self, row: asyncpg.Record) -> AgentTenantPolicyRecord:
         return AgentTenantPolicyRecord(

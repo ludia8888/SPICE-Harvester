@@ -26,6 +26,7 @@ class _StubJsonModelWorker(JsonModelKafkaWorker[_StubModel, None]):
         ("job_id", "stub.job_id"),
         ("aggregate_id", "stub.aggregate_id"),
     )
+    json_model_dlq_default_stage = "execute"
 
     def __init__(self) -> None:
         self.consumer = None
@@ -35,23 +36,17 @@ class _StubJsonModelWorker(JsonModelKafkaWorker[_StubModel, None]):
         self.max_retries = 3
         self.backoff_base = 1
         self.backoff_max = 10
+        self.published_calls: list[dict[str, Any]] = []
 
     async def _process_payload(self, payload: _StubModel) -> None:  # type: ignore[override]
         _ = payload
         return None
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: Optional[_StubModel] = None,
-        raw_payload: Optional[str] = None,
-        error: str,
-        attempt_count: int,
-        **_kwargs: Any,
-    ) -> None:
-        _ = msg, payload, raw_payload, error, attempt_count
-        return None
+    def _json_model_dlq_extra(self, payload: _StubModel) -> dict[str, Any] | None:
+        return {"job": payload.model_dump(mode="json")}
+
+    async def _publish_to_dlq(self, **kwargs: Any) -> None:
+        self.published_calls.append(dict(kwargs))
 
 
 class _Msg:
@@ -124,3 +119,31 @@ def test_objectify_worker_uses_shared_json_model_contract() -> None:
     assert payload.job_id == "job-1"
     assert payload.dataset_id == "dataset-1"
     assert registry_key == RegistryKey(event_id="job-1", aggregate_id="dataset-1", sequence_number=None)
+
+
+@pytest.mark.asyncio
+async def test_json_model_worker_default_send_to_dlq_uses_declared_stage_and_extra() -> None:
+    worker = _StubJsonModelWorker()
+    raw_payload = '{"job_id":"job-2","aggregate_id":"agg-2","sequence_number":5}'
+    payload = worker._parse_payload(raw_payload.encode("utf-8"))
+
+    class _Msg:
+        def headers(self):
+            return [("traceparent", b"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")]
+
+    await worker._send_to_dlq(
+        msg=_Msg(),
+        payload=payload,
+        raw_payload=raw_payload,
+        error="boom",
+        attempt_count=4,
+    )
+
+    assert len(worker.published_calls) == 1
+    published = worker.published_calls[0]
+    assert published["stage"] == "execute"
+    assert published["attempt_count"] == 4
+    assert published["payload_text"] == raw_payload
+    assert published["payload_obj"] is None
+    assert published["fallback_metadata"] == {"job_id": "job-2", "aggregate_id": "agg-2"}
+    assert published["extra"]["job"]["job_id"] == "job-2"

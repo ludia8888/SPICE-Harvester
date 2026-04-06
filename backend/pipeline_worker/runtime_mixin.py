@@ -62,6 +62,7 @@ class PipelineWorkerRuntimeMixin:
     json_model_metadata_fields = ("job_id", "pipeline_id", "db_name", "branch", "mode")
     json_model_span_name = "pipeline_worker.process_job"
     json_model_metric_event_name = "PIPELINE_JOB"
+    json_model_dlq_default_stage = "execute"
     json_model_span_attribute_fields = (
         ("job_id", "pipeline.job_id"),
         ("pipeline_id", "pipeline.pipeline_id"),
@@ -69,6 +70,9 @@ class PipelineWorkerRuntimeMixin:
         ("branch", "pipeline.branch"),
         ("mode", "pipeline.mode"),
     )
+
+    def _json_model_dlq_extra(self, payload: PipelineJob) -> Optional[Dict[str, Any]]:
+        return {"job": payload.model_dump(mode="json")}
 
     def _build_error_payload(
         self,
@@ -589,10 +593,9 @@ class PipelineWorkerRuntimeMixin:
             msg=msg,
             stage=context.stage,
             error=str(context.cause),
+            attempt_count=None,
             payload_text=context.payload_text,
             payload_obj=context.payload_obj,
-            job=None,
-            attempt_count=None,
         )
 
     async def _after_parse_error_dlq_success(  # type: ignore[override]
@@ -644,40 +647,19 @@ class PipelineWorkerRuntimeMixin:
             args=(payload.job_id, attempt_count),
         )
 
-    async def _send_to_dlq(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: PipelineJob,
-        raw_payload: Optional[str],
-        error: str,
-        attempt_count: int,
-    ) -> None:
-        await self._publish_to_dlq(
-            msg=msg,
-            stage="execute",
-            error=error,
-            payload_text=raw_payload,
-            payload_obj=None,
-            job=payload,
-            attempt_count=int(attempt_count),
-        )
-
     async def _publish_to_dlq(
         self,
         *,
         msg: Any,
         stage: str,
         error: str,
+        attempt_count: Optional[int],
         payload_text: Optional[str],
         payload_obj: Optional[Dict[str, Any]],
-        job: Optional[PipelineJob],
-        attempt_count: Optional[int],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
-        extra: Optional[Dict[str, Any]] = None
-        if job is not None:
-            extra = {"job": job.model_dump(mode="json")}
-
         try:
             sent = await self._publish_standard_dlq_record(
                 producer=self.dlq_producer,
@@ -692,8 +674,8 @@ class PipelineWorkerRuntimeMixin:
                 extra=extra,
                 tracing=None,
                 metrics=None,
-                kafka_headers=None,
-                fallback_metadata=None,
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
                 lock=self._dlq_lock,
                 raise_on_missing_producer=False,
                 missing_producer_message="DLQ producer not configured",

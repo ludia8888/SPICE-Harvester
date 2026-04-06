@@ -652,6 +652,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         inferred_payload_obj: Optional[Dict[str, Any]] = None,
         inferred_metadata: Optional[Dict[str, Any]] = None,
         inferred_stage: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         stage_final, payload_text_final, payload_obj_final, kafka_headers_final, fallback_metadata_final = (
             self._normalize_dlq_publish_inputs(
@@ -678,6 +679,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             payload_obj=payload_obj_final,
             kafka_headers=kafka_headers_final,
             fallback_metadata=fallback_metadata_final if isinstance(fallback_metadata_final, dict) else None,
+            extra=extra if isinstance(extra, dict) else None,
         )
 
     async def _send_command_payload_dlq_record(
@@ -695,14 +697,20 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         kafka_headers: Optional[Any],
         fallback_metadata: Optional[Dict[str, Any]],
         publisher: Callable[..., Awaitable[None]],
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         inferred_payload_obj: Optional[Dict[str, Any]] = None
         inferred_metadata: Optional[Dict[str, Any]] = None
         if payload is not None:
+            envelope_obj = getattr(payload, "envelope", None)
             command_obj = getattr(payload, "command", None)
             metadata_obj = getattr(payload, "envelope_metadata", None)
+            if envelope_obj is not None and hasattr(envelope_obj, "model_dump"):
+                envelope_dump = envelope_obj.model_dump(mode="json")
+                if isinstance(envelope_dump, dict):
+                    inferred_payload_obj = envelope_dump
             if isinstance(command_obj, dict):
-                inferred_payload_obj = command_obj
+                inferred_payload_obj = inferred_payload_obj or command_obj
             if isinstance(metadata_obj, dict):
                 inferred_metadata = metadata_obj
 
@@ -720,6 +728,7 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             publisher=publisher,
             inferred_payload_obj=inferred_payload_obj,
             inferred_metadata=inferred_metadata,
+            extra=extra,
         )
 
     async def _send_default_command_payload_dlq(
@@ -1680,6 +1689,10 @@ class CommandEnvelopeKafkaWorker(ProcessedEventKafkaWorker[CommandPayloadT, Resu
     command_payload_cls: type[CommandEnvelopePayload] = CommandEnvelopePayload
     command_parse_error_cls: type[CommandParseError] = CommandParseError
 
+    def _command_dlq_extra(self, payload: CommandPayloadT) -> Optional[Dict[str, Any]]:
+        _ = payload
+        return None
+
     def _raise_command_parse_error(
         self,
         *,
@@ -1835,6 +1848,40 @@ class CommandEnvelopeKafkaWorker(ProcessedEventKafkaWorker[CommandPayloadT, Resu
 
         return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
 
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: Optional[CommandPayloadT] = None,
+        raw_payload: Optional[str] = None,
+        error: str,
+        attempt_count: int,
+        stage: Optional[str] = None,
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        publisher = getattr(self, "_publish_to_dlq", None)
+        if not callable(publisher):
+            raise RuntimeError("DLQ publisher is not configured for command payload")
+        default_stage = str(getattr(self, "command_payload_stage", "process_command") or "process_command")
+        await self._send_command_payload_dlq_record(
+            msg=msg,
+            error=error,
+            attempt_count=int(attempt_count),
+            payload=payload,
+            raw_payload=raw_payload,
+            stage=str(stage or default_stage),
+            default_stage=default_stage,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+            publisher=publisher,
+            extra=self._command_dlq_extra(payload) if payload is not None else None,
+        )
+
 
 class StrictCommandEnvelopeKafkaWorker(
     StrictHeartbeatPolicyMixin,
@@ -1865,6 +1912,11 @@ class JsonModelKafkaWorker(ProcessedEventKafkaWorker[ModelPayloadT, ResultT], AB
     json_model_span_name: Optional[str] = None
     json_model_metric_event_name: Optional[str] = None
     json_model_span_attribute_fields: tuple[tuple[str, str], ...] = ()
+    json_model_dlq_default_stage: str = "process_message"
+
+    def _json_model_dlq_extra(self, payload: ModelPayloadT) -> Optional[Dict[str, Any]]:
+        _ = payload
+        return None
 
     def _raise_json_model_parse_error(
         self,
@@ -1983,6 +2035,40 @@ class JsonModelKafkaWorker(ProcessedEventKafkaWorker[ModelPayloadT, ResultT], AB
         configured = str(getattr(self, "json_model_metric_event_name", "") or "").strip()
         return configured or None
 
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: Optional[ModelPayloadT] = None,
+        raw_payload: Optional[str] = None,
+        error: str,
+        attempt_count: int,
+        stage: Optional[str] = None,
+        payload_text: Optional[str] = None,
+        payload_obj: Optional[Dict[str, Any]] = None,
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        publisher = getattr(self, "_publish_to_dlq", None)
+        if not callable(publisher):
+            raise RuntimeError("DLQ publisher is not configured for JSON model payload")
+        default_stage = str(getattr(self, "json_model_dlq_default_stage", "process_message") or "process_message")
+        await self._send_standard_dlq_record(
+            msg=msg,
+            error=error,
+            attempt_count=int(attempt_count),
+            stage=str(stage or default_stage),
+            default_stage=default_stage,
+            raw_payload=raw_payload,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+            publisher=publisher,
+            inferred_metadata=self._fallback_metadata(payload) if payload is not None else None,
+            extra=self._json_model_dlq_extra(payload) if payload is not None else None,
+        )
+
 
 class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT], ABC):
     """
@@ -2033,6 +2119,22 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
     def _metric_event_name(self, *, payload: EventEnvelope) -> Optional[str]:  # type: ignore[override]
         event_type = str(payload.event_type or "").strip()
         return event_type or None
+
+    def _envelope_dlq_spec(self) -> EnvelopeDlqSpec:
+        spec = getattr(self, "_dlq_spec", None)
+        if not isinstance(spec, EnvelopeDlqSpec):
+            raise RuntimeError("Envelope DLQ spec is not configured for envelope payload")
+        return spec
+
+    def _envelope_dlq_producer_ops(self) -> Optional[Any]:
+        return getattr(self, "dlq_producer_ops", None)
+
+    def _envelope_dlq_key_fallback(self, payload: EventEnvelope) -> Optional[str]:
+        _ = payload
+        return None
+
+    def _envelope_dlq_missing_producer_message(self) -> str:
+        return "DLQ producer not configured; dropping DLQ payload: %s"
 
     async def _publish_envelope_failure_to_dlq(
         self,
@@ -2093,6 +2195,28 @@ class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT]
             spec=spec,
             key=key,
             missing_producer_message=missing_producer_message,
+        )
+
+    async def _send_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        payload: EventEnvelope,
+        raw_payload: Optional[str],
+        error: str,
+        attempt_count: int,
+        **_kwargs: Any,
+    ) -> None:
+        _ = raw_payload
+        await self._send_envelope_failure_to_dlq(
+            msg=msg,
+            payload=payload,
+            error=error,
+            attempt_count=int(attempt_count),
+            producer_ops=self._envelope_dlq_producer_ops(),
+            spec=self._envelope_dlq_spec(),
+            key_fallback=self._envelope_dlq_key_fallback(payload),
+            missing_producer_message=self._envelope_dlq_missing_producer_message(),
         )
 
 

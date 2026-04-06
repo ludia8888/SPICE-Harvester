@@ -15,9 +15,7 @@ from shared.utils.language import localized_text_to_string
 
 logger = logging.getLogger(__name__)
 
-
-def _localized_to_string(value: Any, *, default: str = "") -> str:
-    return localized_text_to_string(value, default=default)
+_localized_to_string = localized_text_to_string
 
 
 def _transform_properties_for_oms(data: Dict[str, Any], *, log_conversions: bool = False) -> None:

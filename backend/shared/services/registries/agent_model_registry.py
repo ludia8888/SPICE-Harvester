@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
+from shared.services.registries.agent_catalog_registry_schema import ensure_agent_model_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dict, normalize_json_payload
 
@@ -39,37 +40,7 @@ class AgentModelRegistry(PostgresSchemaRegistry):
     _REQUIRED_TABLES = ("agent_models",)
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.agent_models (
-                model_id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                display_name TEXT,
-                status TEXT NOT NULL DEFAULT 'ACTIVE',
-                supports_json_mode BOOLEAN NOT NULL DEFAULT true,
-                supports_native_tool_calling BOOLEAN NOT NULL DEFAULT false,
-                max_context_tokens INTEGER,
-                max_output_tokens INTEGER,
-                prompt_per_1k DOUBLE PRECISION,
-                completion_per_1k DOUBLE PRECISION,
-                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await conn.execute(
-            f"""
-            CREATE INDEX IF NOT EXISTS idx_agent_models_status
-            ON {self._schema}.agent_models(status)
-            """
-        )
-        await conn.execute(
-            f"""
-            CREATE INDEX IF NOT EXISTS idx_agent_models_provider
-            ON {self._schema}.agent_models(provider)
-            """
-        )
+        await ensure_agent_model_registry_schema(conn, schema=self._schema)
 
     def _row_to_model(self, row: asyncpg.Record) -> AgentModelRecord:
         return AgentModelRecord(

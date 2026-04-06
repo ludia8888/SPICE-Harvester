@@ -616,6 +616,7 @@ class OntologyWorker(StrictCommandEnvelopeKafkaWorker[_OntologyCommandPayload, N
         payload_obj: Optional[Dict[str, Any]],
         kafka_headers: Optional[Any] = None,
         fallback_metadata: Optional[Dict[str, Any]] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         await self._publish_standard_dlq_record(
             producer=self.dlq_producer,
@@ -627,6 +628,7 @@ class OntologyWorker(StrictCommandEnvelopeKafkaWorker[_OntologyCommandPayload, N
             stage=stage,
             payload_text=payload_text,
             payload_obj=payload_obj,
+            extra=extra,
             kafka_headers=kafka_headers,
             fallback_metadata=fallback_metadata,
             tracing=self.tracing_service or self.tracing,

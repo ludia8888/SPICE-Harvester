@@ -132,3 +132,62 @@ async def test_agent_session_registry_raises_when_objects_missing_and_bootstrap_
 
     with pytest.raises(MissingSchemaObjectsError, match="missing required schema objects"):
         await registry.ensure_schema()
+
+
+@pytest.mark.asyncio
+async def test_agent_registry_bootstrap_executes_representative_schema_sql() -> None:
+    registry = AgentRegistry(
+        dsn="postgres://unused",
+        allow_runtime_ddl_bootstrap=True,
+    )
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_runs" in sql for sql in conn.executed)
+    assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_approval_requests" in sql for sql in conn.executed)
+    assert any("idx_agent_tool_idempotency_tool_id" in sql for sql in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_agent_session_registry_bootstrap_executes_representative_schema_sql() -> None:
+    registry = AgentSessionRegistry(
+        dsn="postgres://unused",
+        allow_runtime_ddl_bootstrap=True,
+    )
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_sessions" in sql for sql in conn.executed)
+    assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_session_tool_calls" in sql for sql in conn.executed)
+    assert any("idx_agent_session_llm_calls_model" in sql for sql in conn.executed)
+
+
+@pytest.mark.asyncio
+async def test_agent_catalog_registries_bootstrap_executes_representative_schema_sql() -> None:
+    registries = [
+        AgentFunctionRegistry(dsn="postgres://unused", allow_runtime_ddl_bootstrap=True),
+        AgentModelRegistry(dsn="postgres://unused", allow_runtime_ddl_bootstrap=True),
+        AgentPolicyRegistry(dsn="postgres://unused", allow_runtime_ddl_bootstrap=True),
+        AgentToolRegistry(dsn="postgres://unused", allow_runtime_ddl_bootstrap=True),
+    ]
+
+    for registry in registries:
+        conn = _Conn()
+        registry._pool = _Pool(conn)
+        await registry.ensure_schema()
+        if isinstance(registry, AgentFunctionRegistry):
+            assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_functions" in sql for sql in conn.executed)
+            assert any("idx_agent_functions_function_id" in sql for sql in conn.executed)
+        if isinstance(registry, AgentModelRegistry):
+            assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_models" in sql for sql in conn.executed)
+            assert any("idx_agent_models_provider" in sql for sql in conn.executed)
+        if isinstance(registry, AgentPolicyRegistry):
+            assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_tenant_policies" in sql for sql in conn.executed)
+            assert any("idx_agent_tenant_policies_updated_at" in sql for sql in conn.executed)
+        if isinstance(registry, AgentToolRegistry):
+            assert any("CREATE TABLE IF NOT EXISTS spice_agent.agent_tool_policies" in sql for sql in conn.executed)
+            assert any("idx_agent_tool_policies_type" in sql for sql in conn.executed)

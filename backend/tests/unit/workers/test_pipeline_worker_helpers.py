@@ -346,10 +346,9 @@ async def test_pipeline_parse_error_uses_shared_flow_and_records_invalid_job() -
         msg=ANY,
         stage="validate",
         error="bad payload",
+        attempt_count=None,
         payload_text='{"job_id":"job-1"}',
         payload_obj=payload_obj,
-        job=None,
-        attempt_count=None,
     )
     worker._best_effort_record_invalid_job.assert_awaited_once_with(
         payload_obj,

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
+from shared.services.registries.agent_catalog_registry_schema import ensure_agent_function_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dict, coerce_json_list, normalize_json_payload
 
@@ -41,30 +42,7 @@ class AgentFunctionRegistry(PostgresSchemaRegistry):
     _REQUIRED_TABLES = ("agent_functions",)
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.agent_functions (
-                function_id TEXT NOT NULL,
-                version TEXT NOT NULL DEFAULT 'v1',
-                status TEXT NOT NULL DEFAULT 'ACTIVE',
-                handler TEXT NOT NULL,
-                tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-                roles JSONB NOT NULL DEFAULT '[]'::jsonb,
-                input_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                output_schema JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (function_id, version)
-            )
-            """
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_agent_functions_status ON {self._schema}.agent_functions(status)"
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_agent_functions_function_id ON {self._schema}.agent_functions(function_id)"
-        )
+        await ensure_agent_function_registry_schema(conn, schema=self._schema)
 
     def _row_to_record(self, row: asyncpg.Record) -> AgentFunctionRecord:
         return AgentFunctionRecord(
