@@ -21,7 +21,7 @@ from bff.routers.foundry_connectivity_v2_common import (
     _DEFAULT_PARENT_FOLDER_RID,
     _KIND_TO_CONNECTION_CONFIG_TYPE,
     _build_execute_run_output,
-    _cdc_enabled_for_db,
+    _cdc_enabled_for_flags,
     _coerce_bool,
     _connection_id_from_rid,
     _connection_kind_from_source,
@@ -43,6 +43,7 @@ from bff.routers.foundry_connectivity_v2_common import (
     _file_import_rid,
     _file_import_source_types,
     _foundry_error,
+    _jdbc_enabled_for_flags,
     _invalid_pagination_response,
     _is_valid_http_url,
     _iso_timestamp,
@@ -58,6 +59,7 @@ from bff.routers.foundry_connectivity_v2_common import (
     _public_custom_jdbc_driver_metadata,
     _require_preview_or_400,
     _requires_cdc_feature,
+    _resolve_feature_flags_settings,
     _resource_branch_name,
     _resource_import_config_from_source,
     _resource_import_mode_from_source,
@@ -116,43 +118,9 @@ router = APIRouter(prefix="/v2/connectivity", tags=["Foundry Connectivity v2"])
 _CONNECTIVITY_FETCH_LIMIT_START = 5000
 _CONNECTIVITY_FETCH_LIMIT_MAX = 2_000_000
 
-
-def _feature_flags_settings() -> Any:
-    settings = get_settings()
-    flags = getattr(settings, "feature_flags", None)
-    if flags is None:
-        flags = getattr(settings, "features", None)
-    return flags
-
-
-def _jdbc_enabled_for_db(db_name: str | None) -> bool:
-    flags = _feature_flags_settings()
-    db = str(db_name or "").strip().lower()
-    if bool(getattr(flags, "enable_foundry_connectivity_jdbc", False)):
-        return True
-    if not db:
-        return False
-    allowlist = {
-        item.strip().lower()
-        for item in str(getattr(flags, "foundry_connectivity_jdbc_db_allowlist", "") or "").split(",")
-        if item.strip()
-    }
-    return db in allowlist
-
-
-def _cdc_enabled_for_db(db_name: str | None) -> bool:
-    flags = _feature_flags_settings()
-    db = str(db_name or "").strip().lower()
-    if bool(getattr(flags, "enable_foundry_connectivity_cdc", False)):
-        return True
-    if not db:
-        return False
-    allowlist = {
-        item.strip().lower()
-        for item in str(getattr(flags, "foundry_connectivity_cdc_db_allowlist", "") or "").split(",")
-        if item.strip()
-    }
-    return db in allowlist
+_feature_flags_settings = lambda: _resolve_feature_flags_settings(get_settings)
+_jdbc_enabled_for_db = lambda db_name: _jdbc_enabled_for_flags(_feature_flags_settings(), db_name)
+_cdc_enabled_for_db = lambda db_name: _cdc_enabled_for_flags(_feature_flags_settings(), db_name)
 
 
 async def _run_connection_export(

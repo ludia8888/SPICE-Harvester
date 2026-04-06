@@ -15,7 +15,7 @@ from bff.dependencies import OMSClientDep
 from bff.routers.objectify_deps import get_dataset_registry, get_objectify_registry
 from bff.schemas.objectify_requests import CreateMappingSpecRequest
 from bff.services.objectify_mapping_spec_service import create_mapping_spec as create_mapping_spec_service
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 

@@ -27,7 +27,8 @@ from bff.routers.registry_deps import get_dataset_registry
 from bff.services import database_service
 from bff.services.oms_client import OMSClient
 from shared.services.registries.dataset_registry import DatasetRegistry
-from shared.models.requests import ApiResponse, DatabaseCreateRequest
+from shared.models.responses import ApiResponse
+from shared.models.requests import DatabaseCreateRequest
 
 router = APIRouter(prefix="/databases", tags=["Database Management"])
 

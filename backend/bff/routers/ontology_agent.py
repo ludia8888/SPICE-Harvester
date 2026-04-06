@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.models.pipeline_plan import PipelinePlanDataScope
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.agent.llm_gateway import LLMGateway

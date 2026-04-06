@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep
+from shared.foundry.errors import foundry_error as _foundry_error
 from shared.observability.tracing import trace_endpoint
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -28,7 +29,10 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.services.storage.elasticsearch_service import ElasticsearchService
-from shared.utils.foundry_page_token import decode_offset_page_token, encode_offset_page_token
+from shared.utils.foundry_pagination import (
+    decode_foundry_page_token as _decode_page_token,
+    encode_foundry_page_token as _encode_page_token,
+)
 from shared.utils.instance_properties import flatten_instance_properties
 from shared.utils.number_utils import to_int_or_none
 from oms.services.ontology_resources import OntologyResourceService
@@ -70,9 +74,6 @@ _TOP_LEVEL_FIELDS = frozenset(
         "event_timestamp",
     }
 )
-_FOUNDRY_PAGE_TOKEN_TTL_SECONDS = 60 * 60 * 24
-
-
 class SearchJsonQueryV2(BaseModel):
     """
     Foundry SearchJsonQueryV2-compatible DSL (subset used by this service).
@@ -232,24 +233,6 @@ class SearchObjectsResponseV2(BaseModel):
 
 class CountObjectsResponseV2(BaseModel):
     count: Optional[int] = None
-
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Optional[Dict[str, Any]] = None,
-) -> JSONResponse:
-    payload = {
-        "errorCode": error_code,
-        "errorName": error_name,
-        "errorInstanceId": str(uuid4()),
-        "parameters": parameters or {},
-    }
-    return JSONResponse(status_code=status_code, content=payload)
-
-
 async def _ensure_object_type_exists(
     *,
     db_name: str,
@@ -314,20 +297,6 @@ def _resolve_field_path(field: str) -> str:
     if validated.startswith("data.") or validated.startswith("properties."):
         return validated
     return f"data.{validated}"
-
-
-def _decode_page_token(page_token: Optional[str], *, scope: Optional[str] = None) -> int:
-    return decode_offset_page_token(
-        page_token,
-        ttl_seconds=_FOUNDRY_PAGE_TOKEN_TTL_SECONDS,
-        expected_scope=scope,
-    )
-
-
-def _encode_page_token(offset: int, *, scope: Optional[str] = None) -> str:
-    return encode_offset_page_token(offset, scope=scope)
-
-
 def _pagination_scope_for_search(
     *,
     db_name: str,

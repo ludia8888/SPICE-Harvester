@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import asyncpg
 
+from shared.services.registries.dataset_registry_common import require_dataset_registry_pool as _require_pool
 from shared.services.registries.dataset_registry_models import (
     AccessPolicyRecord,
     GatePolicyRecord,
@@ -15,14 +16,6 @@ from shared.utils.json_utils import normalize_json_payload
 
 if TYPE_CHECKING:
     from shared.services.registries.dataset_registry import DatasetRegistry
-
-
-def _require_pool(registry: "DatasetRegistry") -> Any:
-    if not registry._pool:
-        raise RuntimeError("DatasetRegistry not connected")
-    return registry._pool
-
-
 async def create_key_spec(
     registry: "DatasetRegistry",
     *,

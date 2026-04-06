@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +15,13 @@ from shared.errors.runtime_exception_policy import RuntimeZone, log_exception_ra
 from shared.models.pipeline_job import PipelineJob
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, RegistryKey
+from shared.services.kafka.processed_event_worker import (
+    CommandParseError,
+    FailureLogContext,
+    HeartbeatOptions,
+    ParseErrorContext,
+    RegistryKey,
+)
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.registries.backing_source_adapter import MappingSpecResolver
@@ -41,23 +46,30 @@ logger = logging.getLogger("pipeline_worker.main")
 T = TypeVar("T")
 
 
-class _PipelinePayloadParseError(ValueError):
-    def __init__(
-        self,
-        *,
-        stage: str,
-        payload_text: Optional[str],
-        payload_obj: Optional[Dict[str, Any]],
-        cause: Exception,
-    ) -> None:
-        super().__init__(str(cause))
-        self.stage = str(stage)
-        self.payload_text = payload_text
-        self.payload_obj = payload_obj
-        self.cause = cause
+class _PipelinePayloadParseError(CommandParseError):
+    pass
 
 
 class PipelineWorkerRuntimeMixin:
+    json_model_cls = PipelineJob
+    json_model_parse_error_cls = _PipelinePayloadParseError
+    registry_event_id_field = "job_id"
+    registry_aggregate_id_field = "pipeline_id"
+    parse_error_enable_dlq = True
+    parse_error_publish_failure_message = "Failed to publish invalid pipeline job payload to DLQ: %s"
+    parse_error_invalid_payload_message = "Invalid pipeline job payload; skipping: %s"
+    parse_error_raise_on_publish_failure = False
+    json_model_metadata_fields = ("job_id", "pipeline_id", "db_name", "branch", "mode")
+    json_model_span_name = "pipeline_worker.process_job"
+    json_model_metric_event_name = "PIPELINE_JOB"
+    json_model_span_attribute_fields = (
+        ("job_id", "pipeline.job_id"),
+        ("pipeline_id", "pipeline.pipeline_id"),
+        ("db_name", "pipeline.db_name"),
+        ("branch", "pipeline.branch"),
+        ("mode", "pipeline.mode"),
+    )
+
     def _build_error_payload(
         self,
         *,
@@ -491,53 +503,6 @@ class PipelineWorkerRuntimeMixin:
     def _uses_commit_state(self) -> bool:  # type: ignore[override]
         return True
 
-    def _parse_payload(self, payload: Any) -> PipelineJob:  # type: ignore[override]
-        if not isinstance(payload, (bytes, bytearray)):
-            raise _PipelinePayloadParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                cause=TypeError("Pipeline job payload must be bytes"),
-            )
-        try:
-            raw_text = payload.decode("utf-8")
-        except Exception as exc:
-            raise _PipelinePayloadParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                cause=exc,
-            ) from exc
-
-        try:
-            payload_obj = json.loads(raw_text)
-        except Exception as exc:
-            raise _PipelinePayloadParseError(
-                stage="json",
-                payload_text=raw_text,
-                payload_obj=None,
-                cause=exc,
-            ) from exc
-
-        try:
-            job = PipelineJob.model_validate(payload_obj)
-        except Exception as exc:
-            raise _PipelinePayloadParseError(
-                stage="validate",
-                payload_text=raw_text,
-                payload_obj=payload_obj if isinstance(payload_obj, dict) else None,
-                cause=exc,
-            ) from exc
-        return job
-
-    def _registry_key(self, payload: PipelineJob) -> RegistryKey:  # type: ignore[override]
-        return RegistryKey(
-            event_id=str(payload.job_id),
-            aggregate_id=str(payload.pipeline_id),
-            # Pipeline jobs are not "append-only state" per pipeline; avoid stale-skips.
-            sequence_number=None,
-        )
-
     async def _process_payload(self, payload: PipelineJob) -> None:  # type: ignore[override]
         logger.info(
             "Executing pipeline job (job_id=%s pipeline_id=%s mode=%s)",
@@ -588,40 +553,6 @@ class PipelineWorkerRuntimeMixin:
             payload.pipeline_id,
         )
 
-    def _fallback_metadata(self, payload: PipelineJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return {
-            "job_id": payload.job_id,
-            "pipeline_id": str(payload.pipeline_id),
-            "db_name": payload.db_name,
-            "branch": payload.branch,
-            "mode": getattr(payload, "mode", None),
-        }
-
-    def _span_name(self, *, payload: PipelineJob) -> str:  # type: ignore[override]
-        return "pipeline_worker.process_job"
-
-    def _span_attributes(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: PipelineJob,
-        registry_key: RegistryKey,
-    ) -> Dict[str, Any]:
-        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
-        attrs.update(
-            {
-                "pipeline.job_id": payload.job_id,
-                "pipeline.pipeline_id": str(payload.pipeline_id),
-                "pipeline.db_name": payload.db_name,
-                "pipeline.branch": payload.branch,
-                "pipeline.mode": getattr(payload, "mode", None),
-            }
-        )
-        return attrs
-
-    def _metric_event_name(self, *, payload: PipelineJob) -> Optional[str]:  # type: ignore[override]
-        return "PIPELINE_JOB"
-
     def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
         return HeartbeatOptions(
             interval_seconds=int(self.processed_event_heartbeat_interval_seconds),
@@ -644,47 +575,47 @@ class PipelineWorkerRuntimeMixin:
             error=error,
         )
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        async def _send(
-            stage: str,
-            cause_text: str,
-            payload_text: Optional[str],
-            payload_obj: Optional[Dict[str, Any]],
-            _kafka_headers: Optional[Any],
-            _fallback_metadata: Optional[Dict[str, Any]],
-        ) -> None:
-            await self._publish_to_dlq(
-                msg=msg,
-                stage=stage,
-                error=cause_text,
-                payload_text=payload_text,
-                payload_obj=payload_obj,
-                job=None,
-                attempt_count=None,
-            )
-            if stage != "validate" or not isinstance(payload_obj, dict):
-                return
-            try:
-                await self._best_effort_record_invalid_job(payload_obj, error=cause_text)
-            except Exception as record_exc:
-                logger.warning(
-                    "Failed to record invalid pipeline job (best-effort): %s",
-                    record_exc,
-                    exc_info=True,
-                )
-
-        await self._publish_parse_error_to_dlq(
+    async def _send_parse_error_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        context: ParseErrorContext,
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        _ = raw_payload, kafka_headers, fallback_metadata
+        await self._publish_to_dlq(
             msg=msg,
-            raw_payload=raw_payload,
-            error=error,
-            dlq_sender=_send,
-            publish_failure_message="Failed to publish invalid pipeline job payload to DLQ: %s",
-            invalid_payload_message="Invalid pipeline job payload; skipping: %s",
-            raise_on_publish_failure=False,
-            logger_instance=logger,
+            stage=context.stage,
+            error=str(context.cause),
+            payload_text=context.payload_text,
+            payload_obj=context.payload_obj,
+            job=None,
+            attempt_count=None,
         )
 
-    async def _on_retry_scheduled(  # type: ignore[override]
+    async def _after_parse_error_dlq_success(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        context: ParseErrorContext,
+    ) -> None:
+        _ = msg, raw_payload, error
+        if context.stage != "validate" or not isinstance(context.payload_obj, dict):
+            return
+        try:
+            await self._best_effort_record_invalid_job(context.payload_obj, error=str(context.cause))
+        except Exception as record_exc:
+            logger.warning(
+                "Failed to record invalid pipeline job (best-effort): %s",
+                record_exc,
+                exc_info=True,
+            )
+
+    def _retry_log_context(  # type: ignore[override]
         self,
         *,
         payload: PipelineJob,
@@ -692,27 +623,25 @@ class PipelineWorkerRuntimeMixin:
         attempt_count: int,
         backoff_s: int,
         retryable: bool,
-    ) -> None:
-        logger.warning(
-            "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
-            payload.job_id,
-            attempt_count,
-            int(backoff_s),
-            error,
+    ) -> FailureLogContext:
+        _ = retryable
+        return FailureLogContext(
+            message="Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+            args=(payload.job_id, attempt_count, int(backoff_s), error),
         )
 
-    async def _on_terminal_failure(  # type: ignore[override]
+    def _terminal_failure_log_context(  # type: ignore[override]
         self,
         *,
         payload: PipelineJob,
         error: str,
         attempt_count: int,
         retryable: bool,
-    ) -> None:
-        logger.error(
-            "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-            payload.job_id,
-            attempt_count,
+    ) -> FailureLogContext:
+        _ = error, retryable
+        return FailureLogContext(
+            message="Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
+            args=(payload.job_id, attempt_count),
         )
 
     async def _send_to_dlq(  # type: ignore[override]

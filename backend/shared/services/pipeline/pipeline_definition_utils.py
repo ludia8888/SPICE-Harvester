@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from shared.services.pipeline.pipeline_schema_utils import normalize_expectations
+from shared.utils.bool_utils import parse_boolish
 
 
 def split_expectation_columns(column: str) -> List[str]:
@@ -73,13 +74,8 @@ def resolve_incremental_watermark_column(
 
 
 def is_truthy(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
+    parsed = parse_boolish(value, allow_numeric=True)
+    return bool(parsed) if parsed is not None else False
 
 
 def normalize_pk_semantics(value: Optional[str]) -> Optional[str]:

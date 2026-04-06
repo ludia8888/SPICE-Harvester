@@ -16,7 +16,8 @@ from shared.services.registries.dataset_registry_get_or_create import get_or_cre
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import LakeFSConflictError
-from shared.utils.path_utils import safe_lakefs_ref, safe_path_segment
+from shared.utils.dataset_artifacts import dataset_artifact_prefix as _dataset_artifact_prefix
+from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
 
@@ -27,11 +28,6 @@ _SUPPORTED_IMPORT_MODES = TABLE_IMPORT_MODES
 
 def _row_hash(row: List[Any]) -> str:
     return hashlib.sha256("|".join(str(v) for v in row).encode("utf-8")).hexdigest()
-
-
-def _dataset_artifact_prefix(*, db_name: str, dataset_id: str, dataset_name: str) -> str:
-    safe_name = safe_path_segment(dataset_name)
-    return f"datasets/{db_name}/{dataset_id}/{safe_name}"
 
 
 def _rows_to_csv_bytes(*, columns: List[str], rows: List[List[Any]]) -> bytes:
@@ -115,7 +111,7 @@ def _apply_update_mode(
     new_columns: List[str],
     new_rows: List[List[Any]],
     *,
-    primary_key_column: Optional[str],
+    primary_key_column: Optional[str] = None,
 ) -> Tuple[List[str], List[List[Any]]]:
     merged_columns = existing_columns if existing_columns else new_columns
     normalized_new_rows = (

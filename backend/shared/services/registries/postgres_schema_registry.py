@@ -164,6 +164,11 @@ class PostgresSchemaRegistry(ABC):
         await self._ensure_tables(conn)
 
     def _required_tables(self) -> tuple[str, ...]:
+        value = getattr(self, "_REQUIRED_TABLES", ())
+        if isinstance(value, tuple):
+            return value
+        if isinstance(value, list):
+            return tuple(str(item) for item in value)
         return ()
 
     @abstractmethod

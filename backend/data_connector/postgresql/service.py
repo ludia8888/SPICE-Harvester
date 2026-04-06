@@ -6,41 +6,13 @@ from typing import Any, Dict, Optional
 import asyncpg
 
 from data_connector.adapters.base import ConnectorAdapter, ConnectorConnectionTestResult, ConnectorExtractResult
+from data_connector.adapters.sql_connector_common import (
+    mapping_rows_to_dict_rows as _rows_to_dict_rows,
+    row_value_case_insensitive as _row_value,
+    safe_columns as _safe_columns,
+    sanitize_simple_identifier as _sanitize_identifier,
+)
 from data_connector.adapters.sql_query_guard import build_ordered_wrapper_query, normalize_sql_query
-
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*$")
-
-
-def _rows_to_dict_rows(rows: list[asyncpg.Record]) -> list[Dict[str, Any]]:
-    out: list[Dict[str, Any]] = []
-    for row in rows:
-        out.append({str(k): row[k] for k in row.keys()})
-    return out
-
-
-def _safe_columns(rows: list[Dict[str, Any]]) -> list[str]:
-    if not rows:
-        return []
-    return [str(k) for k in rows[0].keys()]
-
-
-def _sanitize_identifier(value: str, *, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} is required")
-    if not _IDENTIFIER_RE.fullmatch(text):
-        raise ValueError(f"{field_name} must be a simple identifier")
-    return text
-
-
-def _row_value(row: Dict[str, Any], key: str) -> Any:
-    if key in row:
-        return row.get(key)
-    lower = key.lower()
-    for candidate, value in row.items():
-        if str(candidate).lower() == lower:
-            return value
-    return None
 
 
 class PostgreSQLConnectorService(ConnectorAdapter):

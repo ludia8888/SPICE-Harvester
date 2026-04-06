@@ -7,6 +7,11 @@ from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from shared.services.pipeline.pipeline_definition_utils import collect_pk_columns, resolve_execution_semantics
+from shared.utils.mapping_text import (
+    first_mapping_raw as _first_raw,
+    first_mapping_text_with_key as _first_text,
+    normalized_text as _text,
+)
 
 
 class DatasetWriteMode(str, Enum):
@@ -138,41 +143,6 @@ class ResolvedDatasetWritePolicy:
     @property
     def append_mode(self) -> bool:
         return self.runtime_write_mode == "append"
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _first_text(
-    *,
-    output_metadata: Mapping[str, Any],
-    settings: Mapping[str, Any],
-    definition: Mapping[str, Any],
-    keys: Iterable[str],
-) -> Tuple[str, Optional[str]]:
-    for source in (output_metadata, settings, definition):
-        for key in keys:
-            raw = source.get(key)
-            if isinstance(raw, str) and raw.strip():
-                return raw.strip(), key
-    return "", None
-
-
-def _first_raw(
-    *,
-    output_metadata: Mapping[str, Any],
-    settings: Mapping[str, Any],
-    definition: Mapping[str, Any],
-    keys: Iterable[str],
-) -> Any:
-    for source in (output_metadata, settings, definition):
-        for key in keys:
-            if key in source and source.get(key) is not None:
-                return source.get(key)
-    return None
-
-
 def _normalize_partition_by(value: Any) -> List[str]:
     if value is None:
         return []
@@ -233,10 +203,8 @@ def normalize_dataset_output_metadata(
     warnings: List[str] = []
 
     write_mode_raw, write_mode_key = _first_text(
-        output_metadata=output_metadata,
-        settings=settings,
-        definition=definition,
         keys=_WRITE_MODE_KEYS,
+        sources=(output_metadata, settings, definition),
     )
     explicit_write_mode = bool(write_mode_raw)
     normalized_write_mode = _normalize_write_mode(write_mode_raw)
@@ -246,18 +214,14 @@ def normalize_dataset_output_metadata(
         )
 
     primary_key_raw = _first_raw(
-        output_metadata=output_metadata,
-        settings=settings,
-        definition=definition,
         keys=_PRIMARY_KEY_KEYS,
+        sources=(output_metadata, settings, definition),
     )
     primary_key_columns = _normalize_primary_key_columns(primary_key_raw)
 
     post_filtering_value, post_filtering_key = _first_text(
-        output_metadata=output_metadata,
-        settings=settings,
-        definition=definition,
         keys=_POST_FILTERING_KEYS,
+        sources=(output_metadata, settings, definition),
     )
     if post_filtering_key and post_filtering_key not in {"post_filtering_column", "postFilteringColumn"}:
         warnings.append(
@@ -266,10 +230,8 @@ def normalize_dataset_output_metadata(
         )
 
     output_format_value, output_format_key = _first_text(
-        output_metadata=output_metadata,
-        settings=settings,
-        definition=definition,
         keys=_OUTPUT_FORMAT_KEYS,
+        sources=(output_metadata, settings, definition),
     )
     output_format = _text(output_format_value).lower() or "parquet"
     if output_format_key and output_format_key not in {"output_format", "outputFormat"}:
@@ -278,10 +240,8 @@ def normalize_dataset_output_metadata(
         )
 
     partition_value = _first_raw(
-        output_metadata=output_metadata,
-        settings=settings,
-        definition=definition,
         keys=_PARTITION_KEYS,
+        sources=(output_metadata, settings, definition),
     )
     partition_by = _normalize_partition_by(partition_value)
 

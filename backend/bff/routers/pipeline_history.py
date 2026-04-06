@@ -14,7 +14,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.routers.pipeline_deps import get_pipeline_registry
 from bff.routers.pipeline_shared import _ensure_pipeline_permission
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.registries.pipeline_registry import PipelineRegistry
 

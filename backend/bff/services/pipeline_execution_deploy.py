@@ -30,10 +30,15 @@ from bff.services.pipeline_execution_requests import (
     _PromotedOutputMaterializationContext,
     _PromoteOutputSelection,
 )
+from bff.services.pipeline_execution_shared import (
+    _extract_deploy_dependencies_raw,
+    _parse_deploy_schedule_fields,
+    _parse_optional_bool,
+)
 from shared.dependencies.providers import LineageStoreDep
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.pipeline.dataset_output_semantics import resolve_dataset_write_policy
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
@@ -42,7 +47,6 @@ from shared.services.registries.dataset_registry_get_or_create import get_or_cre
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.storage.lakefs_client import LakeFSConflictError, LakeFSError
-from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.security.input_sanitizer import validate_db_name
 from shared.utils.branch_utils import protected_branch_write_message
 from shared.utils.key_spec import normalize_key_spec
@@ -52,66 +56,6 @@ from shared.utils.time_utils import utcnow
 
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_deploy_dependencies_raw(
-    *,
-    sanitized: Dict[str, Any],
-    definition_json: Optional[Dict[str, Any]],
-) -> Any:
-    if "dependencies" in sanitized:
-        return sanitized.get("dependencies")
-    if isinstance(definition_json, dict) and "dependencies" in definition_json:
-        return definition_json.get("dependencies")
-    return None
-
-
-def _parse_deploy_schedule_fields(
-    *,
-    sanitized: Dict[str, Any],
-    output: Dict[str, Any],
-) -> tuple[Optional[int], Optional[str]]:
-    schedule_interval_seconds = None
-    schedule_cron = None
-    schedule = sanitized.get("schedule") or output.get("schedule")
-    if isinstance(schedule, dict):
-        schedule_interval_seconds = schedule.get("interval_seconds")
-        schedule_cron = schedule.get("cron")
-    elif isinstance(schedule, (int, float, str)):
-        try:
-            schedule_interval_seconds = int(schedule)
-        except (TypeError, ValueError):
-            schedule_interval_seconds = None
-    if schedule_cron:
-        schedule_cron = str(schedule_cron).strip()
-    if schedule_interval_seconds is not None:
-        try:
-            schedule_interval_seconds = int(schedule_interval_seconds)
-        except Exception:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "schedule_interval_seconds must be integer",
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-            )
-        if schedule_interval_seconds <= 0:
-            raise classified_http_exception(
-                status.HTTP_400_BAD_REQUEST,
-                "schedule_interval_seconds must be > 0",
-                code=ErrorCode.REQUEST_VALIDATION_FAILED,
-            )
-    if schedule_interval_seconds and schedule_cron:
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "Provide either schedule_interval_seconds or schedule_cron (not both)",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        )
-    if schedule_cron and not _is_valid_cron_expression(str(schedule_cron)):
-        raise classified_http_exception(
-            status.HTTP_400_BAD_REQUEST,
-            "schedule_cron must be a supported 5-field cron expression",
-            code=ErrorCode.REQUEST_VALIDATION_FAILED,
-        )
-    return schedule_interval_seconds, schedule_cron
 
 
 def parse_deploy_request_payload(*, sanitized: Dict[str, Any]) -> _DeployRequestPayload:
@@ -246,19 +190,6 @@ def resolve_deploy_definition_and_db(
             code=ErrorCode.REQUEST_VALIDATION_FAILED,
         )
     return resolved_definition or {}, validate_db_name(resolved_db_name)
-
-
-def _parse_optional_bool(value: Any) -> Optional[bool]:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "on"}:
-        return True
-    if text in {"0", "false", "no", "n", "off"}:
-        return False
-    return None
 
 
 def _extract_promote_outputs_list(

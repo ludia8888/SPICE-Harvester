@@ -22,7 +22,7 @@ from bff.schemas.governance_requests import (
     CreateKeySpecRequest,
     GatePolicyRequest,
 )
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.database_access import (
     DATA_ENGINEER_ROLES,
     DOMAIN_MODEL_ROLES,

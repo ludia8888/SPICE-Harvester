@@ -34,9 +34,6 @@ class AgentTenantPolicyRecord:
 class AgentPolicyRegistry(PostgresSchemaRegistry):
     _REQUIRED_TABLES = ("agent_tenant_policies",)
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
             f"""

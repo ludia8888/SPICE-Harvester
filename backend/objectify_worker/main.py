@@ -24,7 +24,7 @@ from confluent_kafka import Producer
 from shared.services.kafka.dlq_publisher import DlqPublishSpec, publish_contextual_dlq_json
 from shared.services.kafka.processed_event_worker import (
     HeartbeatOptions,
-    ProcessedEventKafkaWorker,
+    JsonModelKafkaWorker,
     RegistryKey,
 )
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
@@ -112,7 +112,7 @@ from objectify_worker.runtime_mixin import ObjectifyWorkerRuntimeMixin
 logger = logging.getLogger(__name__)
 
 
-class ObjectifyWorker(ObjectifyWorkerRuntimeMixin, ProcessedEventKafkaWorker[ObjectifyJob, None]):
+class ObjectifyWorker(ObjectifyWorkerRuntimeMixin, JsonModelKafkaWorker[ObjectifyJob, None]):
     P0_ERROR_CODES = {
         "SOURCE_FIELD_MISSING",
         "SOURCE_FIELD_UNKNOWN",

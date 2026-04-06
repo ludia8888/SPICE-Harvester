@@ -114,8 +114,5 @@ class DatasetRegistry(
             allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:
         await _schema_registry.ensure_tables(self, conn)

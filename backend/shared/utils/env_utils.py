@@ -4,14 +4,11 @@ import os
 from typing import Optional
 import logging
 
+from shared.utils.bool_utils import parse_boolish
+
 
 def parse_bool(raw: str) -> Optional[bool]:
-    value = (raw or "").strip().lower()
-    if value in {"true", "1", "yes", "on"}:
-        return True
-    if value in {"false", "0", "no", "off"}:
-        return False
-    return None
+    return parse_boolish(raw)
 
 
 def parse_bool_env(name: str, default: Optional[bool] = None) -> Optional[bool]:

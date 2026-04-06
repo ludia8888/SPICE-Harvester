@@ -18,7 +18,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.routers.objectify_deps import _require_db_role
 from bff.schemas.objectify_requests import TriggerObjectifyRequest
 from shared.models.objectify_job import ObjectifyJob
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue

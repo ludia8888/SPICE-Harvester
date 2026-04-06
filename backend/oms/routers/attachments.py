@@ -27,6 +27,7 @@ from oms.routers.foundry_role_guard import (
 from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
 from shared.dependencies.providers import ElasticsearchServiceDep, StorageServiceDep
+from shared.foundry.errors import foundry_error as _foundry_error
 from shared.observability.tracing import trace_endpoint
 from shared.security.database_access import enforce_database_role
 from shared.security.input_sanitizer import (
@@ -49,27 +50,6 @@ attachments_property_router = APIRouter(
     prefix="/v2/ontologies/{ontology}/objects",
     tags=["Foundry Attachment Properties v2"],
 )
-
-
-# ---------------------------------------------------------------------------
-# Error helpers (mirrors query.py pattern)
-# ---------------------------------------------------------------------------
-
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Optional[Dict[str, Any]] = None,
-) -> JSONResponse:
-    payload = {
-        "errorCode": error_code,
-        "errorName": error_name,
-        "errorInstanceId": str(uuid4()),
-        "parameters": parameters or {},
-    }
-    return JSONResponse(status_code=status_code, content=payload)
 
 
 # ---------------------------------------------------------------------------

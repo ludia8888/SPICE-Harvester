@@ -20,7 +20,8 @@ from shared.errors.http_error_mapper import code_for_http_status
 from bff.services.database_error_policy import MessageErrorPolicy, apply_message_error_policies
 from bff.services.oms_client import OMSClient
 from shared.config.settings import get_settings
-from shared.models.requests import ApiResponse, DatabaseCreateRequest
+from shared.models.responses import ApiResponse
+from shared.models.requests import DatabaseCreateRequest
 from shared.security.database_access import (
     DatabaseAccessRegistryUnavailableError,
     fetch_database_access_entries,

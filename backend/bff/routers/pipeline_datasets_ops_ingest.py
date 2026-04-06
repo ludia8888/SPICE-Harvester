@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import quote
 
 from shared.services.registries.dataset_registry import DatasetRegistry
+from shared.utils.dataset_artifacts import dataset_artifact_prefix as _dataset_artifact_prefix
 from shared.utils.path_utils import safe_path_segment
 import logging
 
@@ -57,9 +58,3 @@ def _sanitize_s3_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
         except UnicodeEncodeError:
             sanitized[key] = quote(raw, safe="")
     return sanitized
-
-
-def _dataset_artifact_prefix(*, db_name: str, dataset_id: str, dataset_name: str) -> str:
-    safe_name = safe_path_segment(dataset_name)
-    return f"datasets/{db_name}/{dataset_id}/{safe_name}"
-

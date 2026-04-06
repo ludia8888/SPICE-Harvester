@@ -21,7 +21,12 @@ from oms.routers._event_sourcing import append_event_sourcing_command, build_com
 from shared.models.commands import CommandType, OntologyCommand
 from shared.config.app_config import AppConfig
 from shared.utils.ontology_version import resolve_ontology_version
-from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
+from shared.utils.language import (
+    coerce_localized_text,
+    get_accept_language,
+    localized_text_to_string,
+    select_localized_text,
+)
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.services.core.ontology_linter import (
     OntologyLinterConfig,
@@ -42,7 +47,7 @@ from oms.services.ontology_resources import OntologyResourceService
 from oms.services.property_to_relationship_converter import PropertyToRelationshipConverter
 from oms.validation_codes import OntologyValidationCode as OVC
 from shared.models.common import BaseResponse
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 
@@ -466,30 +471,6 @@ async def _load_existing_ontology_for_write(
     if not resource:
         return None
     return _ontology_from_resource_payload(resource, class_id_hint=class_id)
-
-
-def _localized_to_string(value: Any, *, lang: str) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        preferred = str(value.get(lang) or "").strip() if lang else ""
-        if preferred:
-            return preferred
-        for fallback in ("en", "ko"):
-            candidate = str(value.get(fallback) or "").strip()
-            if candidate:
-                return candidate
-        for v in value.values():
-            candidate = str(v).strip() if v is not None else ""
-            if candidate:
-                return candidate
-        return None
-    candidate = str(value).strip()
-    return candidate or None
-
-
 def _merge_lint_reports(*reports: LintReport) -> LintReport:
     errors = []
     warnings = []
@@ -843,7 +824,7 @@ async def validate_ontology_create(
             )
             id_generated = True
 
-        label = _localized_to_string(raw_label, lang=lang) or class_id
+        label = localized_text_to_string(raw_label, lang=lang) or class_id
 
         metadata_payload = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         expanded_properties, shared_prop_issues = await _apply_shared_properties(

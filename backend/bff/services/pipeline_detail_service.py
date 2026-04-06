@@ -25,7 +25,7 @@ from bff.routers.pipeline_ops_preflight import _validate_pipeline_definition
 from bff.routers.pipeline_shared import _ensure_pipeline_permission, _log_pipeline_audit
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.pipeline.pipeline_dataset_utils import (
     normalize_dataset_selection,

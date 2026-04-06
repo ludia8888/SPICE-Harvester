@@ -7,15 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-
-def _normalize_mapping_pair(item: Any) -> Optional[tuple[str, str]]:
-    if not isinstance(item, dict):
-        return None
-    source = str(item.get("source_field") or "").strip()
-    target = str(item.get("target_field") or "").strip()
-    if not source or not target:
-        return None
-    return source, target
+from shared.utils.mapping_pairs import normalize_mapping_pair as _normalize_mapping_pair
 
 
 def _build_mapping_change_summary(

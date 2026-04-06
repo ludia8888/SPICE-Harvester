@@ -29,11 +29,12 @@ from bff.services.pipeline_execution_requests import (
     _PreparedBuildExecution,
     _PreparedPreviewExecution,
 )
+from bff.services.pipeline_execution_shared import _build_ontology_ref
 from shared.dependencies.providers import AuditLogStoreDep
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.pipeline_job import PipelineJob
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -43,11 +44,6 @@ from shared.utils.time_utils import utcnow
 
 
 logger = logging.getLogger(__name__)
-
-
-def _build_ontology_ref(branch: str) -> str:
-    resolved = str(branch or "").strip() or "main"
-    return f"branch:{resolved}"
 
 
 def _parse_pipeline_run_request_payload(

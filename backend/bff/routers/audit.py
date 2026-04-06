@@ -14,7 +14,7 @@ from fastapi import APIRouter, Query, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.dependencies.providers import AuditLogStoreDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 _AUDIT_STATUS_VALUES = {"success", "failure"}

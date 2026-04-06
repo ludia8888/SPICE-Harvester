@@ -7,7 +7,6 @@ Database command와 ontology command 모두 Postgres registry를 기준으로 �
 """
 
 import asyncio
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -41,9 +40,11 @@ from shared.services.core.write_path_contract import (
 )
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
+    CommandEnvelopePayload,
     CommandParseError,
+    FailureLogContext,
     RegistryKey,
-    StrictHeartbeatKafkaWorker,
+    StrictCommandEnvelopeKafkaWorker,
     WorkerRuntimeConfig,
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
@@ -82,22 +83,23 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class _OntologyCommandPayload:
-    command: Dict[str, Any]
-    envelope_metadata: Optional[Dict[str, Any]] = None
+@dataclass
+class _OntologyCommandPayload(CommandEnvelopePayload):
+    pass
 
 
 class _OntologyCommandParseError(CommandParseError):
     pass
 
 
-class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
+class OntologyWorker(StrictCommandEnvelopeKafkaWorker[_OntologyCommandPayload, None]):
     """온톨로지 Command를 처리하는 워커"""
     parse_error_enable_dlq = True
     parse_error_publish_failure_message = "Failed to publish invalid ontology payload to DLQ; retrying: %s"
     parse_error_invalid_payload_message = "Invalid ontology payload; skipping: %s"
     parse_error_raise_on_publish_failure = True
+    command_payload_cls = _OntologyCommandPayload
+    command_parse_error_cls = _OntologyCommandParseError
 
     def __init__(self):
         settings = get_settings()
@@ -1245,107 +1247,6 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         
         await self.publish_event(event)
 
-    # --- ProcessedEventKafkaWorker hooks ---
-    def _parse_payload(self, payload: Any) -> _OntologyCommandPayload:  # type: ignore[override]
-        if not isinstance(payload, (bytes, bytearray)):
-            raise _OntologyCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=TypeError("Kafka payload must be bytes"),
-            )
-
-        try:
-            raw_text = payload.decode("utf-8")
-        except Exception as exc:
-            raise _OntologyCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        raw_message: Any
-        try:
-            raw_message = json.loads(raw_text)
-        except Exception as exc:
-            raise _OntologyCommandParseError(
-                stage="parse_json",
-                payload_text=raw_text,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
-
-        try:
-            envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
-        except Exception as exc:
-            payload_obj = raw_message if isinstance(raw_message, dict) else None
-            raise _OntologyCommandParseError(
-                stage="parse_envelope",
-                payload_text=raw_text,
-                payload_obj=payload_obj,
-                fallback_metadata=fallback_metadata,
-                cause=exc,
-            ) from exc
-
-        kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-        if kind != "command":
-            payload_obj = envelope.model_dump(mode="json")
-            raise _OntologyCommandParseError(
-                stage="validate_envelope",
-                payload_text=raw_text,
-                payload_obj=payload_obj if isinstance(payload_obj, dict) else None,
-                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
-                cause=ValueError(f"unexpected_envelope_kind:{kind}"),
-            )
-
-        command_data = dict(envelope.data or {})
-        if command_data.get("aggregate_id") and command_data.get("aggregate_id") != envelope.aggregate_id:
-            raise _OntologyCommandParseError(
-                stage="validate_envelope",
-                payload_text=raw_text,
-                payload_obj=envelope.model_dump(mode="json"),
-                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
-                cause=ValueError(
-                    f"aggregate_id mismatch: command.aggregate_id={command_data.get('aggregate_id')} "
-                    f"envelope.aggregate_id={envelope.aggregate_id}"
-                ),
-            )
-        command_data["aggregate_id"] = envelope.aggregate_id
-        command_data.setdefault("event_id", envelope.event_id)
-        command_data.setdefault("sequence_number", envelope.sequence_number)
-        return _OntologyCommandPayload(command=command_data, envelope_metadata=envelope.metadata)
-
-    def _fallback_metadata(self, payload: _OntologyCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return payload.envelope_metadata
-
-    def _registry_key(self, payload: _OntologyCommandPayload) -> RegistryKey:  # type: ignore[override]
-        command = payload.command if isinstance(payload.command, dict) else {}
-
-        registry_event_id = command.get("event_id") or command.get("command_id")
-        registry_event_id = str(registry_event_id or "").strip()
-        if not registry_event_id:
-            raise ValueError("event_id is required")
-
-        aggregate_id = command.get("aggregate_id")
-        aggregate_id = str(aggregate_id).strip() if aggregate_id is not None else None
-        if not aggregate_id:
-            aggregate_id = None
-
-        sequence_number = command.get("sequence_number")
-        try:
-            seq_int = int(sequence_number) if sequence_number is not None else None
-        except (TypeError, ValueError):
-            seq_int = None
-
-        return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
-
     async def _process_payload(self, payload: _OntologyCommandPayload) -> None:  # type: ignore[override]
         command = payload.command if isinstance(payload.command, dict) else {}
         await self.process_command(command)
@@ -1379,7 +1280,7 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
     def _is_retryable_error(exc: Exception, *, payload: Optional[_OntologyCommandPayload] = None) -> bool:
         return classify_retryable_with_profile(exc, ONTOLOGY_COMMAND_RETRY_PROFILE)
 
-    async def _on_retry_scheduled(  # type: ignore[override]
+    async def _after_retry_scheduled(  # type: ignore[override]
         self,
         *,
         payload: _OntologyCommandPayload,
@@ -1406,14 +1307,22 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         except Exception as exc:
             logger.warning("Failed to publish ontology retry failure event: %s", exc, exc_info=True)
 
-        logger.warning(
-            "Retrying ontology command in %ss (attempt %s): %s",
-            int(backoff_s),
-            attempt_count,
-            error,
+    def _retry_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: _OntologyCommandPayload,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = payload, retryable
+        return FailureLogContext(
+            message="Retrying ontology command in %ss (attempt %s): %s",
+            args=(int(backoff_s), attempt_count, error),
         )
 
-    async def _on_terminal_failure(  # type: ignore[override]
+    async def _after_terminal_failure(  # type: ignore[override]
         self,
         *,
         payload: _OntologyCommandPayload,
@@ -1434,11 +1343,18 @@ class OntologyWorker(StrictHeartbeatKafkaWorker[_OntologyCommandPayload, None]):
         except Exception as exc:
             logger.warning("Failed to publish ontology terminal failure event: %s", exc, exc_info=True)
 
-        logger.error(
-            "Ontology command failed after %s attempts (retryable=%s): %s",
-            attempt_count,
-            retryable,
-            error,
+    def _terminal_failure_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: _OntologyCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = payload
+        return FailureLogContext(
+            message="Ontology command failed after %s attempts (retryable=%s): %s",
+            args=(attempt_count, retryable, error),
         )
         
     async def run(self):

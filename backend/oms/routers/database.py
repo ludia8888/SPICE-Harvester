@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from oms.dependencies import CommandStatusServiceDep, EventStoreDep, database_exists_in_registry
 from oms.routers._event_sourcing import append_event_sourcing_command, build_command_status_metadata
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.security.database_access import DatabaseAccessRegistryUnavailableError, list_database_names

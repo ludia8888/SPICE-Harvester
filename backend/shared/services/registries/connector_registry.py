@@ -24,6 +24,7 @@ import asyncpg
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.security.data_encryption import encryptor_from_keys
+from shared.services.registries.connector_registry_schema import ensure_connector_registry_schema
 from shared.services.registries.postgres_schema_registry import PostgresSchemaRegistry
 from shared.utils.json_utils import coerce_json_dict, coerce_json_list, coerce_json_strict, normalize_json_payload
 from shared.utils.time_utils import utcnow
@@ -128,9 +129,6 @@ class ConnectorRegistry(PostgresSchemaRegistry):
             cfg.security.allow_plaintext_connector_secrets or cfg.is_test or cfg.is_pytest
         )
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     @staticmethod
     def _secret_aad(*, source_type: str, source_id: str) -> bytes:
         return f"{source_type}:{source_id}".encode("utf-8")
@@ -181,118 +179,7 @@ class ConnectorRegistry(PostgresSchemaRegistry):
         return payload
 
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.connector_sources (
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                config_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (source_type, source_id)
-            )
-            """
-        )
-
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.connector_mappings (
-                mapping_id UUID PRIMARY KEY,
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'draft',
-                enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                target_db_name TEXT,
-                target_branch TEXT,
-                target_class_label TEXT,
-                field_mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE (source_type, source_id),
-                FOREIGN KEY (source_type, source_id)
-                    REFERENCES {self._schema}.connector_sources(source_type, source_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.connector_sync_state (
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                last_seen_cursor TEXT,
-                last_emitted_seq BIGINT NOT NULL DEFAULT 0,
-                last_polled_at TIMESTAMPTZ,
-                last_success_at TIMESTAMPTZ,
-                last_failure_at TIMESTAMPTZ,
-                last_error TEXT,
-                attempt_count INTEGER NOT NULL DEFAULT 0,
-                rate_limit_until TIMESTAMPTZ,
-                next_retry_at TIMESTAMPTZ,
-                last_command_id TEXT,
-                sync_state_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (source_type, source_id),
-                FOREIGN KEY (source_type, source_id)
-                    REFERENCES {self._schema}.connector_sources(source_type, source_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.connector_update_outbox (
-                outbox_id UUID PRIMARY KEY,
-                event_id TEXT NOT NULL UNIQUE,
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                sequence_number BIGINT,
-                payload JSONB NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                publish_attempts INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                published_at TIMESTAMPTZ,
-                last_error TEXT,
-                FOREIGN KEY (source_type, source_id)
-                    REFERENCES {self._schema}.connector_sources(source_type, source_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        await conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._schema}.connector_connection_secrets (
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                secrets_json_enc JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (source_type, source_id),
-                FOREIGN KEY (source_type, source_id)
-                    REFERENCES {self._schema}.connector_sources(source_type, source_id)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        await conn.execute(
-            f"""
-            ALTER TABLE {self._schema}.connector_sync_state
-            ADD COLUMN IF NOT EXISTS sync_state_json JSONB NOT NULL DEFAULT '{{}}'::jsonb
-            """
-        )
-
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_connector_outbox_status ON {self._schema}.connector_update_outbox(status, created_at)"
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_connector_sources_enabled ON {self._schema}.connector_sources(enabled)"
-        )
-        await conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_connector_sync_next_retry ON {self._schema}.connector_sync_state(next_retry_at)"
-        )
+        await ensure_connector_registry_schema(conn, schema=self._schema)
 
     # -----------------
     # Sources / Mapping

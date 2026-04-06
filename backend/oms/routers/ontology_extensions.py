@@ -18,7 +18,7 @@ from oms.services.ontology_resource_validator import (
     ResourceSpecError,
     validate_resource,
 )
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.schemas.ontology_extension_requests import (
     OntologyDeploymentRecordRequest,
     OntologyResourceRequest,

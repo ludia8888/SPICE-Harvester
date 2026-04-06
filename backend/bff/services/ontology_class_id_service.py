@@ -9,9 +9,11 @@ from typing import Any, Dict
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
-from bff.services.ontology_ops_service import _localized_to_string
 from shared.security.input_sanitizer import SecurityViolationError, validate_class_id
 from shared.utils.id_generator import generate_simple_id
+from shared.utils.language import localized_text_to_string
+
+_localized_to_string = localized_text_to_string
 
 
 def resolve_or_generate_class_id(payload: Dict[str, Any]) -> str:

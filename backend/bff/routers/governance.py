@@ -18,7 +18,7 @@ from bff.schemas.governance_requests import (
     GatePolicyRequest,
 )
 from bff.services import governance_service
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 
 router = APIRouter(tags=["Governance"])

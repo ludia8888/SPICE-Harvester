@@ -11,21 +11,13 @@ import logging
 from typing import Any, Dict, List
 
 from shared.utils.id_generator import generate_simple_id
+from shared.utils.language import localized_text_to_string
 
 logger = logging.getLogger(__name__)
 
 
-def _localized_to_string(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        # Prefer English for IDs (domain-neutral), then Korean, then any translation.
-        return (
-            str(value.get("en") or "").strip()
-            or str(value.get("ko") or "").strip()
-            or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
-        )
-    return str(value).strip() if value is not None else ""
+def _localized_to_string(value: Any, *, default: str = "") -> str:
+    return localized_text_to_string(value, default=default)
 
 
 def _transform_properties_for_oms(data: Dict[str, Any], *, log_conversions: bool = False) -> None:
@@ -39,7 +31,7 @@ def _transform_properties_for_oms(data: Dict[str, Any], *, log_conversions: bool
 
         if "name" not in prop and "label" in prop:
             prop["name"] = generate_simple_id(
-                _localized_to_string(prop.get("label")),
+                localized_text_to_string(prop.get("label")),
                 use_timestamp_for_korean=False,
             )
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Protocol, Sequence
 
 from shared.services.pipeline.dataset_output_semantics import validate_dataset_output_metadata
+from shared.utils.mapping_text import first_mapping_text
 
 
 OUTPUT_KIND_DATASET = "dataset"
@@ -40,19 +41,6 @@ class ResolvedOutputKind:
     raw_kind: str
     normalized_kind: str
     used_alias: bool
-
-
-def _text(payload: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = payload.get(key)
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            return text
-    return ""
-
-
 def _camel_case(value: str) -> str:
     parts = [part for part in str(value or "").split("_") if part]
     if not parts:
@@ -63,7 +51,7 @@ def _camel_case(value: str) -> str:
 def find_virtual_dataset_style_settings(payload: Mapping[str, Any]) -> list[str]:
     unsupported: List[str] = []
     for aliases in _VirtualPlugin._UNSUPPORTED_DATASET_STYLE_KEYS:
-        value = _text(payload, *aliases)
+        value = first_mapping_text(keys=aliases, sources=(payload,))
         if value:
             unsupported.append(aliases[0])
             continue
@@ -89,7 +77,11 @@ class _RequiredMetadataPlugin:
     required_fields: Sequence[tuple[str, tuple[str, ...]]]
 
     def validate(self, payload: Mapping[str, Any]) -> list[str]:
-        missing = [canonical for canonical, aliases in self.required_fields if not _text(payload, *aliases)]
+        missing = [
+            canonical
+            for canonical, aliases in self.required_fields
+            if not first_mapping_text(keys=aliases, sources=(payload,))
+        ]
         if not missing:
             return []
         return [f"missing required metadata ({', '.join(missing)})"]
@@ -112,7 +104,10 @@ class _GeotemporalPlugin(_RequiredMetadataPlugin):
         errors = super().validate(payload)
         if errors:
             return errors
-        geometry_format = _text(payload, "geometry_format", "geometryFormat").lower()
+        geometry_format = first_mapping_text(
+            keys=("geometry_format", "geometryFormat"),
+            sources=(payload,),
+        ).lower()
         if geometry_format not in {"wkt", "geojson"}:
             return ["geometry_format must be one of: wkt|geojson"]
         return []
@@ -134,7 +129,10 @@ class _MediaPlugin(_RequiredMetadataPlugin):
         errors = super().validate(payload)
         if errors:
             return errors
-        media_type = _text(payload, "media_type", "mediaType").lower()
+        media_type = first_mapping_text(
+            keys=("media_type", "mediaType"),
+            sources=(payload,),
+        ).lower()
         if media_type not in {"image", "video", "audio", "document"}:
             return ["media_type must be one of: image|video|audio|document"]
         return []
@@ -163,7 +161,10 @@ class _VirtualPlugin(_RequiredMetadataPlugin):
         errors = super().validate(payload)
         if errors:
             return errors
-        refresh_mode = _text(payload, "refresh_mode", "refreshMode").lower()
+        refresh_mode = first_mapping_text(
+            keys=("refresh_mode", "refreshMode"),
+            sources=(payload,),
+        ).lower()
         if refresh_mode not in {"on_read", "scheduled"}:
             return ["refresh_mode must be one of: on_read|scheduled"]
 
@@ -197,13 +198,16 @@ _SUPPORTED_ONTOLOGY_SPEC_TYPES = frozenset(set(_ONTOLOGY_LINK_SPEC_TYPES) | set(
 
 
 def resolve_ontology_output_semantics(payload: Mapping[str, Any]) -> OntologyOutputSemantics:
-    relationship_spec_type = _text(payload, "relationship_spec_type", "relationshipSpecType").lower()
+    relationship_spec_type = first_mapping_text(
+        keys=("relationship_spec_type", "relationshipSpecType"),
+        sources=(payload,),
+    ).lower()
     if relationship_spec_type and relationship_spec_type not in _SUPPORTED_ONTOLOGY_SPEC_TYPES:
         allowed = "|".join(sorted(_SUPPORTED_ONTOLOGY_SPEC_TYPES))
         raise ValueError(f"relationship_spec_type must be one of: {allowed}")
 
     has_link_hints = any(
-        _text(payload, field, _camel_case(field))
+        first_mapping_text(keys=(field, _camel_case(field)), sources=(payload,))
         for field in (
             "link_type_id",
             "source_class_id",
@@ -214,21 +218,37 @@ def resolve_ontology_output_semantics(payload: Mapping[str, Any]) -> OntologyOut
         )
     )
     if relationship_spec_type in _ONTOLOGY_LINK_SPEC_TYPES or has_link_hints:
-        missing = [field for field in _ONTOLOGY_LINK_REQUIRED_FIELDS if not _text(payload, field, _camel_case(field))]
+        missing = [
+            field
+            for field in _ONTOLOGY_LINK_REQUIRED_FIELDS
+            if not first_mapping_text(keys=(field, _camel_case(field)), sources=(payload,))
+        ]
         if missing:
             raise ValueError(f"missing required link metadata ({', '.join(missing)})")
-        source_key_column = _text(payload, "source_key_column", "sourceKeyColumn")
-        target_key_column = _text(payload, "target_key_column", "targetKeyColumn")
+        source_key_column = first_mapping_text(
+            keys=("source_key_column", "sourceKeyColumn"),
+            sources=(payload,),
+        )
+        target_key_column = first_mapping_text(
+            keys=("target_key_column", "targetKeyColumn"),
+            sources=(payload,),
+        )
         return OntologyOutputSemantics(
             relationship_spec_type="link",
             required_columns=tuple(column for column in (source_key_column, target_key_column) if column),
         )
 
-    if not _text(payload, "target_class_id", "targetClassId"):
+    if not first_mapping_text(keys=("target_class_id", "targetClassId"), sources=(payload,)):
         raise ValueError("target_class_id is required")
 
-    source_key_column = _text(payload, "source_key_column", "sourceKeyColumn")
-    target_key_column = _text(payload, "target_key_column", "targetKeyColumn")
+    source_key_column = first_mapping_text(
+        keys=("source_key_column", "sourceKeyColumn"),
+        sources=(payload,),
+    )
+    target_key_column = first_mapping_text(
+        keys=("target_key_column", "targetKeyColumn"),
+        sources=(payload,),
+    )
     return OntologyOutputSemantics(
         relationship_spec_type="object",
         required_columns=tuple(column for column in (source_key_column, target_key_column) if column),

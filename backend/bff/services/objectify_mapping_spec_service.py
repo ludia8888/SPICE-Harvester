@@ -18,7 +18,7 @@ from bff.schemas.objectify_requests import CreateMappingSpecRequest
 from bff.services.oms_client import OMSClient
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.errors.external_codes import ExternalErrorCode
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.database_access import DOMAIN_MODEL_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_class_id

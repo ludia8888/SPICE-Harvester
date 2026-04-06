@@ -298,9 +298,6 @@ class AgentSessionRegistry(PostgresSchemaRegistry):
         "agent_session_ci_results",
     )
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         await conn.execute(
             f"""

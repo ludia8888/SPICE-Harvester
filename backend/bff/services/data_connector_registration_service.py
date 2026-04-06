@@ -17,7 +17,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.routers.data_connector_ops import _build_google_oauth_client, _resolve_google_connection
 from data_connector.google_sheets.models import GoogleSheetRegisterResponse, RegisteredSheet
 from data_connector.google_sheets.service import GoogleSheetsService
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.connector_registry import ConnectorRegistry
 from shared.services.registries.dataset_registry import DatasetRegistry

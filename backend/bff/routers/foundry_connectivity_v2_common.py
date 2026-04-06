@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from fastapi import status
 from fastapi.responses import JSONResponse
 
+from bff.routers.foundry_dataset_rid_common import _dataset_id_from_rid, _dataset_rid
 from data_connector.adapters.factory import (
     SUPPORTED_CONNECTOR_KINDS,
     connection_source_type_for_kind,
@@ -18,10 +19,11 @@ from data_connector.adapters.factory import (
 )
 from data_connector.adapters.import_config_validators import is_jdbc_connector_kind, normalize_import_mode
 from shared.config.settings import get_settings
-from shared.foundry.errors import foundry_error
+from shared.foundry.errors import foundry_error as _foundry_error
 from shared.foundry.rids import build_rid, parse_rid
 from shared.models.background_task import TaskStatus
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorSource
+from shared.utils.bool_utils import coerce_optional_bool
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -101,18 +103,12 @@ _RESOURCE_CONFIG_ERROR_NAMES = {
 }
 
 
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return foundry_error(
-        status_code,
-        error_code=error_code,
-        error_name=error_name,
-        parameters=parameters or {},
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    return coerce_optional_bool(
+        value,
+        default=default,
+        allow_numeric=True,
+        allow_short_tokens=True,
     )
 
 
@@ -161,10 +157,6 @@ def _virtual_table_rid(virtual_table_id: str) -> str:
     return build_rid("virtual-table", virtual_table_id)
 
 
-def _dataset_id_from_rid(dataset_rid: str) -> str | None:
-    return _id_from_rid(dataset_rid, expected_kind="dataset")
-
-
 def _dataset_id_from_any(raw: Any) -> str | None:
     text = str(raw or "").strip()
     if not text:
@@ -174,29 +166,12 @@ def _dataset_id_from_any(raw: Any) -> str | None:
     return text
 
 
-def _dataset_rid(dataset_id: str) -> str:
-    return build_rid("dataset", dataset_id)
-
-
 def _export_run_rid(run_id: str) -> str:
     return build_rid("export-run", run_id)
 
 
 def _export_run_id_from_rid(export_run_rid: str) -> str | None:
     return _id_from_rid(export_run_rid, expected_kind="export-run")
-
-
-def _coerce_bool(raw: Any, *, default: bool) -> bool:
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, (int, float)):
-        return bool(raw)
-    text = str(raw or "").strip().lower()
-    if text in {"true", "1", "yes", "on"}:
-        return True
-    if text in {"false", "0", "no", "off"}:
-        return False
-    return default
 
 
 def _normalize_export_run_method(raw: Any) -> str:
@@ -339,16 +314,15 @@ def _is_flag_or_allowlist_enabled(*, global_enabled: bool, allowlist_raw: str, d
     return db in _parse_allowlist(allowlist_raw)
 
 
-def _feature_flags_settings() -> Any:
-    settings = get_settings()
+def _resolve_feature_flags_settings(settings_provider=get_settings) -> Any:
+    settings = settings_provider()
     flags = getattr(settings, "feature_flags", None)
     if flags is None:
         flags = getattr(settings, "features", None)
     return flags
 
 
-def _jdbc_enabled_for_db(db_name: str | None) -> bool:
-    flags = _feature_flags_settings()
+def _jdbc_enabled_for_flags(flags: Any, db_name: str | None) -> bool:
     return _is_flag_or_allowlist_enabled(
         global_enabled=bool(getattr(flags, "enable_foundry_connectivity_jdbc", False)),
         allowlist_raw=str(getattr(flags, "foundry_connectivity_jdbc_db_allowlist", "") or ""),
@@ -356,13 +330,24 @@ def _jdbc_enabled_for_db(db_name: str | None) -> bool:
     )
 
 
-def _cdc_enabled_for_db(db_name: str | None) -> bool:
-    flags = _feature_flags_settings()
+def _cdc_enabled_for_flags(flags: Any, db_name: str | None) -> bool:
     return _is_flag_or_allowlist_enabled(
         global_enabled=bool(getattr(flags, "enable_foundry_connectivity_cdc", False)),
         allowlist_raw=str(getattr(flags, "foundry_connectivity_cdc_db_allowlist", "") or ""),
         db_name=db_name,
     )
+
+
+def _feature_flags_settings() -> Any:
+    return _resolve_feature_flags_settings()
+
+
+def _jdbc_enabled_for_db(db_name: str | None) -> bool:
+    return _jdbc_enabled_for_flags(_feature_flags_settings(), db_name)
+
+
+def _cdc_enabled_for_db(db_name: str | None) -> bool:
+    return _cdc_enabled_for_flags(_feature_flags_settings(), db_name)
 
 
 def _requires_cdc_feature(import_mode: str) -> bool:
@@ -428,8 +413,16 @@ def _normalize_export_settings(value: Any) -> Dict[str, Any]:
     if without_markings_raw is None:
         without_markings_raw = False
     return {
-        "exportsEnabled": _coerce_bool(exports_enabled_raw, default=True),
-        "exportEnabledWithoutMarkingsValidation": _coerce_bool(without_markings_raw, default=False),
+        "exportsEnabled": coerce_optional_bool(
+            exports_enabled_raw,
+            default=True,
+            allow_numeric=True,
+        ),
+        "exportEnabledWithoutMarkingsValidation": coerce_optional_bool(
+            without_markings_raw,
+            default=False,
+            allow_numeric=True,
+        ),
     }
 
 

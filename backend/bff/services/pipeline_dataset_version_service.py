@@ -20,7 +20,7 @@ from bff.services.dataset_ingest_idempotency import resolve_existing_version_or_
 from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilder
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input
 from shared.utils.path_utils import safe_lakefs_ref

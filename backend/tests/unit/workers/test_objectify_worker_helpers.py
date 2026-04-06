@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+import pytest
+
 from objectify_worker.main import ObjectifyWorker
+from objectify_worker.runtime_mixin import _ObjectifyPayloadParseError
 from shared.services.core.sheet_import_service import FieldMapping
 
 
@@ -60,3 +65,25 @@ def test_objectify_worker_row_key_derivation() -> None:
         pk_targets=[],
     )
     assert key_from_row == "source:pk-1"
+
+
+@pytest.mark.asyncio
+async def test_objectify_parse_error_records_tracing_via_shared_hook() -> None:
+    worker = ObjectifyWorker()
+    worker.tracing = type("TracingStub", (), {"record_exception": Mock()})()
+
+    error = _ObjectifyPayloadParseError(
+        stage="validate",
+        payload_text='{"job_id":"job-1"}',
+        payload_obj={"job_id": "job-1"},
+        fallback_metadata=None,
+        cause=ValueError("bad payload"),
+    )
+
+    await worker._on_parse_error(
+        msg=type("Msg", (), {"headers": staticmethod(lambda: None)})(),
+        raw_payload='{"job_id":"job-1"}',
+        error=error,
+    )
+
+    worker.tracing.record_exception.assert_called_once_with(error)

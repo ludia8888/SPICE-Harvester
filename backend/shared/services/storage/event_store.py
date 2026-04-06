@@ -36,6 +36,11 @@ from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.observability.tracing import trace_storage_operation
 from shared.services.events.aggregate_sequence_allocator import AggregateSequenceAllocator
+from shared.services.storage.s3_error_utils import client_error_code as _client_error_code
+from shared.services.storage.s3_error_utils import (
+    is_missing_bucket_error as _is_missing_bucket_error,
+    is_missing_object_error as _is_missing_object_error,
+)
 from shared.utils.ontology_version import extract_ontology_version
 from shared.services.storage.s3_client_config import build_s3_client_config
 import logging
@@ -49,20 +54,6 @@ except Exception:  # pragma: no cover
     logging.getLogger(__name__).warning("Exception fallback at shared/services/storage/event_store.py:41", exc_info=True)
     LineageStore = None  # type: ignore
     AuditLogStore = None  # type: ignore
-
-
-def _client_error_code(exc: ClientError) -> str:
-    return str(exc.response.get("Error", {}).get("Code") or "")
-
-
-def _is_missing_bucket_error(exc: ClientError) -> bool:
-    return _client_error_code(exc) in {"404", "NoSuchBucket", "NotFound"}
-
-
-def _is_missing_object_error(exc: ClientError) -> bool:
-    return _client_error_code(exc) in {"404", "NoSuchKey", "NotFound"}
-
-
 class EventStore:
     """
     The REAL Event Store using S3/MinIO as Single Source of Truth.

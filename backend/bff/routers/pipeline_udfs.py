@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from bff.routers.pipeline_deps import get_pipeline_registry
 from bff.services import pipeline_udf_service
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.registries.pipeline_registry import PipelineRegistry
 

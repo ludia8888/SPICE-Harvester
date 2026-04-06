@@ -21,7 +21,7 @@ from bff.routers.pipeline_ops import _acquire_pipeline_publish_lock, _release_pi
 from bff.services import pipeline_execution_service
 from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue

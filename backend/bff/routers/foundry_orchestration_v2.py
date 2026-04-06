@@ -21,7 +21,7 @@ from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.services.pipeline.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.foundry.auth import require_scopes
-from shared.foundry.errors import foundry_error
+from shared.foundry.errors import foundry_error as _foundry_error
 from shared.foundry.rids import build_rid, extract_build_job_id, parse_rid, rid_id_for_kind
 from shared.observability.tracing import trace_endpoint
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
@@ -33,23 +33,6 @@ from shared.utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v2/orchestration", tags=["Foundry Orchestration v2"])
-
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return foundry_error(
-        int(status_code),
-        error_code=str(error_code),
-        error_name=str(error_name),
-        parameters=dict(parameters or {}),
-    )
-
-
 def _pipeline_id_from_target_rid(target_rid: str) -> str | None:
     return rid_id_for_kind(str(target_rid or "").strip(), "pipeline")
 

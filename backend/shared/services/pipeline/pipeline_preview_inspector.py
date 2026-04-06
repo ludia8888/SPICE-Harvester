@@ -11,11 +11,11 @@ import re
 from typing import Any, Dict, Iterable, List, Optional
 
 from shared.services.pipeline.pipeline_math_utils import safe_ratio
-from shared.services.pipeline.pipeline_value_predicates import (
-    is_bool_like,
-    is_datetime_like,
-    is_decimal_like,
-    is_int_like,
+from shared.services.pipeline.pipeline_type_predicates import (
+    preview_is_bool as _is_bool,
+    preview_is_datetime as _is_datetime,
+    preview_is_decimal as _is_decimal,
+    preview_is_int as _is_int,
 )
 
 _CAST_THRESHOLD = 0.9
@@ -59,24 +59,6 @@ def _iter_values(rows: Iterable[Dict[str, Any]], column: str) -> List[Any]:
             continue
         values.append(value)
     return values
-
-
-def _is_bool(value: Any) -> bool:
-    return is_bool_like(value)
-
-
-def _is_int(value: Any) -> bool:
-    return is_int_like(value)
-
-
-def _is_decimal(value: Any) -> bool:
-    return is_decimal_like(value, include_int=False)
-
-
-def _is_datetime(value: Any) -> bool:
-    return is_datetime_like(value, iso_only=True)
-
-
 def _looks_like_id(name: str) -> bool:
     lowered = str(name or "").strip().lower()
     if not lowered:

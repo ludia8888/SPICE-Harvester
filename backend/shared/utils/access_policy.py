@@ -23,13 +23,6 @@ _SUPPORTED_OPS = {
     "not_null",
 }
 
-
-def _coerce_bool(value: Any) -> Optional[bool]:
-    if isinstance(value, bool):
-        return value
-    return None
-
-
 def _match_rule(value: Any, *, op: str, expected: Any) -> bool:
     op = op.lower()
     if op not in _SUPPORTED_OPS:
@@ -147,8 +140,6 @@ def apply_access_policy(
     if not isinstance(mask_columns, list):
         mask_columns = []
     mask_value = policy.get("mask_value")
-    if _coerce_bool(mask_value) is None and mask_value is None:
-        mask_value = None
 
     filtered_rows: List[Dict[str, Any]] = []
     filtered_out = 0

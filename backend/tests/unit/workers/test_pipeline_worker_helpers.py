@@ -1,6 +1,6 @@
 from __future__ import annotations
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -21,6 +21,12 @@ from pipeline_worker.main import (
     _resolve_watermark_column,
     _watermark_values_match,
 )
+from pipeline_worker.runtime_mixin import _PipelinePayloadParseError
+
+
+class _MsgWithHeaders:
+    def headers(self):
+        return [("traceparent", b"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")]
 
 
 def test_resolve_code_version_and_sensitive_keys(monkeypatch) -> None:
@@ -307,3 +313,45 @@ def test_restart_spark_session_terminates_stale_gateway_process(monkeypatch) -> 
     assert _FakeSparkContext._active_spark_context is None
     assert _FakeSparkContext._gateway is None
     assert _FakeSparkContext._jvm is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_parse_error_uses_shared_flow_and_records_invalid_job() -> None:
+    worker = PipelineWorker()
+    worker._publish_to_dlq = AsyncMock()
+    worker._best_effort_record_invalid_job = AsyncMock()
+
+    payload_obj = {
+        "job_id": "job-1",
+        "pipeline_id": "pipeline-1",
+        "db_name": "demo",
+        "branch": "main",
+        "mode": "preview",
+    }
+    error = _PipelinePayloadParseError(
+        stage="validate",
+        payload_text='{"job_id":"job-1"}',
+        payload_obj=payload_obj,
+        fallback_metadata=None,
+        cause=ValueError("bad payload"),
+    )
+
+    await worker._on_parse_error(
+        msg=_MsgWithHeaders(),
+        raw_payload='{"job_id":"job-1","pipeline_id":"pipeline-1","db_name":"demo","branch":"main","mode":"preview"}',
+        error=error,
+    )
+
+    worker._publish_to_dlq.assert_awaited_once_with(
+        msg=ANY,
+        stage="validate",
+        error="bad payload",
+        payload_text='{"job_id":"job-1"}',
+        payload_obj=payload_obj,
+        job=None,
+        attempt_count=None,
+    )
+    worker._best_effort_record_invalid_job.assert_awaited_once_with(
+        payload_obj,
+        error="bad payload",
+    )

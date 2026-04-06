@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
-import json
 import logging
 import os
 import re
@@ -11,6 +8,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.observability.tracing import trace_external_call
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
+from shared.services.pipeline.pipeline_sample_utils import (
+    extract_sample_rows as _extract_sample_rows,
+    parse_csv_bytes as _parse_csv_bytes,
+    parse_excel_bytes as _parse_excel_bytes,
+    parse_json_bytes as _parse_json_bytes,
+)
 from shared.utils.llm_safety import mask_pii
 from shared.utils.s3_uri import parse_s3_uri
 
@@ -28,102 +31,6 @@ _FORBIDDEN_SQL_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE\s+(?!TABLE\s+data\s+AS)TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE)\b",
     re.IGNORECASE,
 )
-
-
-def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    """Parse CSV payload into row dicts (standalone version of PipelineExecutor helper)."""
-    try:
-        text = raw_bytes.decode("utf-8", errors="replace")
-    except (UnicodeDecodeError, AttributeError) as exc:
-        logger.warning("Failed to decode CSV bytes for MCP sample parse: %s", exc, exc_info=True)
-        return []
-    if not text.strip():
-        return []
-    first_line = next((line for line in text.splitlines() if line.strip()), "")
-    if not first_line:
-        return []
-    delimiter = ","
-    if "\t" in first_line and first_line.count("\t") >= first_line.count(","):
-        delimiter = "\t"
-    elif ";" in first_line and first_line.count(";") >= first_line.count(","):
-        delimiter = ";"
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    try:
-        raw_header = next(reader)
-    except StopIteration:
-        return []
-    header = [(str(cell or "").strip() or f"column_{idx + 1}").lstrip("\ufeff") for idx, cell in enumerate(raw_header)]
-    rows: List[Dict[str, Any]] = []
-    resolved_limit = max(1, int(max_rows))
-    for record in reader:
-        if len(rows) >= resolved_limit:
-            break
-        if not record or not any(str(cell or "").strip() for cell in record):
-            continue
-        rows.append({key: str(record[idx]).strip() if idx < len(record) else "" for idx, key in enumerate(header)})
-    return rows
-
-
-def _parse_excel_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    try:
-        import pandas as pd
-        from io import BytesIO
-        frame = pd.read_excel(BytesIO(raw_bytes))
-        return frame.fillna("").to_dict(orient="records")[: max(1, int(max_rows))]
-    except (ImportError, ValueError, TypeError, OSError) as exc:
-        logger.warning("Failed to parse Excel bytes for MCP sample parse: %s", exc, exc_info=True)
-        return []
-
-
-def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    try:
-        payload = json.loads(raw_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        logger.warning("Failed to parse JSON bytes, falling back to JSONL scan: %s", exc, exc_info=True)
-        text = raw_bytes.decode("utf-8", errors="replace")
-        rows: List[Dict[str, Any]] = []
-        resolved_limit = max(1, int(max_rows))
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                rows.append(item)
-            if len(rows) >= resolved_limit:
-                break
-        return rows
-    if isinstance(payload, dict):
-        rows_data = payload.get("rows") or payload.get("data")
-        if isinstance(rows_data, list) and rows_data and isinstance(rows_data[0], dict):
-            return rows_data[: max(1, int(max_rows))]
-    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        return payload[: max(1, int(max_rows))]
-    return []
-
-
-def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
-    """Extract sample rows from a version's sample_json payload."""
-    if not isinstance(sample, dict):
-        return []
-    rows = sample.get("rows")
-    if isinstance(rows, list):
-        if rows and isinstance(rows[0], dict):
-            return rows
-        columns = _extract_schema_column_names(sample)
-        return [
-            {columns[idx] if idx < len(columns) else f"col_{idx}": value for idx, value in enumerate(row)}
-            for row in rows
-            if isinstance(row, list)
-        ]
-    data_rows = sample.get("data")
-    if isinstance(data_rows, list) and data_rows and isinstance(data_rows[0], dict):
-        return data_rows
-    return []
-
-
 def _extract_schema_column_names(schema_json: Any) -> List[str]:
     """Extract column names from a schema JSON payload."""
     if not isinstance(schema_json, dict):

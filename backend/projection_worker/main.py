@@ -35,7 +35,11 @@ from shared.services.storage.lakefs_storage_service import LakeFSStorageService,
 from shared.services.registries.processed_event_registry import (
     ProcessedEventRegistry,
 )
-from shared.services.kafka.processed_event_worker import RegistryKey, StrictHeartbeatEventEnvelopeKafkaWorker
+from shared.services.kafka.processed_event_worker import (
+    ParseErrorContext,
+    RegistryKey,
+    StrictHeartbeatEventEnvelopeKafkaWorker,
+)
 from shared.services.kafka.producer_factory import create_kafka_producer
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
 from shared.services.registries.lineage_store import LineageStore
@@ -71,6 +75,10 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
     """
 
     expected_envelope_kind = "domain"
+    parse_error_enable_dlq = True
+    parse_error_publish_failure_message = "Failed to publish invalid projection payload to DLQ; retrying: %s"
+    parse_error_invalid_payload_message = "Invalid projection payload; skipping: %s"
+    parse_error_raise_on_publish_failure = True
 
     def __init__(self):
         settings = get_settings()
@@ -753,36 +761,23 @@ class ProjectionWorker(StrictHeartbeatEventEnvelopeKafkaWorker[None]):
             attempt_count,
         )
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        async def _send(
-            _stage: str,
-            cause_text: str,
-            payload_text: Optional[str],
-            _payload_obj: Optional[Dict[str, Any]],
-            kafka_headers: Optional[Any],
-            fallback_metadata: Optional[Dict[str, Any]],
-        ) -> None:
-            metadata = fallback_metadata
-            if metadata is None:
-                metadata = self._fallback_metadata_from_raw_payload(payload_text)
-            await self._publish_to_dlq(
-                msg=msg,
-                error=cause_text,
-                attempt_count=1,
-                payload_text=payload_text,
-                kafka_headers=kafka_headers,
-                fallback_metadata=metadata,
-            )
-
-        await self._publish_parse_error_to_dlq(
+    async def _send_parse_error_to_dlq(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        context: ParseErrorContext,
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        _ = raw_payload
+        await self._publish_to_dlq(
             msg=msg,
-            raw_payload=raw_payload,
-            error=error,
-            dlq_sender=_send,
-            publish_failure_message="Failed to publish invalid projection payload to DLQ; retrying: %s",
-            invalid_payload_message="Invalid projection payload; skipping: %s",
-            raise_on_publish_failure=True,
-            logger_instance=logger,
+            error=str(context.cause),
+            attempt_count=1,
+            payload_text=context.payload_text,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
         )
 
     async def _commit(self, msg: Any) -> None:  # type: ignore[override]

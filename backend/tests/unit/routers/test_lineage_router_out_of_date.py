@@ -201,7 +201,7 @@ class _FakeLineageStoreForBatch:
 
 @pytest.mark.asyncio
 async def test_batched_latest_edges_helpers_chunk_large_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("bff.routers.lineage._lineage_lookup_batch_size", lambda: 2)
+    monkeypatch.setattr("bff.services.lineage_shared._lineage_lookup_batch_size", lambda: 2)
     store = _FakeLineageStoreForBatch()
 
     to_result = await _get_latest_edges_to_batched(
@@ -234,7 +234,7 @@ async def test_batched_latest_edges_helpers_chunk_large_inputs(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_enrich_artifacts_with_latest_writer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("bff.routers.lineage._lineage_lookup_batch_size", lambda: 2)
+    monkeypatch.setattr("bff.services.lineage_shared._lineage_lookup_batch_size", lambda: 2)
     store = _FakeLineageStoreForBatch()
     artifacts = [
         {"node_id": "artifact:es:demo:main:Order/o1"},

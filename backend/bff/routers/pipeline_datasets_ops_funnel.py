@@ -12,6 +12,7 @@ from fastapi import status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from shared.config.settings import get_settings
+from shared.services.pipeline.pipeline_sample_utils import extract_sample_matrix, extract_sample_rows
 
 logger = logging.getLogger(__name__)
 
@@ -131,39 +132,15 @@ def _extract_sample_columns(sample_json: Any) -> list[str]:
     return []
 
 
-def _extract_sample_rows(sample_json: Any, columns: list[str]) -> list[list[Any]]:
-    if not isinstance(sample_json, dict):
-        return []
-    rows = sample_json.get("rows")
-    if rows is None:
-        rows = sample_json.get("data")
-    if not isinstance(rows, list):
-        return []
-    if rows and isinstance(rows[0], dict):
-        if not columns:
-            seen: set[str] = set()
-            ordered: list[str] = []
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                for key in row.keys():
-                    key_str = str(key)
-                    if key_str and key_str not in seen:
-                        seen.add(key_str)
-                        ordered.append(key_str)
-            columns[:] = ordered
-        return [[row.get(col) for col in columns] for row in rows if isinstance(row, dict)]
-    if rows and isinstance(rows[0], list):
-        list_rows = [row for row in rows if isinstance(row, list)]
-        if not columns and list_rows:
-            columns[:] = [f"col_{idx}" for idx in range(len(list_rows[0]))]
-        return list_rows
-    return []
+def _extract_sample_rows(sample_json: Any) -> list[Dict[str, Any]]:
+    return extract_sample_rows(sample_json, strip_bom=True)
 
 
 async def _compute_tabular_analysis_from_sample(sample_json: Any) -> Dict[str, Any]:
     columns = _extract_sample_columns(sample_json)
-    rows = _extract_sample_rows(sample_json, columns)
+    shared_columns, rows = extract_sample_matrix(sample_json, strip_bom=True)
+    if not columns:
+        columns = shared_columns
     if not columns and not rows:
         return _build_tabular_analysis_payload(None, [])
     # Palantir Foundry style: all columns default to xsd:string (inferSchema=False).

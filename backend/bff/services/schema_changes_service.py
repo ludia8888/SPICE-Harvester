@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_db_operation
 
 logger = logging.getLogger(__name__)

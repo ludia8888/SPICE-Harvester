@@ -99,3 +99,20 @@ async def test_objectify_registry_raises_when_objects_missing_and_bootstrap_disa
 
     with pytest.raises(MissingSchemaObjectsError, match="missing required schema objects"):
         await registry.ensure_schema()
+
+
+@pytest.mark.asyncio
+async def test_objectify_registry_bootstrap_creates_watermarks_table() -> None:
+    registry = ObjectifyRegistry(
+        dsn="postgres://unused",
+        allow_runtime_ddl_bootstrap=True,
+    )
+    conn = _Conn()
+    registry._pool = _Pool(conn)
+
+    await registry.ensure_schema()
+
+    assert any(
+        "CREATE TABLE IF NOT EXISTS spice_objectify.objectify_watermarks" in sql
+        for sql in conn.executed
+    )

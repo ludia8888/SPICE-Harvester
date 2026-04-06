@@ -47,9 +47,11 @@ from shared.security.input_sanitizer import validate_branch_name, validate_insta
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.processed_event_worker import (
+    CommandEnvelopePayload,
     CommandParseError,
+    FailureLogContext,
     RegistryKey,
-    StrictHeartbeatKafkaWorker,
+    StrictCommandEnvelopeKafkaWorker,
     WorkerRuntimeConfig,
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
@@ -91,17 +93,16 @@ configure_logging(_LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class _InstanceCommandPayload:
-    command: Dict[str, Any]
-    envelope_metadata: Optional[Dict[str, Any]] = None
+@dataclass
+class _InstanceCommandPayload(CommandEnvelopePayload):
+    pass
 
 
 class _InstanceCommandParseError(CommandParseError):
     pass
 
 
-class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, None]):
+class StrictInstanceWorker(StrictCommandEnvelopeKafkaWorker[_InstanceCommandPayload, None]):
     """
     STRICT Lightweight Instance Worker
     Graph는 관계와 참조만, 데이터는 ES/S3에만
@@ -112,6 +113,8 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
     parse_error_publish_failure_message = "Failed to publish invalid instance payload to DLQ: %s"
     parse_error_invalid_payload_message = "Invalid instance payload; skipping: %s"
     parse_error_raise_on_publish_failure = False
+    command_payload_cls = _InstanceCommandPayload
+    command_parse_error_cls = _InstanceCommandParseError
 
     def _emit_write_path_contract(
         self,
@@ -542,20 +545,12 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
         except Exception as e:
             raise ValueError(f"Invalid EventEnvelope: {e}") from e
 
+        expected_kind = str(getattr(self, "expected_envelope_kind", "") or "command").strip()
         kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
-        if kind != "command":
+        if expected_kind and kind != expected_kind:
             raise ValueError(f"Unexpected envelope kind for command topic: {kind}")
 
-        command = dict(envelope.data or {})
-        if command.get("aggregate_id") and command.get("aggregate_id") != envelope.aggregate_id:
-            raise ValueError(
-                f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
-                f"envelope.aggregate_id={envelope.aggregate_id}"
-            )
-        command["aggregate_id"] = envelope.aggregate_id
-        command.setdefault("event_id", envelope.event_id)
-        command.setdefault("sequence_number", envelope.sequence_number)
-        return command
+        return self._command_from_envelope(envelope)
 
     async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         return self._extract_payload_from_message(message)
@@ -2496,59 +2491,6 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             metrics=self.metrics,
         )
 
-    # --- ProcessedEventKafkaWorker hooks ---
-    def _parse_payload(self, payload: Any) -> _InstanceCommandPayload:  # type: ignore[override]
-        if not isinstance(payload, (bytes, bytearray)):
-            raise _InstanceCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=TypeError("Kafka payload must be bytes"),
-            )
-        try:
-            raw_text = payload.decode("utf-8")
-        except Exception as exc:
-            raise _InstanceCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        raw_message: Any
-        try:
-            raw_message = json.loads(raw_text)
-        except Exception as exc:
-            raise _InstanceCommandParseError(
-                stage="parse_json",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
-
-        try:
-            command = self._extract_payload_from_message(raw_message if isinstance(raw_message, dict) else {})
-        except Exception as exc:
-            payload_obj = raw_message if isinstance(raw_message, dict) else None
-            raise _InstanceCommandParseError(
-                stage="validate_envelope",
-                payload_text=raw_text,
-                payload_obj=payload_obj,
-                fallback_metadata=fallback_metadata,
-                cause=exc,
-            ) from exc
-
-        return _InstanceCommandPayload(command=command, envelope_metadata=fallback_metadata)
-
-    def _fallback_metadata(self, payload: _InstanceCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return payload.envelope_metadata
-
     def _registry_key(self, payload: _InstanceCommandPayload) -> RegistryKey:  # type: ignore[override]
         command = payload.command if isinstance(payload.command, dict) else {}
 
@@ -2696,7 +2638,7 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
             cap = min(cap, 8)
         return min(cap, int(2 ** max(attempt_count - 1, 0)))
 
-    async def _on_retry_scheduled(  # type: ignore[override]
+    async def _after_retry_scheduled(  # type: ignore[override]
         self,
         *,
         payload: _InstanceCommandPayload,
@@ -2722,14 +2664,23 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     exc,
                     exc_info=True,
                 )
-        logger.warning(
-            "Retrying instance command in %ss (attempt %s): %s",
-            int(backoff_s),
-            attempt_count,
-            error,
+
+    def _retry_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: _InstanceCommandPayload,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = payload, retryable
+        return FailureLogContext(
+            message="Retrying instance command in %ss (attempt %s): %s",
+            args=(int(backoff_s), attempt_count, error),
         )
 
-    async def _on_terminal_failure(  # type: ignore[override]
+    async def _after_terminal_failure(  # type: ignore[override]
         self,
         *,
         payload: _InstanceCommandPayload,
@@ -2749,11 +2700,19 @@ class StrictInstanceWorker(StrictHeartbeatKafkaWorker[_InstanceCommandPayload, N
                     exc,
                     exc_info=True,
                 )
-        logger.error(
-            "Instance command failed after %s attempts (retryable=%s): %s",
-            attempt_count,
-            retryable,
-            error,
+
+    def _terminal_failure_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: _InstanceCommandPayload,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = payload
+        return FailureLogContext(
+            message="Instance command failed after %s attempts (retryable=%s): %s",
+            args=(attempt_count, retryable, error),
         )
 
     async def run(self):

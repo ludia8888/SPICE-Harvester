@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 
 from bff.dependencies import LabelMapper, OMSClient, get_label_mapper, get_oms_client
 from bff.services import label_mapping_service
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 
 logger = logging.getLogger(__name__)
 

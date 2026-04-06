@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from bff.routers.ontology_read_common import _localized_text
 from shared.utils.action_permission_profile import ActionPermissionProfileError, resolve_action_permission_profile
-from shared.utils.language import first_localized_text
+from shared.utils.bool_utils import coerce_optional_bool as _coerce_optional_bool
 from shared.utils.payload_utils import extract_payload_object, extract_payload_rows
 
 
@@ -14,10 +15,6 @@ def _extract_ontology_resource_rows(payload: Any) -> list[dict[str, Any]]:
 def _extract_ontology_resource(payload: Any) -> dict[str, Any] | None:
     row = extract_payload_object(payload)
     return row or None
-
-
-def _localized_text(value: Any) -> str | None:
-    return first_localized_text(value)
 
 
 def _to_foundry_named_metadata(resource: dict[str, Any]) -> dict[str, Any] | None:
@@ -83,22 +80,6 @@ def _first_non_none(*values: Any) -> Any:
         if value is not None:
             return value
     return None
-
-
-def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "off"}:
-            return False
-    return default
-
-
 def _extract_project_policy_inheritance(
     *,
     permission_policy: dict[str, Any] | None,

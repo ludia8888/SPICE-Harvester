@@ -15,6 +15,7 @@ from shared.services.storage.storage_service import StorageService
 from shared.services.core.object_type_meta_resolver import build_object_type_meta_resolver
 from shared.services.core.writeback_merge_service import WritebackMergeService
 from shared.utils.action_data_access import evaluate_action_target_data_access
+from shared.utils.bool_utils import coerce_optional_bool as _coerce_optional_bool
 from shared.utils.action_permission_profile import (
     ActionPermissionProfile,
     ActionPermissionProfileError,
@@ -359,22 +360,6 @@ def _first_defined(*values: Any) -> Any:
         if value is not None:
             return value
     return None
-
-
-def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return default
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "y", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "n", "off"}:
-            return False
-    return default
-
-
 def _resolve_project_policy_contract(action_spec: Dict[str, Any]) -> Dict[str, Any]:
     spec = action_spec if isinstance(action_spec, dict) else {}
     permission_policy = spec.get("permission_policy") if isinstance(spec.get("permission_policy"), dict) else {}

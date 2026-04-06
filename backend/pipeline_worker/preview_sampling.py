@@ -2,72 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-
-def resolve_preview_flag(
-    preview_meta: Dict[str, Any],
-    *,
-    snake_case_key: str,
-    camel_case_key: str,
-    default: bool,
-) -> bool:
-    raw = preview_meta.get(snake_case_key)
-    if raw is None:
-        raw = preview_meta.get(camel_case_key)
-    if raw is None:
-        return default
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, (int, float)):
-        return bool(raw)
-    if isinstance(raw, str):
-        return raw.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-    return bool(raw)
-
-
-def resolve_preview_limit(
-    *,
-    preview_limit: Optional[Any],
-    preview_meta: Optional[Dict[str, Any]] = None,
-    default: int = 500,
-) -> int:
-    resolved_limit = preview_limit
-    if resolved_limit is None and isinstance(preview_meta, dict):
-        resolved_limit = preview_meta.get("sample_limit")
-        if resolved_limit is None:
-            resolved_limit = preview_meta.get("sampleLimit")
-    try:
-        numeric_limit = int(resolved_limit if resolved_limit is not None else default)
-    except (TypeError, ValueError):
-        numeric_limit = default
-    return max(1, min(500, numeric_limit))
-
-
-def resolve_sampling_strategy(
-    metadata: Dict[str, Any],
-    preview_meta: Dict[str, Any],
-    *,
-    preview_limit: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
-    raw = metadata.get("samplingStrategy") or metadata.get("sampling_strategy")
-    if raw is None:
-        raw = preview_meta.get("samplingStrategy") or preview_meta.get("sampling_strategy")
-    if raw is None:
-        if preview_limit and preview_limit > 0:
-            return {"type": "limit", "limit": preview_limit}
-        return None
-    if isinstance(raw, str):
-        strategy: Dict[str, Any] = {"type": raw}
-        if str(raw).strip().lower() in {"limit", "head"} and preview_limit and preview_limit > 0:
-            strategy["limit"] = preview_limit
-        return strategy
-    if isinstance(raw, dict):
-        strategy = dict(raw)
-        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
-        if strategy_type in {"limit", "head"} and "limit" not in strategy and "rows" not in strategy:
-            if preview_limit and preview_limit > 0:
-                strategy["limit"] = preview_limit
-        return strategy
-    raise ValueError("sampling_strategy must be an object")
+from shared.services.pipeline.preview_sampling_common import (
+    resolve_preview_flag,
+    resolve_preview_limit,
+    resolve_sampling_strategy,
+)
 
 
 def attach_sampling_snapshot(

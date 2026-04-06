@@ -180,9 +180,6 @@ class ActionLogRegistry(PostgresSchemaRegistry):
         except TypeError:
             return json.dumps(str(value), ensure_ascii=False)
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     async def _ensure_tables(self, conn: asyncpg.Connection) -> None:  # type: ignore[override]
         statuses = ",".join(f"'{s.value}'" for s in ActionLogStatus)
         await conn.execute(

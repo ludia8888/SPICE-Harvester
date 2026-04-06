@@ -81,11 +81,144 @@ RUNTIME_VOCAB_PATTERNS = (
         re.compile(r"""["']status["']\s*:\s*["'](?:healthy|unhealthy)["']"""),
         "legacy runtime status",
     ),
-    (
-        re.compile(r"""["']Service is healthy["']"""),
-        "legacy runtime message",
-    ),
 )
+
+ABSENT_RUNTIME_FILES = (
+    "backend/shared/services/core/health_check.py",
+)
+
+DUPLICATE_SURFACE_GUARDS = {
+    "backend/funnel/routers/type_inference_router.py": [
+        '@router.get("/health")',
+    ],
+    "backend/bff/routers/foundry_ontology_v2_errors.py": [
+        "def _foundry_error(",
+    ],
+    "backend/bff/routers/foundry_connectivity_v2.py": [
+        "def _feature_flags_settings(",
+        "def _jdbc_enabled_for_db(",
+        "def _cdc_enabled_for_db(",
+    ],
+    "backend/bff/routers/foundry_connectivity_v2_common.py": [
+        "def _foundry_error(",
+        "def _dataset_id_from_rid(",
+        "def _dataset_rid(",
+    ],
+    "backend/bff/routers/lineage.py": [
+        "def _freshness_status(",
+        "def _status_rank(",
+        "def _staleness_reason_with_scope(",
+        "def _update_type(",
+        "def _chunked(",
+        "async def _get_latest_edges_to_batched(",
+        "async def _get_latest_edges_from_batched(",
+        "async def _get_latest_edges_for_projections_batched(",
+        "def _edge_cause_payload(",
+        "async def _enrich_artifacts_with_latest_writer(",
+        "def _out_of_date_scope(",
+    ],
+    "backend/bff/services/lineage_out_of_date_service.py": [
+        "def _parse_artifact_node_id(",
+        "def _suggest_remediation_actions(",
+        "def _freshness_status(",
+        "def _status_rank(",
+        "def _staleness_reason_with_scope(",
+        "def _update_type(",
+        "def _chunked(",
+        "async def _get_latest_edges_to_batched(",
+        "async def _get_latest_edges_from_batched(",
+        "async def _get_latest_edges_for_projections_batched(",
+        "def _edge_cause_payload(",
+        "async def _enrich_artifacts_with_latest_writer(",
+        "def _out_of_date_scope(",
+    ],
+    "backend/bff/services/data_connector_pipelining_service.py": [
+        "def _row_hash(",
+        "def _parse_csv_bytes(",
+        "def _align_row_to_columns(",
+        "def _align_rows_to_columns(",
+        "def _apply_append_mode(",
+        "def _apply_update_mode(",
+    ],
+    "backend/bff/services/pipeline_execution_service.py": [
+        "def _build_ontology_ref(",
+        "def _parse_optional_bool(",
+        "def _extract_deploy_dependencies_raw(",
+        "def _parse_deploy_schedule_fields(",
+    ],
+    "backend/bff/services/pipeline_execution_deploy.py": [
+        "def _extract_deploy_dependencies_raw(",
+        "def _parse_deploy_schedule_fields(",
+        "def _parse_optional_bool(",
+    ],
+    "backend/bff/services/pipeline_execution_preview_build.py": [
+        "def _build_ontology_ref(",
+    ],
+    "backend/bff/services/ontology_ops_service.py": [
+        "def _localized_to_string(",
+    ],
+    "backend/bff/routers/object_types.py": [
+        "def _unwrap_data(",
+        "def _extract_resources(",
+        "def _extract_resource(",
+        "def _localized_text(",
+        "def _extract_ontology_properties(",
+    ],
+    "backend/bff/routers/link_types_read.py": [
+        "def _unwrap_data(",
+        "def _extract_resources(",
+        "def _normalize_object_ref(",
+        "def _localized_text(",
+    ],
+    "backend/bff/routers/foundry_ontology_v2_serialization.py": [
+        "def _localized_text(",
+    ],
+    "backend/bff/routers/ontology_extensions.py": [
+        "def _default_expected_head_commit(",
+    ],
+    "backend/bff/routers/foundry_orchestration_v2.py": [
+        "def _foundry_error(",
+    ],
+    "backend/bff/services/ontology_extensions_service.py": [
+        "def _default_expected_head_commit(",
+    ],
+    "backend/bff/routers/pipeline_datasets_ops_ingest.py": [
+        "def _dataset_artifact_prefix(",
+    ],
+    "backend/bff/routers/foundry_datasets_v2.py": [
+        "def _dataset_id_from_rid(",
+        "def _dataset_rid(",
+    ],
+    "backend/shared/services/core/connector_ingest_service.py": [
+        "def _dataset_artifact_prefix(",
+    ],
+    "backend/shared/services/registries/dataset_registry_catalog.py": [
+        "def _require_pool(",
+    ],
+    "backend/shared/services/registries/dataset_registry_governance.py": [
+        "def _require_pool(",
+    ],
+    "backend/shared/services/registries/dataset_registry_ingest.py": [
+        "def _require_pool(",
+    ],
+    "backend/shared/services/registries/dataset_registry_relationships.py": [
+        "def _require_pool(",
+    ],
+    "backend/oms/routers/attachments.py": [
+        "def _foundry_error(",
+    ],
+    "backend/oms/routers/timeseries.py": [
+        "def _foundry_error(",
+    ],
+    "backend/oms/routers/query.py": [
+        "def _foundry_error(",
+    ],
+    "backend/oms/routers/ontology.py": [
+        "def _localized_to_string(",
+    ],
+}
+
+APIRESPONSE_IMPORT_PATTERN = re.compile(r"^from shared\.models\.requests import .*?\bApiResponse\b", re.MULTILINE)
 
 
 def _iter_non_test_python_files(backend_root: Path) -> Iterable[Path]:
@@ -149,6 +282,38 @@ def audit_runtime_vocabulary(repo_root: Path) -> List[str]:
     return violations
 
 
+def audit_absent_runtime_files(repo_root: Path) -> List[str]:
+    violations: List[str] = []
+    for relative_path in ABSENT_RUNTIME_FILES:
+        if (repo_root / relative_path).exists():
+            violations.append(f"{relative_path} must stay removed; legacy duplicate runtime surface reintroduced")
+    return violations
+
+
+def audit_duplicate_surfaces(repo_root: Path) -> List[str]:
+    violations: List[str] = []
+    for relative_path, banned_markers in DUPLICATE_SURFACE_GUARDS.items():
+        path = repo_root / relative_path
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        present = [marker for marker in banned_markers if marker in text]
+        if present:
+            violations.append(f"{relative_path} reintroduced duplicate helper/runtime surface markers: {', '.join(present)}")
+    return violations
+
+
+def audit_apiresponse_import_surface(repo_root: Path) -> List[str]:
+    violations: List[str] = []
+    for path in _iter_non_test_python_files(repo_root / "backend"):
+        text = path.read_text(encoding="utf-8")
+        if APIRESPONSE_IMPORT_PATTERN.search(text):
+            violations.append(
+                f"{path.relative_to(repo_root)} imports ApiResponse via requests.py; use shared.models.responses instead"
+            )
+    return violations
+
+
 def audit_docs(repo_root: Path) -> List[str]:
     violations: List[str] = []
     for relative_path, snippets in DOC_REQUIRED_SNIPPETS.items():
@@ -164,6 +329,9 @@ def run_audit(repo_root: Path) -> List[str]:
     violations.extend(audit_facade_line_counts(repo_root))
     violations.extend(audit_facade_markers(repo_root))
     violations.extend(audit_runtime_vocabulary(repo_root))
+    violations.extend(audit_absent_runtime_files(repo_root))
+    violations.extend(audit_duplicate_surfaces(repo_root))
+    violations.extend(audit_apiresponse_import_surface(repo_root))
     violations.extend(audit_docs(repo_root))
     return violations
 

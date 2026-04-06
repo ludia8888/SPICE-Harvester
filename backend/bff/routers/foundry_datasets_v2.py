@@ -46,6 +46,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from bff.routers.data_connector_deps import get_dataset_registry, get_pipeline_registry
+from bff.routers.foundry_dataset_rid_common import _dataset_id_from_rid, _dataset_rid
 from bff.routers.pipeline_datasets_ops_lakefs import _resolve_lakefs_raw_repository, _ensure_lakefs_branch_exists
 from shared.foundry.auth import require_scopes
 from shared.foundry.errors import foundry_error
@@ -125,23 +126,6 @@ _TRANSACTION_RID_PREFIXES = (
     "ri.foundry.main.transaction.",
 )
 _CSV_PREVIEW_ROW_LIMIT = 100
-
-
-def _dataset_id_from_rid(dataset_rid: str) -> str | None:
-    text = str(dataset_rid or "").strip()
-    if not text:
-        return None
-    try:
-        kind, parsed = parse_rid(text)
-    except ValueError:
-        return None
-    if kind != "dataset":
-        return None
-    return parsed
-
-
-def _dataset_rid(dataset_id: str) -> str:
-    return build_rid("dataset", dataset_id)
 
 
 def _folder_rid(db_name: str) -> str:

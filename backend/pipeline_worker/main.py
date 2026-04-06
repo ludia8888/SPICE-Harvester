@@ -55,7 +55,7 @@ from shared.models.pipeline_job import PipelineJob
 from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, ProcessedEventKafkaWorker, RegistryKey
+from shared.services.kafka.processed_event_worker import HeartbeatOptions, JsonModelKafkaWorker, RegistryKey
 from shared.services.kafka.dlq_publisher import DlqPublishSpec
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
@@ -267,7 +267,7 @@ def _validate_output_kind_metadata(
         raise ValueError(f"Invalid output metadata for node {node_id} ({output_kind}): {details}")
 
 
-class PipelineWorker(PipelineWorkerRuntimeMixin, ProcessedEventKafkaWorker[PipelineJob, None]):
+class PipelineWorker(PipelineWorkerRuntimeMixin, JsonModelKafkaWorker[PipelineJob, None]):
     def __init__(self) -> None:
         settings = get_settings()
         self.settings = settings

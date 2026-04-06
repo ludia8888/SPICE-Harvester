@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request, status
 
 from bff.dependencies import OMSClientDep
+from bff.routers.foundry_ontology_v2_common import _default_expected_head_commit
 from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.schemas.ontology_extensions_requests import OntologyDeploymentRecordRequest, OntologyResourceRequest
 from bff.services import ontology_extensions_service
@@ -26,13 +27,6 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
         required_roles=DOMAIN_MODEL_ROLES,
         enforce_fn=enforce_database_role,
     )
-
-
-def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "main"
-    if normalized.lower().startswith("branch:"):
-        return normalized
-    return f"branch:{normalized}"
 
 
 @router.get("/resources")

@@ -6,7 +6,11 @@ All services should use these models for consistent API responses.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
+
+RUNTIME_STATE_READY = "ready"
+RUNTIME_STATE_DEGRADED = "degraded"
+RUNTIME_STATE_HARD_DOWN = "hard_down"
 
 
 @dataclass
@@ -74,7 +78,7 @@ class ApiResponse:
         cls, service_name: str, version: str, description: Optional[str] = None
     ) -> "ApiResponse":
         """Create standardized health check response"""
-        health_data = {"service": service_name, "version": version, "status": "ready"}
+        health_data = {"service": service_name, "version": version, "status": RUNTIME_STATE_READY}
         if description:
             health_data["description"] = description
 
@@ -91,3 +95,75 @@ class ApiResponse:
     def is_warning(self) -> bool:
         """Check if response has warnings"""
         return self.status in ["warning", "partial"]
+
+
+def normalize_health_state(value: Any, *, default: str = RUNTIME_STATE_READY) -> str:
+    token = str(value or "").strip().lower()
+    if token in {RUNTIME_STATE_READY, RUNTIME_STATE_DEGRADED, RUNTIME_STATE_HARD_DOWN}:
+        return token
+    if token in {"healthy", "ok"}:
+        return RUNTIME_STATE_READY
+    if token in {"unhealthy", "down", "unready", "unavailable"}:
+        return RUNTIME_STATE_HARD_DOWN
+    return default
+
+
+def health_http_status(value: Any) -> int:
+    state = normalize_health_state(value)
+    return 200 if state in {RUNTIME_STATE_READY, RUNTIME_STATE_DEGRADED} else 503
+
+
+def health_message_for_state(value: Any) -> str:
+    state = normalize_health_state(value)
+    if state == RUNTIME_STATE_DEGRADED:
+        return "Service is degraded"
+    if state == RUNTIME_STATE_HARD_DOWN:
+        return "Service is not ready"
+    return "Service is ready"
+
+
+def build_health_data(
+    *,
+    service_name: str,
+    version: str,
+    description: Optional[str] = None,
+    availability: Optional[Mapping[str, Any]] = None,
+    extra_data: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    data = {
+        "service": service_name,
+        "version": version,
+        "status": RUNTIME_STATE_READY,
+    }
+    if description:
+        data["description"] = description
+    if isinstance(availability, Mapping):
+        data.update(dict(availability))
+    if isinstance(extra_data, Mapping):
+        data.update(dict(extra_data))
+    return data
+
+
+def build_wrapped_health_response(
+    *,
+    service_name: str,
+    version: str,
+    description: Optional[str] = None,
+    availability: Optional[Mapping[str, Any]] = None,
+    extra_data: Optional[Mapping[str, Any]] = None,
+    message: Optional[str] = None,
+    response_status: Optional[str] = None,
+) -> Dict[str, Any]:
+    data = build_health_data(
+        service_name=service_name,
+        version=version,
+        description=description,
+        availability=availability,
+        extra_data=extra_data,
+    )
+    state = normalize_health_state(data.get("status"))
+    return ApiResponse(
+        status=response_status or ("success" if state == RUNTIME_STATE_READY else "warning" if state == RUNTIME_STATE_DEGRADED else "error"),
+        message=message or health_message_for_state(state),
+        data=data,
+    ).to_dict()

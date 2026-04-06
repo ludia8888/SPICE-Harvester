@@ -11,14 +11,11 @@ Consumes ActionCommand envelopes from Kafka and executes Action-only writeback:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
-
-from pydantic import ValidationError
 
 from action_worker.governance import check_writeback_dataset_acl_alignment
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
@@ -47,9 +44,11 @@ from shared.services.storage.lakefs_client import LakeFSClient, LakeFSConflictEr
 from shared.services.storage.lakefs_branch_utils import ensure_lakefs_branch
 from shared.services.storage.lakefs_storage_service import create_lakefs_storage_service, LakeFSStorageService
 from shared.services.kafka.processed_event_worker import (
+    CommandEnvelopePayload,
     CommandParseError,
+    FailureLogContext,
     RegistryKey,
-    StrictHeartbeatKafkaWorker,
+    StrictCommandEnvelopeKafkaWorker,
     WorkerRuntimeConfig,
 )
 from shared.services.kafka.safe_consumer import SafeKafkaConsumer
@@ -113,10 +112,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _ActionCommandPayload:
-    envelope: EventEnvelope
-    raw_text: Optional[str]
-    envelope_metadata: Optional[Dict[str, Any]] = None
+class _ActionCommandPayload(CommandEnvelopePayload):
     stage: str = "execute_action"
 
 
@@ -128,7 +124,16 @@ class _ActionRejected(Exception):
     """Used to short-circuit retries when the ActionLog is already finalized with a rejection result."""
 
 
-class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
+class ActionWorker(StrictCommandEnvelopeKafkaWorker[_ActionCommandPayload, None]):
+    parse_error_enable_dlq = True
+    parse_error_publish_failure_message = "Failed to publish invalid action payload to DLQ; retrying: %s"
+    parse_error_invalid_payload_message = "Invalid action payload; skipping: %s"
+    parse_error_raise_on_publish_failure = True
+    command_payload_cls = _ActionCommandPayload
+    command_parse_error_cls = _ActionCommandParseError
+    expected_envelope_kind = None
+    command_payload_stage = "execute_action"
+
     def __init__(self) -> None:
         settings = get_settings()
         cfg = settings.workers.action
@@ -228,75 +233,10 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         if self.dataset_registry:
             await self.dataset_registry.close()
 
-    def _parse_payload(self, payload: Any) -> _ActionCommandPayload:  # type: ignore[override]
-        if not isinstance(payload, (bytes, bytearray)):
-            raise _ActionCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=TypeError("Kafka payload must be bytes"),
-            )
-        try:
-            raw_text = payload.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise _ActionCommandParseError(
-                stage="decode",
-                payload_text=None,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        raw_message: Any
-        try:
-            raw_message = json.loads(raw_text)
-        except json.JSONDecodeError as exc:
-            raise _ActionCommandParseError(
-                stage="parse_json",
-                payload_text=raw_text,
-                payload_obj=None,
-                fallback_metadata=None,
-                cause=exc,
-            ) from exc
-
-        fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
-        fallback_metadata = fallback_metadata if isinstance(fallback_metadata, dict) else None
-
-        try:
-            envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
-        except ValidationError as exc:
-            payload_obj = raw_message if isinstance(raw_message, dict) else None
-            raise _ActionCommandParseError(
-                stage="parse_envelope",
-                payload_text=raw_text,
-                payload_obj=payload_obj,
-                fallback_metadata=fallback_metadata,
-                cause=exc,
-            ) from exc
-
-        return _ActionCommandPayload(
-            envelope=envelope,
-            raw_text=raw_text,
-            envelope_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata,
-        )
-
-    def _fallback_metadata(self, payload: _ActionCommandPayload) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return payload.envelope_metadata
-
-    def _registry_key(self, payload: _ActionCommandPayload) -> RegistryKey:  # type: ignore[override]
-        envelope = payload.envelope
-        event_id = str(envelope.event_id or "").strip()
-        if not event_id:
-            raise ValueError("event_id is required")
-        aggregate_id = str(envelope.aggregate_id).strip() if envelope.aggregate_id is not None else None
-        if not aggregate_id:
-            aggregate_id = None
-        sequence_number = int(envelope.sequence_number) if envelope.sequence_number is not None else None
-        return RegistryKey(event_id=event_id, aggregate_id=aggregate_id, sequence_number=sequence_number)
-
     async def _process_payload(self, payload: _ActionCommandPayload) -> None:  # type: ignore[override]
         envelope = payload.envelope
+        if envelope is None:
+            raise ValueError("event envelope is required")
         meta = envelope.metadata if isinstance(envelope.metadata, dict) else {}
         if meta.get("kind") != "command":
             logger.info(
@@ -306,7 +246,7 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
             )
             return
 
-        command_data = envelope.data if isinstance(envelope.data, dict) else {}
+        command_data = payload.command if isinstance(payload.command, dict) else {}
         command_type = command_data.get("command_type")
         command_type = getattr(command_type, "value", command_type)
         if str(command_type) != "EXECUTE_ACTION":
@@ -360,7 +300,9 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
     ) -> Dict[str, Any]:
         attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
         envelope = payload.envelope
-        command_data = envelope.data if isinstance(envelope.data, dict) else {}
+        if envelope is None:
+            raise ValueError("event envelope is required")
+        command_data = payload.command if isinstance(payload.command, dict) else {}
         attrs.update(
             {
                 "messaging.operation": "process",
@@ -373,40 +315,12 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         return attrs
 
     def _metric_event_name(self, *, payload: _ActionCommandPayload) -> Optional[str]:  # type: ignore[override]
-        return str(payload.envelope.event_type or "").strip() or None
+        envelope = payload.envelope
+        if envelope is None:
+            return None
+        return str(envelope.event_type or "").strip() or None
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
-        async def _send(
-            stage: str,
-            cause_text: str,
-            payload_text: Optional[str],
-            payload_obj: Optional[Dict[str, Any]],
-            kafka_headers: Optional[Any],
-            fallback_metadata: Optional[Dict[str, Any]],
-        ) -> None:
-            await self._send_to_dlq(
-                msg=msg,
-                stage=stage,
-                error=cause_text,
-                attempt_count=1,
-                payload_text=payload_text,
-                payload_obj=payload_obj,
-                kafka_headers=kafka_headers,
-                fallback_metadata=fallback_metadata,
-            )
-
-        await self._publish_parse_error_to_dlq(
-            msg=msg,
-            raw_payload=raw_payload,
-            error=error,
-            dlq_sender=_send,
-            publish_failure_message="Failed to publish invalid action payload to DLQ; retrying: %s",
-            invalid_payload_message="Invalid action payload; skipping: %s",
-            raise_on_publish_failure=True,
-            logger_instance=logger,
-        )
-
-    async def _on_retry_scheduled(  # type: ignore[override]
+    def _retry_log_context(  # type: ignore[override]
         self,
         *,
         payload: _ActionCommandPayload,
@@ -414,27 +328,25 @@ class ActionWorker(StrictHeartbeatKafkaWorker[_ActionCommandPayload, None]):
         attempt_count: int,
         backoff_s: int,
         retryable: bool,
-    ) -> None:
-        logger.warning(
-            "Retrying action command in %ss (attempt %s): %s",
-            int(backoff_s),
-            attempt_count,
-            error,
+    ) -> FailureLogContext:
+        _ = payload, retryable
+        return FailureLogContext(
+            message="Retrying action command in %ss (attempt %s): %s",
+            args=(int(backoff_s), attempt_count, error),
         )
 
-    async def _on_terminal_failure(  # type: ignore[override]
+    def _terminal_failure_log_context(  # type: ignore[override]
         self,
         *,
         payload: _ActionCommandPayload,
         error: str,
         attempt_count: int,
         retryable: bool,
-    ) -> None:
-        logger.error(
-            "Action command failed after %s attempts (retryable=%s): %s",
-            attempt_count,
-            retryable,
-            error,
+    ) -> FailureLogContext:
+        _ = payload
+        return FailureLogContext(
+            message="Action command failed after %s attempts (retryable=%s): %s",
+            args=(attempt_count, retryable, error),
         )
 
     @staticmethod

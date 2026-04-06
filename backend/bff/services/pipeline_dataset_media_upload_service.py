@@ -22,7 +22,7 @@ from bff.services.dataset_ingest_outbox_builder import DatasetIngestOutboxBuilde
 from bff.services.dataset_ingest_outbox_flusher import maybe_flush_dataset_ingest_outbox_inline
 from bff.services.dataset_ingest_failures import mark_ingest_failed
 from bff.services.pipeline_dataset_upload_context import _prepare_dataset_upload_context
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.registries.dataset_registry_get_or_create import get_or_create_dataset_record
 from shared.utils.path_utils import safe_path_segment
 from shared.utils.s3_uri import build_s3_uri

@@ -25,7 +25,7 @@ from shared.config.settings import (
     get_settings,
 )
 from shared.errors.error_response import install_error_handlers
-from shared.models.requests import ApiResponse
+from shared.models.responses import build_wrapped_health_response, health_http_status
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import install_rate_limit_headers_middleware
 from shared.observability.request_context import (
@@ -312,31 +312,23 @@ def _add_health_check(app: FastAPI, service_info: ServiceInfo) -> None:
     async def health_check(request: Request):
         """표준 헬스 체크 엔드포인트"""
         _ = request
-        response = ApiResponse.health_check(
-            service_name=service_info.name,
-            version=service_info.version,
-            description=service_info.description
-        ).to_dict()
         runtime_status = _resolve_runtime_status()
         surface = availability_surface(
             service=service_info.name,
             container_ready=True,
             runtime_status=runtime_status,
         )
-
-        if isinstance(response.get("data"), dict):
-            response["data"].update(surface)
+        response = build_wrapped_health_response(
+            service_name=service_info.name,
+            version=service_info.version,
+            description=service_info.description,
+            availability=surface,
+            response_status="success" if surface["status"] == "ready" else "warning" if surface["status"] == "degraded" else "error",
+        )
         if surface["status"] == "ready":
             return response
-
-        response["status"] = "warning" if surface["status"] == "degraded" else "error"
-        response["message"] = (
-            "Service is degraded"
-            if surface["status"] == "degraded"
-            else "Service is not ready"
-        )
         return JSONResponse(
-            status_code=status.HTTP_200_OK if surface["status"] == "degraded" else status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=health_http_status(surface["status"]),
             content=response,
         )
 

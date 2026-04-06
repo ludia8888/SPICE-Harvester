@@ -25,7 +25,7 @@ from bff.services.pipeline_tabular_upload_facade import finalize_tabular_upload
 from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from shared.dependencies.providers import LineageStoreDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry

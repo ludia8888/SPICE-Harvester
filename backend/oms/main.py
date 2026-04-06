@@ -55,7 +55,7 @@ from oms.services.event_store import event_store
 from shared.services.storage.redis_service import RedisService, create_redis_service
 from shared.services.core.command_status_service import CommandStatusService
 from shared.services.storage.elasticsearch_service import ElasticsearchService
-from shared.models.requests import ApiResponse
+from shared.models.responses import build_wrapped_health_response
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.utils.jsonld import JSONToJSONLDConverter
@@ -546,23 +546,22 @@ async def health_check():
             )
             return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
 
-        # 서비스 정상 상태
-        health_response = ApiResponse.health_check(
+        surface = availability_surface(
+            service="oms",
+            container_ready=True,
+            runtime_status=runtime_status,
+        )
+        return build_wrapped_health_response(
             service_name="OMS",
             version="1.0.0",
             description="내부 ID 기반 핵심 온톨로지 관리 서비스",
+            availability=surface,
+            extra_data={
+                "environment": settings.environment.value,
+                "resource_storage_backend": _resource_storage_backend(),
+                "modernized": True,
+            },
         )
-        health_response.data["environment"] = settings.environment.value
-        health_response.data["resource_storage_backend"] = _resource_storage_backend()
-        health_response.data["modernized"] = True
-        health_response.data.update(
-            availability_surface(
-                service="oms",
-                container_ready=True,
-                runtime_status=runtime_status,
-            )
-        )
-        return health_response.to_dict()
 
     except Exception as e:
         logger.error(f"헬스 체크 실패: {e}")

@@ -12,7 +12,7 @@ from bff.routers.pipeline_datasets_deps import get_objectify_job_queue
 from bff.routers.pipeline_deps import get_dataset_registry, get_objectify_registry, get_pipeline_registry
 from bff.services import pipeline_dataset_media_upload_service
 from shared.dependencies.providers import LineageStoreDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.dataset_registry import DatasetRegistry

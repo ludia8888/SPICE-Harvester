@@ -4,16 +4,15 @@
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from shared.observability.tracing import trace_endpoint
 
-from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request
 
 from bff.dependencies import get_oms_client
 from bff.services.oms_client import OMSClient
+from shared.models.responses import build_wrapped_health_response
 from shared.services.core.runtime_status import availability_surface, get_runtime_status
 
 logger = logging.getLogger(__name__)
@@ -48,8 +47,6 @@ async def health_check(request: Request, oms_client: OMSClient = Depends(get_oms
 
     서비스와 데이터베이스 연결 상태를 확인합니다.
     """
-    from shared.models.requests import ApiResponse
-
     oms_connected = False
     oms_error: str | None = None
     try:
@@ -60,32 +57,43 @@ async def health_check(request: Request, oms_client: OMSClient = Depends(get_oms
         oms_connected = False
         oms_error = str(e)
 
-    # 표준화된 헬스체크 응답 생성
-    health_response = ApiResponse.health_check(
-        service_name="BFF", version="2.0.0", description="백엔드 포 프론트엔드 서비스"
-    )
-
-    if health_response.data is None:
-        health_response.data = {}
-
     runtime_status = _bff_runtime_status_from_request(request)
     surface = availability_surface(
         service="bff",
         container_ready=True,
         runtime_status=runtime_status,
     )
+    if not oms_connected and surface["status"] != "hard_down":
+        surface = {
+            **surface,
+            "status": "degraded",
+            "degraded": True,
+            "hard_down": False,
+            "ready": True,
+            "accepting_traffic": True,
+        }
 
-    # OMS 연결 상태 추가 (degraded but still healthy for core paths)
-    health_response.data["oms_connected"] = bool(oms_connected)
-    health_response.data.update(surface)
-    health_response.data["startup_issues"] = surface["issues"]
-    if not oms_connected or surface["status"] != "ready":
-        health_response.data["status"] = "degraded" if surface["status"] != "hard_down" else "hard_down"
-        if oms_error:
-            health_response.data["oms_error"] = oms_error
-        if surface["status"] == "hard_down":
-            health_response.message = "Service is running but startup is degraded"
-        elif not oms_connected:
-            health_response.message = "Service is running (OMS unavailable)"
+    message = "Service is healthy"
+    if surface["status"] == "hard_down":
+        message = "Service is running but startup is degraded"
+    elif not oms_connected:
+        message = "Service is running (OMS unavailable)"
+    elif surface["status"] == "degraded":
+        message = "Service is degraded"
 
-    return health_response.to_dict()
+    extra_data: dict[str, Any] = {
+        "oms_connected": bool(oms_connected),
+        "startup_issues": surface["issues"],
+    }
+    if oms_error:
+        extra_data["oms_error"] = oms_error
+
+    return build_wrapped_health_response(
+        service_name="BFF",
+        version="2.0.0",
+        description="백엔드 포 프론트엔드 서비스",
+        availability=surface,
+        extra_data=extra_data,
+        message=message,
+        response_status="success",
+    )

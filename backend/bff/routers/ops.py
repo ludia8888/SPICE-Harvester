@@ -6,7 +6,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends
 
 from bff.routers.registry_deps import get_dataset_registry, get_objectify_registry
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 

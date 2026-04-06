@@ -17,7 +17,7 @@ from bff.routers.pipeline_shared import (
     _require_pipeline_idempotency_key,
     _filter_pipeline_records_for_read_access,
 )
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.registries.pipeline_registry import PipelineMergeNotSupportedError
 from shared.services.storage.lakefs_client import LakeFSConflictError

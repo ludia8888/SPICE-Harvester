@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import validate_db_name
 from shared.observability.tracing import trace_db_operation
 from shared.services.pipeline.pipeline_udf_runtime import compile_udf, PipelineUdfError

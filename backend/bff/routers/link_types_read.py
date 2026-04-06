@@ -1,33 +1,11 @@
 """Helpers for normalizing link-type resources into Foundry v2 shapes."""
 
-from shared.utils.language import first_localized_text
-from shared.utils.payload_utils import extract_payload_rows, unwrap_data_payload
-
-def _unwrap_data(payload):
-    return unwrap_data_payload(payload)
-
-
-def _extract_resources(payload):
-    return extract_payload_rows(payload, key="resources")
-
-
-def _normalize_object_ref(raw):
-    if not isinstance(raw, str):
-        return None
-    value = raw.strip()
-    if not value:
-        return None
-    for prefix in ("object_type:", "object:", "class:"):
-        if value.startswith(prefix):
-            value = value[len(prefix) :].strip()
-            break
-    if "@" in value:
-        value = value.split("@", 1)[0].strip()
-    return value or None
-
-
-def _localized_text(value):
-    return first_localized_text(value)
+from bff.routers.ontology_read_common import (
+    _extract_resources,
+    _localized_text,
+    _normalize_object_ref,
+    _unwrap_data,
+)
 
 
 def _map_cardinality(raw):

@@ -7,10 +7,7 @@ Executes a pipeline definition against dataset samples to produce preview/output
 from __future__ import annotations
 
 import ast
-import csv
 import difflib
-import io
-import json
 import logging
 import math
 import os
@@ -27,7 +24,18 @@ from shared.services.registries.pipeline_registry import PipelineRegistry
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
 from shared.services.pipeline.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
 from shared.services.pipeline.pipeline_parameter_utils import apply_parameters, normalize_parameters
+from shared.services.pipeline.preview_sampling_common import (
+    resolve_preview_flag,
+    resolve_preview_meta_limit,
+    resolve_sampling_strategy,
+)
 from shared.services.storage.storage_service import StorageService
+from shared.services.pipeline.pipeline_sample_utils import (
+    extract_sample_rows as _extract_sample_rows,
+    parse_csv_bytes as _parse_csv_bytes,
+    parse_excel_bytes as _parse_excel_bytes,
+    parse_json_bytes as _parse_json_bytes,
+)
 from shared.services.pipeline.pipeline_udf_runtime import compile_udf, resolve_udf_reference
 from shared.services.pipeline.pipeline_definition_utils import (
     build_expectations_with_pk,
@@ -62,6 +70,7 @@ from shared.services.pipeline.pipeline_validation_utils import (
     validate_schema_checks,
     validate_schema_contract,
 )
+from shared.utils.schema_columns import extract_schema_column_names as _extract_schema_columns
 from shared.utils.s3_uri import parse_s3_uri
 from shared.services.pipeline.pipeline_join_keys import normalize_join_key_list
 
@@ -128,74 +137,6 @@ class PipelineExecutor:
         # Preview settings are derived from definition["__preview_meta__"] per-run.
         self._preview_mode: bool = False
         self._preview_max_output_rows: Optional[int] = None
-
-    @staticmethod
-    def _preview_flag(
-        preview_meta: Dict[str, Any],
-        *,
-        snake_case_key: str,
-        camel_case_key: str,
-        default: bool,
-    ) -> bool:
-        raw = preview_meta.get(snake_case_key)
-        if raw is None:
-            raw = preview_meta.get(camel_case_key)
-        if raw is None:
-            return default
-        if isinstance(raw, bool):
-            return raw
-        if isinstance(raw, (int, float)):
-            return bool(raw)
-        if isinstance(raw, str):
-            return raw.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-        return bool(raw)
-
-    @staticmethod
-    def _preview_limit(
-        preview_meta: Dict[str, Any],
-        *,
-        primary_key: str,
-        secondary_key: str,
-        default: Optional[int] = None,
-    ) -> Optional[int]:
-        raw = preview_meta.get(primary_key)
-        if raw is None:
-            raw = preview_meta.get(secondary_key)
-        if raw is None:
-            return default
-        try:
-            limit = int(raw)
-        except (TypeError, ValueError):
-            return default
-        if limit <= 0:
-            return default
-        return max(1, min(500, limit))
-
-    def _resolve_preview_sampling_strategy(
-        self,
-        *,
-        metadata: Dict[str, Any],
-        preview_meta: Dict[str, Any],
-        fallback_limit: Optional[int],
-    ) -> Optional[Dict[str, Any]]:
-        raw = metadata.get("samplingStrategy") or metadata.get("sampling_strategy")
-        if raw is None:
-            raw = preview_meta.get("samplingStrategy") or preview_meta.get("sampling_strategy")
-        if raw is None:
-            if fallback_limit and fallback_limit > 0:
-                return {"type": "limit", "limit": fallback_limit}
-            return None
-        if isinstance(raw, str):
-            strategy: Dict[str, Any] = {"type": raw}
-        elif isinstance(raw, dict):
-            strategy = dict(raw)
-        else:
-            raise ValueError("sampling_strategy must be an object")
-        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
-        if strategy_type in {"limit", "head"} and "limit" not in strategy and "rows" not in strategy:
-            if fallback_limit and fallback_limit > 0:
-                strategy["limit"] = fallback_limit
-        return strategy
 
     def _apply_preview_sampling(
         self,
@@ -311,27 +252,27 @@ class PipelineExecutor:
         preview_meta = definition.get("__preview_meta__") or {}
         preview_branch = preview_meta.get("branch")
         self._preview_mode = bool(definition.get("__preview_meta__"))
-        skip_production_checks = self._preview_mode and self._preview_flag(
+        skip_production_checks = self._preview_mode and resolve_preview_flag(
             preview_meta,
             snake_case_key="skip_production_checks",
             camel_case_key="skipProductionChecks",
             default=True,
         )
         sample_limit = (
-            self._preview_limit(
+            resolve_preview_meta_limit(
                 preview_meta,
-                primary_key="sample_limit",
-                secondary_key="sampleLimit",
+                snake_case_key="sample_limit",
+                camel_case_key="sampleLimit",
                 default=500 if self._preview_mode else None,
             )
             if self._preview_mode
             else None
         )
         self._preview_max_output_rows = (
-            self._preview_limit(
+            resolve_preview_meta_limit(
                 preview_meta,
-                primary_key="max_output_rows",
-                secondary_key="maxOutputRows",
+                snake_case_key="max_output_rows",
+                camel_case_key="maxOutputRows",
                 default=sample_limit if self._preview_mode else None,
             )
             if self._preview_mode
@@ -359,10 +300,10 @@ class PipelineExecutor:
                         sample_limit=sample_limit,
                     )
                 if self._preview_mode:
-                    sampling_strategy = self._resolve_preview_sampling_strategy(
+                    sampling_strategy = resolve_sampling_strategy(
                         metadata=metadata,
                         preview_meta=preview_meta,
-                        fallback_limit=sample_limit,
+                        preview_limit=sample_limit,
                     )
                     if sampling_strategy:
                         table = self._apply_preview_sampling(
@@ -958,26 +899,6 @@ class PipelineExecutor:
         if result.tables:
             return list(result.tables.values())[-1]
         return PipelineTable([], [])
-
-
-def _extract_schema_columns(schema: Any) -> List[str]:
-    if not isinstance(schema, dict):
-        return []
-    if isinstance(schema.get("columns"), list):
-        columns = []
-        for col in schema["columns"]:
-            if isinstance(col, dict) and col.get("name"):
-                columns.append(str(col["name"]))
-            elif isinstance(col, str):
-                columns.append(col)
-        return columns
-    if isinstance(schema.get("fields"), list):
-        return [str(col.get("name")) for col in schema["fields"] if isinstance(col, dict) and col.get("name")]
-    if isinstance(schema.get("properties"), dict):
-        return list(schema["properties"].keys())
-    return []
-
-
 def _extract_schema_types(schema: Any) -> Dict[str, str]:
     if not isinstance(schema, dict):
         return {}
@@ -999,27 +920,6 @@ def _extract_schema_types(schema: Any) -> Dict[str, str]:
     if isinstance(properties, dict):
         return {str(name): "xsd:string" for name in properties.keys() if name}
     return {}
-
-
-def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
-    if not isinstance(sample, dict):
-        return []
-    rows = sample.get("rows")
-    if isinstance(rows, list):
-        if rows and isinstance(rows[0], dict):
-            return rows  # type: ignore[return-value]
-        columns = _extract_schema_columns(sample)
-        return [
-            {columns[idx] if idx < len(columns) else f"col_{idx}": value for idx, value in enumerate(row)}
-            for row in rows
-            if isinstance(row, list)
-        ]
-    data_rows = sample.get("data")
-    if isinstance(data_rows, list) and data_rows and isinstance(data_rows[0], dict):
-        return data_rows  # type: ignore[return-value]
-    return []
-
-
 def _fallback_columns(node: Dict[str, Any]) -> List[str]:
     columns = node.get("columns")
     if isinstance(columns, list):
@@ -2473,104 +2373,6 @@ def _regex_replace_table(table: PipelineTable, rules: List[Dict[str, Any]]) -> P
             next_row[column] = regex.sub(replacement, text)
         rows.append(next_row)
     return PipelineTable(columns=table.columns, rows=rows)
-
-
-def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    """
-    Parse a CSV payload into row dicts.
-
-    NOTE: Must handle quoted headers/fields (common in lakeFS-ingested CSVs),
-    otherwise join keys become missing and joins degrade into cross-joins.
-    """
-    try:
-        text = raw_bytes.decode("utf-8", errors="replace")
-    except (UnicodeDecodeError, AttributeError):
-        return []
-    if not text.strip():
-        return []
-
-    # Detect delimiter from the first non-empty line.
-    first_line = next((line for line in text.splitlines() if line.strip()), "")
-    if not first_line:
-        return []
-    delimiter = ","
-    if "\t" in first_line and first_line.count("\t") >= first_line.count(","):
-        delimiter = "\t"
-    elif ";" in first_line and first_line.count(";") >= first_line.count(","):
-        delimiter = ";"
-
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    try:
-        raw_header = next(reader)
-    except StopIteration:
-        return []
-
-    header = []
-    for idx, cell in enumerate(raw_header):
-        name = (str(cell or "").strip() or f"column_{idx + 1}").lstrip("\ufeff")
-        header.append(name)
-
-    rows: List[Dict[str, Any]] = []
-    resolved_limit = max(1, int(max_rows))
-    for record in reader:
-        if len(rows) >= resolved_limit:
-            break
-        if not record:
-            continue
-        if not any(str(cell or "").strip() for cell in record):
-            continue
-        row: Dict[str, Any] = {}
-        for idx, key in enumerate(header):
-            row[key] = str(record[idx]).strip() if idx < len(record) else ""
-        rows.append(row)
-    return rows
-
-
-def _parse_excel_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    try:
-        import pandas as pd
-        from io import BytesIO
-
-        frame = pd.read_excel(BytesIO(raw_bytes))
-        resolved_limit = max(1, int(max_rows))
-        return frame.fillna("").to_dict(orient="records")[:resolved_limit]
-    except (ImportError, ValueError, TypeError, OSError):
-        return []
-
-
-def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
-    try:
-        payload = json.loads(raw_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
-        text = raw_bytes.decode("utf-8", errors="replace")
-        rows: List[Dict[str, Any]] = []
-        resolved_limit = max(1, int(max_rows))
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                rows.append(item)
-            if len(rows) >= resolved_limit:
-                break
-        return rows
-    if isinstance(payload, dict):
-        rows = payload.get("rows") or payload.get("data")
-        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-            return rows[: max(1, int(max_rows))]
-        if isinstance(rows, list) and rows and isinstance(rows[0], list):
-            columns = _extract_schema_columns(payload)
-            output = []
-            resolved_limit = max(1, int(max_rows))
-            for row in rows[:resolved_limit]:
-                output.append({columns[idx] if idx < len(columns) else f"col_{idx}": value for idx, value in enumerate(row)})
-            return output
-    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        return payload[: max(1, int(max_rows))]
-    return []
 
 
 def _infer_column_types(table: PipelineTable) -> Dict[str, str]:

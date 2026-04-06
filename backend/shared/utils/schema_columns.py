@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 def extract_schema_columns(
@@ -139,3 +139,24 @@ def extract_schema_type_map(
             value = normalizer(value)
         output[name] = value
     return output
+
+
+def extract_schema_columns_and_type_map(
+    schema: Any,
+    *,
+    strip_bom: bool = False,
+    dedupe: bool = False,
+    normalizer: Optional[Callable[[Any], Any]] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
+    columns = extract_schema_column_names(
+        schema,
+        strip_bom=strip_bom,
+        dedupe=dedupe,
+    )
+    type_map = extract_schema_type_map(
+        schema,
+        strip_bom=strip_bom,
+        dedupe=dedupe,
+        normalizer=normalizer,
+    )
+    return columns, type_map

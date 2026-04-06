@@ -272,7 +272,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
                 logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
         await super()._on_success(payload=payload, result=result, duration_s=duration_s)
 
-    async def _on_retry_scheduled(
+    async def _after_retry_scheduled(  # type: ignore[override]
         self,
         *,
         payload: EventEnvelope,
@@ -294,7 +294,7 @@ class ConnectorSyncWorker(StrictHeartbeatEventEnvelopeKafkaWorker[Optional[str]]
         except Exception as exc:
             logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
-    async def _on_terminal_failure(
+    async def _after_terminal_failure(  # type: ignore[override]
         self,
         *,
         payload: EventEnvelope,

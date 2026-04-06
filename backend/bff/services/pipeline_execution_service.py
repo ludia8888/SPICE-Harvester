@@ -43,6 +43,12 @@ from bff.services.pipeline_execution_requests import (
     _PromotedOutputMaterializationContext,
     _PromoteOutputSelection,
 )
+from bff.services.pipeline_execution_shared import (
+    _build_ontology_ref,
+    _extract_deploy_dependencies_raw,
+    _parse_deploy_schedule_fields,
+    _parse_optional_bool,
+)
 from bff.services import pipeline_execution_deploy as _deploy_exec
 from bff.services.pipeline_execution_queue import publish_build_pipeline_job, publish_preview_pipeline_job
 from bff.services.ontology_occ_guard_service import (
@@ -55,12 +61,11 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode, classified_http_exception
 from shared.models.lineage_edge_types import EDGE_PIPELINE_OUTPUT_STORED
 from shared.models.pipeline_job import PipelineJob
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline.pipeline_profiler import compute_column_stats
-from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.pipeline.dataset_output_semantics import resolve_dataset_write_policy
 from shared.services.pipeline.output_plugins import OUTPUT_KIND_DATASET, normalize_output_kind
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -79,24 +84,6 @@ from shared.observability.tracing import trace_external_call
 logger = logging.getLogger(__name__)
 
 _ensure_dataset_key_spec_alignment = _deploy_exec._ensure_dataset_key_spec_alignment
-
-
-def _build_ontology_ref(branch: str) -> str:
-    resolved = str(branch or "").strip() or "main"
-    return f"branch:{resolved}"
-
-
-def _parse_optional_bool(value: Any) -> Optional[bool]:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "y", "on"}:
-        return True
-    if text in {"0", "false", "no", "n", "off"}:
-        return False
-    return None
 
 
 def _resolve_output_contract_from_definition(
@@ -162,28 +149,6 @@ def _resolve_output_contract_from_definition(
         "output_name": resolved_output_name,
         "node_id": resolved_node_id,
     }
-
-
-def _extract_deploy_dependencies_raw(
-    *,
-    sanitized: Dict[str, Any],
-    definition_json: Optional[Dict[str, Any]],
-) -> Any:
-    return _deploy_exec._extract_deploy_dependencies_raw(
-        sanitized=sanitized,
-        definition_json=definition_json,
-    )
-
-
-def _parse_deploy_schedule_fields(
-    *,
-    sanitized: Dict[str, Any],
-    output: Dict[str, Any],
-) -> Tuple[Optional[int], Optional[str]]:
-    return _deploy_exec._parse_deploy_schedule_fields(
-        sanitized=sanitized,
-        output=output,
-    )
 
 
 def _parse_deploy_request_payload(*, sanitized: Dict[str, Any]) -> _DeployRequestPayload:

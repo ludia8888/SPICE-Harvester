@@ -23,7 +23,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from pydantic import BaseModel, Field
 
 from bff.routers.registry_deps import get_agent_session_registry
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.agent_session_registry import AgentSessionRegistry
 from shared.utils.uuid_utils import safe_uuid as _safe_uuid

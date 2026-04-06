@@ -7,7 +7,7 @@ import httpx
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 
-from shared.foundry.errors import foundry_error
+from shared.foundry.errors import foundry_error as _foundry_error
 from shared.errors.infra_errors import RegistryUnavailableError
 from shared.security.database_access import DatabaseAccessRegistryUnavailableError
 from shared.security.input_sanitizer import SecurityViolationError
@@ -50,23 +50,6 @@ _ONTOLOGY_HANDLED_EXCEPTIONS = (
     OSError,
     AssertionError,
 )
-
-
-def _foundry_error(
-    status_code: int,
-    *,
-    error_code: str,
-    error_name: str,
-    parameters: Dict[str, Any] | None = None,
-) -> JSONResponse:
-    return foundry_error(
-        int(status_code),
-        error_code=error_code,
-        error_name=error_name,
-        parameters=parameters or {},
-    )
-
-
 def _passthrough_upstream_error_payload(exc: httpx.HTTPStatusError) -> JSONResponse | None:
     response = exc.response
     if response is None:

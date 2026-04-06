@@ -14,20 +14,24 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from shared.errors.error_types import ErrorCode, classified_http_exception
 
 from bff.dependencies import OMSClientDep
+from bff.routers.ontology_read_common import (
+    _extract_ontology_properties,
+    _extract_resource,
+    _extract_resources,
+    _localized_text,
+    _unwrap_data,
+)
 from bff.routers.object_types_deps import get_dataset_registry, get_objectify_registry
 from bff.schemas.object_types_requests import ObjectTypeContractRequest, ObjectTypeContractUpdate
 from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services import object_type_contract_service
 from bff.services.oms_client import OMSClient
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.security.input_sanitizer import validate_db_name
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.objectify_registry import ObjectifyRegistry
 from shared.utils.key_spec import derive_key_spec_from_properties, normalize_key_spec
-from shared.utils.language import first_localized_text
-from shared.utils.ontology_fields import list_ontology_properties
-from shared.utils.payload_utils import extract_payload_object, extract_payload_rows, unwrap_data_payload
 
 logger = logging.getLogger(__name__)
 
@@ -43,26 +47,6 @@ async def _require_domain_role(request: Request, *, db_name: str) -> None:
         required_roles=DOMAIN_MODEL_ROLES,
         enforce_fn=enforce_database_role,
     )
-
-
-def _unwrap_data(payload: Any) -> Dict[str, Any]:
-    return unwrap_data_payload(payload)
-
-
-def _extract_resources(payload: Any) -> List[Dict[str, Any]]:
-    return extract_payload_rows(payload, key="resources")
-
-
-def _extract_resource(payload: Any) -> Dict[str, Any]:
-    return extract_payload_object(payload)
-
-
-def _localized_text(value: Any) -> Optional[str]:
-    return first_localized_text(value)
-
-
-def _extract_ontology_properties(payload: Any) -> List[Dict[str, Any]]:
-    return list_ontology_properties(payload)
 
 
 def _normalize_foundry_data_type(value: Any) -> Optional[str]:

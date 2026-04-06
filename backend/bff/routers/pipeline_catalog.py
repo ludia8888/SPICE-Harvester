@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from bff.routers.pipeline_deps import get_dataset_registry, get_pipeline_registry
 from bff.services import pipeline_catalog_service
 from shared.dependencies.providers import AuditLogStoreDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.services.registries.dataset_registry import DatasetRegistry
 from shared.services.registries.pipeline_registry import PipelineRegistry

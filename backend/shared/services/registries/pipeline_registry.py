@@ -416,9 +416,6 @@ class PipelineRegistry(PostgresSchemaRegistry):
             allow_runtime_ddl_bootstrap=allow_runtime_ddl_bootstrap,
         )
 
-    def _required_tables(self) -> tuple[str, ...]:
-        return self._REQUIRED_TABLES
-
     async def _get_lakefs_credentials(
         self,
         *,

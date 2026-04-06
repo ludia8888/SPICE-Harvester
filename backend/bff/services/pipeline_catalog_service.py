@@ -29,7 +29,7 @@ from bff.routers.pipeline_shared import (
 from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.input_validation_service import enforce_db_scope_or_403
 from shared.config.app_config import AppConfig
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.pipeline.pipeline_scheduler import _is_valid_cron_expression

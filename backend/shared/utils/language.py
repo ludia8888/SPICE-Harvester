@@ -283,6 +283,43 @@ def first_localized_text(value: Any, *, preferred_langs: Sequence[str] = ("en", 
     return next(iter(mapping.values()), None)
 
 
+def localized_text_to_string(
+    value: Any,
+    *,
+    lang: Optional[str] = None,
+    preferred_langs: Sequence[str] = ("en", "ko"),
+) -> str:
+    """
+    Normalize LocalizedText-like input into one representative string.
+
+    - If ``lang`` is provided, prefer that language and its fallbacks.
+    - Otherwise prefer ``preferred_langs`` in order, then any remaining text.
+    - Returns an empty string when no meaningful text is available.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+
+    mapping = coerce_localized_text(value)
+    if not mapping:
+        try:
+            return str(value).strip() if value is not None else ""
+        except Exception:
+            logging.getLogger(__name__).warning("Exception fallback at shared/utils/language.py:293", exc_info=True)
+            return ""
+
+    if lang:
+        return select_localized_text(mapping, lang=lang)
+
+    for preferred in preferred_langs:
+        normalized = normalize_language(preferred)
+        candidate = mapping.get(normalized)
+        if candidate:
+            return candidate
+    return next(iter(mapping.values()), "")
+
+
 class MultilingualText:
     """
     Utility class for handling multilingual text.

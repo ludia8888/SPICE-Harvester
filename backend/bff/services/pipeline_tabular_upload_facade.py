@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 import bff.routers.pipeline_datasets_ops as ops
 from bff.services.pipeline_dataset_upload_context import _DatasetUploadContext, _build_dataset_upload_response
 from bff.services.pipeline_dataset_upload_service import TabularDatasetUploadInput, upload_tabular_dataset
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_external_call
 
 

@@ -22,9 +22,10 @@ from abc import ABC, abstractmethod
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Deque, Dict, Generic, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Deque, Dict, Generic, Optional, TypeVar, cast
 
 from confluent_kafka import KafkaError, TopicPartition
+from pydantic import BaseModel
 
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
@@ -75,6 +76,21 @@ class ParseErrorContext:
     payload_obj: Optional[Dict[str, Any]]
     fallback_metadata: Optional[Dict[str, Any]]
     cause: Exception
+
+
+@dataclass(frozen=True)
+class FailureLogContext:
+    message: str
+    args: tuple[Any, ...]
+
+
+@dataclass
+class CommandEnvelopePayload:
+    command: Dict[str, Any]
+    envelope_metadata: Optional[Dict[str, Any]] = None
+    envelope: Optional[EventEnvelope] = None
+    raw_text: Optional[str] = None
+    stage: str = "process_command"
 
 
 class CommandParseError(ValueError):
@@ -302,44 +318,115 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
             fallback_metadata=fallback_metadata,
         )
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:
-        if not bool(getattr(self, "parse_error_enable_dlq", False)):
-            logger.exception("Invalid Kafka payload; skipping: %s", error)
-            return
+    async def _before_parse_error_handling(
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        context: ParseErrorContext,
+    ) -> None:
+        return
 
-        async def _send(
-            stage: str,
-            cause_text: str,
-            payload_text: Optional[str],
-            payload_obj: Optional[Dict[str, Any]],
-            kafka_headers: Optional[Any],
-            fallback_metadata: Optional[Dict[str, Any]],
-        ) -> None:
-            await self._send_parse_error_via_publish_to_dlq(
+    def _resolve_parse_error_fallback_metadata(
+        self,
+        *,
+        raw_payload: Optional[str],
+        context: ParseErrorContext,
+    ) -> Optional[Dict[str, Any]]:
+        if isinstance(context.fallback_metadata, dict):
+            return context.fallback_metadata
+        metadata = self._fallback_metadata_from_raw_payload(raw_payload)
+        if metadata is not None:
+            return metadata
+        return self._fallback_metadata_from_raw_payload(context.payload_text)
+
+    async def _send_parse_error_to_dlq(
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        context: ParseErrorContext,
+        kafka_headers: Optional[Any],
+        fallback_metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        _ = raw_payload
+        await self._send_parse_error_via_publish_to_dlq(
+            msg=msg,
+            stage=context.stage,
+            cause_text=str(context.cause),
+            payload_text=context.payload_text,
+            payload_obj=context.payload_obj,
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata,
+        )
+
+    async def _after_parse_error_dlq_success(
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        context: ParseErrorContext,
+    ) -> None:
+        return
+
+    async def _after_parse_error_dlq_failure(
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        context: ParseErrorContext,
+        dlq_error: Exception,
+    ) -> None:
+        return
+
+    async def _run_parse_error_hook(
+        self,
+        *,
+        hook: Callable[[], Awaitable[None]],
+        warning_message: str,
+        logger_instance: Optional[logging.Logger] = None,
+    ) -> None:
+        log = logger_instance or logger
+        try:
+            await hook()
+        except Exception as exc:
+            log.warning(warning_message, exc, exc_info=True)
+
+    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:
+        context = self._parse_error_context(raw_payload=raw_payload, error=error)
+        invalid_payload_message = str(
+            getattr(self, "parse_error_invalid_payload_message", self.parse_error_invalid_payload_message)
+        )
+        await self._run_parse_error_hook(
+            hook=lambda: self._before_parse_error_handling(
                 msg=msg,
-                stage=stage,
-                cause_text=cause_text,
-                payload_text=payload_text,
-                payload_obj=payload_obj,
-                kafka_headers=kafka_headers,
-                fallback_metadata=fallback_metadata,
-            )
+                raw_payload=raw_payload,
+                error=error,
+                context=context,
+            ),
+            warning_message="Parse error pre-handle hook failed: %s",
+            logger_instance=logger,
+        )
+        if not bool(getattr(self, "parse_error_enable_dlq", False)):
+            logger.exception(invalid_payload_message, context.cause)
+            return
 
         await self._publish_parse_error_to_dlq(
             msg=msg,
             raw_payload=raw_payload,
             error=error,
-            dlq_sender=_send,
             publish_failure_message=str(
                 getattr(self, "parse_error_publish_failure_message", self.parse_error_publish_failure_message)
             ),
-            invalid_payload_message=str(
-                getattr(self, "parse_error_invalid_payload_message", self.parse_error_invalid_payload_message)
-            ),
+            invalid_payload_message=invalid_payload_message,
             raise_on_publish_failure=bool(
                 getattr(self, "parse_error_raise_on_publish_failure", self.parse_error_raise_on_publish_failure)
             ),
             logger_instance=logger,
+            context=context,
         )
 
     def _parse_error_context(self, *, raw_payload: Optional[str], error: Exception) -> ParseErrorContext:
@@ -388,18 +475,45 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         msg: Any,
         raw_payload: Optional[str],
         error: Exception,
-        dlq_sender: Callable[
+        dlq_sender: Optional[Callable[
             [str, str, Optional[str], Optional[Dict[str, Any]], Optional[Any], Optional[Dict[str, Any]]],
             Awaitable[None],
-        ],
+        ]] = None,
         publish_failure_message: str,
         invalid_payload_message: str,
         raise_on_publish_failure: bool = True,
         logger_instance: Optional[logging.Logger] = None,
-    ) -> None:
+        context: Optional[ParseErrorContext] = None,
+    ) -> bool:
         log = logger_instance or logger
-        context = self._parse_error_context(raw_payload=raw_payload, error=error)
+        context = context or self._parse_error_context(raw_payload=raw_payload, error=error)
         kafka_headers = self._safe_message_headers(msg)
+        fallback_metadata = self._resolve_parse_error_fallback_metadata(
+            raw_payload=raw_payload,
+            context=context,
+        )
+
+        if dlq_sender is None:
+            async def _default_sender(
+                stage: str,
+                cause_text: str,
+                payload_text: Optional[str],
+                payload_obj: Optional[Dict[str, Any]],
+                kafka_headers_arg: Optional[Any],
+                fallback_metadata_arg: Optional[Dict[str, Any]],
+            ) -> None:
+                _ = stage, cause_text, payload_text, payload_obj
+                await self._send_parse_error_to_dlq(
+                    msg=msg,
+                    raw_payload=raw_payload,
+                    context=context,
+                    kafka_headers=kafka_headers_arg,
+                    fallback_metadata=fallback_metadata_arg,
+                )
+
+            dlq_sender = _default_sender
+
+        sent = False
         try:
             await dlq_sender(
                 context.stage,
@@ -407,13 +521,37 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
                 context.payload_text,
                 context.payload_obj,
                 kafka_headers,
-                context.fallback_metadata,
+                fallback_metadata,
             )
         except Exception as dlq_err:
+            await self._run_parse_error_hook(
+                hook=lambda: self._after_parse_error_dlq_failure(
+                    msg=msg,
+                    raw_payload=raw_payload,
+                    error=error,
+                    context=context,
+                    dlq_error=dlq_err,
+                ),
+                warning_message="Parse error DLQ failure hook failed: %s",
+                logger_instance=log,
+            )
             log.error(publish_failure_message, dlq_err, exc_info=True)
             if raise_on_publish_failure:
                 raise
+        else:
+            sent = True
+            await self._run_parse_error_hook(
+                hook=lambda: self._after_parse_error_dlq_success(
+                    msg=msg,
+                    raw_payload=raw_payload,
+                    error=error,
+                    context=context,
+                ),
+                warning_message="Parse error DLQ success hook failed: %s",
+                logger_instance=log,
+            )
         log.exception(invalid_payload_message, context.cause)
+        return sent
 
     def _normalize_dlq_publish_inputs(
         self,
@@ -631,7 +769,22 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         backoff_s: int,
         retryable: bool,
     ) -> None:
-        return
+        await self._after_retry_scheduled(
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            backoff_s=backoff_s,
+            retryable=retryable,
+        )
+        log_context = self._retry_log_context(
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            backoff_s=backoff_s,
+            retryable=retryable,
+        )
+        if log_context is not None:
+            logger.warning(log_context.message, *log_context.args)
 
     async def _on_terminal_failure(
         self,
@@ -641,7 +794,62 @@ class ProcessedEventKafkaWorker(Generic[PayloadT, ResultT], ABC):
         attempt_count: int,
         retryable: bool,
     ) -> None:
+        await self._after_terminal_failure(
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            retryable=retryable,
+        )
+        log_context = self._terminal_failure_log_context(
+            payload=payload,
+            error=error,
+            attempt_count=attempt_count,
+            retryable=retryable,
+        )
+        if log_context is not None:
+            logger.error(log_context.message, *log_context.args)
+
+    async def _after_retry_scheduled(
+        self,
+        *,
+        payload: PayloadT,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> None:
         return
+
+    async def _after_terminal_failure(
+        self,
+        *,
+        payload: PayloadT,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> None:
+        return
+
+    def _retry_log_context(
+        self,
+        *,
+        payload: PayloadT,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> FailureLogContext | None:
+        return None
+
+    def _terminal_failure_log_context(
+        self,
+        *,
+        payload: PayloadT,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> FailureLogContext | None:
+        return None
 
     async def _mark_retryable_failure(
         self,
@@ -1452,6 +1660,328 @@ class StrictHeartbeatKafkaWorker(
     ABC,
 ):
     """ProcessedEventKafkaWorker with strict heartbeat behavior."""
+
+
+CommandPayloadT = TypeVar("CommandPayloadT", bound=CommandEnvelopePayload)
+
+
+class CommandEnvelopeKafkaWorker(ProcessedEventKafkaWorker[CommandPayloadT, ResultT], ABC):
+    """
+    Specialization of ProcessedEventKafkaWorker for command envelopes.
+
+    Many workers consume the same transport contract:
+    Kafka bytes -> UTF-8 JSON -> EventEnvelope(kind=command) -> command dict.
+    This class keeps that transport boilerplate in one place so concrete workers
+    only own their domain behavior.
+    """
+
+    expected_envelope_kind: Optional[str] = "command"
+    command_payload_stage: str = "process_command"
+    command_payload_cls: type[CommandEnvelopePayload] = CommandEnvelopePayload
+    command_parse_error_cls: type[CommandParseError] = CommandParseError
+
+    def _raise_command_parse_error(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        fallback_metadata: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        raise self.command_parse_error_cls(
+            stage=stage,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            fallback_metadata=fallback_metadata,
+            cause=cause,
+        )
+
+    def _command_from_envelope(self, envelope: EventEnvelope) -> Dict[str, Any]:
+        command = dict(envelope.data or {})
+        if command.get("aggregate_id") and command.get("aggregate_id") != envelope.aggregate_id:
+            raise ValueError(
+                f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
+                f"envelope.aggregate_id={envelope.aggregate_id}"
+            )
+        command["aggregate_id"] = envelope.aggregate_id
+        command.setdefault("event_id", envelope.event_id)
+        command.setdefault("sequence_number", envelope.sequence_number)
+        return command
+
+    def _build_command_payload(
+        self,
+        *,
+        envelope: EventEnvelope,
+        command: Dict[str, Any],
+        raw_text: str,
+        fallback_metadata: Optional[Dict[str, Any]],
+    ) -> CommandPayloadT:
+        payload_cls = getattr(self, "command_payload_cls", CommandEnvelopePayload)
+        stage = str(getattr(self, "command_payload_stage", "process_command") or "process_command")
+        return cast(
+            CommandPayloadT,
+            payload_cls(
+                command=command,
+                envelope_metadata=fallback_metadata,
+                envelope=envelope,
+                raw_text=raw_text,
+                stage=stage,
+            ),
+        )
+
+    def _parse_payload(self, payload: Any) -> CommandPayloadT:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            self._raise_command_parse_error(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=TypeError("Kafka payload must be bytes"),
+            )
+
+        try:
+            raw_text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            self._raise_command_parse_error(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            )
+
+        raw_message: Any
+        try:
+            raw_message = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            self._raise_command_parse_error(
+                stage="parse_json",
+                payload_text=raw_text,
+                payload_obj=None,
+                fallback_metadata=None,
+                cause=exc,
+            )
+
+        fallback_metadata_obj = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+        fallback_metadata = dict(fallback_metadata_obj) if isinstance(fallback_metadata_obj, dict) else None
+
+        try:
+            envelope = EventEnvelope.model_validate(raw_message if isinstance(raw_message, dict) else {})
+        except Exception as exc:
+            payload_obj = raw_message if isinstance(raw_message, dict) else None
+            self._raise_command_parse_error(
+                stage="parse_envelope",
+                payload_text=raw_text,
+                payload_obj=payload_obj,
+                fallback_metadata=fallback_metadata,
+                cause=exc,
+            )
+
+        expected_kind = str(getattr(self, "expected_envelope_kind", "") or "").strip()
+        metadata = envelope.metadata if isinstance(envelope.metadata, dict) else fallback_metadata
+        metadata_final = dict(metadata) if isinstance(metadata, dict) else None
+        if expected_kind:
+            kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
+            if kind != expected_kind:
+                self._raise_command_parse_error(
+                    stage="validate_envelope",
+                    payload_text=raw_text,
+                    payload_obj=envelope.model_dump(mode="json"),
+                    fallback_metadata=metadata_final,
+                    cause=ValueError(f"unexpected_envelope_kind:{kind}"),
+                )
+
+        try:
+            command = self._command_from_envelope(envelope)
+        except Exception as exc:
+            self._raise_command_parse_error(
+                stage="validate_envelope",
+                payload_text=raw_text,
+                payload_obj=envelope.model_dump(mode="json"),
+                fallback_metadata=metadata_final,
+                cause=exc,
+            )
+
+        return self._build_command_payload(
+            envelope=envelope,
+            command=command,
+            raw_text=raw_text,
+            fallback_metadata=metadata_final,
+        )
+
+    def _fallback_metadata(self, payload: CommandPayloadT) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        metadata = getattr(payload, "envelope_metadata", None)
+        return metadata if isinstance(metadata, dict) else None
+
+    def _registry_key(self, payload: CommandPayloadT) -> RegistryKey:  # type: ignore[override]
+        command = payload.command if isinstance(payload.command, dict) else {}
+
+        registry_event_id = command.get("event_id") or command.get("command_id")
+        registry_event_id = str(registry_event_id or "").strip()
+        if not registry_event_id:
+            raise ValueError("event_id is required")
+
+        aggregate_id = command.get("aggregate_id")
+        aggregate_id = str(aggregate_id).strip() if aggregate_id is not None else None
+        if not aggregate_id:
+            aggregate_id = None
+
+        sequence_number = command.get("sequence_number")
+        try:
+            seq_int = int(sequence_number) if sequence_number is not None else None
+        except (TypeError, ValueError):
+            seq_int = None
+
+        return RegistryKey(event_id=registry_event_id, aggregate_id=aggregate_id, sequence_number=seq_int)
+
+
+class StrictCommandEnvelopeKafkaWorker(
+    StrictHeartbeatPolicyMixin,
+    CommandEnvelopeKafkaWorker[CommandPayloadT, ResultT],
+    ABC,
+):
+    """CommandEnvelopeKafkaWorker with strict heartbeat behavior."""
+
+
+ModelPayloadT = TypeVar("ModelPayloadT", bound=BaseModel)
+
+
+class JsonModelKafkaWorker(ProcessedEventKafkaWorker[ModelPayloadT, ResultT], ABC):
+    """
+    Specialization of ProcessedEventKafkaWorker for plain JSON model payloads.
+
+    This is useful for workers like pipeline/objectify that do not consume
+    EventEnvelope, but still share the same transport contract:
+    Kafka bytes -> UTF-8 JSON -> validated Pydantic model.
+    """
+
+    json_model_cls: type[BaseModel] = BaseModel
+    json_model_parse_error_cls: type[CommandParseError] = CommandParseError
+    registry_event_id_field: str = "job_id"
+    registry_aggregate_id_field: Optional[str] = None
+    registry_sequence_field: Optional[str] = None
+    json_model_metadata_fields: tuple[str, ...] = ()
+    json_model_span_name: Optional[str] = None
+    json_model_metric_event_name: Optional[str] = None
+    json_model_span_attribute_fields: tuple[tuple[str, str], ...] = ()
+
+    def _raise_json_model_parse_error(
+        self,
+        *,
+        stage: str,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        cause: Exception,
+    ) -> None:
+        raise self.json_model_parse_error_cls(
+            stage=stage,
+            payload_text=payload_text,
+            payload_obj=payload_obj,
+            fallback_metadata=None,
+            cause=cause,
+        )
+
+    def _parse_payload(self, payload: Any) -> ModelPayloadT:  # type: ignore[override]
+        if not isinstance(payload, (bytes, bytearray)):
+            self._raise_json_model_parse_error(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                cause=TypeError("Kafka payload must be bytes"),
+            )
+
+        try:
+            raw_text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            self._raise_json_model_parse_error(
+                stage="decode",
+                payload_text=None,
+                payload_obj=None,
+                cause=exc,
+            )
+
+        raw_obj: Any
+        try:
+            raw_obj = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            self._raise_json_model_parse_error(
+                stage="json",
+                payload_text=raw_text,
+                payload_obj=None,
+                cause=exc,
+            )
+
+        try:
+            return cast(ModelPayloadT, self.json_model_cls.model_validate(raw_obj))
+        except Exception as exc:
+            self._raise_json_model_parse_error(
+                stage="validate",
+                payload_text=raw_text,
+                payload_obj=raw_obj if isinstance(raw_obj, dict) else None,
+                cause=exc,
+            )
+
+    def _registry_key(self, payload: ModelPayloadT) -> RegistryKey:  # type: ignore[override]
+        event_id_value = getattr(payload, str(self.registry_event_id_field or "").strip() or "job_id", None)
+        event_id = str(event_id_value or "").strip()
+        if not event_id:
+            raise ValueError("event_id is required")
+
+        aggregate_field = str(getattr(self, "registry_aggregate_id_field", None) or "").strip()
+        aggregate_value = getattr(payload, aggregate_field, None) if aggregate_field else None
+        aggregate_id = str(aggregate_value).strip() if aggregate_value is not None else None
+        if not aggregate_id:
+            aggregate_id = None
+
+        sequence_field = str(getattr(self, "registry_sequence_field", None) or "").strip()
+        sequence_value = getattr(payload, sequence_field, None) if sequence_field else None
+        try:
+            sequence_number = int(sequence_value) if sequence_value is not None else None
+        except (TypeError, ValueError):
+            sequence_number = None
+
+        return RegistryKey(
+            event_id=event_id,
+            aggregate_id=aggregate_id,
+            sequence_number=sequence_number,
+        )
+
+    def _fallback_metadata(self, payload: ModelPayloadT) -> Optional[Dict[str, Any]]:  # type: ignore[override]
+        fields = tuple(getattr(self, "json_model_metadata_fields", ()) or ())
+        if not fields:
+            return None
+        metadata: Dict[str, Any] = {}
+        for field_name in fields:
+            key = str(field_name or "").strip()
+            if not key:
+                continue
+            metadata[key] = getattr(payload, key, None)
+        return metadata
+
+    def _span_name(self, *, payload: ModelPayloadT) -> str:
+        _ = payload
+        configured = str(getattr(self, "json_model_span_name", "") or "").strip()
+        if configured:
+            return configured
+        name = self._service_name() or self.__class__.__name__
+        return f"{name}.process_message"
+
+    def _span_attributes(self, *, msg: Any, payload: ModelPayloadT, registry_key: RegistryKey) -> Dict[str, Any]:
+        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
+        mappings = tuple(getattr(self, "json_model_span_attribute_fields", ()) or ())
+        for payload_field, attr_name in mappings:
+            payload_key = str(payload_field or "").strip()
+            span_key = str(attr_name or "").strip()
+            if not payload_key or not span_key:
+                continue
+            attrs[span_key] = getattr(payload, payload_key, None)
+        return attrs
+
+    def _metric_event_name(self, *, payload: ModelPayloadT) -> Optional[str]:
+        _ = payload
+        configured = str(getattr(self, "json_model_metric_event_name", "") or "").strip()
+        return configured or None
 
 
 class EventEnvelopeKafkaWorker(ProcessedEventKafkaWorker[EventEnvelope, ResultT], ABC):

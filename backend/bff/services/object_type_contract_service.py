@@ -22,7 +22,7 @@ from bff.services.ontology_occ_guard_service import (
 )
 from bff.services.objectify_mapping_spec_service import create_mapping_spec as create_mapping_spec_service
 from bff.routers.objectify_job_ops import enqueue_objectify_job_for_mapping_spec
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.dataset_registry import DatasetRegistry

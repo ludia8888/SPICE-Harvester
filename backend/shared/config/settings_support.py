@@ -3,13 +3,13 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from shared.utils.bool_utils import parse_boolish
+
 
 def _is_docker_environment() -> bool:
-    docker_env = (os.getenv("DOCKER_CONTAINER") or "").strip().lower()
-    if docker_env in ("false", "0", "no", "off"):
-        return False
-    if docker_env in ("true", "1", "yes", "on"):
-        return True
+    parsed = parse_boolish(os.getenv("DOCKER_CONTAINER"))
+    if parsed is not None:
+        return parsed
     return os.path.exists("/.dockerenv")
 
 
@@ -24,14 +24,7 @@ def _clamp_int(raw: Any, *, default: int, min_value: int = 0, max_value: int = 1
 
 
 def _parse_boolish(raw: Any) -> Optional[bool]:
-    if raw is None:
-        return None
-    value = str(raw).strip().lower()
-    if value in {"true", "1", "yes", "on"}:
-        return True
-    if value in {"false", "0", "no", "off"}:
-        return False
-    return None
+    return parse_boolish(raw)
 
 
 def _strip_optional_text(raw: Any) -> Optional[str]:

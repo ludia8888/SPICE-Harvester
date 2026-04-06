@@ -7,7 +7,6 @@ to centralize connector-to-dataset materialization (Facade pattern).
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,7 +29,13 @@ from data_connector.adapters.runtime_credentials import resolve_source_runtime_c
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
-from shared.services.core.connector_ingest_service import ConnectorIngestService
+from shared.services.core.connector_ingest_service import (
+    ConnectorIngestService,
+    _apply_append_mode,
+    _apply_update_mode,
+    _parse_csv_bytes,
+    _row_hash,
+)
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue
 from shared.services.registries.connector_registry import ConnectorMapping, ConnectorRegistry, ConnectorSource
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -45,137 +50,6 @@ from shared.utils.s3_uri import build_s3_uri
 from shared.observability.tracing import trace_external_call
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Sync mode helpers — APPEND / UPDATE
-# ---------------------------------------------------------------------------
-
-
-def _row_hash(row: List[Any]) -> str:
-    """Deterministic hash of a row for deduplication."""
-    return hashlib.sha256("|".join(str(v) for v in row).encode("utf-8")).hexdigest()
-
-
-def _parse_csv_bytes(data: bytes) -> Tuple[List[str], List[List[str]]]:
-    """Parse CSV bytes into (columns, rows)."""
-    text = data.decode("utf-8", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    columns: List[str] = []
-    rows: List[List[str]] = []
-    for i, row in enumerate(reader):
-        if i == 0:
-            columns = row
-        else:
-            rows.append(row)
-    return columns, rows
-
-
-def _align_row_to_columns(
-    row: List[Any],
-    *,
-    source_columns: List[str],
-    target_columns: List[str],
-) -> List[Any]:
-    """Project a row from source column order into target column order."""
-    if not target_columns:
-        return list(row)
-    index_by_name = {name: idx for idx, name in enumerate(source_columns)}
-    aligned: List[Any] = []
-    for name in target_columns:
-        idx = index_by_name.get(name)
-        if idx is None or idx >= len(row):
-            aligned.append(None)
-        else:
-            aligned.append(row[idx])
-    return aligned
-
-
-def _align_rows_to_columns(
-    rows: List[List[Any]],
-    *,
-    source_columns: List[str],
-    target_columns: List[str],
-) -> List[List[Any]]:
-    return [
-        _align_row_to_columns(row, source_columns=source_columns, target_columns=target_columns)
-        for row in rows
-    ]
-
-
-def _apply_append_mode(
-    existing_columns: List[str],
-    existing_rows: List[List[Any]],
-    new_columns: List[str],
-    new_rows: List[List[Any]],
-) -> Tuple[List[str], List[List[Any]]]:
-    """APPEND mode: add only new rows (by hash) that don't exist in the current dataset."""
-    # Use new_columns as canonical if existing is empty
-    merged_columns = existing_columns if existing_columns else new_columns
-
-    normalized_new_rows = (
-        _align_rows_to_columns(new_rows, source_columns=new_columns, target_columns=merged_columns)
-        if merged_columns and new_columns and merged_columns != new_columns
-        else new_rows
-    )
-
-    # Build hash set of existing rows for O(1) lookup
-    existing_hashes = {_row_hash(row) for row in existing_rows}
-
-    appended = list(existing_rows)
-    for row in normalized_new_rows:
-        h = _row_hash(row)
-        if h not in existing_hashes:
-            appended.append(row)
-            existing_hashes.add(h)
-
-    return merged_columns, appended
-
-
-def _apply_update_mode(
-    existing_columns: List[str],
-    existing_rows: List[List[Any]],
-    new_columns: List[str],
-    new_rows: List[List[Any]],
-    primary_key_column: Optional[str] = None,
-) -> Tuple[List[str], List[List[Any]]]:
-    """UPDATE mode: merge/upsert rows by primary key column.
-
-    If primary_key_column is not specified, the first column is used as the PK.
-    Existing rows are updated if the PK matches; new rows are appended.
-    """
-    merged_columns = existing_columns if existing_columns else new_columns
-
-    normalized_new_rows = (
-        _align_rows_to_columns(new_rows, source_columns=new_columns, target_columns=merged_columns)
-        if merged_columns and new_columns and merged_columns != new_columns
-        else new_rows
-    )
-
-    # Resolve PK column index
-    pk_col = primary_key_column or (merged_columns[0] if merged_columns else None)
-    pk_index = 0
-    if pk_col and pk_col in merged_columns:
-        pk_index = merged_columns.index(pk_col)
-
-    # Build index of existing rows by PK value
-    pk_map: Dict[str, int] = {}
-    merged_rows = list(existing_rows)
-    for idx, row in enumerate(merged_rows):
-        pk_value = str(row[pk_index]) if pk_index < len(row) else ""
-        pk_map[pk_value] = idx
-
-    for row in normalized_new_rows:
-        pk_value = str(row[pk_index]) if pk_index < len(row) else ""
-        if pk_value in pk_map:
-            # Update existing row
-            merged_rows[pk_map[pk_value]] = row
-        else:
-            # Insert new row
-            pk_map[pk_value] = len(merged_rows)
-            merged_rows.append(row)
-
-    return merged_columns, merged_rows
 
 
 async def _load_existing_csv(

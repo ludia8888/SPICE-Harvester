@@ -11,12 +11,13 @@ removed (Palantir Foundry style: all columns default to xsd:string).
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from funnel.routers.type_inference_router import router as structure_router
 from funnel.services.structure_patch_store import close_patch_store, initialize_patch_store
 from shared.config.settings import get_settings
+from shared.models.responses import build_health_data, health_http_status
 from shared.services.core.runtime_status import availability_surface, ensure_runtime_status, get_runtime_status, record_runtime_issue
 from shared.services.storage.redis_service import create_redis_service
 from shared.utils.app_logger import get_logger
@@ -123,13 +124,17 @@ async def health_check(request: Request = None) -> Any:
         container_ready=True,
         runtime_status=get_runtime_status(request.app if request is not None else app),
     )
-    surface["version"] = "0.1.0"
-    surface["description"] = "Sheet structure analysis service"
+    payload = build_health_data(
+        service_name="funnel",
+        version="0.1.0",
+        description="Sheet structure analysis service",
+        availability=surface,
+    )
     if surface["status"] == "ready":
-        return surface
+        return payload
     return JSONResponse(
-        status_code=status.HTTP_200_OK if surface["status"] == "degraded" else status.HTTP_503_SERVICE_UNAVAILABLE,
-        content=surface,
+        status_code=health_http_status(surface["status"]),
+        content=payload,
     )
 
 

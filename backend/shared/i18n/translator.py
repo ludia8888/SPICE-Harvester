@@ -120,6 +120,8 @@ def _translate_known(text: str, *, target_lang: str) -> Optional[str]:
         },
         "인증이 필요합니다": {"en": "Authentication required.", "ko": "인증이 필요합니다"},
         "Authentication required.": {"en": "Authentication required.", "ko": "인증이 필요합니다"},
+        "Service is healthy": {"en": "Service is healthy", "ko": "서비스가 정상입니다."},
+        "Service is healthy.": {"en": "Service is healthy.", "ko": "서비스가 정상입니다."},
         "Service is ready": {"en": "Service is ready.", "ko": "서비스 준비가 완료되었습니다."},
         "Service is ready.": {"en": "Service is ready.", "ko": "서비스 준비가 완료되었습니다."},
         "Service is degraded": {"en": "Service is degraded.", "ko": "서비스가 저하된 상태입니다."},

@@ -8,6 +8,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.settings import get_settings
+from shared.services.registries.dataset_registry_common import require_dataset_registry_pool as _require_pool
 from shared.services.registries.dataset_registry_models import (
     DatasetIngestRequestRecord,
     DatasetIngestTransactionRecord,
@@ -27,14 +28,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _require_pool(registry: "DatasetRegistry") -> Any:
-    if not registry._pool:
-        raise RuntimeError("DatasetRegistry not connected")
-    return registry._pool
-
-
 async def create_ingest_request(
     registry: "DatasetRegistry",
     *,

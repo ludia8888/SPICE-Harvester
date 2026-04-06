@@ -33,7 +33,8 @@ from shared.services.pipeline.pipeline_transform_spec import (
     resolve_stream_join_spec,
 )
 from shared.services.pipeline.pipeline_type_utils import infer_xsd_type_from_values
-from shared.utils.schema_columns import extract_schema_columns
+from shared.services.pipeline.pipeline_sample_utils import extract_sample_rows as _extract_sample_rows
+from shared.utils.schema_columns import extract_schema_columns_and_type_map as _extract_schema_columns
 
 
 @dataclass(frozen=True)
@@ -58,77 +59,6 @@ def _normalize_column_list(raw: Any) -> List[str]:
             if value:
                 output.append(value.lstrip("\ufeff") or value)
     return output
-
-
-def _extract_schema_columns(schema: Any) -> Tuple[List[str], Dict[str, Optional[str]]]:
-    columns: List[str] = []
-    type_map: Dict[str, Optional[str]] = {}
-    for col in extract_schema_columns(schema, strip_bom=True, dedupe=True):
-        name = str(col.get("name") or "").strip()
-        if not name:
-            continue
-        columns.append(name)
-        raw_type = col.get("type")
-        if raw_type:
-            type_map[name] = normalize_schema_type(raw_type)
-    return columns, type_map
-
-
-def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
-    if not isinstance(sample, dict):
-        return []
-    rows = sample.get("rows")
-    if isinstance(rows, list):
-        if rows and isinstance(rows[0], dict):
-            output: List[Dict[str, Any]] = []
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                normalized: Dict[str, Any] = {}
-                for key, value in row.items():
-                    name = (str(key) or "").lstrip("\ufeff") or str(key)
-                    if name in normalized:
-                        base = name
-                        idx = 1
-                        while f"{base}__{idx}" in normalized:
-                            idx += 1
-                        name = f"{base}__{idx}"
-                    normalized[name] = value
-                output.append(normalized)
-            return output
-        columns, _ = _extract_schema_columns(sample)
-        output: List[Dict[str, Any]] = []
-        for row in rows:
-            if not isinstance(row, list):
-                continue
-            output.append(
-                {
-                    (columns[idx] if idx < len(columns) else f"col_{idx}"): value
-                    for idx, value in enumerate(row)
-                }
-            )
-        return output
-    data_rows = sample.get("data")
-    if isinstance(data_rows, list) and data_rows and isinstance(data_rows[0], dict):
-        output: List[Dict[str, Any]] = []
-        for row in data_rows:
-            if not isinstance(row, dict):
-                continue
-            normalized: Dict[str, Any] = {}
-            for key, value in row.items():
-                name = (str(key) or "").lstrip("\ufeff") or str(key)
-                if name in normalized:
-                    base = name
-                    idx = 1
-                    while f"{base}__{idx}" in normalized:
-                        idx += 1
-                    name = f"{base}__{idx}"
-                normalized[name] = value
-            output.append(normalized)
-        return output
-    return []
-
-
 def _output_metadata_text(payload: Dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = payload.get(key)
@@ -162,9 +92,24 @@ def _merge_types(
 
 
 def _schema_for_input(dataset: Any, version: Any) -> SchemaInfo:
-    columns, type_map = _extract_schema_columns(getattr(dataset, "schema_json", None) or {})
-    sample_columns, sample_types = _extract_schema_columns(getattr(version, "sample_json", None) or {})
-    sample_rows = _extract_sample_rows(getattr(version, "sample_json", None) or {})
+    columns, type_map = _extract_schema_columns(
+        getattr(dataset, "schema_json", None) or {},
+        strip_bom=True,
+        dedupe=True,
+        normalizer=normalize_schema_type,
+    )
+    sample_columns, sample_types = _extract_schema_columns(
+        getattr(version, "sample_json", None) or {},
+        strip_bom=True,
+        dedupe=True,
+        normalizer=normalize_schema_type,
+    )
+    sample_rows = _extract_sample_rows(
+        getattr(version, "sample_json", None) or {},
+        strip_bom=True,
+        dedupe_keys=True,
+        columns=sample_columns,
+    )
 
     if not columns:
         columns = sample_columns

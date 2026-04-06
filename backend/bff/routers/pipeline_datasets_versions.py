@@ -17,7 +17,7 @@ from bff.services import pipeline_dataset_version_service
 from shared.config.app_config import AppConfig
 from shared.dependencies.providers import get_lineage_store
 from shared.errors.error_types import ErrorCode, classified_http_exception
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.events.objectify_job_queue import ObjectifyJobQueue

@@ -16,6 +16,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.schemas.ontology_extensions_requests import OntologyResourceRequest
 from bff.services.oms_client import OMSClient
 from bff.services.ontology_occ_guard_service import resolve_expected_head_commit
+from bff.routers.foundry_ontology_v2_common import _default_expected_head_commit
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.observability.tracing import trace_external_call
@@ -25,13 +26,6 @@ logger = logging.getLogger(__name__)
 _SECURITY_VIOLATION_DETAIL = "입력 데이터에 보안 위반이 감지되었습니다"
 
 T = TypeVar("T")
-
-
-def _default_expected_head_commit(branch: str) -> str:
-    normalized = str(branch or "").strip() or "main"
-    if normalized.lower().startswith("branch:"):
-        return normalized
-    return f"branch:{normalized}"
 
 
 async def _call_oms(*, action: str, func: Callable[[], Awaitable[T]]) -> T:

@@ -15,7 +15,7 @@ from bff.routers.pipeline_datasets_ops import (
 from bff.routers.pipeline_deps import get_dataset_registry
 from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.schemas.pipeline_datasets import TabularAnalysisApiResponse
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.observability.tracing import trace_endpoint
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input

@@ -6,6 +6,11 @@ from urllib.parse import quote
 
 import httpx
 
+from shared.utils.mapping_text import (
+    first_mapping_text as _first_text,
+    normalized_text as _text,
+)
+
 
 @dataclass(frozen=True)
 class KafkaAvroSchemaRegistryReference:
@@ -21,22 +26,6 @@ class KafkaAvroSchemaRegistryReference:
     def request_url(self) -> str:
         safe_subject = quote(self.subject, safe="")
         return f"{self.url.rstrip('/')}/subjects/{safe_subject}/versions/{self.version}"
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _first_text(*, keys: tuple[str, ...], sources: tuple[Mapping[str, Any], ...]) -> str:
-    for source in sources:
-        for key in keys:
-            if key in source:
-                value = _text(source.get(key))
-                if value:
-                    return value
-    return ""
-
-
 def _mapping(value: Any) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value

@@ -15,7 +15,7 @@ from shared.errors.error_types import ErrorCode, classified_http_exception
 from bff.routers.objectify_deps import get_dataset_registry, get_objectify_registry, _require_db_role
 from bff.schemas.objectify_requests import TriggerIncrementalRequest
 from shared.models.objectify_job import ObjectifyJob
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.registries.dataset_registry import DatasetRegistry

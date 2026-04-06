@@ -26,19 +26,12 @@ from shared.models.commands import CommandType
 from shared.errors.infra_errors import StorageUnavailableError
 from shared.observability.tracing import trace_storage_operation
 from shared.services.storage.s3_client_config import build_s3_client_config
+from shared.services.storage.s3_error_utils import client_error_code as _client_error_code
 
 if TYPE_CHECKING:
     from shared.config.settings import ApplicationSettings
 
 logger = logging.getLogger(__name__)
-
-
-def _client_error_code(exc: Exception) -> str:
-    if isinstance(exc, ClientError):
-        return str(exc.response.get("Error", {}).get("Code") or "")
-    return ""
-
-
 class StorageService:
     """
     S3/MinIO 스토리지 서비스 - Event Sourcing 지원

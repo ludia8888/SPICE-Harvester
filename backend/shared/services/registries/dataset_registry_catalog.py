@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from shared.services.registries.dataset_registry_get_or_create import get_or_create_record
+from shared.services.registries.dataset_registry_common import require_dataset_registry_pool as _require_pool
 from shared.services.registries.dataset_registry_models import (
     BackingDatasourceRecord,
     BackingDatasourceVersionRecord,
@@ -26,14 +27,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _require_pool(registry: "DatasetRegistry") -> Any:
-    if not registry._pool:
-        raise RuntimeError("DatasetRegistry not connected")
-    return registry._pool
-
-
 async def create_dataset(
     registry: "DatasetRegistry",
     *,

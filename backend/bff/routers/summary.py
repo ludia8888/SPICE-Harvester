@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Query
 
 from shared.dependencies.providers import ElasticsearchServiceDep, RedisServiceDep
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.branch_utils import get_protected_branches
 

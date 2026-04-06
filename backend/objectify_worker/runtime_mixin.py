@@ -12,7 +12,13 @@ from shared.models.objectify_job import ObjectifyJob
 from shared.security.auth_utils import get_expected_token
 from shared.services.core.sheet_import_service import FieldMapping
 from shared.services.grpc.oms_gateway_client import OMSGrpcHttpCompatClient
-from shared.services.kafka.processed_event_worker import HeartbeatOptions, RegistryKey
+from shared.services.kafka.processed_event_worker import (
+    CommandParseError,
+    FailureLogContext,
+    HeartbeatOptions,
+    ParseErrorContext,
+    RegistryKey,
+)
 from shared.services.kafka.producer_factory import create_kafka_dlq_producer
 from shared.services.kafka.producer_ops import close_kafka_producer
 from shared.services.registries.dataset_registry import DatasetRegistry
@@ -51,7 +57,39 @@ from objectify_worker.write_paths import (
 logger = logging.getLogger("objectify_worker.main")
 
 
+class _ObjectifyPayloadParseError(CommandParseError):
+    pass
+
+
 class ObjectifyWorkerRuntimeMixin:
+    json_model_cls = ObjectifyJob
+    json_model_parse_error_cls = _ObjectifyPayloadParseError
+    registry_event_id_field = "job_id"
+    registry_aggregate_id_field = "dataset_id"
+    json_model_metadata_fields = (
+        "job_id",
+        "db_name",
+        "dataset_id",
+        "dataset_version_id",
+        "mapping_spec_id",
+        "mapping_spec_version",
+        "target_class_id",
+        "artifact_id",
+        "artifact_key",
+        "artifact_output_name",
+    )
+    json_model_span_name = "objectify_worker.process_message"
+    json_model_metric_event_name = "OBJECTIFY_JOB"
+    json_model_span_attribute_fields = (
+        ("job_id", "objectify.job_id"),
+        ("db_name", "objectify.db_name"),
+        ("dataset_id", "objectify.dataset_id"),
+        ("dataset_version_id", "objectify.dataset_version_id"),
+        ("mapping_spec_id", "objectify.mapping_spec_id"),
+        ("mapping_spec_version", "objectify.mapping_spec_version"),
+        ("target_class_id", "objectify.target_class_id"),
+    )
+
     def _build_error_report(
         self,
         *,
@@ -499,16 +537,6 @@ class ObjectifyWorkerRuntimeMixin:
             await self.close()
 
     # --- ProcessedEventKafkaWorker Strategy hooks ---
-    def _parse_payload(self, payload: Any) -> ObjectifyJob:  # type: ignore[override]
-        return ObjectifyJob.model_validate_json(payload)
-
-    def _registry_key(self, payload: ObjectifyJob) -> RegistryKey:  # type: ignore[override]
-        return RegistryKey(
-            event_id=str(payload.job_id),
-            aggregate_id=str(payload.dataset_id) if payload.dataset_id else None,
-            sequence_number=None,
-        )
-
     async def _process_payload(self, payload: ObjectifyJob) -> None:  # type: ignore[override]
         try:
             await self._process_job(payload)
@@ -524,60 +552,26 @@ class ObjectifyWorkerRuntimeMixin:
             )
             raise
 
-    def _fallback_metadata(self, payload: ObjectifyJob) -> Optional[Dict[str, Any]]:  # type: ignore[override]
-        return {
-            "job_id": payload.job_id,
-            "db_name": payload.db_name,
-            "dataset_id": payload.dataset_id,
-            "dataset_version_id": payload.dataset_version_id,
-            "mapping_spec_id": payload.mapping_spec_id,
-            "mapping_spec_version": payload.mapping_spec_version,
-            "target_class_id": payload.target_class_id,
-            "artifact_id": payload.artifact_id,
-            "artifact_key": payload.artifact_key,
-            "artifact_output_name": payload.artifact_output_name,
-        }
-
-    def _span_name(self, *, payload: ObjectifyJob) -> str:  # type: ignore[override]
-        return "objectify_worker.process_message"
-
-    def _span_attributes(  # type: ignore[override]
-        self,
-        *,
-        msg: Any,
-        payload: ObjectifyJob,
-        registry_key: RegistryKey,
-    ) -> Dict[str, Any]:
-        attrs = super()._span_attributes(msg=msg, payload=payload, registry_key=registry_key)
-        attrs.update(
-            {
-                "objectify.job_id": payload.job_id,
-                "objectify.db_name": payload.db_name,
-                "objectify.dataset_id": payload.dataset_id,
-                "objectify.dataset_version_id": payload.dataset_version_id,
-                "objectify.mapping_spec_id": payload.mapping_spec_id,
-                "objectify.mapping_spec_version": payload.mapping_spec_version,
-                "objectify.target_class_id": payload.target_class_id,
-            }
-        )
-        return attrs
-
-    def _metric_event_name(self, *, payload: ObjectifyJob) -> Optional[str]:  # type: ignore[override]
-        return "OBJECTIFY_JOB"
-
     def _heartbeat_options(self) -> HeartbeatOptions:  # type: ignore[override]
         return HeartbeatOptions(
             warning_message="Objectify heartbeat failed (handler=%s event_id=%s): %s",
         )
 
-    async def _on_parse_error(self, *, msg: Any, raw_payload: Optional[str], error: Exception) -> None:  # type: ignore[override]
+    async def _before_parse_error_handling(  # type: ignore[override]
+        self,
+        *,
+        msg: Any,
+        raw_payload: Optional[str],
+        error: Exception,
+        context: ParseErrorContext,
+    ) -> None:
+        _ = msg, raw_payload, context
         try:
             record = getattr(self.tracing, "record_exception", None)
             if callable(record):
                 record(error)
         except Exception as exc:
             logger.warning("Tracing record_exception failed during parse error handling: %s", exc, exc_info=True)
-        await super()._on_parse_error(msg=msg, raw_payload=raw_payload, error=error)
 
     def _is_retryable_error(self, exc: Exception, *, payload: ObjectifyJob) -> bool:  # type: ignore[override]
         try:
@@ -634,7 +628,7 @@ class ObjectifyWorkerRuntimeMixin:
                 exc_info=True,
             )
 
-    async def _on_retry_scheduled(  # type: ignore[override]
+    async def _after_retry_scheduled(  # type: ignore[override]
         self,
         *,
         payload: ObjectifyJob,
@@ -651,15 +645,23 @@ class ObjectifyWorkerRuntimeMixin:
             retryable=retryable,
             completed_at=None,
         )
-        logger.warning(
-            "Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
-            payload.job_id,
-            attempt_count,
-            int(backoff_s),
-            error,
+
+    def _retry_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: ObjectifyJob,
+        error: str,
+        attempt_count: int,
+        backoff_s: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = retryable
+        return FailureLogContext(
+            message="Objectify job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+            args=(payload.job_id, attempt_count, int(backoff_s), error),
         )
 
-    async def _on_terminal_failure(  # type: ignore[override]
+    async def _after_terminal_failure(  # type: ignore[override]
         self,
         *,
         payload: ObjectifyJob,
@@ -675,10 +677,19 @@ class ObjectifyWorkerRuntimeMixin:
             retryable=retryable,
             completed_at=datetime.now(timezone.utc),
         )
-        logger.error(
-            "Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-            payload.job_id,
-            attempt_count,
+
+    def _terminal_failure_log_context(  # type: ignore[override]
+        self,
+        *,
+        payload: ObjectifyJob,
+        error: str,
+        attempt_count: int,
+        retryable: bool,
+    ) -> FailureLogContext:
+        _ = error, retryable
+        return FailureLogContext(
+            message="Objectify job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
+            args=(payload.job_id, attempt_count),
         )
 
     async def _resolve_job_input_context(

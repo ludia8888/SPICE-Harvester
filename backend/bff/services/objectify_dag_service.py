@@ -25,7 +25,7 @@ from bff.services.database_role_guard import enforce_database_role_or_http_error
 from bff.services.oms_client import OMSClient
 from bff.utils.httpx_exceptions import raise_httpx_as_http_exception
 from shared.models.objectify_job import ObjectifyJob
-from shared.models.requests import ApiResponse
+from shared.models.responses import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.database_access import DATA_ENGINEER_ROLES
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_branch_name, validate_class_id
