@@ -27,9 +27,11 @@ class _FakeElasticsearchService:
     def __init__(self) -> None:
         self.client = self
         self._indices: set[str] = set()
+        self._documents: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self.created_indices: List[Dict[str, Any]] = []
         self.mapping_updates: List[Dict[str, Any]] = []
         self.bulk_calls: List[Dict[str, Any]] = []
+        self.update_calls: List[Dict[str, Any]] = []
         self.deleted_docs: List[tuple[str, str]] = []
         self.refreshed: List[str] = []
         self.search_responses: List[Dict[str, Any]] = []
@@ -39,6 +41,7 @@ class _FakeElasticsearchService:
 
     async def create_index(self, index: str, mappings: Dict[str, Any], settings: Dict[str, Any]) -> bool:
         self._indices.add(index)
+        self._documents.setdefault(index, {})
         self.created_indices.append({"index": index, "mappings": mappings, "settings": settings})
         return True
 
@@ -61,10 +64,35 @@ class _FakeElasticsearchService:
                 "refresh": refresh,
             }
         )
+        store = self._documents.setdefault(index, {})
+        for document in documents:
+            store[str(document["_id"])] = dict(document)
         return {"success": len(documents), "failed": 0}
 
+    async def update_document(
+        self,
+        index: str,
+        doc_id: str,
+        doc: Dict[str, Any] | None = None,
+        script: Dict[str, Any] | None = None,
+        upsert: Dict[str, Any] | None = None,
+        refresh: bool = False,
+    ) -> bool:
+        _ = (script, refresh)
+        store = self._documents.setdefault(index, {})
+        if doc_id not in store:
+            if upsert is None:
+                return False
+            store[doc_id] = dict(upsert)
+        elif doc:
+            store[doc_id].update(dict(doc))
+        self.update_calls.append({"index": index, "doc_id": doc_id, "doc": dict(doc or {})})
+        return True
+
     async def delete_document(self, index: str, doc_id: str, refresh: bool = False) -> bool:
+        _ = refresh
         self.deleted_docs.append((index, doc_id))
+        self._documents.setdefault(index, {}).pop(doc_id, None)
         return True
 
     async def refresh_index(self, index: str) -> bool:
@@ -72,18 +100,36 @@ class _FakeElasticsearchService:
         return True
 
     async def search(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        _ = (index, body)
         if self.search_responses:
             return self.search_responses.pop(0)
-        return {"hits": {"hits": []}}
+        docs = list(self._documents.get(index, {}).values())
+        hits = [{"_source": doc, "_id": doc.get("_id"), "sort": [doc.get("instance_id")]} for doc in docs]
+        return {"hits": {"hits": hits}}
+
+    async def mget(self, *, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        ids = [str(value) for value in list(body.get("ids") or [])]
+        store = self._documents.get(index, {})
+        docs = []
+        for doc_id in ids:
+            document = store.get(doc_id)
+            if document is None:
+                docs.append({"_id": doc_id, "found": False})
+                continue
+            docs.append({"_id": doc_id, "found": True, "_source": dict(document)})
+        return {"docs": docs}
 
 
 class _FakeStorageService:
     def __init__(self) -> None:
         self.saved: List[Dict[str, Any]] = []
+        self.deleted: List[Dict[str, Any]] = []
 
     async def save_json(self, bucket: str, key: str, payload: Dict[str, Any]) -> None:
         self.saved.append({"bucket": bucket, "key": key, "payload": payload})
+
+    async def delete_object(self, bucket: str, key: str) -> bool:
+        self.deleted.append({"bucket": bucket, "key": key})
+        return True
 
 
 @pytest.mark.asyncio
@@ -116,6 +162,7 @@ async def test_dataset_primary_write_path_indexes_instances_directly() -> None:
     assert docs[0]["_id"] == "order-1"
     assert docs[0]["class_id"] == "Order"
     assert docs[0]["data"]["status"] == "NEW"
+    assert docs[0]["objectify_visibility_state"] == "staged"
 
 
 @pytest.mark.asyncio
@@ -246,6 +293,19 @@ async def test_dataset_primary_finalize_prunes_stale_docs_on_full() -> None:
         prune_stale_on_full=True,
     )
 
+    await writer.write_instances(
+        job=job,
+        instances=[{"instance_id": "order-1", "order_id": "order-1", "status": "NEW"}],
+        ontology_version=None,
+        objectify_pk_fields=["order_id"],
+        objectify_instance_id_field="order_id",
+    )
+    index_name = next(iter(fake_es._documents.keys()))
+    fake_es._documents[index_name]["order-2"] = {
+        "instance_id": "order-2",
+        "objectify_visibility_state": "committed",
+    }
+
     summary = await writer.finalize_job(
         job=job,
         execution_mode="full",
@@ -256,10 +316,12 @@ async def test_dataset_primary_finalize_prunes_stale_docs_on_full() -> None:
     assert summary["stale_prune"]["deleted"] == 1
     assert fake_es.deleted_docs
     assert fake_es.deleted_docs[0][1] == "order-2"
+    assert summary["visibility_publish"]["published"] == 1
+    assert fake_es.refreshed
 
 
 @pytest.mark.asyncio
-async def test_dataset_primary_write_path_samples_command_ids_but_tracks_total_files() -> None:
+async def test_dataset_primary_write_path_publishes_instance_event_files_only_during_finalize() -> None:
     job = _build_job()
     fake_es = _FakeElasticsearchService()
     fake_storage = _FakeStorageService()
@@ -283,7 +345,108 @@ async def test_dataset_primary_write_path_samples_command_ids_but_tracks_total_f
         objectify_instance_id_field="order_id",
     )
 
-    assert result.instance_event_files_written == 30
+    assert result.instance_event_files_written == 0
     assert result.instance_event_file_failures == 0
-    assert len(result.command_ids) == 25
+    assert result.command_ids == []
+    assert fake_storage.saved == []
+
+    summary = await writer.finalize_job(
+        job=job,
+        execution_mode="incremental",
+        indexed_instance_ids=result.indexed_instance_ids,
+    )
+
+    instance_event_files = summary["instance_event_files"]
+    assert instance_event_files["written"] == 30
+    assert instance_event_files["failed"] == 0
+    assert len(instance_event_files["command_ids"]) == 25
     assert len(fake_storage.saved) == 30
+
+
+@pytest.mark.asyncio
+async def test_dataset_primary_finalize_publishes_staged_docs_before_completion() -> None:
+    job = _build_job()
+    fake_es = _FakeElasticsearchService()
+    writer = DatasetPrimaryIndexWritePath(
+        elasticsearch_service=fake_es,  # type: ignore[arg-type]
+        chunk_size=100,
+        refresh=False,
+        prune_stale_on_full=False,
+    )
+
+    await writer.write_instances(
+        job=job,
+        instances=[{"instance_id": "order-1", "order_id": "order-1", "status": "NEW"}],
+        ontology_version=None,
+        objectify_pk_fields=["order_id"],
+        objectify_instance_id_field="order_id",
+    )
+
+    index_name = next(iter(fake_es._documents.keys()))
+    assert fake_es._documents[index_name]["order-1"]["objectify_visibility_state"] == "staged"
+
+    summary = await writer.finalize_job(
+        job=job,
+        execution_mode="incremental",
+        indexed_instance_ids=["order-1"],
+    )
+
+    assert summary["visibility_publish"]["published"] == 1
+    assert fake_es._documents[index_name]["order-1"]["objectify_visibility_state"] == "committed"
+    assert fake_es.refreshed == [index_name]
+
+
+@pytest.mark.asyncio
+async def test_dataset_primary_finalize_requires_every_instance_to_publish_visibility() -> None:
+    job = _build_job()
+    fake_es = _FakeElasticsearchService()
+    writer = DatasetPrimaryIndexWritePath(
+        elasticsearch_service=fake_es,  # type: ignore[arg-type]
+        chunk_size=100,
+        refresh=False,
+        prune_stale_on_full=False,
+    )
+
+    with pytest.raises(RuntimeError, match="objectify_visibility_publish_incomplete"):
+        await writer.finalize_job(
+            job=job,
+            execution_mode="incremental",
+            indexed_instance_ids=["missing-order"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_dataset_primary_finalize_applies_explicit_delta_deletes_after_commit() -> None:
+    job = _build_job()
+    fake_es = _FakeElasticsearchService()
+    writer = DatasetPrimaryIndexWritePath(
+        elasticsearch_service=fake_es,  # type: ignore[arg-type]
+        chunk_size=100,
+        refresh=False,
+        prune_stale_on_full=False,
+    )
+
+    await writer.write_instances(
+        job=job,
+        instances=[{"instance_id": "order-1", "order_id": "order-1", "status": "NEW"}],
+        ontology_version=None,
+        objectify_pk_fields=["order_id"],
+        objectify_instance_id_field="order_id",
+    )
+
+    index_name = next(iter(fake_es._documents.keys()))
+    fake_es._documents[index_name]["order-2"] = {
+        "instance_id": "order-2",
+        "objectify_visibility_state": "committed",
+    }
+
+    summary = await writer.finalize_job(
+        job=job,
+        execution_mode="incremental",
+        indexed_instance_ids=["order-1"],
+        deleted_instance_ids=["order-2"],
+    )
+
+    assert summary["explicit_delete"]["executed"] is True
+    assert summary["explicit_delete"]["deleted"] == 1
+    assert "order-2" not in fake_es._documents[index_name]

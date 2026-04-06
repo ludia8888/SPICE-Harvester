@@ -23,6 +23,7 @@ from shared.config.search_config import get_instances_index_name
 from shared.config.settings import get_settings
 from shared.security.input_sanitizer import validate_branch_name
 from shared.services.storage.elasticsearch_service import ElasticsearchService
+from shared.services.core.instance_visibility import is_visible_instance_document
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +496,8 @@ class GraphFederationServiceES:
             docs: List[Dict[str, Any]] = []
             for doc in payload.get("docs", []):
                 if isinstance(doc, dict) and doc.get("found") and isinstance(doc.get("_source"), dict):
-                    docs.append(doc["_source"])
+                    if is_visible_instance_document(doc["_source"]):
+                        docs.append(doc["_source"])
             return docs
         except Exception as exc:
             logger.warning("mget failed for %s/%s: %s", index_name, class_id, exc)

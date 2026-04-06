@@ -74,11 +74,11 @@ class ApiResponse:
         cls, service_name: str, version: str, description: Optional[str] = None
     ) -> "ApiResponse":
         """Create standardized health check response"""
-        health_data = {"service": service_name, "version": version, "status": "healthy"}
+        health_data = {"service": service_name, "version": version, "status": "ready"}
         if description:
             health_data["description"] = description
 
-        return cls(status="success", message="Service is healthy", data=health_data)
+        return cls(status="success", message="Service is ready", data=health_data)
 
     def is_success(self) -> bool:
         """Check if response indicates success"""

@@ -390,7 +390,7 @@ class WatermarkMonitor:
             }
         
         return {
-            "status": "healthy" if self.global_watermark.is_healthy else "unhealthy",
+            "status": "ready" if self.global_watermark.is_healthy else "hard_down",
             "total_lag": self.global_watermark.total_lag,
             "max_lag": self.global_watermark.max_lag,
             "avg_lag": self.global_watermark.avg_lag,

@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Set
 
-from shared.config.search_config import get_instances_index_name
-
 from objectify_worker.validation_codes import ObjectifyValidationCode as VC
 
 logger = logging.getLogger(__name__)
@@ -159,18 +157,10 @@ async def process_lakefs_delta_rows(
                 instance_ids_sample.extend(instance_ids[: max(0, 10 - len(instance_ids_sample))])
 
     if effective_deleted_keys:
-        branch = job.ontology_branch or job.dataset_branch or "main"
-        index_name = get_instances_index_name(job.db_name, branch=branch)
-        for deleted_key in effective_deleted_keys:
-            try:
-                await worker.instance_write_path._es.delete_document(
-                    index=index_name,
-                    doc_id=deleted_key,
-                    refresh=False,
-                )
-            except Exception:
-                logger.debug("Delete failed for stale delta key: %s", deleted_key)
-        logger.info("Deleted %d stale instances from LakeFS delta", len(effective_deleted_keys))
+        logger.info(
+            "Deferred %d LakeFS delta deletes until authoritative objectify commit",
+            len(effective_deleted_keys),
+        )
 
     return {
         "prepared_instances": prepared_instances,

@@ -538,7 +538,7 @@ async def health_check():
                 context={
                     "service": "OMS",
                     "version": "1.0.0",
-                    "status": "unhealthy",
+                    "status": "hard_down",
                     "environment": settings.environment.value,
                     "resource_storage_backend": _resource_storage_backend(),
                     "modernized": True,
@@ -578,7 +578,7 @@ async def health_check():
             context={
                 "service": "OMS",
                 "version": "1.0.0",
-                "status": "unhealthy",
+                "status": "hard_down",
                 "environment": settings.environment.value,
                 "resource_storage_backend": _resource_storage_backend(),
                 "modernized": True,

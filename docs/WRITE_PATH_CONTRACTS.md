@@ -273,10 +273,11 @@ Primary files:
 Contract:
 
 1. validate ontology, mapping, and key-spec rules before durable success is recorded
-2. materialize instances and related read models
-3. commit authoritative completion in `postgres.objectify_registry`
-4. record `elasticsearch_index`, `instance_event_files`, `lineage`, and `watermark_update` inside the same canonical `write_path_contract`
-5. reconcile forward if post-commit status/event follow-ups degrade
+2. stage instance read-model writes so partially processed rows are not query-visible yet
+3. commit authoritative objectify state in `postgres.objectify_registry` with a recoverable `COMMITTING` checkpoint
+4. publish `instance_event_files`, then publish staged Elasticsearch documents, prune stale visible rows, and refresh before reporting `COMPLETED`
+5. record `elasticsearch_index`, `instance_event_files`, `lineage`, and `watermark_update` inside the same canonical `write_path_contract`
+6. reconcile forward if post-commit publish/status/event follow-ups degrade
 
 ### Worker Projection / Objectify / Pipeline Runtime
 

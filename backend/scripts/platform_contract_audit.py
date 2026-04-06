@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Iterable, List
@@ -69,11 +70,21 @@ DOC_REQUIRED_SNIPPETS = {
     ],
 }
 
-BANNED_CLASSIFICATION_LITERALS = (
-    '"classification": "healthy"',
-    '"classification": "unknown"',
-    "'classification': 'healthy'",
-    "'classification': 'unknown'",
+RUNTIME_VOCAB_SCAN_ROOTS = ("backend", "docs")
+RUNTIME_VOCAB_TEXT_SUFFIXES = {".py", ".conf", ".md", ".json", ".yaml", ".yml", ".toml"}
+RUNTIME_VOCAB_PATTERNS = (
+    (
+        re.compile(r"""["']classification["']\s*:\s*["'](?:healthy|unknown)["']"""),
+        "legacy runtime classification",
+    ),
+    (
+        re.compile(r"""["']status["']\s*:\s*["'](?:healthy|unhealthy)["']"""),
+        "legacy runtime status",
+    ),
+    (
+        re.compile(r"""["']Service is healthy["']"""),
+        "legacy runtime message",
+    ),
 )
 
 
@@ -84,6 +95,21 @@ def _iter_non_test_python_files(backend_root: Path) -> Iterable[Path]:
         if path.name.startswith("test_"):
             continue
         yield path
+
+
+def _iter_runtime_contract_text_files(repo_root: Path) -> Iterable[Path]:
+    for root_name in RUNTIME_VOCAB_SCAN_ROOTS:
+        root = repo_root / root_name
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in RUNTIME_VOCAB_TEXT_SUFFIXES:
+                continue
+            if any(part in {"tests", "__pycache__", "_build"} for part in path.parts):
+                continue
+            yield path
 
 
 def audit_facade_line_counts(repo_root: Path) -> List[str]:
@@ -110,15 +136,15 @@ def audit_facade_markers(repo_root: Path) -> List[str]:
 
 def audit_runtime_vocabulary(repo_root: Path) -> List[str]:
     violations: List[str] = []
-    backend_root = repo_root / "backend"
-    for path in _iter_non_test_python_files(backend_root):
+    for path in _iter_runtime_contract_text_files(repo_root):
         if path.name == "platform_contract_audit.py":
             continue
-        text = path.read_text(encoding="utf-8")
-        for banned in BANNED_CLASSIFICATION_LITERALS:
-            if banned in text:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for pattern, label in RUNTIME_VOCAB_PATTERNS:
+            match = pattern.search(text)
+            if match:
                 violations.append(
-                    f"{path.relative_to(repo_root)} contains banned legacy runtime classification literal {banned}"
+                    f"{path.relative_to(repo_root)} contains banned {label} literal {match.group(0)}"
                 )
     return violations
 

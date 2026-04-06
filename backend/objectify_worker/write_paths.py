@@ -8,14 +8,21 @@ Encapsulates how objectified instances are persisted:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Optional, Protocol
 
 from shared.config.instances_index_mapping import INSTANCE_INDEX_MAPPING
 from shared.config.search_config import get_default_index_settings, get_instances_index_name
 from shared.models.objectify_job import ObjectifyJob
+from shared.services.core.instance_visibility import (
+    OBJECTIFY_VISIBILITY_COMMITTED,
+    OBJECTIFY_VISIBILITY_FIELD,
+    OBJECTIFY_VISIBILITY_STAGED,
+    apply_visible_instances_filter,
+)
 from shared.services.storage.elasticsearch_service import ElasticsearchService
 from shared.utils.deterministic_ids import deterministic_uuid5_hex_prefix, deterministic_uuid5_str
 
@@ -41,6 +48,7 @@ class ObjectifyWriteBatchResult:
     indexed_instance_ids: List[str]
     instance_event_files_written: int = 0
     instance_event_file_failures: int = 0
+    instance_event_keys: List[str] = field(default_factory=list)
 
 
 class ObjectifyWritePath(Protocol):
@@ -65,8 +73,25 @@ class ObjectifyWritePath(Protocol):
         *,
         job: ObjectifyJob,
         execution_mode: str,
-        indexed_instance_ids: Iterable[str],
+        indexed_instance_ids: Optional[Iterable[str]],
+        deleted_instance_ids: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
+        ...
+
+    async def list_job_instance_ids(
+        self,
+        *,
+        job: ObjectifyJob,
+    ) -> List[str]:
+        ...
+
+    async def cleanup_failed_job(
+        self,
+        *,
+        job: ObjectifyJob,
+        indexed_instance_ids: Optional[Iterable[str]] = None,
+        instance_event_keys: Optional[Iterable[str]] = None,
+    ) -> Dict[str, int]:
         ...
 
 
@@ -165,66 +190,86 @@ class DatasetPrimaryIndexWritePath:
             if failed > 0:
                 raise RuntimeError(f"dataset_primary_bulk_index_failed:{failed}")
 
-        # Write BULK_CREATE_INSTANCES command files to instance-events S3 bucket.
-        # These files are consumed by action_worker to reconstruct base instance state
-        # via list_command_files() → replay_instance_state().
-        command_ids: List[str] = []
-        instance_event_files_written = 0
-        instance_event_file_failures = 0
-        if self._storage and indexed_instance_ids:
-            command_write_result = await self._write_instance_commands_to_s3(
-                job=job,
-                instances=instances,
-                indexed_instance_ids=indexed_instance_ids,
-                branch=branch,
-                now_iso=now,
-                batch_sequence=batch_sequence,
-            )
-            command_ids = list(command_write_result.get("command_ids") or [])
-            instance_event_files_written = int(command_write_result.get("written") or 0)
-            instance_event_file_failures = int(command_write_result.get("failed") or 0)
-
         return ObjectifyWriteBatchResult(
-            command_ids=command_ids,
+            command_ids=[],
             indexed_instance_ids=indexed_instance_ids,
-            instance_event_files_written=instance_event_files_written,
-            instance_event_file_failures=instance_event_file_failures,
+            instance_event_files_written=0,
+            instance_event_file_failures=0,
+            instance_event_keys=[],
         )
 
     async def _write_instance_commands_to_s3(
         self,
         *,
         job: ObjectifyJob,
-        instances: List[Dict[str, Any]],
-        indexed_instance_ids: List[str],
+        index_name: str,
+        indexed_instance_ids: Iterable[str],
         branch: str,
-        now_iso: str,
-        batch_sequence: int,
     ) -> Dict[str, Any]:
-        """Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback."""
-        assert self._storage is not None  # caller checks
-        timestamp = now_iso.replace(":", "").replace("-", "").replace("+", "")
-        instance_map: Dict[str, Dict[str, Any]] = {}
-        for inst in instances:
-            if not isinstance(inst, dict):
-                continue
-            iid = str(inst.get("instance_id") or "").strip()
-            if iid:
-                instance_map[iid] = inst
+        """Publish BULK_CREATE_INSTANCES command files after authoritative job commit."""
+        if not self._storage:
+            return {
+                "written": 0,
+                "failed": 0,
+                "command_ids": [],
+                "command_ids_truncated": False,
+                "keys": [],
+                "reason": "storage_unavailable_or_not_configured",
+            }
+
+        requested_ids = [str(value).strip() for value in indexed_instance_ids if str(value).strip()]
+        if not requested_ids:
+            return {
+                "written": 0,
+                "failed": 0,
+                "command_ids": [],
+                "command_ids_truncated": False,
+                "keys": [],
+                "reason": "no_instances_indexed",
+            }
+
+        documents = await self._load_instance_documents(
+            index_name=index_name,
+            instance_ids=requested_ids,
+        )
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         written = 0
         failed_count = 0
         command_ids_sample: List[str] = []
-        for instance_id in indexed_instance_ids:
-            inst_data = instance_map.get(instance_id, {})
-            command_id = deterministic_uuid5_str(f"objectify:{job.job_id}:{instance_id}:{batch_sequence}")
+        written_keys: List[str] = []
+        for instance_id in requested_ids:
+            source_doc = documents.get(instance_id)
+            if not isinstance(source_doc, Mapping):
+                failed_count += 1
+                if failed_count <= 3:
+                    logger.warning(
+                        "Missing staged objectify document during command publish (job=%s instance=%s)",
+                        job.job_id,
+                        instance_id,
+                    )
+                continue
 
-            # Build flat payload excluding internal metadata keys
+            raw_payload = source_doc.get("data") if isinstance(source_doc.get("data"), Mapping) else {}
             payload: Dict[str, Any] = {}
             _skip = {"instance_id", "class_id", "db_name", "branch", "properties", "_metadata"}
-            for k, v in inst_data.items():
-                if k not in _skip:
-                    payload[k] = v
+            for key, value in raw_payload.items():
+                if key not in _skip:
+                    payload[key] = value
+
+            command_id = str(source_doc.get("event_id") or "").strip()
+            if not command_id:
+                event_sequence = str(source_doc.get("event_sequence") or "0").strip()
+                command_id = deterministic_uuid5_str(
+                    f"objectify:{job.job_id}:{instance_id}:{event_sequence}"
+                )
+            created_at = str(
+                source_doc.get("created_at")
+                or source_doc.get("event_timestamp")
+                or now_iso
+            )
+            key_timestamp = created_at.replace(":", "").replace("-", "").replace("+", "")
+            resolved_branch = str(source_doc.get("branch") or branch or "main").strip() or "main"
 
             command_file: Dict[str, Any] = {
                 "command_type": "BULK_CREATE_INSTANCES",
@@ -232,15 +277,15 @@ class DatasetPrimaryIndexWritePath:
                 "instance_id": instance_id,
                 "class_id": job.target_class_id,
                 "db_name": job.db_name,
-                "branch": branch,
+                "branch": resolved_branch,
                 "payload": payload,
-                "created_at": now_iso,
+                "created_at": created_at,
                 "created_by": f"objectify:{job.job_id}",
             }
 
             s3_key = (
-                f"{job.db_name}/{branch}/{job.target_class_id}/{instance_id}/"
-                f"{timestamp}_{command_id}_BULK_CREATE_INSTANCES.json"
+                f"{job.db_name}/{resolved_branch}/{job.target_class_id}/{instance_id}/"
+                f"{key_timestamp}_{command_id}_BULK_CREATE_INSTANCES.json"
             )
             try:
                 await self._storage.save_json(
@@ -249,6 +294,7 @@ class DatasetPrimaryIndexWritePath:
                     command_file,
                 )
                 written += 1
+                written_keys.append(s3_key)
                 if len(command_ids_sample) < OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT:
                     command_ids_sample.append(command_id)
             except Exception as exc:
@@ -269,15 +315,79 @@ class DatasetPrimaryIndexWritePath:
             "failed": failed_count,
             "command_ids": command_ids_sample,
             "command_ids_truncated": written > len(command_ids_sample),
+            "keys": written_keys,
         }
+
+    async def _load_instance_documents(
+        self,
+        *,
+        index_name: str,
+        instance_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        documents: Dict[str, Dict[str, Any]] = {}
+        for idx in range(0, len(instance_ids), self._chunk_size):
+            chunk = instance_ids[idx : idx + self._chunk_size]
+            response = await self._es.client.mget(index=index_name, body={"ids": chunk})
+            payload = getattr(response, "body", response)
+            docs = payload.get("docs") if isinstance(payload, Mapping) else None
+            if not isinstance(docs, list):
+                continue
+            for item in docs:
+                if not isinstance(item, Mapping) or not item.get("found"):
+                    continue
+                source = item.get("_source") if isinstance(item.get("_source"), Mapping) else None
+                if not isinstance(source, Mapping):
+                    continue
+                instance_id = str(item.get("_id") or source.get("instance_id") or "").strip()
+                if instance_id:
+                    documents[instance_id] = dict(source)
+        return documents
 
     async def finalize_job(
         self,
         *,
         job: ObjectifyJob,
         execution_mode: str,
-        indexed_instance_ids: Iterable[str],
+        indexed_instance_ids: Optional[Iterable[str]],
+        deleted_instance_ids: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        index_name = await self._ensure_instances_index(db_name=job.db_name, branch=branch)
+        active_ids = {
+            str(v).strip()
+            for v in (
+                indexed_instance_ids
+                if indexed_instance_ids is not None
+                else await self.list_job_instance_ids(job=job)
+            )
+            if str(v).strip()
+        }
+        pending_deleted_ids = {
+            str(v).strip()
+            for v in (deleted_instance_ids or [])
+            if str(v).strip() and str(v).strip() not in active_ids
+        }
+        instance_event_summary = await self._write_instance_commands_to_s3(
+            job=job,
+            index_name=index_name,
+            indexed_instance_ids=sorted(active_ids),
+            branch=branch,
+        )
+        publish_summary = await self._publish_job_visibility(
+            index_name=index_name,
+            instance_ids=active_ids,
+        )
+        published_count = int(publish_summary.get("published") or 0)
+        if active_ids and published_count != len(active_ids):
+            raise RuntimeError(
+                "objectify_visibility_publish_incomplete:"
+                f"expected={len(active_ids)} published={published_count}"
+            )
+        explicit_delete_summary = await self._delete_explicit_instance_ids(
+            index_name=index_name,
+            instance_ids=pending_deleted_ids,
+        )
+
         resolved_mode = str(execution_mode or "").strip().lower()
         prune_reason: Optional[str] = None
         if resolved_mode != "full":
@@ -288,7 +398,11 @@ class DatasetPrimaryIndexWritePath:
             prune_reason = "max_rows_set"
 
         if prune_reason is not None:
+            await self._es.refresh_index(index_name)
             return {
+                "instance_event_files": instance_event_summary,
+                "visibility_publish": publish_summary,
+                "explicit_delete": explicit_delete_summary,
                 "stale_prune": {
                     "enabled": bool(self._prune_stale_on_full),
                     "executed": False,
@@ -297,9 +411,6 @@ class DatasetPrimaryIndexWritePath:
                 }
             }
 
-        branch = job.ontology_branch or job.dataset_branch or "main"
-        index_name = await self._ensure_instances_index(db_name=job.db_name, branch=branch)
-        active_ids = {str(v).strip() for v in indexed_instance_ids if str(v).strip()}
         stale_ids = await self._find_stale_instance_ids(
             index_name=index_name,
             class_id=job.target_class_id,
@@ -312,16 +423,142 @@ class DatasetPrimaryIndexWritePath:
             if ok:
                 deleted += 1
 
-        if self._refresh and stale_ids:
-            await self._es.refresh_index(index_name)
+        await self._es.refresh_index(index_name)
 
         return {
+            "instance_event_files": instance_event_summary,
+            "visibility_publish": publish_summary,
+            "explicit_delete": explicit_delete_summary,
             "stale_prune": {
                 "enabled": bool(self._prune_stale_on_full),
                 "executed": True,
                 "deleted": deleted,
                 "candidates": len(stale_ids),
             }
+        }
+
+    async def _delete_explicit_instance_ids(
+        self,
+        *,
+        index_name: str,
+        instance_ids: set[str],
+    ) -> Dict[str, Any]:
+        if not instance_ids:
+            return {
+                "executed": False,
+                "deleted": 0,
+                "reason": "no_explicit_deletes",
+            }
+
+        deleted = 0
+        for instance_id in sorted(instance_ids):
+            if await self._es.delete_document(index=index_name, doc_id=instance_id, refresh=False):
+                deleted += 1
+        return {
+            "executed": True,
+            "deleted": deleted,
+            "requested": len(instance_ids),
+        }
+
+    async def list_job_instance_ids(
+        self,
+        *,
+        job: ObjectifyJob,
+    ) -> List[str]:
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        index_name = await self._ensure_instances_index(db_name=job.db_name, branch=branch)
+        instance_ids: List[str] = []
+        search_after: Optional[List[Any]] = None
+        page_size = min(max(self._chunk_size, 200), 2000)
+        query: Dict[str, Any] = {
+            "bool": {
+                "filter": [
+                    {"term": {"class_id": job.target_class_id}},
+                    {"term": {"backing_dataset.objectify_job_id": job.job_id}},
+                ]
+            }
+        }
+
+        while True:
+            body: Dict[str, Any] = {
+                "query": query,
+                "_source": ["instance_id"],
+                "size": page_size,
+                "sort": [{"instance_id": {"order": "asc"}}],
+                "track_total_hits": False,
+            }
+            if search_after:
+                body["search_after"] = search_after
+
+            response = await self._es.client.search(index=index_name, body=body)
+            payload = getattr(response, "body", response)
+            hits_outer = payload.get("hits") if isinstance(payload, Mapping) else None
+            hits = hits_outer.get("hits") if isinstance(hits_outer, Mapping) else None
+            if not isinstance(hits, list) or not hits:
+                break
+
+            for hit in hits:
+                if not isinstance(hit, Mapping):
+                    continue
+                source = hit.get("_source") if isinstance(hit.get("_source"), Mapping) else {}
+                instance_id = str(source.get("instance_id") or hit.get("_id") or "").strip()
+                if instance_id:
+                    instance_ids.append(instance_id)
+
+            last = hits[-1] if isinstance(hits[-1], Mapping) else {}
+            raw_sort = last.get("sort") if isinstance(last, Mapping) else None
+            if not isinstance(raw_sort, list) or not raw_sort:
+                break
+            search_after = raw_sort
+
+        return instance_ids
+
+    async def cleanup_failed_job(
+        self,
+        *,
+        job: ObjectifyJob,
+        indexed_instance_ids: Optional[Iterable[str]] = None,
+        instance_event_keys: Optional[Iterable[str]] = None,
+    ) -> Dict[str, int]:
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        index_name = await self._ensure_instances_index(db_name=job.db_name, branch=branch)
+        deleted_docs = 0
+        deleted_objects = 0
+        active_ids = {
+            str(value).strip()
+            for value in (
+                indexed_instance_ids
+                if indexed_instance_ids is not None
+                else await self.list_job_instance_ids(job=job)
+            )
+            if str(value).strip()
+        }
+
+        for instance_id in active_ids:
+            if await self._es.delete_document(index=index_name, doc_id=instance_id, refresh=False):
+                deleted_docs += 1
+        if deleted_docs:
+            await self._es.refresh_index(index_name)
+
+        if self._storage:
+            for key in instance_event_keys or []:
+                key_token = str(key or "").strip()
+                if not key_token:
+                    continue
+                try:
+                    if await self._storage.delete_object(self._instance_bucket, key_token):
+                        deleted_objects += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to delete objectify instance-event file during cleanup (job=%s key=%s): %s",
+                        job.job_id,
+                        key_token,
+                        exc,
+                    )
+
+        return {
+            "deleted_docs": deleted_docs,
+            "deleted_instance_event_files": deleted_objects,
         }
 
     async def _ensure_instances_index(self, *, db_name: str, branch: str) -> str:
@@ -368,7 +605,7 @@ class DatasetPrimaryIndexWritePath:
 
         while True:
             body: Dict[str, Any] = {
-                "query": {"term": {"class_id": class_id}},
+                "query": apply_visible_instances_filter({"term": {"class_id": class_id}}),
                 "_source": ["instance_id"],
                 "size": page_size,
                 "sort": [{"instance_id": {"order": "asc"}}],
@@ -410,6 +647,44 @@ class DatasetPrimaryIndexWritePath:
             search_after = raw_sort
 
         return stale_ids
+
+    async def _publish_job_visibility(
+        self,
+        *,
+        index_name: str,
+        instance_ids: set[str],
+    ) -> Dict[str, Any]:
+        if not instance_ids:
+            return {
+                "executed": False,
+                "published": 0,
+                "reason": "no_instances_indexed",
+                "refresh": True,
+            }
+
+        published = 0
+        sorted_ids = sorted(instance_ids)
+        chunk_size = min(max(self._chunk_size, 50), 500)
+        for offset in range(0, len(sorted_ids), chunk_size):
+            batch = sorted_ids[offset : offset + chunk_size]
+            results = await asyncio.gather(
+                *[
+                    self._es.update_document(
+                        index=index_name,
+                        doc_id=instance_id,
+                        doc={OBJECTIFY_VISIBILITY_FIELD: OBJECTIFY_VISIBILITY_COMMITTED},
+                        refresh=False,
+                    )
+                    for instance_id in batch
+                ]
+            )
+            published += sum(1 for item in results if item)
+
+        return {
+            "executed": True,
+            "published": published,
+            "refresh": True,
+        }
 
     @staticmethod
     def _build_document(
@@ -477,6 +752,7 @@ class DatasetPrimaryIndexWritePath:
             "data": payload,
             "relationships": relationships or {},
             "backing_dataset": backing_dataset,
+            OBJECTIFY_VISIBILITY_FIELD: OBJECTIFY_VISIBILITY_STAGED,
             "lifecycle_id": lifecycle_id,
             "event_id": event_id,
             "event_sequence": int(event_sequence),

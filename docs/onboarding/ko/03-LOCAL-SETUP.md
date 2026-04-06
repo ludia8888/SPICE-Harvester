@@ -154,7 +154,7 @@ curl http://localhost:8000/health
 **예상 응답:**
 ```json
 {
-  "status": "healthy",
+  "status": "ready",
   "version": "1.0.0",
   "checks": {
     "database": "ok",
@@ -171,7 +171,7 @@ curl http://localhost:8002/api/v1/health
 **예상 응답:**
 ```json
 {
-  "status": "healthy",
+  "status": "ready",
   "version": "1.0.0",
   "checks": {
     "database": "ok",

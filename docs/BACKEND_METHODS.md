@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-04-04T16:08:49+09:00
+> Generated: 2026-04-04T18:36:56+09:00
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -4194,7 +4194,7 @@
 
 ### `backend/objectify_worker/delta_processing.py`
 - **Functions**
-  - `async process_lakefs_delta_rows(worker, job, lakefs_delta_result, delta_computer, allow_partial, errors, batch_size, rel_map, ontology_version, target_field_types, property_mappings, relationship_mappings, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys, stable_seed, command_ids, indexed_instance_ids, instance_ids_sample, fail_job, extract_instance_relationships)` (line 13): no docstring
+  - `async process_lakefs_delta_rows(worker, job, lakefs_delta_result, delta_computer, allow_partial, errors, batch_size, rel_map, ontology_version, target_field_types, property_mappings, relationship_mappings, mapping_sources, sources_by_target, required_targets, pk_targets, pk_fields, field_constraints, field_raw_types, seen_row_keys, stable_seed, command_ids, indexed_instance_ids, instance_ids_sample, fail_job, extract_instance_relationships)` (line 11): no docstring
 
 ### `backend/objectify_worker/input_context.py`
 - **Functions**
@@ -4208,9 +4208,10 @@
 
 ### `backend/objectify_worker/job_processing.py`
 - **Functions**
-  - `_build_objectify_write_path_contract(job_id, execution_mode, indexed_instances, write_path_report, command_ids_sample, instance_event_files_written, instance_event_file_failures, lineage_limit, lineage_remaining, lineage_enabled, watermark_followup)` (line 33): no docstring
-  - `_build_objectify_completion_report(total_rows, prepared_instances, warnings, errors, error_rows, command_ids_sample, instance_ids_sample, indexed_instances, write_path_report, write_path_contract, ontology_version, instance_event_files_written, instance_event_file_failures)` (line 131): no docstring
-  - `async process_job(worker, job, fail_exception_cls, compute_lakefs_delta, extract_instance_relationships, auto_detect_watermark_column)` (line 174): no docstring
+  - `_build_objectify_write_path_contract(job_id, execution_mode, indexed_instances, write_path_report, command_ids_sample, instance_event_files_written, instance_event_file_failures, lineage_followup, watermark_followup)` (line 33): no docstring
+  - `_build_objectify_commit_report(total_rows, prepared_instances, warnings, errors, error_rows, command_ids_sample, instance_ids_sample, indexed_instances, ontology_version, execution_mode, input_type, artifact_output_name, watermark_column, latest_watermark, instance_event_files_written, instance_event_file_failures, pending_deleted_instance_ids)` (line 128): no docstring
+  - `_build_objectify_completion_report(total_rows, prepared_instances, warnings, errors, error_rows, command_ids_sample, instance_ids_sample, indexed_instances, write_path_report, write_path_contract, ontology_version, instance_event_files_written, instance_event_file_failures)` (line 185): no docstring
+  - `async process_job(worker, job, fail_exception_cls, compute_lakefs_delta, extract_instance_relationships, auto_detect_watermark_column)` (line 228): no docstring
 
 ### `backend/objectify_worker/key_constraint_scanning.py`
 - **Functions**
@@ -4329,11 +4330,11 @@
     - `async _on_parse_error(self, msg, raw_payload, error)` (line 573): no docstring
     - `_is_retryable_error(self, exc, payload)` (line 582): no docstring
     - `async _persist_objectify_failure_status(self, job, status, error, attempt_count, retryable, completed_at)` (line 591): no docstring
-    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 624): no docstring
-    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 649): no docstring
-    - `async _resolve_job_input_context(self, job, fail_job)` (line 671): no docstring
-    - `async _resolve_mapping_spec_for_job(self, job, fail_job)` (line 683): no docstring
-    - `async _process_job(self, job)` (line 695): no docstring
+    - `async _on_retry_scheduled(self, payload, error, attempt_count, backoff_s, retryable)` (line 637): no docstring
+    - `async _on_terminal_failure(self, payload, error, attempt_count, retryable)` (line 662): no docstring
+    - `async _resolve_job_input_context(self, job, fail_job)` (line 684): no docstring
+    - `async _resolve_mapping_spec_for_job(self, job, fail_job)` (line 696): no docstring
+    - `async _process_job(self, job)` (line 708): no docstring
 
 ### `backend/objectify_worker/validation_codes.py`
 - **Classes**
@@ -4341,18 +4342,25 @@
 
 ### `backend/objectify_worker/write_paths.py`
 - **Classes**
-  - `ObjectifyWriteBatchResult` (line 33): Result for a single write batch.
-  - `ObjectifyWritePath` (line 46): Port for objectify write-side strategies.
-    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 49): no docstring
-    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 63): no docstring
-  - `DatasetPrimaryIndexWritePath` (line 73): Foundry-style path: dataset rows are indexed directly into Elasticsearch.
-    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 82): no docstring
-    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 100): no docstring
-    - `async _write_instance_commands_to_s3(self, job, instances, indexed_instance_ids, branch, now_iso, batch_sequence)` (line 194): Write BULK_CREATE_INSTANCES command files to instance-events S3 for action writeback.
-    - `async finalize_job(self, job, execution_mode, indexed_instance_ids)` (line 274): no docstring
-    - `async _ensure_instances_index(self, db_name, branch)` (line 327): no docstring
-    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 358): no docstring
-    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 415): no docstring
+  - `ObjectifyWriteBatchResult` (line 40): Result for a single write batch.
+  - `ObjectifyWritePath` (line 54): Port for objectify write-side strategies.
+    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 57): no docstring
+    - `async finalize_job(self, job, execution_mode, indexed_instance_ids, deleted_instance_ids)` (line 71): no docstring
+    - `async list_job_instance_ids(self, job)` (line 81): no docstring
+    - `async cleanup_failed_job(self, job, indexed_instance_ids, instance_event_keys)` (line 88): no docstring
+  - `DatasetPrimaryIndexWritePath` (line 98): Foundry-style path: dataset rows are indexed directly into Elasticsearch.
+    - `__init__(self, elasticsearch_service, storage_service, instance_bucket, chunk_size, refresh, prune_stale_on_full)` (line 107): no docstring
+    - `async write_instances(self, job, instances, ontology_version, objectify_pk_fields, objectify_instance_id_field, instance_relationships, target_field_types)` (line 125): no docstring
+    - `async _write_instance_commands_to_s3(self, job, index_name, indexed_instance_ids, branch)` (line 201): Publish BULK_CREATE_INSTANCES command files after authoritative job commit.
+    - `async _load_instance_documents(self, index_name, instance_ids)` (line 321): no docstring
+    - `async finalize_job(self, job, execution_mode, indexed_instance_ids, deleted_instance_ids)` (line 346): no docstring
+    - `async _delete_explicit_instance_ids(self, index_name, instance_ids)` (line 440): no docstring
+    - `async list_job_instance_ids(self, job)` (line 463): no docstring
+    - `async cleanup_failed_job(self, job, indexed_instance_ids, instance_event_keys)` (line 516): no docstring
+    - `async _ensure_instances_index(self, db_name, branch)` (line 564): no docstring
+    - `async _find_stale_instance_ids(self, index_name, class_id, active_instance_ids)` (line 595): no docstring
+    - `async _publish_job_visibility(self, index_name, instance_ids)` (line 651): no docstring
+    - `_build_document(job, instance, instance_id, branch, ontology_version, now_iso, event_sequence, relationships, target_field_types)` (line 690): no docstring
 
 ## oms
 
@@ -5713,13 +5721,14 @@
 
 ### `backend/scripts/platform_contract_audit.py`
 - **Functions**
-  - `_iter_non_test_python_files(backend_root)` (line 80): no docstring
-  - `audit_facade_line_counts(repo_root)` (line 89): no docstring
-  - `audit_facade_markers(repo_root)` (line 101): no docstring
-  - `audit_runtime_vocabulary(repo_root)` (line 111): no docstring
-  - `audit_docs(repo_root)` (line 126): no docstring
-  - `run_audit(repo_root)` (line 136): no docstring
-  - `main(argv)` (line 145): no docstring
+  - `_iter_non_test_python_files(backend_root)` (line 91): no docstring
+  - `_iter_runtime_contract_text_files(repo_root)` (line 100): no docstring
+  - `audit_facade_line_counts(repo_root)` (line 115): no docstring
+  - `audit_facade_markers(repo_root)` (line 127): no docstring
+  - `audit_runtime_vocabulary(repo_root)` (line 137): no docstring
+  - `audit_docs(repo_root)` (line 152): no docstring
+  - `run_audit(repo_root)` (line 162): no docstring
+  - `main(argv)` (line 171): no docstring
 
 ### `backend/scripts/processed_event_registry_smoke.py`
 - **Functions**
@@ -6630,8 +6639,8 @@
   - `_generic_http_detail(status_code, lang)` (line 29): no docstring
   - `_generic_api_message(api_status, lang)` (line 50): no docstring
   - `_translate_known(text, target_lang)` (line 94): Small curated dictionary for common phrases.
-  - `_translate_ko_to_en(text)` (line 141): no docstring
-  - `localize_free_text(text, target_lang, status_code, api_status)` (line 162): Best-effort localization for existing free-text messages.
+  - `_translate_ko_to_en(text)` (line 143): no docstring
+  - `localize_free_text(text, target_lang, status_code, api_status)` (line 164): Best-effort localization for existing free-text messages.
 
 ### `backend/shared/interfaces/__init__.py`
 
@@ -7584,24 +7593,24 @@
 
 ### `backend/shared/services/core/graph_federation_service_es.py`
 - **Classes**
-  - `GraphFederationServiceES` (line 41): ES-native graph traversal service for Search Arounds.
-    - `__init__(self, es_service, oms_base_url)` (line 44): no docstring
-    - `async _ensure_connected(self)` (line 53): Lazily connect the ES client on first use.
-    - `async multi_hop_query(self, db_name, start_class, hops, base_branch, overlay_branch, graph_branch, strict_overlay, filters, limit, offset, max_nodes, max_edges, include_paths, max_paths, no_cycles, include_documents, include_audit)` (line 64): Execute multi-hop graph query entirely within Elasticsearch.
-    - `async simple_graph_query(self, db_name, class_name, base_branch, overlay_branch, graph_branch, strict_overlay, filters, include_documents, include_audit)` (line 220): Single-class ES search — no hops.
-    - `async find_relationship_paths(self, db_name, source_class, target_class, branch, max_depth)` (line 269): Discover relationship paths between two classes by sampling ES docs.
-    - `async _search_start_class(self, index_name, class_id, filters, limit, offset)` (line 320): Hop 0 — search for start class instances with optional filters.
-    - `async _hop_forward(self, index_name, source_docs, predicate, target_class, max_fan_out)` (line 365): Forward hop: extract relationships.{predicate} → fetch targets via mget.
-    - `async _hop_reverse(self, index_name, source_docs, predicate, owner_class, source_class, max_fan_out)` (line 409): Reverse hop: find owner_class docs whose relationships.{predicate}
-    - `async _mget_instances(self, index_name, class_id, instance_ids)` (line 478): Batch-fetch instance documents by ID (instance_id == ES _id).
-    - `async _discover_class_adjacency(self, index_name)` (line 504): Sample ES docs to discover class → [(predicate, target_class)] adjacency.
-    - `_normalize_hops(hops)` (line 556): Normalize hop specs into (predicate, target_class, reverse) tuples.
-    - `_node_id(doc)` (line 580): Build canonical node ID: 'Class/instance_id'.
-    - `_make_node(doc)` (line 587): Build a graph node dict from an ES document.
-    - `_class_of(docs)` (line 601): Return the class_id of the first doc (all should be same class).
-    - `_get_relationship_refs(doc, predicate)` (line 608): Extract relationship references for a given predicate from a doc.
-    - `_parse_ref(ref)` (line 621): Parse 'TargetClass/instance_id' → (target_class, instance_id).
-    - `_empty_result()` (line 629): no docstring
+  - `GraphFederationServiceES` (line 42): ES-native graph traversal service for Search Arounds.
+    - `__init__(self, es_service, oms_base_url)` (line 45): no docstring
+    - `async _ensure_connected(self)` (line 54): Lazily connect the ES client on first use.
+    - `async multi_hop_query(self, db_name, start_class, hops, base_branch, overlay_branch, graph_branch, strict_overlay, filters, limit, offset, max_nodes, max_edges, include_paths, max_paths, no_cycles, include_documents, include_audit)` (line 65): Execute multi-hop graph query entirely within Elasticsearch.
+    - `async simple_graph_query(self, db_name, class_name, base_branch, overlay_branch, graph_branch, strict_overlay, filters, include_documents, include_audit)` (line 221): Single-class ES search — no hops.
+    - `async find_relationship_paths(self, db_name, source_class, target_class, branch, max_depth)` (line 270): Discover relationship paths between two classes by sampling ES docs.
+    - `async _search_start_class(self, index_name, class_id, filters, limit, offset)` (line 321): Hop 0 — search for start class instances with optional filters.
+    - `async _hop_forward(self, index_name, source_docs, predicate, target_class, max_fan_out)` (line 366): Forward hop: extract relationships.{predicate} → fetch targets via mget.
+    - `async _hop_reverse(self, index_name, source_docs, predicate, owner_class, source_class, max_fan_out)` (line 410): Reverse hop: find owner_class docs whose relationships.{predicate}
+    - `async _mget_instances(self, index_name, class_id, instance_ids)` (line 479): Batch-fetch instance documents by ID (instance_id == ES _id).
+    - `async _discover_class_adjacency(self, index_name)` (line 506): Sample ES docs to discover class → [(predicate, target_class)] adjacency.
+    - `_normalize_hops(hops)` (line 558): Normalize hop specs into (predicate, target_class, reverse) tuples.
+    - `_node_id(doc)` (line 582): Build canonical node ID: 'Class/instance_id'.
+    - `_make_node(doc)` (line 589): Build a graph node dict from an ES document.
+    - `_class_of(docs)` (line 603): Return the class_id of the first doc (all should be same class).
+    - `_get_relationship_refs(doc, predicate)` (line 610): Extract relationship references for a given predicate from a doc.
+    - `_parse_ref(ref)` (line 623): Parse 'TargetClass/instance_id' → (target_class, instance_id).
+    - `_empty_result()` (line 631): no docstring
 
 ### `backend/shared/services/core/health_check.py`
 - **Classes**
@@ -7654,6 +7663,13 @@
   - `RebuildIndexRequest` (line 33): Parameters for an index rebuild operation.
   - `RebuildClassResult` (line 42): no docstring
   - `RebuildIndexResult` (line 49): no docstring
+
+### `backend/shared/services/core/instance_visibility.py`
+- **Functions**
+  - `is_instances_index(index_name)` (line 10): no docstring
+  - `staged_visibility_clause()` (line 15): no docstring
+  - `apply_visible_instances_filter(query)` (line 19): no docstring
+  - `is_visible_instance_document(document)` (line 41): no docstring
 
 ### `backend/shared/services/core/link_index_job_builder.py`
 - **Functions**
@@ -9765,34 +9781,34 @@
 
 ### `backend/shared/services/storage/elasticsearch_service.py`
 - **Functions**
-  - `_resolve_compat_version()` (line 33): no docstring
-  - `_apply_compat_mimetype_patch(compat_version)` (line 45): Patch elasticsearch-py v9 compatibility media type to target ES8 clusters.
-  - `create_elasticsearch_service(settings)` (line 715): Elasticsearch 서비스 팩토리 함수 (Anti-pattern 13 해결)
-  - `async promote_alias_to_index(elasticsearch_service, base_index, new_index, allow_delete_base_index)` (line 746): Atomically promote *new_index* behind the *base_index* alias.
+  - `_resolve_compat_version()` (line 38): no docstring
+  - `_apply_compat_mimetype_patch(compat_version)` (line 50): Patch elasticsearch-py v9 compatibility media type to target ES8 clusters.
+  - `create_elasticsearch_service(settings)` (line 729): Elasticsearch 서비스 팩토리 함수 (Anti-pattern 13 해결)
+  - `async promote_alias_to_index(elasticsearch_service, base_index, new_index, allow_delete_base_index)` (line 760): Atomically promote *new_index* behind the *base_index* alias.
 - **Classes**
-  - `ElasticsearchService` (line 70): Async Elasticsearch client service with connection pooling and error handling.
-    - `__init__(self, host, port, username, password, use_ssl, verify_certs, request_timeout, max_retries, retry_on_timeout)` (line 86): no docstring
-    - `async _safe_close_client(self, client, context)` (line 131): no docstring
-    - `async connect(self)` (line 150): Initialize Elasticsearch connection.
-    - `async initialize(self)` (line 184): ServiceContainer lifecycle hook — delegates to ``connect()``.
-    - `async disconnect(self)` (line 195): Close Elasticsearch connection.
-    - `client(self)` (line 207): Get Elasticsearch client instance.
-    - `async get_cluster_health(self)` (line 214): Get Elasticsearch cluster health status.
-    - `async create_index(self, index, mappings, settings, aliases)` (line 227): Create an index with optional mappings, settings, and aliases.
-    - `async delete_index(self, index)` (line 266): Delete an index.
-    - `async index_exists(self, index)` (line 288): Check if index exists.
-    - `async update_mapping(self, index, properties)` (line 297): Update index mapping.
-    - `async index_document(self, index, document, doc_id, refresh, version, version_type, op_type)` (line 326): Index a single document.
-    - `async get_document(self, index, doc_id, source_includes, source_excludes)` (line 370): Get a document by ID.
-    - `async update_document(self, index, doc_id, doc, script, upsert, refresh)` (line 404): Update a document.
-    - `async delete_document(self, index, doc_id, refresh, version, version_type)` (line 453): Delete a document.
-    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 491): Bulk index documents.
-    - `async search(self, index, query, size, from_, sort, source_includes, source_excludes, aggregations)` (line 541): Search documents.
-    - `async count(self, index, query)` (line 595): Count documents matching query.
-    - `async create_alias(self, index, alias, filter)` (line 624): Create an alias for an index with optional filter.
-    - `async delete_alias(self, index, alias)` (line 658): Delete an alias.
-    - `async update_aliases(self, actions)` (line 681): Perform multiple alias operations atomically.
-    - `async refresh_index(self, index)` (line 705): Force refresh an index to make changes searchable.
+  - `ElasticsearchService` (line 75): Async Elasticsearch client service with connection pooling and error handling.
+    - `__init__(self, host, port, username, password, use_ssl, verify_certs, request_timeout, max_retries, retry_on_timeout)` (line 91): no docstring
+    - `async _safe_close_client(self, client, context)` (line 136): no docstring
+    - `async connect(self)` (line 155): Initialize Elasticsearch connection.
+    - `async initialize(self)` (line 189): ServiceContainer lifecycle hook — delegates to ``connect()``.
+    - `async disconnect(self)` (line 200): Close Elasticsearch connection.
+    - `client(self)` (line 212): Get Elasticsearch client instance.
+    - `async get_cluster_health(self)` (line 219): Get Elasticsearch cluster health status.
+    - `async create_index(self, index, mappings, settings, aliases)` (line 232): Create an index with optional mappings, settings, and aliases.
+    - `async delete_index(self, index)` (line 271): Delete an index.
+    - `async index_exists(self, index)` (line 293): Check if index exists.
+    - `async update_mapping(self, index, properties)` (line 302): Update index mapping.
+    - `async index_document(self, index, document, doc_id, refresh, version, version_type, op_type)` (line 331): Index a single document.
+    - `async get_document(self, index, doc_id, source_includes, source_excludes)` (line 375): Get a document by ID.
+    - `async update_document(self, index, doc_id, doc, script, upsert, refresh)` (line 412): Update a document.
+    - `async delete_document(self, index, doc_id, refresh, version, version_type)` (line 461): Delete a document.
+    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 499): Bulk index documents.
+    - `async search(self, index, query, size, from_, sort, source_includes, source_excludes, aggregations)` (line 549): Search documents.
+    - `async count(self, index, query)` (line 608): Count documents matching query.
+    - `async create_alias(self, index, alias, filter)` (line 638): Create an alias for an index with optional filter.
+    - `async delete_alias(self, index, alias)` (line 672): Delete an alias.
+    - `async update_aliases(self, actions)` (line 695): Perform multiple alias operations atomically.
+    - `async refresh_index(self, index)` (line 719): Force refresh an index to make changes searchable.
 
 ### `backend/shared/services/storage/event_store.py`
 - **Functions**
@@ -13634,6 +13650,9 @@
   - `test_service_patches_elasticsearch_v9_compat_template(monkeypatch)` (line 39): no docstring
   - `async test_connect_is_idempotent_under_concurrency(monkeypatch)` (line 56): no docstring
   - `async test_disconnect_clears_client_reference(monkeypatch)` (line 85): no docstring
+  - `async test_search_hides_staged_objectify_documents_from_instances_index()` (line 115): no docstring
+  - `async test_get_document_hides_staged_objectify_documents_from_instances_index()` (line 140): no docstring
+  - `async test_count_adds_visibility_filter_for_instances_index()` (line 152): no docstring
 
 ### `backend/tests/unit/services/test_envelope_dlq_publisher.py`
 - **Functions**
@@ -15445,7 +15464,9 @@
 
 ### `backend/tests/unit/utils/test_platform_contract_audit.py`
 - **Functions**
-  - `test_platform_contract_audit_guard()` (line 11): no docstring
+  - `test_platform_contract_audit_guard()` (line 12): no docstring
+  - `test_runtime_vocabulary_audit_flags_minified_nginx_health_payload(tmp_path)` (line 30): no docstring
+  - `test_runtime_vocabulary_audit_scans_docs_examples(tmp_path)` (line 45): no docstring
 
 ### `backend/tests/unit/utils/test_principal_policy.py`
 - **Functions**
@@ -15995,32 +16016,38 @@
 ### `backend/tests/unit/workers/test_objectify_write_path_contract.py`
 - **Functions**
   - `test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_store()` (line 13): no docstring
-  - `test_objectify_write_path_contract_marks_degraded_instance_event_files()` (line 42): no docstring
-  - `test_objectify_completion_report_keeps_sample_count_consistent_with_reported_ids()` (line 67): no docstring
+  - `test_objectify_write_path_contract_marks_degraded_instance_event_files()` (line 40): no docstring
+  - `test_objectify_completion_report_keeps_sample_count_consistent_with_reported_ids()` (line 63): no docstring
 
 ### `backend/tests/unit/workers/test_objectify_write_paths.py`
 - **Functions**
   - `_build_job()` (line 11): no docstring
-  - `async test_dataset_primary_write_path_indexes_instances_directly()` (line 90): no docstring
-  - `async test_build_document_populates_properties_from_flat_instance()` (line 122): Properties nested array should be auto-built from flat instance fields.
-  - `async test_build_document_preserves_existing_properties()` (line 160): If properties list is already populated, it should not be overwritten.
-  - `async test_build_document_skips_none_values()` (line 182): Properties with None values should not be included.
-  - `async test_write_instances_passes_target_field_types()` (line 201): write_instances() should forward target_field_types to _build_document().
-  - `async test_dataset_primary_finalize_prunes_stale_docs_on_full()` (line 228): no docstring
-  - `async test_dataset_primary_write_path_samples_command_ids_but_tracks_total_files()` (line 262): no docstring
+  - `async test_dataset_primary_write_path_indexes_instances_directly()` (line 136): no docstring
+  - `async test_build_document_populates_properties_from_flat_instance()` (line 169): Properties nested array should be auto-built from flat instance fields.
+  - `async test_build_document_preserves_existing_properties()` (line 207): If properties list is already populated, it should not be overwritten.
+  - `async test_build_document_skips_none_values()` (line 229): Properties with None values should not be included.
+  - `async test_write_instances_passes_target_field_types()` (line 248): write_instances() should forward target_field_types to _build_document().
+  - `async test_dataset_primary_finalize_prunes_stale_docs_on_full()` (line 275): no docstring
+  - `async test_dataset_primary_write_path_publishes_instance_event_files_only_during_finalize()` (line 324): no docstring
+  - `async test_dataset_primary_finalize_publishes_staged_docs_before_completion()` (line 367): no docstring
+  - `async test_dataset_primary_finalize_requires_every_instance_to_publish_visibility()` (line 400): no docstring
+  - `async test_dataset_primary_finalize_applies_explicit_delta_deletes_after_commit()` (line 419): no docstring
 - **Classes**
   - `_FakeElasticsearchService` (line 26): no docstring
     - `__init__(self)` (line 27): no docstring
-    - `async index_exists(self, index)` (line 37): no docstring
-    - `async create_index(self, index, mappings, settings)` (line 40): no docstring
-    - `async update_mapping(self, index, properties)` (line 45): no docstring
-    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 49): no docstring
-    - `async delete_document(self, index, doc_id, refresh)` (line 66): no docstring
-    - `async refresh_index(self, index)` (line 70): no docstring
-    - `async search(self, index, body)` (line 74): no docstring
-  - `_FakeStorageService` (line 81): no docstring
-    - `__init__(self)` (line 82): no docstring
-    - `async save_json(self, bucket, key, payload)` (line 85): no docstring
+    - `async index_exists(self, index)` (line 39): no docstring
+    - `async create_index(self, index, mappings, settings)` (line 42): no docstring
+    - `async update_mapping(self, index, properties)` (line 48): no docstring
+    - `async bulk_index(self, index, documents, chunk_size, refresh)` (line 52): no docstring
+    - `async update_document(self, index, doc_id, doc, script, upsert, refresh)` (line 72): no docstring
+    - `async delete_document(self, index, doc_id, refresh)` (line 92): no docstring
+    - `async refresh_index(self, index)` (line 98): no docstring
+    - `async search(self, index, body)` (line 102): no docstring
+    - `async mget(self, index, body)` (line 109): no docstring
+  - `_FakeStorageService` (line 122): no docstring
+    - `__init__(self)` (line 123): no docstring
+    - `async save_json(self, bucket, key, payload)` (line 127): no docstring
+    - `async delete_object(self, bucket, key)` (line 130): no docstring
 
 ### `backend/tests/unit/workers/test_ontology_worker_graph_lineage_naming.py`
 - **Functions**

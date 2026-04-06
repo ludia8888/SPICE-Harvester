@@ -19,9 +19,7 @@ def test_objectify_write_path_contract_uses_postgres_registry_as_authoritative_s
         command_ids_sample=["cmd-1", "cmd-2"],
         instance_event_files_written=12,
         instance_event_file_failures=0,
-        lineage_limit=100,
-        lineage_remaining=88,
-        lineage_enabled=True,
+        lineage_followup=followup_completed("lineage", details={"recorded_links": 12}),
         watermark_followup=followup_completed(
             "watermark_update",
             details={"new_watermark": "2026-04-04T00:00:00Z"},
@@ -48,9 +46,7 @@ def test_objectify_write_path_contract_marks_degraded_instance_event_files() -> 
         command_ids_sample=["cmd-1"],
         instance_event_files_written=2,
         instance_event_file_failures=1,
-        lineage_limit=0,
-        lineage_remaining=0,
-        lineage_enabled=False,
+        lineage_followup=followup_degraded("lineage", error="lineage store unavailable"),
         watermark_followup=followup_degraded(
             "watermark_update",
             error="watermark store unavailable",
@@ -59,7 +55,7 @@ def test_objectify_write_path_contract_marks_degraded_instance_event_files() -> 
 
     followups = {item["name"]: item for item in contract["derived_side_effects"]}
     assert followups["instance_event_files"]["status"] == "degraded"
-    assert followups["lineage"]["status"] == "skipped"
+    assert followups["lineage"]["status"] == "degraded"
     assert followups["watermark_update"]["status"] == "degraded"
 
 

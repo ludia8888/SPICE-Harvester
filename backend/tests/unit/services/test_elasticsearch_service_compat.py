@@ -109,3 +109,59 @@ async def test_disconnect_clears_client_reference(monkeypatch: pytest.MonkeyPatc
 
     assert created_clients[0].closed is True
     assert service._client is None
+
+
+@pytest.mark.asyncio
+async def test_search_hides_staged_objectify_documents_from_instances_index() -> None:
+    class _FakeClient:
+        async def search(self, **_: object) -> dict[str, object]:
+            return {
+                "hits": {
+                    "total": {"value": 1},
+                    "hits": [
+                        {
+                            "_source": {
+                                "instance_id": "order-1",
+                                "objectify_visibility_state": "staged",
+                            }
+                        }
+                    ],
+                }
+            }
+
+    service = es_module.ElasticsearchService(host="127.0.0.1", port=9200)
+    service._client = _FakeClient()  # type: ignore[assignment]
+
+    result = await service.search(index="demo_instances", query={"term": {"class_id": "Order"}})
+    assert result["hits"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_document_hides_staged_objectify_documents_from_instances_index() -> None:
+    class _FakeClient:
+        async def get(self, **_: object) -> dict[str, object]:
+            return {"_source": {"instance_id": "order-1", "objectify_visibility_state": "staged"}}
+
+    service = es_module.ElasticsearchService(host="127.0.0.1", port=9200)
+    service._client = _FakeClient()  # type: ignore[assignment]
+
+    assert await service.get_document(index="demo_instances", doc_id="order-1") is None
+
+
+@pytest.mark.asyncio
+async def test_count_adds_visibility_filter_for_instances_index() -> None:
+    recorded_body: dict[str, object] = {}
+
+    class _FakeClient:
+        async def count(self, *, index: str, body: dict[str, object]) -> dict[str, object]:
+            recorded_body["index"] = index
+            recorded_body["body"] = body
+            return {"count": 3}
+
+    service = es_module.ElasticsearchService(host="127.0.0.1", port=9200)
+    service._client = _FakeClient()  # type: ignore[assignment]
+
+    count = await service.count(index="demo_instances", query={"term": {"class_id": "Order"}})
+    assert count == 3
+    query = recorded_body["body"]["query"]  # type: ignore[index]
+    assert query["bool"]["must_not"][0]["term"]["objectify_visibility_state"] == "staged"  # type: ignore[index]

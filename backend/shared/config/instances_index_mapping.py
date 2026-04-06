@@ -42,6 +42,7 @@ INSTANCE_INDEX_MAPPING: Dict[str, Any] = {
         "version": {"type": "long"},
         "db_name": {"type": "keyword"},
         "branch": {"type": "keyword"},
+        "objectify_visibility_state": {"type": "keyword"},
         "ontology_ref": {"type": "keyword"},
         "ontology_commit": {"type": "keyword"},
         "created_at": {"type": "date"},
@@ -66,4 +67,3 @@ INSTANCE_INDEX_MAPPING: Dict[str, Any] = {
         },
     }
 }
-

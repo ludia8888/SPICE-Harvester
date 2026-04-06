@@ -601,11 +601,24 @@ class ObjectifyWorkerRuntimeMixin:
         if not self.objectify_registry:
             return
         try:
+            existing = await self.objectify_registry.get_objectify_job(job_id=job.job_id)
+            existing_status = str(getattr(existing, "status", "") or "").strip().upper()
             report_payload = self._build_error_report(
                 error=error,
                 job=job,
                 context={"attempt_count": int(attempt_count), "retryable": bool(retryable)},
             )
+            if existing_status in {"COMMITTING", "COMPLETED"}:
+                committed_report = dict(getattr(existing, "report", None) or {})
+                committed_report["post_commit_error"] = report_payload
+                await self.objectify_registry.update_objectify_job_status(
+                    job_id=job.job_id,
+                    status=existing_status,
+                    error=(error or "")[:4000],
+                    report=committed_report,
+                    completed_at=getattr(existing, "completed_at", None),
+                )
+                return
             await self.objectify_registry.update_objectify_job_status(
                 job_id=job.job_id,
                 status=status,

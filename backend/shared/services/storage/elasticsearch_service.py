@@ -22,6 +22,11 @@ from elasticsearch.helpers import async_bulk
 
 from shared.config.settings import get_settings
 from shared.observability.tracing import trace_storage_operation
+from shared.services.core.instance_visibility import (
+    apply_visible_instances_filter,
+    is_instances_index,
+    is_visible_instance_document,
+)
 from shared.services.storage.connectivity import AsyncClientPingMixin
 
 if TYPE_CHECKING:
@@ -393,7 +398,10 @@ class ElasticsearchService(AsyncClientPingMixin):
                 _source_includes=source_includes,
                 _source_excludes=source_excludes
             )
-            return response["_source"]
+            document = response["_source"]
+            if is_instances_index(index) and not is_visible_instance_document(document):
+                return None
+            return document
         except NotFoundError:
             return None
         except ElasticsearchException as e:
@@ -567,8 +575,9 @@ class ElasticsearchService(AsyncClientPingMixin):
         """
         try:
             body = {}
-            if query:
-                body["query"] = query
+            resolved_query = apply_visible_instances_filter(query) if is_instances_index(index) else query
+            if resolved_query:
+                body["query"] = resolved_query
             if aggregations:
                 body["aggs"] = aggregations
                 
@@ -582,9 +591,13 @@ class ElasticsearchService(AsyncClientPingMixin):
                 _source_excludes=source_excludes
             )
             
+            hits = [hit["_source"] for hit in response["hits"]["hits"]]
+            if is_instances_index(index):
+                hits = [hit for hit in hits if is_visible_instance_document(hit)]
+
             return {
                 "total": response["hits"]["total"]["value"],
-                "hits": [hit["_source"] for hit in response["hits"]["hits"]],
+                "hits": hits,
                 "aggregations": response.get("aggregations", {})
             }
         except ElasticsearchException as e:
@@ -609,8 +622,9 @@ class ElasticsearchService(AsyncClientPingMixin):
         """
         try:
             body = {}
-            if query:
-                body["query"] = query
+            resolved_query = apply_visible_instances_filter(query) if is_instances_index(index) else query
+            if resolved_query:
+                body["query"] = resolved_query
                 
             response = await self.client.count(index=index, body=body)
             return response["count"]

@@ -39,9 +39,7 @@ def _build_objectify_write_path_contract(
     command_ids_sample: List[str],
     instance_event_files_written: int,
     instance_event_file_failures: int,
-    lineage_limit: int,
-    lineage_remaining: int,
-    lineage_enabled: bool,
+    lineage_followup: Dict[str, Any],
     watermark_followup: Dict[str, Any],
 ) -> Dict[str, Any]:
     stale_prune = (
@@ -49,12 +47,31 @@ def _build_objectify_write_path_contract(
         if isinstance(write_path_report.get("stale_prune"), dict)
         else None
     )
+    visibility_publish = (
+        dict(write_path_report.get("visibility_publish") or {})
+        if isinstance(write_path_report.get("visibility_publish"), dict)
+        else None
+    )
+    explicit_delete = (
+        dict(write_path_report.get("explicit_delete") or {})
+        if isinstance(write_path_report.get("explicit_delete"), dict)
+        else None
+    )
+    instance_event_files_report = (
+        dict(write_path_report.get("instance_event_files") or {})
+        if isinstance(write_path_report.get("instance_event_files"), dict)
+        else {}
+    )
     elasticsearch_details: Dict[str, Any] = {
         "indexed_instances": int(indexed_instances),
         "execution_mode": str(execution_mode or "full"),
     }
     if stale_prune is not None:
         elasticsearch_details["stale_prune"] = stale_prune
+    if visibility_publish is not None:
+        elasticsearch_details["visibility_publish"] = visibility_publish
+    if explicit_delete is not None:
+        elasticsearch_details["explicit_delete"] = explicit_delete
 
     if indexed_instances > 0:
         elasticsearch_followup = followup_completed(
@@ -91,29 +108,9 @@ def _build_objectify_write_path_contract(
     else:
         instance_event_files_followup = followup_skipped(
             "instance_event_files",
-            details={"reason": "storage_unavailable_or_not_configured"},
-        )
-
-    lineage_recorded = max(0, int(lineage_limit) - max(0, int(lineage_remaining)))
-    if lineage_recorded > 0:
-        lineage_followup = followup_completed(
-            "lineage",
-            details={"recorded_links": lineage_recorded},
-        )
-    elif not lineage_enabled:
-        lineage_followup = followup_skipped(
-            "lineage",
-            details={"reason": "lineage_disabled"},
-        )
-    elif int(lineage_limit) <= 0 or int(lineage_remaining) <= 0:
-        lineage_followup = followup_skipped(
-            "lineage",
-            details={"reason": "lineage_limit_reached"},
-        )
-    else:
-        lineage_followup = followup_skipped(
-            "lineage",
-            details={"reason": "no_lineage_links_recorded"},
+            details={
+                "reason": str(instance_event_files_report.get("reason") or "storage_unavailable_or_not_configured"),
+            },
         )
 
     return build_write_path_contract(
@@ -126,6 +123,63 @@ def _build_objectify_write_path_contract(
         ],
         recovery_path={"reference": f"objectify_job:{job_id}"},
     )
+
+
+def _build_objectify_commit_report(
+    *,
+    total_rows: int,
+    prepared_instances: int,
+    warnings: List[Dict[str, Any]],
+    errors: List[Dict[str, Any]],
+    error_rows: List[int],
+    command_ids_sample: List[str],
+    instance_ids_sample: List[str],
+    indexed_instances: int,
+    ontology_version: Optional[Dict[str, str]],
+    execution_mode: str,
+    input_type: str,
+    artifact_output_name: Optional[str],
+    watermark_column: Optional[str],
+    latest_watermark: Optional[str],
+    instance_event_files_written: int,
+    instance_event_file_failures: int,
+    pending_deleted_instance_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    sampled_command_ids = [
+        str(command_id).strip()
+        for command_id in command_ids_sample[:OBJECTIFY_COMMAND_ID_SAMPLE_LIMIT]
+        if str(command_id).strip()
+    ]
+    report = {
+        "commit_state": "committed_pending_publish",
+        "total_rows": total_rows,
+        "prepared_instances": prepared_instances,
+        "warnings": warnings[:200],
+        "validation": {"warnings": warnings[:200]},
+        "errors": errors[:200],
+        "error_row_indices": error_rows[:200],
+        "command_ids": sampled_command_ids,
+        "command_id_count": len(sampled_command_ids),
+        "command_ids_truncated": int(instance_event_files_written) > len(sampled_command_ids),
+        "instance_event_files_written": int(instance_event_files_written),
+        "instance_event_file_failures": int(instance_event_file_failures),
+        "instance_ids_sample": instance_ids_sample[:10],
+        "indexed_instances": int(indexed_instances),
+        "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+        "ontology_version": ontology_version or {},
+        "execution_mode": str(execution_mode or "full"),
+        "input_type": str(input_type or ""),
+        "artifact_output_name": str(artifact_output_name or "").strip() or None,
+        "watermark_column": str(watermark_column or "").strip() or None,
+        "latest_watermark": str(latest_watermark or "").strip() or None,
+    }
+    if pending_deleted_instance_ids:
+        report["pending_deleted_instance_ids"] = [
+            str(instance_id).strip()
+            for instance_id in pending_deleted_instance_ids
+            if str(instance_id).strip()
+        ]
+    return report
 
 
 def _build_objectify_completion_report(
@@ -191,6 +245,36 @@ async def process_job(
     if not self.instance_write_path:
         raise RuntimeError("Objectify write path not initialized")
 
+    indexed_instance_ids: set[str] = set()
+    delta_deleted_instance_ids: set[str] = set()
+    written_instance_event_keys: List[str] = []
+    authoritative_commit_recorded = False
+
+    async def _cleanup_precommit_side_effects() -> None:
+        if not indexed_instance_ids and not written_instance_event_keys:
+            return
+        cleanup = getattr(self.instance_write_path, "cleanup_failed_job", None)
+        if not callable(cleanup):
+            return
+        try:
+            cleanup_result = await cleanup(
+                job=job,
+                indexed_instance_ids=indexed_instance_ids,
+                instance_event_keys=written_instance_event_keys,
+            )
+            logger.warning(
+                "Cleaned up staged objectify side effects before authoritative commit (job_id=%s): %s",
+                job.job_id,
+                cleanup_result,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to cleanup staged objectify side effects before authoritative commit (job_id=%s): %s",
+                job.job_id,
+                exc,
+                exc_info=True,
+            )
+
     async def _fail_job(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
         if report:
             errs = report.get("errors")
@@ -202,6 +286,8 @@ async def process_job(
             stats = report.get("stats")
             if stats:
                 logger.error("Objectify validation stats (job_id=%s): %s", job.job_id, stats)
+        if not authoritative_commit_recorded:
+            await _cleanup_precommit_side_effects()
         report_payload = self._build_error_report(error=error, report=report, job=job)
         if error.startswith("validation_failed"):
             await self._record_gate_result(
@@ -222,20 +308,39 @@ async def process_job(
     if record and record.status in {"SUBMITTED", "COMPLETED"}:
         logger.info("Objectify job already submitted (job_id=%s); skipping", job.job_id)
         return
+    resume_from_commit = bool(record and str(record.status or "").strip().upper() == "COMMITTING")
 
+    async def _fail_resume_commit(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
+        logger.warning(
+            "Committed objectify job requires recovery before completion (job_id=%s): %s",
+            job.job_id,
+            error,
+        )
+        recovery_report = dict(getattr(record, "report", None) or {})
+        recovery_report["recovery_error"] = self._build_error_report(error=error, report=report, job=job)
+        await self.objectify_registry.update_objectify_job_status(
+            job_id=job.job_id,
+            status="COMMITTING",
+            error=error[:4000],
+            report=recovery_report,
+        )
+        raise RuntimeError(error)
+
+    fail_resolver = _fail_resume_commit if resume_from_commit else _fail_job
     input_type, resolved_output_name, stable_seed = await self._resolve_job_input_context(
         job=job,
-        fail_job=_fail_job,
+        fail_job=fail_resolver,
     )
     mapping_spec = await self._resolve_mapping_spec_for_job(
         job=job,
-        fail_job=_fail_job,
+        fail_job=fail_resolver,
     )
 
-    await self.objectify_registry.update_objectify_job_status(
-        job_id=job.job_id,
-        status="RUNNING",
-    )
+    if not resume_from_commit:
+        await self.objectify_registry.update_objectify_job_status(
+            job_id=job.job_id,
+            status="RUNNING",
+        )
 
     options: Dict[str, Any] = dict(mapping_spec.options or {})
     if isinstance(job.options, dict):
@@ -608,14 +713,338 @@ async def process_job(
                 },
             )
 
+    execution_mode = str(options.get("execution_mode") or job.execution_mode or "full").strip().lower() or "full"
+    if execution_mode not in {"full", "incremental", "delta"}:
+        execution_mode = "full"
+    watermark_column = job.watermark_column or options.get("watermark_column")
+    previous_watermark = job.previous_watermark
+    latest_watermark: Optional[str] = None
+    delta_computer: Optional[ObjectifyDeltaComputer] = None
+    lakefs_delta_result: Optional[DeltaResult] = None
+
+    if execution_mode in ("incremental",) and not watermark_column:
+        watermark_column = _auto_detect_watermark_column(columns=None, options=options)
+        if not watermark_column:
+            logger.info(
+                "Incremental mode requested but no watermark column detected; falling back to full mode"
+            )
+            execution_mode = "full"
+
+    if execution_mode == "delta" and job.base_commit_id:
+        pk_source_columns: List[str] = []
+        if pk_targets:
+            mapping_by_target = {
+                str(m.target_field): str(m.source_field)
+                for m in (property_mappings or [])
+                if getattr(m, "target_field", None) and getattr(m, "source_field", None)
+            }
+            for target in pk_targets:
+                src = mapping_by_target.get(str(target)) or str(target)
+                if src:
+                    pk_source_columns.append(src)
+        if not pk_source_columns:
+            pk_source_columns = ["id"]
+        delta_computer = ObjectifyDeltaComputer(pk_columns=pk_source_columns)
+        lakefs_delta_result = await _compute_lakefs_delta(
+            job=job,
+            delta_computer=delta_computer,
+            storage=self.storage,
+        )
+        if lakefs_delta_result and lakefs_delta_result.has_changes:
+            logger.info(
+                "LakeFS delta computed: added=%d, modified=%d, deleted=%d",
+                lakefs_delta_result.stats.get("added_count", 0),
+                lakefs_delta_result.stats.get("modified_count", 0),
+                lakefs_delta_result.stats.get("deleted_count", 0),
+            )
+        elif lakefs_delta_result and not lakefs_delta_result.has_changes:
+            logger.info("LakeFS delta: no changes detected between commits")
+        else:
+            logger.warning("LakeFS delta computation failed; falling back to full mode")
+            execution_mode = "full"
+            lakefs_delta_result = None
+    elif execution_mode in ("incremental", "delta") and watermark_column:
+        delta_computer = create_delta_computer_for_mapping_spec(
+            vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
+        )
+        logger.info(
+            "Incremental objectify mode enabled: execution_mode=%s, watermark_column=%s, previous=%s",
+            execution_mode, watermark_column, previous_watermark,
+        )
+
     ontology_version = await self._fetch_ontology_version(job)
-    job_node_id = await self._record_lineage_header(
-        job=job,
-        mapping_spec=mapping_spec,
-        ontology_version=ontology_version,
-        input_type=input_type,
-        artifact_output_name=resolved_output_name,
-    )
+
+    async def _complete_committed_job(
+        *,
+        total_rows: int,
+        prepared_instances: int,
+        warnings: List[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        error_rows: List[int],
+        command_ids_sample: List[str],
+        instance_ids_sample: List[str],
+        instance_event_files_written: int,
+        instance_event_file_failures: int,
+        indexed_instance_ids_for_finalize: Optional[set[str]],
+        deleted_instance_ids_for_finalize: Optional[set[str]],
+        latest_watermark_value: Optional[str],
+    ) -> None:
+        active_instance_ids = sorted(
+            indexed_instance_ids_for_finalize
+            if indexed_instance_ids_for_finalize is not None
+            else {
+                str(value).strip()
+                for value in await self.instance_write_path.list_job_instance_ids(job=job)
+                if str(value).strip()
+            }
+        )
+
+        write_path_report = await self.instance_write_path.finalize_job(
+            job=job,
+            execution_mode=execution_mode,
+            indexed_instance_ids=active_instance_ids,
+            deleted_instance_ids=deleted_instance_ids_for_finalize,
+        )
+        instance_event_files_report = (
+            dict(write_path_report.get("instance_event_files") or {})
+            if isinstance(write_path_report.get("instance_event_files"), dict)
+            else {}
+        )
+        final_command_ids_sample = [
+            str(command_id).strip()
+            for command_id in list(instance_event_files_report.get("command_ids") or [])
+            if str(command_id).strip()
+        ]
+        final_instance_event_files_written = int(instance_event_files_report.get("written") or 0)
+        final_instance_event_file_failures = int(instance_event_files_report.get("failed") or 0)
+        indexed_instances_count = int(
+            (
+                (write_path_report.get("visibility_publish") or {}).get("published")
+                if isinstance(write_path_report.get("visibility_publish"), dict)
+                else 0
+            )
+            or len(active_instance_ids)
+        )
+
+        if execution_mode in ("incremental", "delta") and latest_watermark_value:
+            try:
+                await self._update_watermark_after_job(
+                    job=job,
+                    new_watermark=latest_watermark_value,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Objectify watermark update degraded after authoritative commit (job_id=%s): %s",
+                    job.job_id,
+                    exc,
+                    exc_info=True,
+                )
+                watermark_followup = followup_degraded(
+                    "watermark_update",
+                    error=str(exc),
+                    details={
+                        "execution_mode": execution_mode,
+                        "watermark_column": watermark_column,
+                        "new_watermark": latest_watermark_value,
+                    },
+                )
+            else:
+                watermark_followup = followup_completed(
+                    "watermark_update",
+                    details={
+                        "execution_mode": execution_mode,
+                        "watermark_column": watermark_column,
+                        "new_watermark": latest_watermark_value,
+                    },
+                )
+        else:
+            watermark_followup = followup_skipped(
+                "watermark_update",
+                details={
+                    "reason": "not_incremental_or_no_new_watermark",
+                    "execution_mode": execution_mode,
+                    "watermark_column": watermark_column,
+                },
+            )
+
+        if not self.lineage_store and getattr(self, "lineage_required", False):
+            lineage_followup = followup_degraded(
+                "lineage",
+                error="lineage_store_unavailable",
+                details={"reason": "lineage_required_but_unavailable"},
+            )
+        elif not self.lineage_store:
+            lineage_followup = followup_skipped(
+                "lineage",
+                details={"reason": "lineage_disabled"},
+            )
+        else:
+            try:
+                job_node_id = await self._record_lineage_header(
+                    job=job,
+                    mapping_spec=mapping_spec,
+                    ontology_version=ontology_version,
+                    input_type=input_type,
+                    artifact_output_name=resolved_output_name,
+                )
+                lineage_remaining = await self._record_instance_lineage(
+                    job=job,
+                    job_node_id=job_node_id,
+                    instance_ids=active_instance_ids,
+                    mapping_spec_id=mapping_spec.mapping_spec_id,
+                    mapping_spec_version=mapping_spec.version,
+                    column_lineage_pairs=self._build_column_lineage_pairs(getattr(mapping_spec, "mappings", None)),
+                    ontology_version=ontology_version,
+                    limit_remaining=self.lineage_max_links,
+                    input_type=input_type,
+                    artifact_output_name=resolved_output_name,
+                )
+                lineage_recorded = max(0, int(self.lineage_max_links) - max(0, int(lineage_remaining)))
+                if lineage_recorded > 0:
+                    lineage_followup = followup_completed(
+                        "lineage",
+                        details={"recorded_links": lineage_recorded},
+                    )
+                elif int(self.lineage_max_links) <= 0 or int(lineage_remaining) <= 0:
+                    lineage_followup = followup_skipped(
+                        "lineage",
+                        details={"reason": "lineage_limit_reached"},
+                    )
+                else:
+                    lineage_followup = followup_skipped(
+                        "lineage",
+                        details={"reason": "no_lineage_links_recorded"},
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Objectify lineage write degraded after authoritative commit (job_id=%s): %s",
+                    job.job_id,
+                    exc,
+                    exc_info=True,
+                )
+                lineage_followup = followup_degraded(
+                    "lineage",
+                    error=str(exc),
+                )
+
+        write_path_contract = _build_objectify_write_path_contract(
+            job_id=job.job_id,
+            execution_mode=execution_mode,
+            indexed_instances=indexed_instances_count,
+            write_path_report=write_path_report,
+            command_ids_sample=final_command_ids_sample,
+            instance_event_files_written=final_instance_event_files_written,
+            instance_event_file_failures=final_instance_event_file_failures,
+            lineage_followup=lineage_followup,
+            watermark_followup=watermark_followup,
+        )
+
+        logger.info(
+            "Objectify write path contract committed (job_id=%s): %s",
+            job.job_id,
+            write_path_contract,
+        )
+
+        completion_report = _build_objectify_completion_report(
+            total_rows=total_rows,
+            prepared_instances=prepared_instances,
+            warnings=warnings,
+            errors=errors,
+            error_rows=error_rows,
+            command_ids_sample=final_command_ids_sample,
+            instance_ids_sample=instance_ids_sample,
+            indexed_instances=indexed_instances_count,
+            write_path_report=write_path_report,
+            write_path_contract=write_path_contract,
+            ontology_version=ontology_version,
+            instance_event_files_written=final_instance_event_files_written,
+            instance_event_file_failures=final_instance_event_file_failures,
+        )
+
+        await self.objectify_registry.update_objectify_job_status(
+            job_id=job.job_id,
+            status="COMPLETED",
+            command_id=None,
+            error="",
+            report=completion_report,
+            completed_at=datetime.now(timezone.utc),
+        )
+
+        try:
+            await self._record_gate_result(
+                job=job,
+                status="PASS",
+                details={
+                    "total_rows": total_rows,
+                    "prepared_instances": prepared_instances,
+                    "command_ids": completion_report.get("command_ids") or [],
+                    "command_id_count": completion_report.get("command_id_count") or 0,
+                    "command_ids_truncated": bool(completion_report.get("command_ids_truncated")),
+                    "instance_event_files_written": final_instance_event_files_written,
+                    "instance_event_file_failures": final_instance_event_file_failures,
+                    "indexed_instances": indexed_instances_count,
+                    "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
+                    "warning_count": len(warnings),
+                    "error_count": len(errors or []),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Objectify gate result persistence degraded after job commit (job_id=%s): %s",
+                job.job_id,
+                exc,
+                exc_info=True,
+            )
+
+        try:
+            await self._update_object_type_active_version(job=job, mapping_spec=mapping_spec)
+        except Exception as exc:
+            logger.warning(
+                "Objectify active-version update degraded after job commit (job_id=%s): %s",
+                job.job_id,
+                exc,
+                exc_info=True,
+            )
+
+        try:
+            await self._emit_objectify_completed_event(
+                job=job,
+                total_rows=total_rows,
+                prepared_instances=prepared_instances,
+                indexed_instances=indexed_instances_count,
+                execution_mode=execution_mode,
+                ontology_version=ontology_version,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Objectify completion event degraded after job commit (job_id=%s): %s",
+                job.job_id,
+                exc,
+                exc_info=True,
+            )
+
+    if resume_from_commit:
+        authoritative_commit_recorded = True
+        resume_report = dict(getattr(record, "report", None) or {})
+        await _complete_committed_job(
+            total_rows=int(resume_report.get("total_rows") or 0),
+            prepared_instances=int(resume_report.get("prepared_instances") or 0),
+            warnings=list(resume_report.get("warnings") or []),
+            errors=list(resume_report.get("errors") or []),
+            error_rows=list(resume_report.get("error_row_indices") or []),
+            command_ids_sample=list(resume_report.get("command_ids") or []),
+            instance_ids_sample=list(resume_report.get("instance_ids_sample") or []),
+            instance_event_files_written=int(resume_report.get("instance_event_files_written") or 0),
+            instance_event_file_failures=int(resume_report.get("instance_event_file_failures") or 0),
+            indexed_instance_ids_for_finalize=None,
+            deleted_instance_ids_for_finalize={
+                str(value).strip()
+                for value in list(resume_report.get("pending_deleted_instance_ids") or [])
+                if str(value).strip()
+            },
+            latest_watermark_value=str(resume_report.get("latest_watermark") or "").strip() or None,
+        )
+        return
 
     (
         key_scan_total_rows,
@@ -689,7 +1118,6 @@ async def process_job(
             )
 
     command_ids_sample: List[str] = []
-    indexed_instance_ids: set[str] = set()
     instance_event_files_written = 0
     instance_event_file_failures = 0
     prepared_instances = 0
@@ -697,67 +1125,7 @@ async def process_job(
     error_rows: List[int] = []
     errors: List[Dict[str, Any]] = []
     total_rows_seen = 0
-    lineage_remaining = self.lineage_max_links
     seen_row_keys: set[str] = set()
-
-    execution_mode = str(options.get("execution_mode") or job.execution_mode or "full").strip().lower() or "full"
-    if execution_mode not in {"full", "incremental", "delta"}:
-        execution_mode = "full"
-    watermark_column = job.watermark_column or options.get("watermark_column")
-    previous_watermark = job.previous_watermark
-    latest_watermark: Optional[str] = None
-    delta_computer: Optional[ObjectifyDeltaComputer] = None
-    lakefs_delta_result: Optional[DeltaResult] = None
-
-    if execution_mode in ("incremental",) and not watermark_column:
-        watermark_column = _auto_detect_watermark_column(columns=None, options=options)
-        if not watermark_column:
-            logger.info(
-                "Incremental mode requested but no watermark column detected; falling back to full mode"
-            )
-            execution_mode = "full"
-
-    if execution_mode == "delta" and job.base_commit_id:
-        pk_source_columns: List[str] = []
-        if pk_targets:
-            mapping_by_target = {
-                str(m.target_field): str(m.source_field)
-                for m in (property_mappings or [])
-                if getattr(m, "target_field", None) and getattr(m, "source_field", None)
-            }
-            for target in pk_targets:
-                src = mapping_by_target.get(str(target)) or str(target)
-                if src:
-                    pk_source_columns.append(src)
-        if not pk_source_columns:
-            pk_source_columns = ["id"]
-        delta_computer = ObjectifyDeltaComputer(pk_columns=pk_source_columns)
-        lakefs_delta_result = await _compute_lakefs_delta(
-            job=job,
-            delta_computer=delta_computer,
-            storage=self.storage,
-        )
-        if lakefs_delta_result and lakefs_delta_result.has_changes:
-            logger.info(
-                "LakeFS delta computed: added=%d, modified=%d, deleted=%d",
-                lakefs_delta_result.stats.get("added_count", 0),
-                lakefs_delta_result.stats.get("modified_count", 0),
-                lakefs_delta_result.stats.get("deleted_count", 0),
-            )
-        elif lakefs_delta_result and not lakefs_delta_result.has_changes:
-            logger.info("LakeFS delta: no changes detected between commits")
-        else:
-            logger.warning("LakeFS delta computation failed; falling back to full mode")
-            execution_mode = "full"
-            lakefs_delta_result = None
-    elif execution_mode in ("incremental", "delta") and watermark_column:
-        delta_computer = create_delta_computer_for_mapping_spec(
-            vars(mapping_spec) if hasattr(mapping_spec, "__dict__") else dict(mapping_spec or {})
-        )
-        logger.info(
-            "Incremental objectify mode enabled: execution_mode=%s, watermark_column=%s, previous=%s",
-            execution_mode, watermark_column, previous_watermark,
-        )
 
     if lakefs_delta_result and lakefs_delta_result.has_changes:
         delta_result = await _delta_processing.process_lakefs_delta_rows(
@@ -790,6 +1158,11 @@ async def process_job(
         )
         prepared_instances += int(delta_result.get("prepared_instances") or 0)
         total_rows_seen = int(delta_result.get("total_rows_seen") or 0)
+        delta_deleted_instance_ids.update(
+            str(value).strip()
+            for value in list(delta_result.get("effective_deleted_keys") or [])
+            if str(value).strip()
+        )
 
     incremental_filtering_enabled = bool(
         execution_mode in ("incremental", "delta") and delta_computer and watermark_column
@@ -956,25 +1329,16 @@ async def process_job(
                 command_ids_sample.extend([str(v) for v in write_result.command_ids if str(v).strip()])
             if write_result.indexed_instance_ids:
                 indexed_instance_ids.update(str(v).strip() for v in write_result.indexed_instance_ids if str(v).strip())
+            if getattr(write_result, "instance_event_keys", None):
+                written_instance_event_keys.extend(
+                    [str(v).strip() for v in write_result.instance_event_keys if str(v).strip()]
+                )
             instance_event_files_written += int(getattr(write_result, "instance_event_files_written", 0) or 0)
             instance_event_file_failures += int(getattr(write_result, "instance_event_file_failures", 0) or 0)
 
         prepared_instances += len(instances)
         if len(instance_ids_sample) < 10:
             instance_ids_sample.extend(instance_ids[: max(0, 10 - len(instance_ids_sample))])
-
-        lineage_remaining = await self._record_instance_lineage(
-            job=job,
-            job_node_id=job_node_id,
-            instance_ids=instance_ids,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
-            column_lineage_pairs=self._build_column_lineage_pairs(getattr(mapping_spec, "mappings", None)),
-            ontology_version=ontology_version,
-            limit_remaining=lineage_remaining,
-            input_type=input_type,
-            artifact_output_name=resolved_output_name,
-        )
 
     total_rows = validated_total_rows if not allow_partial else total_rows_seen
     if total_rows == 0:
@@ -988,74 +1352,7 @@ async def process_job(
             },
         )
 
-    write_path_report = await self.instance_write_path.finalize_job(
-        job=job,
-        execution_mode=execution_mode,
-        indexed_instance_ids=indexed_instance_ids,
-    )
-
-    if execution_mode in ("incremental", "delta") and latest_watermark:
-        try:
-            await self._update_watermark_after_job(
-                job=job,
-                new_watermark=latest_watermark,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Objectify watermark update degraded after instance writes (job_id=%s): %s",
-                job.job_id,
-                exc,
-                exc_info=True,
-            )
-            watermark_followup = followup_degraded(
-                "watermark_update",
-                error=str(exc),
-                details={
-                    "execution_mode": execution_mode,
-                    "watermark_column": watermark_column,
-                    "new_watermark": latest_watermark,
-                },
-            )
-        else:
-            watermark_followup = followup_completed(
-                "watermark_update",
-                details={
-                    "execution_mode": execution_mode,
-                    "watermark_column": watermark_column,
-                    "new_watermark": latest_watermark,
-                },
-            )
-    else:
-        watermark_followup = followup_skipped(
-            "watermark_update",
-            details={
-                "reason": "not_incremental_or_no_new_watermark",
-                "execution_mode": execution_mode,
-                "watermark_column": watermark_column,
-            },
-        )
-
-    write_path_contract = _build_objectify_write_path_contract(
-        job_id=job.job_id,
-        execution_mode=execution_mode,
-        indexed_instances=len(indexed_instance_ids),
-        write_path_report=write_path_report,
-        command_ids_sample=command_ids_sample,
-        instance_event_files_written=instance_event_files_written,
-        instance_event_file_failures=instance_event_file_failures,
-        lineage_limit=self.lineage_max_links,
-        lineage_remaining=lineage_remaining,
-        lineage_enabled=bool(self.lineage_store),
-        watermark_followup=watermark_followup,
-    )
-
-    logger.info(
-        "Objectify write path contract committed (job_id=%s): %s",
-        job.job_id,
-        write_path_contract,
-    )
-
-    completion_report = _build_objectify_completion_report(
+    commit_report = _build_objectify_commit_report(
         total_rows=total_rows,
         prepared_instances=prepared_instances,
         warnings=warnings,
@@ -1064,70 +1361,35 @@ async def process_job(
         command_ids_sample=command_ids_sample,
         instance_ids_sample=instance_ids_sample,
         indexed_instances=len(indexed_instance_ids),
-        write_path_report=write_path_report,
-        write_path_contract=write_path_contract,
         ontology_version=ontology_version,
+        execution_mode=execution_mode,
+        input_type=input_type,
+        artifact_output_name=resolved_output_name,
+        watermark_column=watermark_column,
+        latest_watermark=latest_watermark,
         instance_event_files_written=instance_event_files_written,
         instance_event_file_failures=instance_event_file_failures,
+        pending_deleted_instance_ids=sorted(delta_deleted_instance_ids) if delta_deleted_instance_ids else None,
     )
 
     await self.objectify_registry.update_objectify_job_status(
         job_id=job.job_id,
-        status="COMPLETED",
-        command_id=None,
-        report=completion_report,
-        completed_at=datetime.now(timezone.utc),
+        status="COMMITTING",
+        report=commit_report,
     )
+    authoritative_commit_recorded = True
 
-    try:
-        await self._record_gate_result(
-            job=job,
-            status="PASS",
-            details={
-                "total_rows": total_rows,
-                "prepared_instances": prepared_instances,
-                "command_ids": completion_report.get("command_ids") or [],
-                "command_id_count": completion_report.get("command_id_count") or 0,
-                "command_ids_truncated": bool(completion_report.get("command_ids_truncated")),
-                "instance_event_files_written": instance_event_files_written,
-                "instance_event_file_failures": instance_event_file_failures,
-                "indexed_instances": len(indexed_instance_ids),
-                "write_path_mode": WRITE_PATH_MODE_DATASET_PRIMARY_INDEX,
-                "warning_count": len(warnings),
-                "error_count": len(errors or validation_errors or []),
-            },
-        )
-    except Exception as exc:
-        logger.warning(
-            "Objectify gate result persistence degraded after job commit (job_id=%s): %s",
-            job.job_id,
-            exc,
-            exc_info=True,
-        )
-
-    try:
-        await self._update_object_type_active_version(job=job, mapping_spec=mapping_spec)
-    except Exception as exc:
-        logger.warning(
-            "Objectify active-version update degraded after job commit (job_id=%s): %s",
-            job.job_id,
-            exc,
-            exc_info=True,
-        )
-
-    try:
-        await self._emit_objectify_completed_event(
-            job=job,
-            total_rows=total_rows,
-            prepared_instances=prepared_instances,
-            indexed_instances=len(indexed_instance_ids),
-            execution_mode=execution_mode,
-            ontology_version=ontology_version,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Objectify completed event emission degraded after job commit (job_id=%s): %s",
-            job.job_id,
-            exc,
-            exc_info=True,
-        )
+    await _complete_committed_job(
+        total_rows=total_rows,
+        prepared_instances=prepared_instances,
+        warnings=warnings,
+        errors=(errors or validation_errors),
+        error_rows=(error_rows or validation_error_rows),
+        command_ids_sample=command_ids_sample,
+        instance_ids_sample=instance_ids_sample,
+        instance_event_files_written=instance_event_files_written,
+        instance_event_file_failures=instance_event_file_failures,
+        indexed_instance_ids_for_finalize=indexed_instance_ids,
+        deleted_instance_ids_for_finalize=delta_deleted_instance_ids,
+        latest_watermark_value=latest_watermark,
+    )

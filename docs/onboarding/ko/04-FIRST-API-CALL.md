@@ -37,7 +37,7 @@ curl -s http://localhost:8002/api/v1/health | python3 -m json.tool
 **예상 응답:**
 ```json
 {
-    "status": "healthy",
+    "status": "ready",
     "version": "1.0.0",
     "checks": {
         "database": "ok",
@@ -48,7 +48,7 @@ curl -s http://localhost:8002/api/v1/health | python3 -m json.tool
 }
 ```
 
-> 💡 **뒤에서 일어나는 일:** BFF가 PostgreSQL, Elasticsearch, Redis, Kafka에 각각 연결을 시도해요. 모두 응답하면 "healthy"를 반환해요. 코드 위치는 `backend/bff/main.py`의 `/health` 엔드포인트예요.
+> 💡 **뒤에서 일어나는 일:** BFF가 PostgreSQL, Elasticsearch, Redis, Kafka에 각각 연결을 시도해요. 모두 응답하면 트래픽을 받을 준비가 됐다는 뜻으로 `ready` 상태를 반환해요. 코드 위치는 `backend/bff/main.py`의 `/health` 엔드포인트예요.
 
 ---
 
